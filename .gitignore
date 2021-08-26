@@ -1,0 +1,4 @@
+*.so
+__pycache__
+.idea
+build
