@@ -1,7 +1,10 @@
 import dataclasses
 import dis
 import types
+import sys
 from typing import Any, Optional, List
+
+assert sys.version.startswith("3.8")
 
 
 @dataclasses.dataclass
@@ -48,18 +51,20 @@ def lnotab_writer(lineno, byteno=0):
     """
     Used to create typing.CodeType.co_lnotab
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    Note this format is changing in Python 3.10 and we will need to update
+    Note this format is changing in Python 3.10 and we will need to rewrite this
     """
+    assert sys.version_info < (3, 10)
     lnotab = []
 
     def update(lineno_new, byteno_new):
         nonlocal byteno, lineno
-        byte_offset = byteno_new - byteno
-        line_offset = lineno_new - lineno
-        byteno += byte_offset
-        lineno += line_offset
-        assert 0 <= byte_offset < 256 and 0 <= line_offset < 256, "can this be negative or overflow?"
-        lnotab.extend((byte_offset, line_offset))
+        while byteno_new != byteno or lineno_new != lineno:
+            byte_offset = max(0, min(byteno_new - byteno, 255))
+            line_offset = max(-128, min(lineno_new - lineno, 127))
+            assert byte_offset != 0 or line_offset != 0
+            byteno += byte_offset
+            lineno += line_offset
+            lnotab.extend((byte_offset, line_offset & 0xFF))
 
     return lnotab, update
 

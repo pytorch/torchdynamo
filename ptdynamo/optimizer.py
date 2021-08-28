@@ -1,11 +1,9 @@
-import contextlib
 import dis
+import functools
 import logging
 
-from . import eval_frame
+from .eval_frame import set_eval_frame
 from .bytecode_transformation import debug_checks, transform_code_object, insert_nops
-
-log = logging.getLogger(__name__)
 
 """
 class BoxedValue:
@@ -68,7 +66,7 @@ class FrameInterpreter:
 """
 
 
-def transform_frame(frame):
+def debug_insert_nops(frame):
     code = frame.f_code
     if frame.f_lasti >= 0:
         return code  # already running?
@@ -78,17 +76,42 @@ def transform_frame(frame):
     return transform_code_object(code, insert_nops)
 
 
-@contextlib.contextmanager
-def context(callback=transform_frame):
+default_callback = debug_insert_nops
+
+
+class _Context:
+    def __init__(self, callback):
+        assert callable(callback)
+        self.callback = callback
+        self.prior = None
+
+    def __enter__(self):
+        assert self.prior is None
+        self.prior = set_eval_frame(self.callback)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        set_eval_frame(self.prior)
+        self.prior = None
+
+    def __call__(self, fn):
+        assert callable(fn)
+
+        @functools.wraps(fn)
+        def _fn(*args, **kwargs):
+            with self:
+                return fn(*args, **kwargs)
+
+        return _fn
+
+
+def context(callback=default_callback):
     def catch_errors(frame):
         try:
             return callback(frame)
         except Exception:
-            eval_frame.set_eval_frame(None)
+            logging.basicConfig()
             bc = dis.Bytecode(frame.f_code)
-            log.exception(f"Error while processing frame:\n{bc.info()}\n{bc.dis()}")
+            logging.exception(f"Error while processing frame:\n{bc.info()}\n{bc.dis()}")
             raise
 
-    prior = eval_frame.set_eval_frame(catch_errors)
-    yield
-    eval_frame.set_eval_frame(prior)
+    return _Context(catch_errors)
