@@ -1,4 +1,8 @@
-from ptdynamo.translator import activate
+from ptdynamo import optimizer
+
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 c = 10
 
@@ -25,11 +29,12 @@ def foo():
     yield 1
     yield 2
 
-with activate():
+
+with optimizer.context():
     print(-7, "==", test1(1, 2))
     print(27, "==", test2(1, 2))
     print(-7, "==", test1(1, 2))
     print(27, "==", test2(1, 2))
     t = foo()
-    next(t)
-    next(t)
+    print(next(t))
+    print(next(t))

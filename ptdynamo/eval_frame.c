@@ -33,18 +33,20 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate);
 
 inline static PyCodeObject *get_extra(PyCodeObject *code) {
   void *extra = NULL;
-  _PyCode_GetExtra(code, extra_index, &extra);
+  _PyCode_GetExtra((PyObject*)code, extra_index, &extra);
   return (PyCodeObject *)extra;
 }
 
 inline static void set_extra(PyCodeObject *code, PyCodeObject *extra) {
-  _PyCode_SetExtra(code, extra_index, extra);
+  _PyCode_SetExtra((PyObject*)code, extra_index, extra);
 }
 
 inline static PyObject *swap_code_and_run(PyFrameObject *frame,
                                           PyCodeObject *code, int throw_flag) {
-  // Py_INCREF(code);
-  // Py_DECREF(frame->f_code);
+  if(code != frame->f_code) {
+      Py_INCREF(code);
+      Py_DECREF(frame->f_code);
+  }
   frame->f_code = code;
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 }
