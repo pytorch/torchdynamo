@@ -1,10 +1,9 @@
 import dataclasses
 import dis
+import pprint
 import types
 import sys
 from typing import Any, Optional, List
-
-assert sys.version.startswith("3.8")
 
 
 @dataclasses.dataclass
@@ -37,6 +36,7 @@ class _NotProvided:
 
 
 def create_instruction(name, arg=None, argval=_NotProvided):
+    assert arg is None or 0 <= arg < 256
     if argval is _NotProvided:
         argval = arg
     return Instruction(
@@ -77,8 +77,7 @@ def assemble(instructions: List[dis.Instruction], firstlineno):
         if inst.starts_line is not None:
             update_lineno(inst.starts_line, len(code))
         arg = inst.arg or 0
-        assert 0 <= arg < 256, "TODO: handle extended args"
-        code.extend((inst.opcode, arg))
+        code.extend((inst.opcode, arg & 0xff))
 
     return bytes(code), bytes(lnotab)
 
@@ -111,8 +110,6 @@ def devirtualize_jumps(instructions):
 
 
 def instruction_size(inst):
-    arg = inst.arg or 0
-    assert 0 <= arg < 256, "TODO: support EXTENDED_ARG"
     return 2
 
 
@@ -156,9 +153,10 @@ def transform_code_object(code, transformations):
     update_offsets(instructions)
     devirtualize_jumps(instructions)
     bytecode, lnotab = assemble(instructions, code.co_firstlineno)
-    return types.CodeType(
+
+    args = [
         code.co_argcount,
-        code.co_posonlyargcount,  # python 3.8+
+        getattr(code, "co_posonlyargcount", 0),  # python 3.8+
         code.co_kwonlyargcount,
         code.co_nlocals,
         code.co_stacksize,
@@ -173,7 +171,10 @@ def transform_code_object(code, transformations):
         lnotab,
         code.co_freevars,
         code.co_cellvars,
-    )
+    ]
+    if sys.version_info < (3, 8):
+        args.pop(1)
+    return types.CodeType(*args)
 
 
 def insert_nops(instructions):

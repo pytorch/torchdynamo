@@ -111,6 +111,8 @@ def context(callback=default_callback):
         except Exception:
             logging.basicConfig()
             bc = dis.Bytecode(frame.f_code)
+            for i in bc:
+                print(i)
             logging.exception(f"Error while processing frame:\n{bc.info()}\n{bc.dis()}")
             raise
 
