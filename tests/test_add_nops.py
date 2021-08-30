@@ -48,9 +48,3 @@ class NopTests(unittest.TestCase):
         self.assertEqual(next(t), 1)
         self.assertEqual(next(t), 2)
         self.assertRaises(StopIteration, lambda: next(t))
-
-
-class AssemblerTests(unittest.TestCase):
-
-
-strip_extended_args(instructions)

@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import warnings
+from ptdynamo.testing import same
 
 os.environ["FX_PATCH_GETITEM"] = "1"  # make BERT fx.symbolic_trace
 os.environ["KALDI_ROOT"] = "/tmp"
@@ -44,30 +45,12 @@ def eager(model, example_inputs):
 
 @register_experiment
 def ptdynamo(model, example_inputs):
-    def run(*args, **kwargs):
-        with context():
-            return model(*args, **kwargs)
-
-    return run
+    return context()(model)
 
 
 def short_name(name, limit=20):
     """ Truncate a model name to limit chars"""
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
-
-
-def same(a, b):
-    """ Check correctness to see if a and b match """
-    if isinstance(a, (list, tuple)):
-        assert isinstance(b, (list, tuple))
-        return all(same(ai, bi) for ai, bi in zip(a, b))
-    elif isinstance(a, torch.Tensor):
-        assert isinstance(b, torch.Tensor)
-        return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-    elif type(a).__name__ == "SquashedNormal":
-        return same(a.mean, b.mean)
-    else:
-        raise RuntimeError(f"unsupported type: {type(a).__name__}")
 
 
 def iter_models(args):
@@ -84,7 +67,7 @@ def iter_models(args):
                 gc.collect()
                 global current_name
                 current_name = short_name(benchmark.name)
-                print(current_name)
+                # print(current_name)
                 yield device, current_name, model, example_inputs
             except NotImplementedError:
                 pass

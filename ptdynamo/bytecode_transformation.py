@@ -138,43 +138,49 @@ def debug_bytes(*args):
 
 def debug_checks(code):
     """ Make sure our assembler produces same bytes as we start with """
-    dode = transform_code_object(code, lambda x: None)
+    dode = transform_code_object(code, lambda x, y: None)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == code.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
 
 def transform_code_object(code, transformations):
+    keys = [
+        "co_argcount",
+        "co_posonlyargcount",  # python 3.8+
+        "co_kwonlyargcount",
+        "co_nlocals",
+        "co_stacksize",
+        "co_flags",
+        "co_code",
+        "co_consts",
+        "co_names",
+        "co_varnames",
+        "co_filename",
+        "co_name",
+        "co_firstlineno",
+        "co_lnotab",
+        "co_freevars",
+        "co_cellvars",
+    ]
+    if sys.version_info < (3, 8):
+        keys.pop(1)
+    code_options = {
+        k: getattr(code, k) for k in keys
+    }
+
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     virtualize_jumps(instructions)
 
-    transformations(instructions)
+    transformations(instructions, code_options)
 
     update_offsets(instructions)
     devirtualize_jumps(instructions)
     bytecode, lnotab = assemble(instructions, code.co_firstlineno)
-
-    args = [
-        code.co_argcount,
-        getattr(code, "co_posonlyargcount", 0),  # python 3.8+
-        code.co_kwonlyargcount,
-        code.co_nlocals,
-        code.co_stacksize,
-        code.co_flags,
-        bytecode,
-        code.co_consts,
-        code.co_names,
-        code.co_varnames,
-        code.co_filename,
-        code.co_name,
-        code.co_firstlineno,
-        lnotab,
-        code.co_freevars,
-        code.co_cellvars,
-    ]
-    if sys.version_info < (3, 8):
-        args.pop(1)
-    return types.CodeType(*args)
+    code_options["co_code"] = bytecode
+    code_options["co_lnotab"] = lnotab
+    assert set(keys) == set(code_options.keys())
+    return types.CodeType(*[code_options[k] for k in keys])
 
 
 def insert_nops(instructions):
