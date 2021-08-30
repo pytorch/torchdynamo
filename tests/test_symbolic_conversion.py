@@ -1,16 +1,15 @@
 #!/usr/bin/env pytest
 import inspect
 
-from ptdynamo import optimizer
+from torchdynamo import optimizer
 import unittest
 import torch
-from ptdynamo.testing import same
-from ptdynamo.symbolic_convert import convert_frame_assert
+from torchdynamo.testing import same
+from torchdynamo.symbolic_convert import convert_frame_assert
 
 
 def add(a, b):
     return a + b
-
 
 
 def make_test(fn):
@@ -22,6 +21,7 @@ def make_test(fn):
             val2 = fn(*args)
         self.assertTrue(same(val1, correct))
         self.assertTrue(same(val2, correct))
+
     return test_fn
 
 

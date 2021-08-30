@@ -3,8 +3,8 @@ import functools
 import logging
 
 from . import skipfiles
-from .eval_frame import set_eval_frame
 from .bytecode_transformation import debug_checks, transform_code_object, insert_nops
+from .eval_frame import set_eval_frame
 
 
 def debug_insert_nops(frame):

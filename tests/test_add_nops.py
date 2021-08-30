@@ -1,5 +1,5 @@
 #!/usr/bin/env pytest
-from ptdynamo import optimizer
+from torchdynamo import optimizer
 import unittest
 
 c = 10

@@ -1,14 +1,15 @@
 import dataclasses
 import dis
-import types
-from typing import Union, Callable, Optional, Dict, Any, List
 import enum
 import functools
 import inspect
+import itertools
+import types
+from typing import Optional, List
+
 import torch
-from torch.fx import Graph
-from torch.fx import GraphModule
 from torch import fx
+from torch.fx import GraphModule
 
 from .bytecode_transformation import debug_checks, transform_code_object, Instruction, create_instruction
 
@@ -22,6 +23,12 @@ def symbolic_trace(root: Union[torch.nn.Module, Callable], concrete_args: Option
 
 # out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
 """
+
+_unique_id_counter = itertools.count()
+
+
+def unique_id(name):
+    return f"{name}_{next(_unique_id_counter)}"
 
 
 class TracingSupported(enum.Enum):
@@ -141,7 +148,7 @@ class InstructionTracer(fx.Tracer):
             self.graph.print_tabular()
             gm = GraphModule(dict(), self.graph)
             gm.recompile()
-            name = "__ptdynamo_fn__"
+            name = unique_id("__translated_fn")
             self.f_globals[name] = gm.forward
             self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
             self.code_options["co_stacksize"] = len(self.argnames) + 1
@@ -296,9 +303,9 @@ class InstructionTracer(fx.Tracer):
 
 def convert_frame_assert(frame: types.FrameType):
     code = frame.f_code
-    if code.co_name == "forward":
-        print("fname", code.co_filename, code.co_firstlineno)
-        return code
+    if code.co_filename.startswith("<eval_with_key>"):
+        return code  # skip FX output
+    # TODO(jansel): detect and skip other types of generated code
     debug_checks(code)
     print("ORIGINAL")
     print(dis.Bytecode(code).info())

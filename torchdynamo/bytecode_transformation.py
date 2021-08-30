@@ -1,8 +1,7 @@
 import dataclasses
 import dis
-import pprint
-import types
 import sys
+import types
 from typing import Any, Optional, List
 
 
@@ -183,7 +182,7 @@ def transform_code_object(code, transformations):
     return types.CodeType(*[code_options[k] for k in keys])
 
 
-def insert_nops(instructions):
+def insert_nops(instructions, code_options):
     """ used to debug jump updates """
     instructions.insert(0, create_instruction("NOP"))
     instructions.insert(0, create_instruction("NOP"))

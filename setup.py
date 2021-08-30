@@ -2,9 +2,9 @@
 
 from setuptools import setup, Extension
 
-setup(name='ptdynamo',
+setup(name='torchdynamo',
       version='0.1',
       author="Jason Ansel",
       author_email="jansel@jansel.net",
-      packages=["ptdynamo"],
-      ext_modules=[Extension('ptdynamo.eval_frame', ['ptdynamo/eval_frame.c'])])
+      packages=["torchdynamo"],
+      ext_modules=[Extension('torchdynamo.eval_frame', ['torchdynamo/eval_frame.c'])])

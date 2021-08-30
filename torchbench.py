@@ -10,7 +10,7 @@ import re
 import sys
 import time
 import warnings
-from ptdynamo.testing import same
+from torchdynamo.testing import same
 
 os.environ["FX_PATCH_GETITEM"] = "1"  # make BERT fx.symbolic_trace
 os.environ["KALDI_ROOT"] = "/tmp"
@@ -21,8 +21,8 @@ sys.path.append(TORCHBENCH)
 
 from torchbenchmark import list_models
 import torch
-import ptdynamo
-from ptdynamo.optimizer import context
+import torchdynamo
+from torchdynamo.optimizer import context
 
 log = logging.getLogger(__name__)
 EXPERIMENTS = []
@@ -44,7 +44,7 @@ def eager(model, example_inputs):
 
 
 @register_experiment
-def ptdynamo(model, example_inputs):
+def torchdynamo(model, example_inputs):
     return context()(model)
 
 
@@ -149,7 +149,7 @@ def main():
     args.verbose = True
 
     # defaults
-    args.experiment = args.experiment or ["ptdynamo"]
+    args.experiment = args.experiment or ["torchdynamo"]
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
@@ -214,27 +214,6 @@ def main():
 
     print_row("", "GEOMEAN", map("{:.3f}x".format, gmean(np.vstack(all_speedups), axis=0)))
 
-
-# import torch, re, multiprocessing
-# from timeit import timeit
-
-"""
-def measure(fuse, benchmark_module, warmup=1, number=100):
-    torch.set_num_threads(1)
-    torch._C._jit_override_can_fuse_on_cpu(fuse)
-    name = re.sub(r"^.*[.]", "", benchmark_module.__name__)
-    benchmark = benchmark_module.Model(device="cpu", jit=True)
-    model, example_inputs = benchmark.get_module()
-    assert isinstance(model, torch.jit.ScriptModule)
-
-    model = model.eval()
-    timeit(lambda: model(*example_inputs), number=warmup)
-    print(f"    script({name:20})         = {timeit(lambda: model(*example_inputs), number=number):.3f} sec")
-
-    model = torch.jit.freeze(model)
-    timeit(lambda: model(*example_inputs), number=warmup)
-    print(f"    freeze(script({name:20})) = {timeit(lambda: model(*example_inputs), number=number):.3f} sec")
-"""
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARNING)
