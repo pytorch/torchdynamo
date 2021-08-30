@@ -180,9 +180,3 @@ def transform_code_object(code, transformations):
     code_options["co_lnotab"] = lnotab
     assert set(keys) == set(code_options.keys())
     return types.CodeType(*[code_options[k] for k in keys])
-
-
-def insert_nops(instructions, code_options):
-    """ used to debug jump updates """
-    instructions.insert(0, create_instruction("NOP"))
-    instructions.insert(0, create_instruction("NOP"))

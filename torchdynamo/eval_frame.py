@@ -3,16 +3,7 @@ import functools
 import logging
 
 from . import skipfiles
-from .bytecode_transformation import debug_checks, transform_code_object, insert_nops
-from .eval_frame import set_eval_frame
-
-
-def debug_insert_nops(frame):
-    debug_checks(frame.f_code)
-    return transform_code_object(frame.f_code, insert_nops)
-
-
-default_callback = debug_insert_nops
+from ._eval_frame import set_eval_frame
 
 
 class _Context:
@@ -40,7 +31,7 @@ class _Context:
         return _fn
 
 
-def context(callback=default_callback):
+def translating(callback):
     def catch_errors(frame):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):

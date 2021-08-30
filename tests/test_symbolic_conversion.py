@@ -1,7 +1,7 @@
 #!/usr/bin/env pytest
 import inspect
 
-from torchdynamo import optimizer
+from torchdynamo import eval_frame
 import unittest
 import torch
 from torchdynamo.testing import same
@@ -16,7 +16,7 @@ def make_test(fn):
     def test_fn(self):
         args = [torch.randn(10) for _ in inspect.signature(fn).parameters]
         correct = fn(*args)
-        with optimizer.context(convert_frame_assert):
+        with eval_frame.translating(convert_frame_assert):
             val1 = fn(*args)
             val2 = fn(*args)
         self.assertTrue(same(val1, correct))

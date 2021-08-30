@@ -113,10 +113,10 @@ static PyMethodDef _methods[] = {
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
-    PyModuleDef_HEAD_INIT, "ptdynamo.eval_frame",
+    PyModuleDef_HEAD_INIT, "_eval_frame",
     "Module containing hooks to override eval_frame", -1, _methods};
 
-PyMODINIT_FUNC PyInit_eval_frame(void) {
+PyMODINIT_FUNC PyInit__eval_frame(void) {
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
   Py_XDECREF(skip_files);
   skip_files = PySet_New(NULL);

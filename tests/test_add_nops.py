@@ -1,5 +1,6 @@
 #!/usr/bin/env pytest
-from torchdynamo import optimizer
+import torchdynamo.testing
+from torchdynamo import eval_frame
 import unittest
 
 c = 10
@@ -28,7 +29,7 @@ def fn3():
     yield 2
 
 
-with_debug_nops = optimizer.context(optimizer.debug_insert_nops)
+with_debug_nops = eval_frame.translating(torchdynamo.testing.debug_insert_nops)
 
 
 class NopTests(unittest.TestCase):

@@ -7,4 +7,4 @@ setup(name='torchdynamo',
       author="Jason Ansel",
       author_email="jansel@jansel.net",
       packages=["torchdynamo"],
-      ext_modules=[Extension('torchdynamo.eval_frame', ['torchdynamo/eval_frame.c'])])
+      ext_modules=[Extension('torchdynamo._eval_frame', ['torchdynamo/_eval_frame.c'])])

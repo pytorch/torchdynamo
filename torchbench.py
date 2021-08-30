@@ -21,8 +21,8 @@ sys.path.append(TORCHBENCH)
 
 from torchbenchmark import list_models
 import torch
-import torchdynamo
-from torchdynamo.optimizer import context
+from torchdynamo.eval_frame import translating
+from torchdynamo.testing import debug_insert_nops
 
 log = logging.getLogger(__name__)
 EXPERIMENTS = []
@@ -45,7 +45,7 @@ def eager(model, example_inputs):
 
 @register_experiment
 def torchdynamo(model, example_inputs):
-    return context()(model)
+    return translating(debug_insert_nops)(model)
 
 
 def short_name(name, limit=20):
