@@ -31,7 +31,8 @@ class _Context:
         return _fn
 
 
-def translating(callback):
+def catch_errors_wrapper(callback):
+    @functools.wraps(callback)
     def catch_errors(frame):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
@@ -45,4 +46,8 @@ def translating(callback):
             logging.exception(f"Error while processing frame:\n{bc.info()}\n{bc.dis()}")
             raise
 
-    return _Context(catch_errors)
+    return catch_errors
+
+
+def context(callback):
+    return _Context(catch_errors_wrapper(callback))

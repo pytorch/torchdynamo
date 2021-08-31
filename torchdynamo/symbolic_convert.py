@@ -5,7 +5,7 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Optional, List
+from typing import List
 
 import torch
 from torch import fx
@@ -13,16 +13,22 @@ from torch.fx import GraphModule
 
 from .bytecode_transformation import debug_checks, transform_code_object, Instruction, create_instruction
 
-"""
-def symbolic_trace(root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
-                   enable_cpatching: bool = False) -> GraphModule:
-    tracer = MyTracer(enable_cpatching=enable_cpatching)
-    graph = tracer.trace(root, concrete_args)
-    name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
-    return GraphModule(tracer.root, graph, name)
+TORCH_OBJECT_IDS = {id(torch)}
 
-# out = self.create_proxy('placeholder', f'{name}_{str(cnt)}', (), {})
-"""
+
+def _find_torch_objects(module):
+    print(module.__name__)
+    for name, obj in list(module.__dict__.items()):
+        if id(obj) not in TORCH_OBJECT_IDS and not name.startswith("_"):
+            if isinstance(obj, types.ModuleType):
+                if obj.__name__.startswith("torch."):
+                    TORCH_OBJECT_IDS.add(id(obj))
+                    _find_torch_objects(obj)
+            else:
+                TORCH_OBJECT_IDS.add(id(obj))
+
+
+_find_torch_objects(torch)
 
 _unique_id_counter = itertools.count()
 
@@ -44,10 +50,47 @@ def combine_state(a, b):
 combine_states = functools.partial(functools.reduce, combine_state)
 
 
-@dataclasses.dataclass
 class VariableTracker:
-    proxy: Optional[fx.Proxy]
-    state: TracingSupported
+    """ Base class for tracked locals and stack values """
+
+    @staticmethod
+    def combine(vars):
+        vars = list(vars)
+        priority = [TensorVariable, TorchVariable, ConstantVariable]
+        vars.sort(key=lambda v: priority.index(type(v)))
+        return type(vars[0]), {"state": combine_states(v.state for v in vars)}
+
+    def __init__(self, state):
+        super(VariableTracker, self).__init__()
+        self.state = state
+
+
+class TensorVariable(VariableTracker):
+    """ Points to a tensor """
+
+    def __init__(self, proxy, **kwargs):
+        super(TensorVariable, self).__init__(**kwargs)
+        self.proxy = proxy
+
+    def as_proxy(self):
+        return self.proxy
+
+
+class ConstantVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(ConstantVariable, self).__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self):
+        return self.value
+
+
+class TorchVariable(VariableTracker):
+    """ Points to a module or method in torch.* """
+
+    def __init__(self, value, **kwargs):
+        super(TorchVariable, self).__init__(**kwargs)
+        self.value = value
 
 
 def stack_op(fn):
@@ -56,17 +99,33 @@ def stack_op(fn):
     @functools.wraps(fn)
     def impl(self, inst):
         inputs = self.popn(nargs)
-        state = combine_states(i.state for i in inputs)
-        if state == TracingSupported.YES:
-            proxy = fn(*[i.proxy for i in inputs])
+
+        cls, kwargs = VariableTracker.combine(inputs)
+        if issubclass(cls, TensorVariable):
+            val = cls(proxy=fn(*[i.as_proxy() for i in inputs]),
+                      **kwargs)
         else:
-            proxy = None
-        self.push(VariableTracker(
-            proxy=proxy,
-            state=state
-        ))
+            assert False
+
+        self.push(val)
 
     return impl
+
+
+@dataclasses.dataclass
+class LocalArg:
+    name: str
+
+    def load(self, tracer):
+        return tracer.create_load_fast(self.name)
+
+
+@dataclasses.dataclass
+class GlobalArg:
+    name: str
+
+    def load(self, tracer):
+        return tracer.create_load_global(self.name)
 
 
 class InstructionTracer(fx.Tracer):
@@ -80,7 +139,7 @@ class InstructionTracer(fx.Tracer):
         self.indexof = {id(i): n for n, i in enumerate(instructions)}
         self.instruction_pointer = 0
         self.cnt = -1
-        self.argnames = []
+        self.graphargs = []
         self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
                                 for k in code_options["co_varnames"]
                                 if k in f_locals}
@@ -92,7 +151,7 @@ class InstructionTracer(fx.Tracer):
         print("freevars  ", code_options["co_freevars"])
         print("consts    ", code_options["co_consts"])
         print("stacksize ", code_options["co_stacksize"])
-        print("argnames  ", self.argnames)
+        print("argnames  ", self.graphargs)
 
     def create_load_fast(self, name):
         assert name in self.code_options["co_varnames"]
@@ -108,16 +167,22 @@ class InstructionTracer(fx.Tracer):
 
     def wrap_local(self, name, value):
         if isinstance(value, torch.Tensor):
-            self.cnt += 1
-            self.argnames.append(name)
-            return VariableTracker(
-                proxy=self.create_proxy('placeholder', f'{name}_{str(self.cnt)}', (), {}),
+            self.graphargs.append(LocalArg(name))
+            return TensorVariable(
+                proxy=self.create_graph_input(name),
                 state=TracingSupported.YES
             )
-        return VariableTracker(
-            proxy=None,
-            state=TracingSupported.NO
-        )
+        assert False
+
+    def create_graph_input(self, name):
+        self.cnt += 1
+        placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
+        if placeholders:
+            ctx = self.graph.inserting_after(placeholders[-1])
+        else:
+            ctx = self.graph.inserting_before(None)
+        with ctx:
+            return self.create_proxy('placeholder', f'{name}_{str(self.cnt)}', (), {})
 
     def step(self):
         inst = self.instructions[self.instruction_pointer]
@@ -141,6 +206,20 @@ class InstructionTracer(fx.Tracer):
     def LOAD_FAST(self, inst):
         self.push(self.symbolic_locals[inst.argval])
 
+    def LOAD_CONST(self, inst):
+        self.push(ConstantVariable(value=inst.argval,
+                                   state=TracingSupported.UNKNOWN))
+
+    def LOAD_GLOBAL(self, inst):
+        value = self.f_globals[inst.argval]
+        if isinstance(value, torch.Tensor):
+            self.graphargs.append(GlobalArg(inst.argval))
+            self.push(TensorVariable(
+                proxy=self.create_graph_input(inst.argval),
+                state=TracingSupported.YES
+            ))
+
+
     def RETURN_VALUE(self, inst):
         rv = self.pop()
         if rv.state == TracingSupported.YES:
@@ -151,11 +230,11 @@ class InstructionTracer(fx.Tracer):
             name = unique_id("__translated_fn")
             self.f_globals[name] = gm.forward
             self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
-            self.code_options["co_stacksize"] = len(self.argnames) + 1
+            self.code_options["co_stacksize"] = len(self.graphargs) + 1
             self.instructions[:] = (
                     [self.create_load_global(name)] +
-                    list(map(self.create_load_fast, self.argnames)) +
-                    [create_instruction("CALL_FUNCTION", len(self.argnames)),
+                    [arg.load(self) for arg in self.graphargs] +
+                    [create_instruction("CALL_FUNCTION", len(self.graphargs)),
                      create_instruction("RETURN_VALUE")]
             )
         else:

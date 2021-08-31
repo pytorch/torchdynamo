@@ -1,37 +1,35 @@
 #!/usr/bin/env python
-from scipy.stats import gmean, ttest_ind
 import argparse
 import copy
 import gc
 import logging
-import numpy as np
 import os
 import re
 import sys
 import time
 import warnings
+
+import numpy as np
+import torch
+from scipy.stats import gmean, ttest_ind
+
+from torchdynamo.eval_frame import context
+from torchdynamo.testing import debug_insert_nops
 from torchdynamo.testing import same
 
-os.environ["FX_PATCH_GETITEM"] = "1"  # make BERT fx.symbolic_trace
-os.environ["KALDI_ROOT"] = "/tmp"
-
-TORCHBENCH = os.path.expanduser("~/torchbench")
-os.chdir(TORCHBENCH)
-sys.path.append(TORCHBENCH)
-
-from torchbenchmark import list_models
-import torch
-from torchdynamo.eval_frame import translating
-from torchdynamo.testing import debug_insert_nops
-
+os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+torchbench_dir = os.path.expanduser("~/torchbench")
+assert os.path.exists(torchbench_dir)
+os.chdir(torchbench_dir)
+sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
 EXPERIMENTS = []
 SKIP = {
-    # `get_model()` is broken these:
+    # torchbench `get_model()` is broken these:
     "albert", "demucs", "hf_T5", "hf_Reformer", "hf_Longformer",
     "hf_GPT2", "hf_DistilBert", "hf_BigBird", "hf_Bert", "hf_Bart",
     "nvidia_deeprecommender", "hf_Albert",
-    # TODO: need to debug a crash in this one
+    # TODO: need to debug a crash in this one on debug_insert_nops
     "pyhpc_isoneutral_mixing",
 }
 register_experiment = EXPERIMENTS.append
@@ -45,7 +43,7 @@ def eager(model, example_inputs):
 
 @register_experiment
 def torchdynamo(model, example_inputs):
-    return translating(debug_insert_nops)(model)
+    return context(debug_insert_nops)(model)
 
 
 def short_name(name, limit=20):
@@ -54,6 +52,7 @@ def short_name(name, limit=20):
 
 
 def iter_models(args):
+    from torchbenchmark import list_models  # noqa
     for benchmark_cls in list_models():
         if (not re.search("|".join(args.filter), benchmark_cls.name, re.I) or
                 re.search("|".join(args.exclude), benchmark_cls.name, re.I) or
@@ -219,4 +218,3 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main()
-    # repro()

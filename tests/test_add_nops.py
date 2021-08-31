@@ -29,7 +29,7 @@ def fn3():
     yield 2
 
 
-with_debug_nops = eval_frame.translating(torchdynamo.testing.debug_insert_nops)
+with_debug_nops = eval_frame.context(torchdynamo.testing.debug_insert_nops)
 
 
 class NopTests(unittest.TestCase):
