@@ -7,73 +7,66 @@
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
 #include "internal/pycore_pystate.h"
-//#include "internal/pycore_frame.h"
 #undef Py_BUILD_CORE
 #endif
 
-#if PY_VERSION_HEX < 0x03090000
-PyObject *PyObject_CallOneArg(PyObject *callable, PyObject *arg) {
-  PyObject *args = PyTuple_Pack(1, arg);
-  PyObject *result = PyObject_CallObject(callable, args);
-  Py_DECREF(args);
-  return result;
-}
-#endif
+#include "_caching.h"
 
-static PyObject *skip_files = NULL;
 static PyObject *eval_frame_callback =
     NULL; // TODO(jansel): make this threadlocal to support MT
 size_t extra_index = -1;
 static void ignored(void *obj) {}
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate);
 
-// PyAPI_FUNC(int) _PyCode_GetExtra(PyObject *code, Py_ssize_t index, void
-// **extra); PyAPI_FUNC(int) _PyCode_SetExtra(PyObject *code, Py_ssize_t index,
-// void *extra);
-
-inline static PyCodeObject *get_extra(PyCodeObject *code) {
+inline static CacheEntry *get_extra(PyCodeObject *code) {
   void *extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, extra_index, &extra);
+  _PyCode_GetExtra((PyObject *)code, extra_index, &extra);
   return (PyCodeObject *)extra;
 }
 
-inline static void set_extra(PyCodeObject *code, PyCodeObject *extra) {
-  _PyCode_SetExtra((PyObject*)code, extra_index, extra);
+inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
+  _PyCode_SetExtra((PyObject *)code, extra_index, extra);
 }
 
 inline static PyObject *swap_code_and_run(PyFrameObject *frame,
                                           PyCodeObject *code, int throw_flag) {
-  if(code != frame->f_code) {
-      Py_INCREF(code);
-      Py_DECREF(frame->f_code);
+  if (code != frame->f_code) {
+    Py_INCREF(code);
+    Py_DECREF(frame->f_code);
   }
   frame->f_code = code;
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 }
 
-static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
-  // if ( //PySet_Contains(skip_files, frame->f_code->co_filename) ||
-  //     frame->f_lasti != -1) {
-  //   return _PyEval_EvalFrameDefault(frame, throw_flag);
-  // }
+#define ALREADY_DONE ((void *)0x1)
 
-  PyCodeObject *extra = get_extra(frame->f_code);
-  if (extra != NULL) {
+static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
+  CacheEntry *extra = get_extra(frame->f_code);
+  if (extra == ALREADY_DONE) {
+    return _PyEval_EvalFrameDefault(frame, throw_flag);
+  }
+  PyCodeObject *cached_code =
+      get_cached_code(extra, frame->f_locals, frame->f_globals);
+  if (cached_code != NULL) {
     // used cached version
-    return swap_code_and_run(frame, extra, throw_flag);
+    return swap_code_and_run(frame, cached_code, throw_flag);
   }
 
   PyThreadState *tstate = PyThreadState_GET();
   PyObject *callback = set_eval_frame(Py_None, tstate);
   PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
-  if (result == NULL || !PyCode_Check(result)) {
+  if (result == NULL) {
     return NULL; // exception
   }
-  extra = (PyCodeObject *)result;
-  set_extra(extra, extra);  // avoid double compile
+  extra = set_cached_code(extra, frame->f_locals, frame->f_globals, result);
+  cached_code = get_cached_code(extra, frame->f_locals, frame->f_globals);
+  if (cached_code == NULL) {
+    return NULL;
+  }
+  set_extra(cached_code, ALREADY_DONE); // avoid double compile
   set_extra(frame->f_code, extra);
   set_eval_frame(callback, tstate);
-  return swap_code_and_run(frame, extra, throw_flag);
+  return swap_code_and_run(frame, cached_code, throw_flag);
 }
 
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
@@ -102,14 +95,8 @@ static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
-static PyObject *get_skip_files(void) { return skip_files; }
-
-static PyObject *py_abort(void) { abort(); }
-
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
-    {"get_skip_files", (PyCFunction)&get_skip_files, METH_NOARGS, NULL},
-    {"abort", (PyCFunction)&py_abort, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -118,8 +105,6 @@ static struct PyModuleDef _module = {
 
 PyMODINIT_FUNC PyInit__eval_frame(void) {
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
-  Py_XDECREF(skip_files);
-  skip_files = PySet_New(NULL);
   Py_XDECREF(eval_frame_callback);
   eval_frame_callback = Py_None;
   Py_XINCREF(eval_frame_callback);

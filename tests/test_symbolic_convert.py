@@ -4,6 +4,7 @@ import unittest
 
 import torch
 from torch import sub
+from torch.nn import functional as F
 
 from torchdynamo import eval_frame
 from torchdynamo.symbolic_convert import convert_frame_assert
@@ -41,9 +42,10 @@ class MyModule(torch.nn.Module):
     def __init__(self):
         super(MyModule, self).__init__()
         self.linear1 = torch.nn.Linear(10, 10)
+        self.scale = torch.randn(1, 10)
 
     def forward(self, x):
-        return self.linear1(x)
+        return F.relu(self.linear1(x)) * self.scale
 
 
 def make_test(fn):
@@ -68,4 +70,5 @@ class SymblicConversionTests(unittest.TestCase):
     test_globalfn = make_test(globalfn)
     test_viatorch = make_test(viatorch)
     test_viamethod = make_test(viamethod)
-    test_mymodule = make_test(MyModule())
+    test_mymodule1 = make_test(MyModule())
+    # test_mymodule2 = make_test(MyModule())

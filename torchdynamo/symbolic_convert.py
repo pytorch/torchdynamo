@@ -245,7 +245,7 @@ class InstructionTracer(fx.Tracer):
                                          state=TracingSupported.UNKNOWN))
             self.push(obj)
         elif isinstance(obj, NNModuleVariable):
-            key = f"{obj.key}.{inst.argval}"
+            key = f"{obj.key}.{name}"
             subobj = self.get_submodule(key)
             if isinstance(subobj, torch.nn.Module):
                 self.push(NNModuleVariable(
@@ -253,6 +253,23 @@ class InstructionTracer(fx.Tracer):
                     **options
                 ))
                 self.push(None)  # Null self ptr
+            else:
+                assert False
+        else:
+            assert False
+
+    def LOAD_ATTR(self, inst):
+        obj = self.pop()
+        name = inst.argval
+        _, options = VariableTracker.combine([obj])
+        if isinstance(obj, NNModuleVariable):
+            key = f"{obj.key}.{name}"
+            subobj = self.get_submodule(key)
+            if isinstance(subobj, torch.Tensor):
+                self.push(TensorVariable(
+                    proxy=self.create_proxy("get_attr", key, tuple(), {}),
+                    **options
+                ))
             else:
                 assert False
         else:
