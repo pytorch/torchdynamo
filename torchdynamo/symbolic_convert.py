@@ -11,15 +11,15 @@ import torch
 from torch import fx
 from torch.fx import GraphModule
 
-from .bytecode_transformation import debug_checks, transform_code_object, Instruction, create_instruction
+from .bytecode_transformation import debug_checks, transform_code_object, Instruction, create_instruction, unique_id
 
-TORCH_OBJECT_IDS = {id(torch)}
+TORCH_OBJECT_IDS = set()
 
 
 def _find_torch_objects(module):
-    print(module.__name__)
+    TORCH_OBJECT_IDS.add(id(module))
     for name, obj in list(module.__dict__.items()):
-        if id(obj) not in TORCH_OBJECT_IDS and not name.startswith("_"):
+        if id(obj) not in TORCH_OBJECT_IDS:
             if isinstance(obj, types.ModuleType):
                 if obj.__name__.startswith("torch."):
                     TORCH_OBJECT_IDS.add(id(obj))
@@ -30,12 +30,6 @@ def _find_torch_objects(module):
 
 _find_torch_objects(torch)
 
-_unique_id_counter = itertools.count()
-
-
-def unique_id(name):
-    return f"{name}_{next(_unique_id_counter)}"
-
 
 class TracingSupported(enum.Enum):
     UNKNOWN = 0
@@ -43,11 +37,33 @@ class TracingSupported(enum.Enum):
     NO = 2
 
 
+class GuardSource(enum.Enum):
+    LOCAL = 0
+    GLOBAL = 1
+
+
+class GuardRequirement(enum.Enum):
+    TYPE_MATCH = 0
+    VALUE_MATCH = 1
+    FUNCTION_MATCH = 2  # e.q. "from torch import add"
+
+
+@dataclasses.dataclass
+class Guard:
+    name: str
+    source: GuardSource
+    requirement: GuardRequirement
+
+    def __hash__(self):
+        return hash((self.name, self.source, self.requirement))
+
+
 def combine_state(a, b):
     return TracingSupported(max(a.value, b.value))
 
 
 combine_states = functools.partial(functools.reduce, combine_state)
+combine_guards = functools.partial(functools.reduce, set.union)
 
 
 class VariableTracker:
@@ -56,13 +72,17 @@ class VariableTracker:
     @staticmethod
     def combine(vars):
         vars = list(vars)
-        priority = [TensorVariable, TorchVariable, ConstantVariable]
+        priority = [TensorVariable, TorchVariable, NNModuleVariable, ConstantVariable, MethodNameVariable]
         vars.sort(key=lambda v: priority.index(type(v)))
-        return type(vars[0]), {"state": combine_states(v.state for v in vars)}
+        return type(vars[0]), {
+            "state": combine_states(v.state for v in vars),
+            "guards": combine_guards(v.guards for v in vars),
+        }
 
-    def __init__(self, state):
+    def __init__(self, state=TracingSupported.UNKNOWN, guards=None):
         super(VariableTracker, self).__init__()
         self.state = state
+        self.guards = guards or set()
 
 
 class TensorVariable(VariableTracker):
@@ -74,6 +94,12 @@ class TensorVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+
+class NNModuleVariable(VariableTracker):
+    def __init__(self, key: str, **kwargs):
+        super(NNModuleVariable, self).__init__(**kwargs)
+        self.key = key
 
 
 class ConstantVariable(VariableTracker):
@@ -91,6 +117,12 @@ class TorchVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(TorchVariable, self).__init__(**kwargs)
         self.value = value
+
+
+class MethodNameVariable(VariableTracker):
+    def __init__(self, name, **kwargs):
+        super(MethodNameVariable, self).__init__(**kwargs)
+        self.name = name
 
 
 def stack_op(fn):
@@ -138,12 +170,14 @@ class InstructionTracer(fx.Tracer):
         self.f_builtins = f_builtins
         self.indexof = {id(i): n for n, i in enumerate(instructions)}
         self.instruction_pointer = 0
-        self.cnt = -1
+        self.cnt = itertools.count()
         self.graphargs = []
+        self.code_options = code_options
+        self.nn_modules = {}
+
         self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
                                 for k in code_options["co_varnames"]
                                 if k in f_locals}
-        self.code_options = code_options
 
         print("names     ", code_options["co_names"])
         print("varnames  ", code_options["co_varnames"])
@@ -170,19 +204,41 @@ class InstructionTracer(fx.Tracer):
             self.graphargs.append(LocalArg(name))
             return TensorVariable(
                 proxy=self.create_graph_input(name),
-                state=TracingSupported.YES
+                state=TracingSupported.YES,
+                guards={Guard(name, GuardSource.LOCAL, GuardRequirement.TYPE_MATCH)},
             )
-        assert False
+        elif isinstance(value, torch.nn.Module):
+            key = f"{name}_{next(self.cnt)}"
+            self.nn_modules[key] = value
+            return NNModuleVariable(
+                key=key,
+                state=TracingSupported.YES,
+                guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
+            )
+        else:
+            assert False
 
     def create_graph_input(self, name):
-        self.cnt += 1
         placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
         if placeholders:
             ctx = self.graph.inserting_after(placeholders[-1])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy('placeholder', f'{name}_{str(self.cnt)}', (), {})
+            return self.create_proxy('placeholder', f'{name}_{next(self.cnt)}', (), {})
+
+    def call_function(self, fn, args, kwargs):
+        if isinstance(fn, TorchVariable):
+            assert getattr(fn.value, "__self__", None) is None
+            cls, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
+            proxy_args = tuple(arg.as_proxy() for arg in args)
+            proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+            self.push(cls(
+                proxy=self.create_proxy('call_function', fn.value, proxy_args, proxy_kwargs),
+                **options
+            ))
+        else:
+            assert False
 
     def step(self):
         inst = self.instructions[self.instruction_pointer]
@@ -212,20 +268,100 @@ class InstructionTracer(fx.Tracer):
 
     def LOAD_GLOBAL(self, inst):
         value = self.f_globals[inst.argval]
-        if isinstance(value, torch.Tensor):
+        if id(value) in TORCH_OBJECT_IDS:
+            # TODO(jansel): if we wanted to be paranoid, we could generate a guard here
+            self.push(TorchVariable(
+                value=value,
+                state=TracingSupported.YES,
+                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
+            ))
+        elif isinstance(value, torch.Tensor):
+            # turn a load of a global tensor into an arg for the graph
             self.graphargs.append(GlobalArg(inst.argval))
             self.push(TensorVariable(
                 proxy=self.create_graph_input(inst.argval),
-                state=TracingSupported.YES
+                state=TracingSupported.YES,
+                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.TYPE_MATCH)},
             ))
+        else:
+            assert False
 
+    def CALL_FUNCTION(self, inst):
+        args = self.popn(inst.argval)
+        fn = self.pop()
+        self.call_function(fn, args, {})
+
+    def CALL_METHOD(self, inst):
+        args = self.popn(inst.argval)
+        self_ptr = self.pop()
+        fn = self.pop()
+        if isinstance(fn, TorchVariable):
+            assert self_ptr is None
+            self.call_function(fn, args, {})
+        elif isinstance(fn, MethodNameVariable):
+            assert isinstance(self_ptr, TensorVariable)
+            cls, options = VariableTracker.combine([fn, self_ptr] + args)
+            proxy_args = tuple(x.as_proxy() for x in [self_ptr] + args)
+            self.push(cls(
+                proxy=self.create_proxy('call_method', fn.name, proxy_args, {}),
+                **options
+            ))
+        elif isinstance(fn, NNModuleVariable):
+            _, options = VariableTracker.combine([fn] + args)
+            proxy_args = tuple(x.as_proxy() for x in args)
+            self.push(TensorVariable(
+                proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
+                **options
+            ))
+        else:
+            assert False
+
+    def get_submodule(self, keys):
+        print(keys)
+        assert keys
+        obj = self.nn_modules
+        for k in keys.split("."):
+            if isinstance(obj, dict):
+                obj = obj[k]
+            else:
+                obj = getattr(obj, k)
+        return obj
+
+    def LOAD_METHOD(self, inst):
+        obj = self.pop()
+        name = inst.argval
+        _, options = VariableTracker.combine([obj])
+        if isinstance(obj, TorchVariable):
+            self.push(TorchVariable(
+                value=getattr(obj.value, name),
+                **options
+            ))
+            self.push(None)  # Null self ptr
+        elif isinstance(obj, TensorVariable):
+            self.push(MethodNameVariable(name=name,
+                                         state=TracingSupported.UNKNOWN))
+            self.push(obj)
+        elif isinstance(obj, NNModuleVariable):
+            key = f"{obj.key}.{inst.argval}"
+            subobj = self.get_submodule(key)
+            if isinstance(subobj, torch.nn.Module):
+                self.push(NNModuleVariable(
+                    key,
+                    **options
+                ))
+                self.push(None)  # Null self ptr
+            else:
+                assert False
+        else:
+            assert False
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
         if rv.state == TracingSupported.YES:
             self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
             self.graph.print_tabular()
-            gm = GraphModule(dict(), self.graph)
+            print(rv.guards)
+            gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
             name = unique_id("__translated_fn")
             self.f_globals[name] = gm.forward
@@ -256,128 +392,17 @@ class InstructionTracer(fx.Tracer):
     BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
 
 
-"""
-        def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
-            if isinstance(root, torch.nn.Module):
-                self.root = root
-                fn = type(root).forward
-                self.submodule_paths = {mod: name for name, mod in root.named_modules()}
-            else:
-                self.root = torch.nn.Module()
-                fn = root
-            self.graph = Graph()
-    
-            # When we encounter a Tensor value that's not a parameter, we look if it
-            # is some other attribute on the model. Construct a dict mapping Tensor
-            # values to the qualified name here for efficiency. This is used downstream
-            # in create_arg
-            self.tensor_attrs: Dict[torch.Tensor, str] = {}
-    
-            def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
-                for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject)):
-                        self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
-                for k, v in m.named_children():
-                    collect_tensor_attrs(v, prefix_atoms + [k])
-    
-            collect_tensor_attrs(self.root, [])
-    
-            assert isinstance(fn, FunctionType)
-    
-            fn_globals = fn.__globals__  # run before it gets patched
-            fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
-    
-            parameter_proxy_cache: Dict[str, Proxy] = {}  # Reduce number of get_attr calls
-    
-            # Method dispatch on parameters is not recorded unless it's directly used.
-            # Thus, we need to insert a proxy when __getattr__ requests a parameter.
-            @functools.wraps(_orig_module_getattr)
-            def module_getattr_wrapper(mod, attr):
-                attr_val = _orig_module_getattr(mod, attr)
-                return self._module_getattr(attr, attr_val, parameter_proxy_cache)
-    
-            @functools.wraps(_orig_module_call)
-            def module_call_wrapper(mod, *args, **kwargs):
-                def forward(*args, **kwargs):
-                    return _orig_module_call(mod, *args, **kwargs)
-    
-                _autowrap_check(patcher, getattr(getattr(mod, "forward", mod), "__globals__", {}),
-                                self._autowrap_function_ids)
-                return self.call_module(mod, forward, args, kwargs)
-    
-            with _CPatchManager(self):
-                with _Patcher() as patcher:
-                    # allow duplicate patches to support the case of nested calls
-                    patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
-                    patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
-                    _patch_wrapped_functions(patcher)
-                    _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-                    for module in self._autowrap_search:
-                        _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
-                    self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                                     type_expr=fn.__annotations__.get('return', None))
-    
-            self.submodule_paths = None
-            return self.graph
-            
-        class BoxedValue:
-            def __init__(self, value):
-                self.value = value
-        
-        
-        def stack_op(fn):
-            nargs = len(inspect.signature(fn).parameters)
-        
-            @functools.wraps(fn)
-            def impl(self, val):
-                self.stack.append(fn(*self.popn(nargs)))
-        
-            return impl
-        
-        
-        def load_op(fn):
-            @functools.wraps(fn)
-            def impl(self, val):
-                self.stack.append(fn(self, val))
-        
-            return impl
-        
-        
-        class FrameInterpreter:
-            def LOAD_FAST(self, val):
-                self.stack.append(self.f_locals[val].value)
-        
-            def LOAD_CLOSURE(self, val):
-                self.stack.append(self.f_locals[val].value)
-        
-            def LOAD_FAST(self, val):
-                self.stack.append(self.f_locals[val].value)
-        
-            def STORE_FAST(self, val):
-                self.f_locals[val] = BoxedValue(self.stack.pop())
-        
-            def LOAD_GLOBAL(self, val):
-                self.stack.append(self.f_globals[val])
-        
-            def STORE_DEREF(self, val):
-                self.f_locals[val] = BoxedValue(CellType(self.stack.pop()))
-        
-            BINARY_POWER = stack_op(lambda tos1, tos: tos1 ** tos)
-            BINARY_MULTIPLY = stack_op(lambda tos1, tos: tos1 * tos)
-            BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1 @ tos)
-            BINARY_FLOOR_DIVIDE = stack_op(lambda tos1, tos: tos1 // tos)
-            BINARY_TRUE_DIVIDE = stack_op(lambda tos1, tos: tos1 / tos)
-            BINARY_MODULO = stack_op(lambda tos1, tos: tos1 % tos)
-            BINARY_ADD = stack_op(lambda tos1, tos: tos1 + tos)
-            BINARY_SUBTRACT = stack_op(lambda tos1, tos: tos1 - tos)
-            BINARY_SUBSCR = stack_op(lambda tos1, tos: tos1[tos])
-            BINARY_LSHIFT = stack_op(lambda tos1, tos: tos1 << tos)
-            BINARY_RSHIFT = stack_op(lambda tos1, tos: tos1 >> tos)
-            BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
-            BINARY_XOR = stack_op(lambda tos1, tos: tos1 ^ tos)
-            BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
-            LOAD_CONST = load_op(lambda self, val: val)
-"""
+class FakeRootModule(torch.nn.Module):
+    """ Trick the constructor of fx.GraphModule """
+    def __init__(self, nn_modules: dict):
+        super(FakeRootModule, self).__init__()
+        training = None
+        for k, v in nn_modules.items():
+            setattr(self, k, v)
+            training2 = getattr(v, "training", None)
+            assert None in (training, training2) or training == training2
+            if training2 is not None:
+                training = training2
 
 
 def convert_frame_assert(frame: types.FrameType):

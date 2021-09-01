@@ -1,5 +1,6 @@
 import dataclasses
 import dis
+import itertools
 import sys
 import types
 from typing import Any, Optional, List
@@ -180,3 +181,10 @@ def transform_code_object(code, transformations):
     code_options["co_lnotab"] = lnotab
     assert set(keys) == set(code_options.keys())
     return types.CodeType(*[code_options[k] for k in keys])
+
+
+_unique_id_counter = itertools.count()
+
+
+def unique_id(name):
+    return f"{name}_{next(_unique_id_counter)}"
