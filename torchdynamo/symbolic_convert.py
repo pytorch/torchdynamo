@@ -1,6 +1,5 @@
 import dataclasses
 import dis
-import enum
 import functools
 import inspect
 import itertools
@@ -11,118 +10,22 @@ import torch
 from torch import fx
 from torch.fx import GraphModule
 
-from .bytecode_transformation import debug_checks, transform_code_object, Instruction, create_instruction, unique_id
-
-TORCH_OBJECT_IDS = set()
-
-
-def _find_torch_objects(module):
-    TORCH_OBJECT_IDS.add(id(module))
-    for name, obj in list(module.__dict__.items()):
-        if id(obj) not in TORCH_OBJECT_IDS:
-            if isinstance(obj, types.ModuleType):
-                if obj.__name__.startswith("torch."):
-                    TORCH_OBJECT_IDS.add(id(obj))
-                    _find_torch_objects(obj)
-            else:
-                TORCH_OBJECT_IDS.add(id(obj))
-
-
-_find_torch_objects(torch)
-
-
-class TracingSupported(enum.Enum):
-    UNKNOWN = 0
-    YES = 1
-    NO = 2
-
-
-class GuardSource(enum.Enum):
-    LOCAL = 0
-    GLOBAL = 1
-
-
-class GuardRequirement(enum.Enum):
-    TYPE_MATCH = 0
-    VALUE_MATCH = 1
-    FUNCTION_MATCH = 2  # e.q. "from torch import add"
-
-
-@dataclasses.dataclass
-class Guard:
-    name: str
-    source: GuardSource
-    requirement: GuardRequirement
-
-    def __hash__(self):
-        return hash((self.name, self.source, self.requirement))
-
-
-def combine_state(a, b):
-    return TracingSupported(max(a.value, b.value))
-
-
-combine_states = functools.partial(functools.reduce, combine_state)
-combine_guards = functools.partial(functools.reduce, set.union)
-
-
-class VariableTracker:
-    """ Base class for tracked locals and stack values """
-
-    @staticmethod
-    def combine(vars):
-        vars = list(vars)
-        priority = [TensorVariable, TorchVariable, NNModuleVariable, ConstantVariable, MethodNameVariable]
-        vars.sort(key=lambda v: priority.index(type(v)))
-        return type(vars[0]), {
-            "state": combine_states(v.state for v in vars),
-            "guards": combine_guards(v.guards for v in vars),
-        }
-
-    def __init__(self, state=TracingSupported.UNKNOWN, guards=None):
-        super(VariableTracker, self).__init__()
-        self.state = state
-        self.guards = guards or set()
-
-
-class TensorVariable(VariableTracker):
-    """ Points to a tensor """
-
-    def __init__(self, proxy, **kwargs):
-        super(TensorVariable, self).__init__(**kwargs)
-        self.proxy = proxy
-
-    def as_proxy(self):
-        return self.proxy
-
-
-class NNModuleVariable(VariableTracker):
-    def __init__(self, key: str, **kwargs):
-        super(NNModuleVariable, self).__init__(**kwargs)
-        self.key = key
-
-
-class ConstantVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
-        super(ConstantVariable, self).__init__(**kwargs)
-        self.value = value
-
-    def as_proxy(self):
-        return self.value
-
-
-class TorchVariable(VariableTracker):
-    """ Points to a module or method in torch.* """
-
-    def __init__(self, value, **kwargs):
-        super(TorchVariable, self).__init__(**kwargs)
-        self.value = value
-
-
-class MethodNameVariable(VariableTracker):
-    def __init__(self, name, **kwargs):
-        super(MethodNameVariable, self).__init__(**kwargs)
-        self.name = name
+from .allowed_functions import is_allowed
+from .bytecode_transformation import Instruction
+from .bytecode_transformation import create_instruction
+from .bytecode_transformation import debug_checks
+from .bytecode_transformation import transform_code_object
+from .bytecode_transformation import unique_id
+from .guards import Guard
+from .guards import GuardRequirement
+from .guards import GuardSource
+from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import ConstantVariable
+from .variable_tracker import MethodNameVariable
+from .variable_tracker import NNModuleVariable
+from .variable_tracker import TensorVariable
+from .variable_tracker import TracingSupported
+from .variable_tracker import VariableTracker
 
 
 def stack_op(fn):
@@ -228,7 +131,7 @@ class InstructionTracer(fx.Tracer):
             return self.create_proxy('placeholder', f'{name}_{next(self.cnt)}', (), {})
 
     def call_function(self, fn, args, kwargs):
-        if isinstance(fn, TorchVariable):
+        if isinstance(fn, AllowedFunctionOrModuleVariable):
             assert getattr(fn.value, "__self__", None) is None
             cls, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
             proxy_args = tuple(arg.as_proxy() for arg in args)
@@ -268,9 +171,9 @@ class InstructionTracer(fx.Tracer):
 
     def LOAD_GLOBAL(self, inst):
         value = self.f_globals[inst.argval]
-        if id(value) in TORCH_OBJECT_IDS:
+        if is_allowed(value):
             # TODO(jansel): if we wanted to be paranoid, we could generate a guard here
-            self.push(TorchVariable(
+            self.push(AllowedFunctionOrModuleVariable(
                 value=value,
                 state=TracingSupported.YES,
                 guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
@@ -295,7 +198,7 @@ class InstructionTracer(fx.Tracer):
         args = self.popn(inst.argval)
         self_ptr = self.pop()
         fn = self.pop()
-        if isinstance(fn, TorchVariable):
+        if isinstance(fn, AllowedFunctionOrModuleVariable):
             assert self_ptr is None
             self.call_function(fn, args, {})
         elif isinstance(fn, MethodNameVariable):
@@ -331,8 +234,8 @@ class InstructionTracer(fx.Tracer):
         obj = self.pop()
         name = inst.argval
         _, options = VariableTracker.combine([obj])
-        if isinstance(obj, TorchVariable):
-            self.push(TorchVariable(
+        if isinstance(obj, AllowedFunctionOrModuleVariable):
+            self.push(AllowedFunctionOrModuleVariable(
                 value=getattr(obj.value, name),
                 **options
             ))
@@ -394,6 +297,7 @@ class InstructionTracer(fx.Tracer):
 
 class FakeRootModule(torch.nn.Module):
     """ Trick the constructor of fx.GraphModule """
+
     def __init__(self, nn_modules: dict):
         super(FakeRootModule, self).__init__()
         training = None
