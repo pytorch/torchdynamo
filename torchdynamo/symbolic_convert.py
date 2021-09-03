@@ -354,3 +354,10 @@ def convert_frame_assert(frame: types.FrameType):
     print(dis.Bytecode(code).dis())
     assert guards is not None
     return GuardedCode(code, guards)
+
+
+def convert_frame(frame: types.FrameType):
+    try:
+        return convert_frame_assert(frame)
+    except Exception:
+        return GuardedCode(frame.f_code)

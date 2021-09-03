@@ -1,7 +1,16 @@
 #include "_caching.h"
 #include <iostream>
 
+#define unlikely(x) __builtin_expect((x), 0)
+#define NULL_CHECK(val)                                                        \
+  if (unlikely((val) == NULL)) {                                               \
+    std::cerr << "NULL ERROR: " << __FILE__ << ":" << __LINE__ << std::endl;   \
+    abort();                                                                   \
+  } else {                                                                     \
+  }
+
 namespace {
+
 void abort_error(const char *msg) {
   std::cerr << "ERROR: " << msg << std::endl;
   abort();
@@ -23,27 +32,18 @@ void init_value_guards(GuardsVector &out, PyObject *in, PyObject *scope) {
   out.reserve(len);
   for (size_t i = 0; i < len; ++i) {
     PyObject *key = PyList_GetItem(in, i); // borrows
-    if (key == NULL) {
-      abort_error("invalid guard");
-    }
+    NULL_CHECK(key);
     Py_INCREF(key);
     PyObject *value = PyObject_GetItem(scope, key); // new ref
-    if (value == NULL) {
-      abort_error("invalid guard");
-    }
-    PyObject* valref = PyWeakref_NewRef(value, NULL);
-    if (valref == NULL) {
-      abort_error("weakref error");
-    }
+    NULL_CHECK(value);
+    PyObject *valref = PyWeakref_NewRef(value, NULL);
+    NULL_CHECK(valref);
     Py_DECREF(value);
     out.emplace_back(std::make_pair(key, valref));
   }
 }
 
 bool check_value_guards(const GuardsVector &guards, PyObject *scope) {
-  if(scope == NULL) {
-    abort_error("scope is null");
-  }
   for (auto item : guards) {
     PyObject *key = item.first;
     PyObject *value1 = PyWeakref_GET_OBJECT(item.second);
@@ -61,20 +61,16 @@ void init_type_guards(GuardsVector &out, PyObject *in, PyObject *scope) {
   out.reserve(len);
   for (size_t i = 0; i < len; ++i) {
     PyObject *key = PyList_GetItem(in, i); // borrows
-    if (key == NULL) {
-      abort_error("invalid guard");
-    }
+    NULL_CHECK(key);
     Py_INCREF(key);
     PyObject *objtype = _get_item_type(scope, key);
-    if (objtype == NULL) {
-      abort_error("invalid guard");
-    }
+    NULL_CHECK(objtype);
     out.emplace_back(std::make_pair(key, objtype));
   }
 }
 
 bool check_type_guards(const GuardsVector &guards, PyObject *scope) {
-  if(scope == NULL) {
+  if (scope == NULL) {
     abort_error("scope is null");
   }
   for (auto item : guards) {

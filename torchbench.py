@@ -14,6 +14,7 @@ import torch
 from scipy.stats import gmean, ttest_ind
 
 from torchdynamo.eval_frame import context
+from torchdynamo.symbolic_convert import convert_frame
 from torchdynamo.testing import debug_insert_nops
 from torchdynamo.testing import same
 
@@ -42,8 +43,13 @@ def eager(model, example_inputs):
 
 
 @register_experiment
-def torchdynamo(model, example_inputs):
+def torchdynamo_nops(model, example_inputs):
     return context(debug_insert_nops)(model)
+
+
+@register_experiment
+def torchdynamo(model, example_inputs):
+    return context(convert_frame)(model)
 
 
 def short_name(name, limit=20):
