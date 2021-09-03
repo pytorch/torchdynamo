@@ -2,10 +2,23 @@
 #include <Python.h>
 
 #ifdef __cplusplus
-struct CacheEntry {
-  PyObject *guards;
-  PyCodeObject *code;
-  CacheEntry *next;
+#include <vector>
+typedef std::vector<std::pair<PyObject *, PyObject *>> GuardsVector;
+
+class CacheEntry {
+public:
+  CacheEntry(CacheEntry *next, PyObject *f_locals, PyObject *f_globals,
+             PyObject *guarded_code);
+
+  PyCodeObject *lookup(PyObject *f_locals, PyObject *f_globals);
+
+private:
+  GuardsVector value_locals_;
+  GuardsVector value_globals_;
+  GuardsVector type_locals_;
+  GuardsVector type_globals_;
+  PyCodeObject *code_;
+  CacheEntry *next_;
 };
 #else
 typedef void CacheEntry;
@@ -15,10 +28,10 @@ typedef void CacheEntry;
 extern "C" {
 #endif
 
-PyCodeObject *get_cached_code(CacheEntry *cache, PyObject *f_locals,
-                              PyObject *f_globals);
+PyCodeObject *cached_code_lookup(CacheEntry *cache, PyObject *f_locals,
+                                 PyObject *f_globals);
 
-CacheEntry *set_cached_code(CacheEntry *cache, PyObject *f_locals,
+CacheEntry *new_cached_code(CacheEntry *cache, PyObject *f_locals,
                             PyObject *f_globals, PyObject *result);
 
 #ifdef __cplusplus
@@ -33,11 +46,3 @@ static inline PyObject *PyObject_CallOneArg(PyObject *callable, PyObject *arg) {
   return result;
 }
 #endif
-
-
-static inline PyObject *PyObject_CallTwoArg(PyObject *callable, PyObject *arg1, PyObject *arg2) {
-  PyObject *args = PyTuple_Pack(2, arg1, arg2);
-  PyObject *result = PyObject_CallObject(callable, args);
-  Py_DECREF(args);
-  return result;
-}

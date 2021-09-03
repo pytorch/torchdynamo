@@ -71,4 +71,4 @@ class SymblicConversionTests(unittest.TestCase):
     test_viatorch = make_test(viatorch)
     test_viamethod = make_test(viamethod)
     test_mymodule1 = make_test(MyModule())
-    # test_mymodule2 = make_test(MyModule())
+    test_mymodule2 = make_test(MyModule())

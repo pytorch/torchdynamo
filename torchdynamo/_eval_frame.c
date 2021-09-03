@@ -42,24 +42,30 @@ inline static PyObject *swap_code_and_run(PyFrameObject *frame,
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   CacheEntry *extra = get_extra(frame->f_code);
-  if (extra == ALREADY_DONE) {
+  if (extra == ALREADY_DONE || frame->f_locals == NULL) {
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
+
+  // TODO(jansel) Can we move this off the fast path?
+  PyThreadState *tstate = PyThreadState_GET();
+  PyObject *callback = set_eval_frame(Py_None, tstate);
+
   PyCodeObject *cached_code =
-      get_cached_code(extra, frame->f_locals, frame->f_globals);
+      cached_code_lookup(extra, frame->f_locals, frame->f_globals);
   if (cached_code != NULL) {
     // used cached version
+    set_eval_frame(callback, tstate);
     return swap_code_and_run(frame, cached_code, throw_flag);
   }
 
-  PyThreadState *tstate = PyThreadState_GET();
-  PyObject *callback = set_eval_frame(Py_None, tstate);
   PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
   if (result == NULL) {
     return NULL; // exception
   }
-  extra = set_cached_code(extra, frame->f_locals, frame->f_globals, result);
-  cached_code = get_cached_code(extra, frame->f_locals, frame->f_globals);
+  extra = new_cached_code(extra, frame->f_locals, frame->f_globals, result);
+  Py_DECREF(result);
+
+  cached_code = cached_code_lookup(extra, frame->f_locals, frame->f_globals);
   if (cached_code == NULL) {
     return NULL;
   }

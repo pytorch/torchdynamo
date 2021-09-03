@@ -1,6 +1,9 @@
 import torch
 
-from torchdynamo.bytecode_transformation import debug_checks, transform_code_object, create_instruction
+from torchdynamo.bytecode_transformation import create_instruction
+from torchdynamo.bytecode_transformation import debug_checks
+from torchdynamo.bytecode_transformation import transform_code_object
+from torchdynamo.guards import GuardedCode
 
 
 def same(a, b):
@@ -25,4 +28,4 @@ def debug_insert_nops(frame):
         instructions.insert(0, create_instruction("NOP"))
 
     debug_checks(frame.f_code)
-    return transform_code_object(frame.f_code, insert_nops)
+    return GuardedCode(transform_code_object(frame.f_code, insert_nops))

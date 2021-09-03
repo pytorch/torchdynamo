@@ -16,7 +16,7 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import transform_code_object
 from .bytecode_transformation import unique_id
-from .guards import Guard
+from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
 from .variable_tracker import AllowedFunctionOrModuleVariable
@@ -77,6 +77,7 @@ class InstructionTracer(fx.Tracer):
         self.graphargs = []
         self.code_options = code_options
         self.nn_modules = {}
+        self.guards = None
 
         self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
                                 for k in code_options["co_varnames"]
@@ -280,7 +281,7 @@ class InstructionTracer(fx.Tracer):
         if rv.state == TracingSupported.YES:
             self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
             self.graph.print_tabular()
-            print(rv.guards)
+            self.guards = rv.guards
             gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
             name = unique_id("__translated_fn")
@@ -329,23 +330,27 @@ class FakeRootModule(torch.nn.Module):
 def convert_frame_assert(frame: types.FrameType):
     code = frame.f_code
     if code.co_filename.startswith("<eval_with_key>"):
-        return code  # skip FX output
+        return GuardedCode(code)  # skip FX output
     # TODO(jansel): detect and skip other types of generated code
     debug_checks(code)
     print("ORIGINAL")
     print(dis.Bytecode(code).info())
     print(dis.Bytecode(code).dis())
+    guards = None
 
     def transform(instructions, code_options):
+        nonlocal guards
         tracer = InstructionTracer(instructions,
                                    frame.f_locals,
                                    frame.f_globals,
                                    frame.f_builtins,
                                    code_options)
         tracer.run()
+        guards = tracer.guards
 
     code = transform_code_object(frame.f_code, transform)
     print("NEW CODE")
     print(dis.Bytecode(code).info())
     print(dis.Bytecode(code).dis())
-    return code
+    assert guards is not None
+    return GuardedCode(code, guards)

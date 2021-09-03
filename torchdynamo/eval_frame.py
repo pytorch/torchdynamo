@@ -4,6 +4,7 @@ import logging
 
 from . import skipfiles
 from ._eval_frame import set_eval_frame
+from .guards import GuardedCode
 
 
 class _Context:
@@ -36,7 +37,7 @@ def catch_errors_wrapper(callback):
     def catch_errors(frame):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                return frame.f_code
+                return GuardedCode(frame.f_code)
             return callback(frame)
         except Exception:
             logging.basicConfig()
