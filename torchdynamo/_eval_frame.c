@@ -42,18 +42,22 @@ inline static PyObject *swap_code_and_run(PyFrameObject *frame,
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   CacheEntry *extra = get_extra(frame->f_code);
-  if (extra == ALREADY_DONE || frame->f_locals == NULL) {
+  if (extra == ALREADY_DONE) {
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
 
   // TODO(jansel) Can we move this off the fast path?
   PyThreadState *tstate = PyThreadState_GET();
   PyObject *callback = set_eval_frame(Py_None, tstate);
+  if (PyFrame_FastToLocalsWithError(frame) < 0)
+    return NULL;
+  Py_INCREF(frame->f_locals);
 
   PyCodeObject *cached_code =
       cached_code_lookup(extra, frame->f_locals, frame->f_globals);
   if (cached_code != NULL) {
     // used cached version
+    Py_DECREF(frame->f_locals);
     set_eval_frame(callback, tstate);
     return swap_code_and_run(frame, cached_code, throw_flag);
   }
@@ -71,6 +75,7 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   }
   set_extra(cached_code, ALREADY_DONE); // avoid double compile
   set_extra(frame->f_code, extra);
+  Py_DECREF(frame->f_locals);
   set_eval_frame(callback, tstate);
   return swap_code_and_run(frame, cached_code, throw_flag);
 }

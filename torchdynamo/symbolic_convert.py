@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import dis
 import functools
@@ -26,6 +27,9 @@ from .variable_tracker import NNModuleVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
 from .variable_tracker import VariableTracker
+
+DEBUG = False
+counters = collections.Counter()
 
 
 def stack_op(fn):
@@ -82,14 +86,14 @@ class InstructionTracer(fx.Tracer):
         self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
                                 for k in code_options["co_varnames"]
                                 if k in f_locals}
-
-        print("names     ", code_options["co_names"])
-        print("varnames  ", code_options["co_varnames"])
-        print("cellvars  ", code_options["co_cellvars"])
-        print("freevars  ", code_options["co_freevars"])
-        print("consts    ", code_options["co_consts"])
-        print("stacksize ", code_options["co_stacksize"])
-        print("argnames  ", self.graphargs)
+        if DEBUG:
+            print("names     ", code_options["co_names"])
+            print("varnames  ", code_options["co_varnames"])
+            print("cellvars  ", code_options["co_cellvars"])
+            print("freevars  ", code_options["co_freevars"])
+            print("consts    ", code_options["co_consts"])
+            print("stacksize ", code_options["co_stacksize"])
+            print("argnames  ", self.graphargs)
 
     def create_load_fast(self, name):
         assert name in self.code_options["co_varnames"]
@@ -221,7 +225,6 @@ class InstructionTracer(fx.Tracer):
             assert False
 
     def get_submodule(self, keys):
-        print(keys)
         assert keys
         obj = self.nn_modules
         for k in keys.split("."):
@@ -280,7 +283,10 @@ class InstructionTracer(fx.Tracer):
         rv = self.pop()
         if rv.state == TracingSupported.YES:
             self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
-            self.graph.print_tabular()
+            ncalls = count_calls(self.graph)
+            counters["calls_captured"] += ncalls
+            counters["fusions_possible"] += ncalls - 1
+            DEBUG and self.graph.print_tabular()
             self.guards = rv.guards
             gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
@@ -327,15 +333,20 @@ class FakeRootModule(torch.nn.Module):
                 training = training2
 
 
+def count_calls(g: fx.Graph):
+    c = 0
+    for n in g.nodes:
+        if n.op in ("call_module", "call_function"):
+            c += 1
+    return c
+
+
 def convert_frame_assert(frame: types.FrameType):
     code = frame.f_code
     if code.co_filename.startswith("<eval_with_key>"):
         return GuardedCode(code)  # skip FX output
     # TODO(jansel): detect and skip other types of generated code
     debug_checks(code)
-    print("ORIGINAL")
-    print(dis.Bytecode(code).info())
-    print(dis.Bytecode(code).dis())
     guards = None
 
     def transform(instructions, code_options):
@@ -349,15 +360,22 @@ def convert_frame_assert(frame: types.FrameType):
         guards = tracer.guards
 
     code = transform_code_object(frame.f_code, transform)
-    print("NEW CODE")
-    print(dis.Bytecode(code).info())
-    print(dis.Bytecode(code).dis())
+    if DEBUG:
+        print("ORIGINAL")
+        print(dis.Bytecode(code).info())
+        print(dis.Bytecode(code).dis())
+        print("NEW CODE")
+        print(dis.Bytecode(code).info())
+        print(dis.Bytecode(code).dis())
     assert guards is not None
     return GuardedCode(code, guards)
 
 
 def convert_frame(frame: types.FrameType):
     try:
-        return convert_frame_assert(frame)
+        result = convert_frame_assert(frame)
+        counters["convert_ok"] += 1
+        return result
     except Exception:
+        counters["convert_fail"] += 1
         return GuardedCode(frame.f_code)

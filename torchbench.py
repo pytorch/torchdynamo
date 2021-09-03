@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import collections
 import copy
 import gc
 import logging
@@ -15,6 +16,7 @@ from scipy.stats import gmean, ttest_ind
 
 from torchdynamo.eval_frame import context
 from torchdynamo.symbolic_convert import convert_frame
+from torchdynamo import symbolic_convert
 from torchdynamo.testing import debug_insert_nops
 from torchdynamo.testing import same
 
@@ -120,7 +122,7 @@ class ExperimentResult(object):
 
 
 def print_row(device, name, speedups, sec="sec"):
-    print(f"{device:4} {name:20} " + " ".join(map("{:20}".format, speedups)) + f" -- {sec}")
+    print(f"{device:4} {name:20} " + " - ".join(map("{:10}".format, speedups))) # + f" -- {sec or -1:.1f}")
 
 
 def main():
@@ -179,8 +181,9 @@ def main():
         return
 
     all_speedups = []
-    print(f"median speedup over {baseline.__name__} and t-test")
-    print_row("dev", "name", [x.__name__ for x in experiment_fns])
+    # print(f"median speedup over {baseline.__name__} and t-test")
+    # print_row("dev", "name", [x.__name__ for x in experiment_fns])
+    totals = collections.Counter()
 
     def check_correctness(fn):
         torch.manual_seed(1337)
@@ -200,24 +203,42 @@ def main():
             model = baseline(copy.deepcopy(original_model), example_inputs)
             result, sec = timed(model, example_inputs, args.warmup)
             experiments = []
+            results = []
+
             for fn in experiment_fns:
+                symbolic_convert.counters.clear()
                 fn_model, fn_ok = check_correctness(fn)
+
+                results.append(fn_ok)
+                results.append(str(sorted(symbolic_convert.counters.items())))
+                totals.update(symbolic_convert.counters)
+
+                symbolic_convert.counters.clear()
+                fn_model(*example_inputs)
+                results.append(str(sorted(symbolic_convert.counters.items())))
+                totals.update(symbolic_convert.counters)
+
                 experiments.append(ExperimentResult(fn_model, fn_ok))
 
-            speedups, pvalues = measure_speedups([model] + [x.model for x in experiments],
-                                                 example_inputs,
-                                                 max(1, int(args.min_measure_sec / sec)),
-                                                 args.repeat)
-            if all(x.ok == "OK" for x in experiments):
-                all_speedups.append(speedups)
+            print_row(device, name, results, time.time() - t0)
 
-            print_row(device, name,
-                      [e.format_speedup(s, p)
-                       for e, s, p in zip(experiments, speedups, pvalues)], f"{time.time() - t0:.1f}s")
+            # speedups, pvalues = measure_speedups([model] + [x.model for x in experiments],
+            #                                      example_inputs,
+            #                                      max(1, int(args.min_measure_sec / sec)),
+            #                                      args.repeat)
+            # if all(x.ok == "OK" for x in experiments):
+            #     all_speedups.append(speedups)
+
+            # print_row(device, name,
+            #           [e.format_speedup(s, p)
+            #            for e, s, p in zip(experiments, speedups, pvalues)], f"{time.time() - t0:.1f}s")
         except Exception:
             log.exception(f"ERROR from {name}")
 
-    print_row("", "GEOMEAN", map("{:.3f}x".format, gmean(np.vstack(all_speedups), axis=0)))
+    print("NOW", totals.most_common(20))
+    print("OLD", [('convert_fail', 199), ('calls_captured', 82), ('convert_ok', 72), ('fusions_possible', 47)])
+
+    # print_row("", "GEOMEAN", map("{:.3f}x".format, gmean(np.vstack(all_speedups), axis=0)))
 
 
 if __name__ == '__main__':
