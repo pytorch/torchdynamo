@@ -9,19 +9,21 @@ import re
 import sys
 import time
 import warnings
+from os.path import abspath
+from os.path import exists
 
 import numpy as np
 import torch
-from scipy.stats import gmean, ttest_ind
+from scipy.stats import ttest_ind
 
+from torchdynamo import symbolic_convert
 from torchdynamo.eval_frame import context
 from torchdynamo.symbolic_convert import convert_frame
-from torchdynamo import symbolic_convert
 from torchdynamo.testing import debug_insert_nops
 from torchdynamo.testing import same
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-torchbench_dir = os.path.expanduser("~/torchbench")
+torchbench_dir = abspath("../torchbench" if exists("../torchbench") else "../torchbenchmark")
 assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
@@ -122,7 +124,7 @@ class ExperimentResult(object):
 
 
 def print_row(device, name, speedups, sec="sec"):
-    print(f"{device:4} {name:20} " + " - ".join(map("{:10}".format, speedups))) # + f" -- {sec or -1:.1f}")
+    print(f"{device:4} {name:20} " + " - ".join(map("{:10}".format, speedups)))  # + f" -- {sec or -1:.1f}")
 
 
 def main():
