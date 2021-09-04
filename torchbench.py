@@ -41,6 +41,15 @@ register_experiment = EXPERIMENTS.append
 current_name = ""
 
 
+def synchronize():
+    global synchronize
+    if torch.cuda.is_available():
+        synchronize = torch.cuda.synchronize
+        synchronize()
+    else:
+        synchronize = lambda: None
+
+
 @register_experiment
 def eager(model, example_inputs):
     return model
@@ -90,7 +99,7 @@ def timed(model, example_inputs, times=1):
     t0 = time.perf_counter()
     for _ in range(times):
         result = model(*example_inputs)
-        torch.cuda.synchronize()
+        synchronize()
     t1 = time.perf_counter()
     return result, t1 - t0
 

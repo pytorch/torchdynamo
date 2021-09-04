@@ -33,6 +33,11 @@ DEBUG = False
 counters = collections.Counter()
 
 
+def unimplemented(name):
+    counters[f"E:{name}"] += 1
+    raise NotImplementedError(name)
+
+
 def stack_op(fn):
     nargs = len(inspect.signature(fn).parameters)
 
@@ -45,7 +50,7 @@ def stack_op(fn):
             val = cls(proxy=fn(*[i.as_proxy() for i in inputs]),
                       **kwargs)
         else:
-            assert False
+            unimplemented("stack_op")
 
         self.push(val)
 
@@ -125,7 +130,7 @@ class InstructionTracer(fx.Tracer):
                 guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
             )
         else:
-            assert False
+            unimplemented("wrap_local")
 
     def create_graph_input(self, name):
         placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
@@ -158,11 +163,13 @@ class InstructionTracer(fx.Tracer):
                 **options
             ))
         else:
-            assert False
+            unimplemented("call_function")
 
     def step(self):
         inst = self.instructions[self.instruction_pointer]
         self.instruction_pointer += 1
+        if not hasattr(self, inst.opname):
+            unimplemented(f"missing: {inst.opname}")
         getattr(self, inst.opname)(inst)
         return inst.opname != "RETURN_VALUE"
 
@@ -207,7 +214,7 @@ class InstructionTracer(fx.Tracer):
                 guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.TYPE_MATCH)},
             ))
         else:
-            assert False
+            unimplemented("LOAD_GLOBAL")
 
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
@@ -222,7 +229,7 @@ class InstructionTracer(fx.Tracer):
             kwargsvars = self.pop()
             argsvars = self.pop()
         else:
-            assert False
+            unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
         assert isinstance(argsvars, ListVariable)
         assert isinstance(kwargsvars, ConstDictVariable)
@@ -244,14 +251,18 @@ class InstructionTracer(fx.Tracer):
                 **options
             ))
         elif isinstance(fn, NNModuleVariable):
-            _, options = VariableTracker.combine([fn] + args)
-            proxy_args = tuple(x.as_proxy() for x in args)
-            self.push(TensorVariable(
-                proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
-                **options
-            ))
+            mod = self.get_submodule(fn.key)
+            if is_allowed(mod.__class__):
+                _, options = VariableTracker.combine([fn] + args)
+                proxy_args = tuple(x.as_proxy() for x in args)
+                self.push(TensorVariable(
+                    proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
+                    **options
+                ))
+            else:
+                unimplemented("user defined module")
         else:
-            assert False
+            unimplemented("CALL_METHOD")
 
     def get_submodule(self, keys):
         assert keys
@@ -287,9 +298,9 @@ class InstructionTracer(fx.Tracer):
                 ))
                 self.push(None)  # Null self ptr
             else:
-                assert False
+                unimplemented("nn.Module method")
         else:
-            assert False
+            unimplemented("LOAD_METHOD")
 
     def LOAD_ATTR(self, inst):
         obj = self.pop()
@@ -304,11 +315,11 @@ class InstructionTracer(fx.Tracer):
                     **options
                 ))
             else:
-                assert False
+                unimplemented("nn.Module attr")
         elif isinstance(obj, TensorVariable):
             self.push(GetAttrVariable(obj, name, **options))
         else:
-            assert False
+            unimplemented("LOAD_ATTR")
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -350,7 +361,7 @@ class InstructionTracer(fx.Tracer):
                      create_instruction("RETURN_VALUE")]
             )
         else:
-            assert False
+            unimplemented("not traceable")
 
     BINARY_POWER = stack_op(lambda tos1, tos: tos1 ** tos)
     BINARY_MULTIPLY = stack_op(lambda tos1, tos: tos1 * tos)
@@ -421,10 +432,13 @@ def convert_frame_assert(frame: types.FrameType):
 
 
 def convert_frame(frame: types.FrameType):
+    counters["F:total"] += 1
     try:
         result = convert_frame_assert(frame)
-        counters["convert_ok"] += 1
+        counters["F:ok"] += 1
         return result
-    except Exception:
-        counters["convert_fail"] += 1
-        return GuardedCode(frame.f_code)
+    except NotImplementedError:
+        pass
+    except Exception as e:
+        counters[f"E:{e.__class__.__name__}:{e}"] += 1
+    return GuardedCode(frame.f_code)

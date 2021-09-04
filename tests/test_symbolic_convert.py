@@ -71,8 +71,16 @@ def globalmodule(x):
     return e(x)
 
 
-def method_call(a, b, c):
+def method_call1(a, b, c):
     return constant3(a, b) * c
+
+
+def method_call2(a, b):
+    return constant3(a=b, b=a) + 1
+
+
+def method_call3(a, b):
+    return constant3(a, b=1.0) + b
 
 
 def tuple1(a, b):
@@ -83,6 +91,43 @@ def tuple1(a, b):
 def tuple2(a, b):
     args = [a, b]
     return sub(*args)
+
+
+def listarg1(a, b):
+    return torch.cat([a, b])
+
+
+def listarg2(a, b):
+    return torch.cat((a, b), dim=0)
+
+
+def slice1(a):
+    return a[5]
+
+
+def slice2(a):
+    return a[:5]
+
+
+def slice3(a):
+    return a[5:]
+
+
+def slice4(a):
+    return a[2:5]
+
+
+def slice5(a):
+    return a[::2]
+
+
+def slice6(a):
+    return torch.unsqueeze(a, 0)[:, 2:]
+
+
+def unpack1(a):
+    a, b = a[:5], a[5:]
+    return a - b
 
 
 class MyModule(torch.nn.Module):
@@ -127,10 +172,21 @@ class SymblicConversionTests(unittest.TestCase):
     test_viamethod = make_test(viamethod)
     test_mymodule1 = make_test(MyModule())
     test_mymodule2 = make_test(MyModule())
-    # test_globalmodule = make_test(globalmodule)
     test_indirect1 = make_test(indirect1)
     test_indirect2 = make_test(indirect2)
     test_indirect3 = make_test(indirect3)
-    # test_methodcall = make_test(methodcall)
     test_tuple1 = make_test(tuple1)
     test_tuple2 = make_test(tuple2)
+    # test_methodcall1 = make_test(methodcall1)
+    # test_methodcall2 = make_test(methodcall2)
+    # test_methodcall3 = make_test(methodcall3)
+    # test_listarg1 = make_test(listarg1)
+    # test_listarg2 = make_test(listarg2)
+    # test_slice1 = make_test(slice1)
+    # test_slice2 = make_test(slice2)
+    # test_slice3 = make_test(slice3)
+    # test_slice4 = make_test(slice4)
+    # test_slice5 = make_test(slice5)
+    # test_slice6 = make_test(slice6)
+    # test_globalmodule = make_test(globalmodule)
+    # test_unpack1 = make_test(unpack1)
