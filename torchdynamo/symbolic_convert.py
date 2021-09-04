@@ -20,7 +20,8 @@ from .bytecode_transformation import unique_id
 from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, GetAttrVariable, TupleVariable, ListVariable, \
+    ConstDictVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import MethodNameVariable
 from .variable_tracker import NNModuleVariable
@@ -137,12 +138,23 @@ class InstructionTracer(fx.Tracer):
 
     def call_function(self, fn, args, kwargs):
         if isinstance(fn, AllowedFunctionOrModuleVariable):
-            assert getattr(fn.value, "__self__", None) is None
             cls, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
+            assert getattr(fn.value, "__self__", None) is None
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
             self.push(cls(
                 proxy=self.create_proxy('call_function', fn.value, proxy_args, proxy_kwargs),
+                **options
+            ))
+        elif isinstance(fn, GetAttrVariable):
+            name = fn.name
+            obj = fn.obj
+            args = [obj] + list(args)
+            cls, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
+            proxy_args = tuple(arg.as_proxy() for arg in args)
+            proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+            self.push(cls(
+                proxy=self.create_proxy('call_method', name, proxy_args, proxy_kwargs),
                 **options
             ))
         else:
@@ -169,6 +181,9 @@ class InstructionTracer(fx.Tracer):
 
     def LOAD_FAST(self, inst):
         self.push(self.symbolic_locals[inst.argval])
+
+    def STORE_FAST(self, inst):
+        self.symbolic_locals[inst.argval] = self.pop()
 
     def LOAD_CONST(self, inst):
         self.push(ConstantVariable(value=inst.argval,
@@ -198,6 +213,20 @@ class InstructionTracer(fx.Tracer):
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
+
+    def CALL_FUNCTION_EX(self, inst):
+        if inst.argval == 0:
+            kwargsvars = ConstDictVariable({})
+            argsvars = self.pop()
+        elif inst.argval == 1:
+            kwargsvars = self.pop()
+            argsvars = self.pop()
+        else:
+            assert False
+        fn = self.pop()
+        assert isinstance(argsvars, ListVariable)
+        assert isinstance(kwargsvars, ConstDictVariable)
+        self.call_function(fn, argsvars.items, kwargsvars.items)
 
     def CALL_METHOD(self, inst):
         args = self.popn(inst.argval)
@@ -276,8 +305,28 @@ class InstructionTracer(fx.Tracer):
                 ))
             else:
                 assert False
+        elif isinstance(obj, TensorVariable):
+            self.push(GetAttrVariable(obj, name, **options))
         else:
             assert False
+
+    def BUILD_TUPLE(self, inst):
+        items = self.popn(inst.argval)
+        _, options = VariableTracker.combine(items)
+        self.push(TupleVariable(items, **options))
+
+    def BUILD_LIST(self, inst):
+        items = self.popn(inst.argval)
+        _, options = VariableTracker.combine(items)
+        self.push(ListVariable(items, **options))
+
+    def BUILD_MAP(self, inst):
+        assert inst.argval == 0
+        self.push(ConstDictVariable({}))
+
+        # items = self.popn(inst.argval)
+        # _, options = VariableTracker.combine(items)
+        # self.push(ConstDictVariable(items, **options))
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
@@ -336,7 +385,7 @@ class FakeRootModule(torch.nn.Module):
 def count_calls(g: fx.Graph):
     c = 0
     for n in g.nodes:
-        if n.op in ("call_module", "call_function"):
+        if "call" in n.op:
             c += 1
     return c
 

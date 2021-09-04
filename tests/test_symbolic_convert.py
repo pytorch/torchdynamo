@@ -75,6 +75,16 @@ def method_call(a, b, c):
     return constant3(a, b) * c
 
 
+def tuple1(a, b):
+    args = (a, b)
+    return sub(*args)
+
+
+def tuple2(a, b):
+    args = [a, b]
+    return sub(*args)
+
+
 class MyModule(torch.nn.Module):
     def __init__(self):
         super(MyModule, self).__init__()
@@ -87,7 +97,7 @@ class MyModule(torch.nn.Module):
 
 def make_test(fn):
     def test_fn(self):
-        # torch.fx.symbolic_trace(fn).graph.print_tabular()
+        torch.fx.symbolic_trace(fn).graph.print_tabular()
         nargs = len(inspect.signature(fn).parameters) - int(isinstance(fn, torch.nn.Module))
         args1 = [torch.randn(10, 10) for _ in range(nargs)]
         args2 = [torch.randn(10, 10) for _ in range(nargs)]
@@ -117,8 +127,10 @@ class SymblicConversionTests(unittest.TestCase):
     test_viamethod = make_test(viamethod)
     test_mymodule1 = make_test(MyModule())
     test_mymodule2 = make_test(MyModule())
-    # test_indirect1 = make_test(indirect1)
-    # test_indirect2 = make_test(indirect2)
-    # test_indirect3 = make_test(indirect3)
     # test_globalmodule = make_test(globalmodule)
+    test_indirect1 = make_test(indirect1)
+    test_indirect2 = make_test(indirect2)
+    test_indirect3 = make_test(indirect3)
     # test_methodcall = make_test(methodcall)
+    test_tuple1 = make_test(tuple1)
+    test_tuple2 = make_test(tuple2)

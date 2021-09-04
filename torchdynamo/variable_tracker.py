@@ -23,7 +23,7 @@ class VariableTracker:
     def combine(vars):
         vars = list(vars)
         priority = [TensorVariable, AllowedFunctionOrModuleVariable, NNModuleVariable, ConstantVariable,
-                    MethodNameVariable]
+                    MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable]
         vars.sort(key=lambda v: priority.index(type(v)))
         return type(vars[0]), {
             "state": combine_states(v.state for v in vars),
@@ -60,6 +60,29 @@ class ConstantVariable(VariableTracker):
 
     def as_proxy(self):
         return self.value
+
+
+class GetAttrVariable(VariableTracker):
+    def __init__(self, obj, name, **kwargs):
+        super(GetAttrVariable, self).__init__(**kwargs)
+        self.obj = obj
+        self.name = name
+
+
+class ListVariable(VariableTracker):
+    def __init__(self, items, **kwargs):
+        super(ListVariable, self).__init__(**kwargs)
+        self.items = items
+
+
+class TupleVariable(ListVariable):
+    pass
+
+
+class ConstDictVariable(VariableTracker):
+    def __init__(self, items, **kwargs):
+        super(ConstDictVariable, self).__init__(**kwargs)
+        self.items = items
 
 
 class AllowedFunctionOrModuleVariable(VariableTracker):
