@@ -130,6 +130,13 @@ def unpack1(a):
     return a - b
 
 
+def inplace1(a, b):
+    o = torch.empty((10,))
+    o.copy_(a)
+    o -= b
+    return o
+
+
 class MyModule(torch.nn.Module):
     def __init__(self):
         super(MyModule, self).__init__()
@@ -161,7 +168,7 @@ def make_test(fn):
     return test_fn
 
 
-class SymblicConversionTests(unittest.TestCase):
+class SymbolicConversionTests(unittest.TestCase):
     test_add = make_test(add)
     test_constant1 = make_test(constant1)
     test_constant2 = make_test(constant2)
@@ -177,16 +184,17 @@ class SymblicConversionTests(unittest.TestCase):
     test_indirect3 = make_test(indirect3)
     test_tuple1 = make_test(tuple1)
     test_tuple2 = make_test(tuple2)
+    test_slice1 = make_test(slice1)
+    test_slice2 = make_test(slice2)
+    test_slice3 = make_test(slice3)
+    test_slice4 = make_test(slice4)
+    test_slice5 = make_test(slice5)
+    test_slice6 = make_test(slice6)
+    test_listarg1 = make_test(listarg1)
+    test_listarg2 = make_test(listarg2)
     # test_methodcall1 = make_test(methodcall1)
     # test_methodcall2 = make_test(methodcall2)
     # test_methodcall3 = make_test(methodcall3)
-    # test_listarg1 = make_test(listarg1)
-    # test_listarg2 = make_test(listarg2)
-    # test_slice1 = make_test(slice1)
-    # test_slice2 = make_test(slice2)
-    # test_slice3 = make_test(slice3)
-    # test_slice4 = make_test(slice4)
-    # test_slice5 = make_test(slice5)
-    # test_slice6 = make_test(slice6)
     # test_globalmodule = make_test(globalmodule)
     # test_unpack1 = make_test(unpack1)
+    # test_inplace1 = make_test(inplace1)

@@ -21,7 +21,7 @@ from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
 from .variable_tracker import AllowedFunctionOrModuleVariable, GetAttrVariable, TupleVariable, ListVariable, \
-    ConstDictVariable
+    ConstDictVariable, SliceVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import MethodNameVariable
 from .variable_tracker import NNModuleVariable
@@ -143,11 +143,11 @@ class InstructionTracer(fx.Tracer):
 
     def call_function(self, fn, args, kwargs):
         if isinstance(fn, AllowedFunctionOrModuleVariable):
-            cls, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
+            _, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
             assert getattr(fn.value, "__self__", None) is None
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-            self.push(cls(
+            self.push(TensorVariable(
                 proxy=self.create_proxy('call_function', fn.value, proxy_args, proxy_kwargs),
                 **options
             ))
@@ -235,6 +235,17 @@ class InstructionTracer(fx.Tracer):
         assert isinstance(kwargsvars, ConstDictVariable)
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
+    def CALL_FUNCTION_KW(self, inst):
+        argnames = self.pop()
+        args = self.popn(inst.argval)
+        fn = self.pop()
+        assert isinstance(argnames, ConstantVariable)
+        argnames = argnames.value
+        args, kwargs = args[:-len(argnames)], args[-len(argnames):]
+        kwargs = dict(zip(argnames, kwargs))
+        assert len(kwargs) == len(argnames)
+        self.call_function(fn, args, kwargs)
+
     def CALL_METHOD(self, inst):
         args = self.popn(inst.argval)
         self_ptr = self.pop()
@@ -318,6 +329,11 @@ class InstructionTracer(fx.Tracer):
                 unimplemented("nn.Module attr")
         elif isinstance(obj, TensorVariable):
             self.push(GetAttrVariable(obj, name, **options))
+        elif isinstance(obj, AllowedFunctionOrModuleVariable):
+            self.push(AllowedFunctionOrModuleVariable(
+                value=getattr(obj.value, name),
+                **options
+            ))
         else:
             unimplemented("LOAD_ATTR")
 
@@ -325,6 +341,11 @@ class InstructionTracer(fx.Tracer):
         items = self.popn(inst.argval)
         _, options = VariableTracker.combine(items)
         self.push(TupleVariable(items, **options))
+
+    def BUILD_SLICE(self, inst):
+        items = self.popn(inst.argval)
+        _, options = VariableTracker.combine(items)
+        self.push(SliceVariable(items, **options))
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)

@@ -23,7 +23,7 @@ class VariableTracker:
     def combine(vars):
         vars = list(vars)
         priority = [TensorVariable, AllowedFunctionOrModuleVariable, NNModuleVariable, ConstantVariable,
-                    MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable]
+                    MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable, SliceVariable]
         vars.sort(key=lambda v: priority.index(type(v)))
         return type(vars[0]), {
             "state": combine_states(v.state for v in vars),
@@ -74,9 +74,18 @@ class ListVariable(VariableTracker):
         super(ListVariable, self).__init__(**kwargs)
         self.items = items
 
+    def as_proxy(self):
+        return [x.as_proxy() for x in self.items]
+
 
 class TupleVariable(ListVariable):
-    pass
+    def as_proxy(self):
+        return tuple(super().as_proxy())
+
+
+class SliceVariable(ListVariable):
+    def as_proxy(self):
+        return slice(*super().as_proxy())
 
 
 class ConstDictVariable(VariableTracker):
