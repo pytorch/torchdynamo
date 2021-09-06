@@ -353,12 +353,34 @@ class InstructionTracer(fx.Tracer):
         self.push(ListVariable(items, **options))
 
     def BUILD_MAP(self, inst):
-        assert inst.argval == 0
-        self.push(ConstDictVariable({}))
+        items = self.popn(inst.argval * 2)
+        _, options = VariableTracker.combine(items)
+        result = dict()
+        for k, v in zip(items[::2], items[1::2]):
+            assert isinstance(k, ConstantVariable)
+            result[k.value] = v
+        assert len(result) == len(items) / 2
+        self.push(ConstDictVariable(result, **options))
 
-        # items = self.popn(inst.argval)
-        # _, options = VariableTracker.combine(items)
-        # self.push(ConstDictVariable(items, **options))
+    def BUILD_CONST_KEY_MAP(self, inst):
+        keys = self.pop()
+        values = self.popn(inst.argval)
+        _, options = VariableTracker.combine([keys] + values)
+        assert isinstance(keys, ConstantVariable)
+        keys = keys.value
+        assert isinstance(keys, tuple)
+        assert len(keys) == len(values)
+        self.push(ConstDictVariable(dict(zip(keys, values)), **options))
+
+
+    def UNPACK_SEQUENCE(self, inst):
+        seq = self.pop()
+        if isinstance(seq, ListVariable):
+            assert len(seq.items) == inst.argval
+            for i in reversed(seq.items):
+                self.push(i)
+        else:
+            unimplemented("UNPACK_SEQUENCE")
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
@@ -383,6 +405,57 @@ class InstructionTracer(fx.Tracer):
             )
         else:
             unimplemented("not traceable")
+
+    def NOP(self, inst):
+        pass
+
+    def POP_TOP(self, inst):
+        self.pop()
+
+    def ROT_TWO(self, inst):
+        a = self.pop()
+        b = self.pop()
+        self.push(a)
+        self.push(b)
+
+    def ROT_THREE(self, inst):
+        a = self.pop()
+        b = self.pop()
+        c = self.pop()
+        self.push(a)
+        self.push(c)
+        self.push(b)
+
+    def ROT_FOUR(self, inst):
+        a = self.pop()
+        b = self.pop()
+        c = self.pop()
+        d = self.pop()
+        self.push(a)
+        self.push(d)
+        self.push(c)
+        self.push(b)
+
+    def DUP_TOP(self, inst):
+        a = self.pop()
+        self.push(a)
+        self.push(a)
+
+    def DUP_TOP_TWO(self, inst):
+        a = self.pop()
+        b = self.pop()
+        self.push(b)
+        self.push(a)
+        self.push(b)
+        self.push(a)
+
+    UNARY_POSITIVE = stack_op(lambda tos: +tos)
+    UNARY_NEGATIVE = stack_op(lambda tos: -tos)
+    UNARY_NOT = stack_op(lambda tos: not tos)
+    UNARY_INVERT = stack_op(lambda tos: ~tos)
+
+    # GET_ITER
+    # GET_YIELD_FROM_ITER
 
     BINARY_POWER = stack_op(lambda tos1, tos: tos1 ** tos)
     BINARY_MULTIPLY = stack_op(lambda tos1, tos: tos1 * tos)

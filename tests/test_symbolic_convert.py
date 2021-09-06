@@ -101,6 +101,21 @@ def listarg2(a, b):
     return torch.cat((a, b), dim=0)
 
 
+def listarg3(a, b):
+    kwargs = {"tensors": (a, b), "dim": 0}
+    return torch.cat(**kwargs)
+
+
+def listarg4(a, b):
+    return torch.cat(tensors=[a, b], dim=0)
+
+
+def listarg5(a, b):
+    args = [(a, b)]
+    kwargs = {"dim": 0}
+    return torch.cat(*args, **kwargs)
+
+
 def slice1(a):
     return a[5]
 
@@ -127,6 +142,18 @@ def slice6(a):
 
 def unpack1(a):
     a, b = a[:5], a[5:]
+    return a - b
+
+
+def unpack2(a):
+    l = [a[:5], a[5:]]
+    a, b = l
+    return a - b
+
+
+def unpack3(a):
+    l = (a[:5], a[5:])
+    a, b = l
     return a - b
 
 
@@ -192,9 +219,14 @@ class SymbolicConversionTests(unittest.TestCase):
     test_slice6 = make_test(slice6)
     test_listarg1 = make_test(listarg1)
     test_listarg2 = make_test(listarg2)
+    test_listarg3 = make_test(listarg3)
+    test_listarg4 = make_test(listarg4)
+    test_listarg5 = make_test(listarg5)
+    test_unpack1 = make_test(unpack1)
+    test_unpack2 = make_test(unpack2)
+    test_unpack3 = make_test(unpack3)
     # test_methodcall1 = make_test(methodcall1)
     # test_methodcall2 = make_test(methodcall2)
     # test_methodcall3 = make_test(methodcall3)
     # test_globalmodule = make_test(globalmodule)
-    # test_unpack1 = make_test(unpack1)
     # test_inplace1 = make_test(inplace1)

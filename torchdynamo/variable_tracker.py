@@ -22,6 +22,8 @@ class VariableTracker:
     @staticmethod
     def combine(vars):
         vars = list(vars)
+        if len(vars) == 0:
+            return ConstantVariable, {}
         priority = [TensorVariable, AllowedFunctionOrModuleVariable, NNModuleVariable, ConstantVariable,
                     MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable, SliceVariable]
         vars.sort(key=lambda v: priority.index(type(v)))
