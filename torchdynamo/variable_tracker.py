@@ -20,17 +20,24 @@ class VariableTracker:
     """ Base class for tracked locals and stack values """
 
     @staticmethod
-    def combine(vars):
-        vars = list(vars)
+    def propagate(vars):
         if len(vars) == 0:
-            return ConstantVariable, {}
-        priority = [TensorVariable, AllowedFunctionOrModuleVariable, NNModuleVariable, ConstantVariable,
-                    MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable, SliceVariable]
-        vars.sort(key=lambda v: priority.index(type(v)))
-        return type(vars[0]), {
+            return {}
+        assert all(isinstance(x, VariableTracker) for x in vars)
+        return {
             "state": combine_states(v.state for v in vars),
             "guards": combine_guards(v.guards for v in vars),
         }
+
+    @staticmethod
+    def combine_type(vars):
+        if len(vars) == 0:
+            return ConstantVariable, {}
+        vars = list(vars)
+        priority = [TensorVariable, AllowedFunctionOrModuleVariable, NNModuleVariable, ConstantVariable,
+                    MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable, SliceVariable]
+        vars.sort(key=lambda v: priority.index(type(v)))
+        return type(vars[0])
 
     def __init__(self, state=TracingSupported.UNKNOWN, guards=None):
         super(VariableTracker, self).__init__()

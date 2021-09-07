@@ -45,10 +45,11 @@ def stack_op(fn):
     def impl(self, inst):
         inputs = self.popn(nargs)
 
-        cls, kwargs = VariableTracker.combine(inputs)
+        cls = VariableTracker.combine_type(inputs)
+        options = VariableTracker.propagate(inputs)
         if issubclass(cls, TensorVariable):
             val = cls(proxy=fn(*[i.as_proxy() for i in inputs]),
-                      **kwargs)
+                      **options)
         else:
             unimplemented("stack_op")
 
@@ -143,7 +144,7 @@ class InstructionTracer(fx.Tracer):
 
     def call_function(self, fn, args, kwargs):
         if isinstance(fn, AllowedFunctionOrModuleVariable):
-            _, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
+            options = VariableTracker.propagate([fn, ] + list(args) + list(kwargs.values()))
             assert getattr(fn.value, "__self__", None) is None
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
@@ -155,10 +156,10 @@ class InstructionTracer(fx.Tracer):
             name = fn.name
             obj = fn.obj
             args = [obj] + list(args)
-            cls, options = VariableTracker.combine([fn, ] + list(args) + list(kwargs.values()))
+            options = VariableTracker.propagate([fn, ] + list(args) + list(kwargs.values()))
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-            self.push(cls(
+            self.push(TensorVariable(
                 proxy=self.create_proxy('call_method', name, proxy_args, proxy_kwargs),
                 **options
             ))
@@ -255,16 +256,16 @@ class InstructionTracer(fx.Tracer):
             self.call_function(fn, args, {})
         elif isinstance(fn, MethodNameVariable):
             assert isinstance(self_ptr, TensorVariable)
-            cls, options = VariableTracker.combine([fn, self_ptr] + args)
+            options = VariableTracker.propagate([fn, self_ptr] + args)
             proxy_args = tuple(x.as_proxy() for x in [self_ptr] + args)
-            self.push(cls(
+            self.push(TensorVariable(
                 proxy=self.create_proxy('call_method', fn.name, proxy_args, {}),
                 **options
             ))
         elif isinstance(fn, NNModuleVariable):
             mod = self.get_submodule(fn.key)
             if is_allowed(mod.__class__):
-                _, options = VariableTracker.combine([fn] + args)
+                options = VariableTracker.propagate([fn] + args)
                 proxy_args = tuple(x.as_proxy() for x in args)
                 self.push(TensorVariable(
                     proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
@@ -288,7 +289,7 @@ class InstructionTracer(fx.Tracer):
     def LOAD_METHOD(self, inst):
         obj = self.pop()
         name = inst.argval
-        _, options = VariableTracker.combine([obj])
+        options = VariableTracker.propagate([obj])
         if isinstance(obj, AllowedFunctionOrModuleVariable):
             self.push(AllowedFunctionOrModuleVariable(
                 value=getattr(obj.value, name),
@@ -316,7 +317,7 @@ class InstructionTracer(fx.Tracer):
     def LOAD_ATTR(self, inst):
         obj = self.pop()
         name = inst.argval
-        _, options = VariableTracker.combine([obj])
+        options = VariableTracker.propagate([obj])
         if isinstance(obj, NNModuleVariable):
             key = f"{obj.key}.{name}"
             subobj = self.get_submodule(key)
@@ -339,22 +340,22 @@ class InstructionTracer(fx.Tracer):
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
-        _, options = VariableTracker.combine(items)
+        options = VariableTracker.propagate(items)
         self.push(TupleVariable(items, **options))
 
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
-        _, options = VariableTracker.combine(items)
+        options = VariableTracker.propagate(items)
         self.push(SliceVariable(items, **options))
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
-        _, options = VariableTracker.combine(items)
+        options = VariableTracker.propagate(items)
         self.push(ListVariable(items, **options))
 
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
-        _, options = VariableTracker.combine(items)
+        options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable)
@@ -365,13 +366,12 @@ class InstructionTracer(fx.Tracer):
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
         values = self.popn(inst.argval)
-        _, options = VariableTracker.combine([keys] + values)
+        options = VariableTracker.propagate([keys] + values)
         assert isinstance(keys, ConstantVariable)
         keys = keys.value
         assert isinstance(keys, tuple)
         assert len(keys) == len(values)
         self.push(ConstDictVariable(dict(zip(keys, values)), **options))
-
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
