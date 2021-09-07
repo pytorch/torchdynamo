@@ -23,7 +23,6 @@ from .guards import GuardSource
 from .variable_tracker import AllowedFunctionOrModuleVariable, GetAttrVariable, TupleVariable, ListVariable, \
     ConstDictVariable, SliceVariable
 from .variable_tracker import ConstantVariable
-from .variable_tracker import MethodNameVariable
 from .variable_tracker import NNModuleVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
@@ -163,6 +162,17 @@ class InstructionTracer(fx.Tracer):
                 proxy=self.create_proxy('call_method', name, proxy_args, proxy_kwargs),
                 **options
             ))
+        elif isinstance(fn, NNModuleVariable):
+            mod = self.get_submodule(fn.key)
+            if is_allowed(mod.__class__):
+                options = VariableTracker.propagate([fn] + args)
+                proxy_args = tuple(x.as_proxy() for x in args)
+                self.push(TensorVariable(
+                    proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
+                    **options
+                ))
+            else:
+                unimplemented("call custom module")
         else:
             unimplemented("call_function")
 
@@ -247,35 +257,6 @@ class InstructionTracer(fx.Tracer):
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
 
-    def CALL_METHOD(self, inst):
-        args = self.popn(inst.argval)
-        self_ptr = self.pop()
-        fn = self.pop()
-        if isinstance(fn, AllowedFunctionOrModuleVariable):
-            assert self_ptr is None
-            self.call_function(fn, args, {})
-        elif isinstance(fn, MethodNameVariable):
-            assert isinstance(self_ptr, TensorVariable)
-            options = VariableTracker.propagate([fn, self_ptr] + args)
-            proxy_args = tuple(x.as_proxy() for x in [self_ptr] + args)
-            self.push(TensorVariable(
-                proxy=self.create_proxy('call_method', fn.name, proxy_args, {}),
-                **options
-            ))
-        elif isinstance(fn, NNModuleVariable):
-            mod = self.get_submodule(fn.key)
-            if is_allowed(mod.__class__):
-                options = VariableTracker.propagate([fn] + args)
-                proxy_args = tuple(x.as_proxy() for x in args)
-                self.push(TensorVariable(
-                    proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
-                    **options
-                ))
-            else:
-                unimplemented("user defined module")
-        else:
-            unimplemented("CALL_METHOD")
-
     def get_submodule(self, keys):
         assert keys
         obj = self.nn_modules
@@ -287,32 +268,15 @@ class InstructionTracer(fx.Tracer):
         return obj
 
     def LOAD_METHOD(self, inst):
-        obj = self.pop()
-        name = inst.argval
-        options = VariableTracker.propagate([obj])
-        if isinstance(obj, AllowedFunctionOrModuleVariable):
-            self.push(AllowedFunctionOrModuleVariable(
-                value=getattr(obj.value, name),
-                **options
-            ))
-            self.push(None)  # Null self ptr
-        elif isinstance(obj, TensorVariable):
-            self.push(MethodNameVariable(name=name,
-                                         state=TracingSupported.UNKNOWN))
-            self.push(obj)
-        elif isinstance(obj, NNModuleVariable):
-            key = f"{obj.key}.{name}"
-            subobj = self.get_submodule(key)
-            if isinstance(subobj, torch.nn.Module):
-                self.push(NNModuleVariable(
-                    key,
-                    **options
-                ))
-                self.push(None)  # Null self ptr
-            else:
-                unimplemented("nn.Module method")
-        else:
-            unimplemented("LOAD_METHOD")
+        self.LOAD_ATTR(inst)
+        self.push(None)
+
+    def CALL_METHOD(self, inst):
+        args = self.popn(inst.argval)
+        dummy = self.pop()
+        assert dummy is None
+        fn = self.pop()
+        self.call_function(fn, args, {})
 
     def LOAD_ATTR(self, inst):
         obj = self.pop()
@@ -324,6 +288,11 @@ class InstructionTracer(fx.Tracer):
             if isinstance(subobj, torch.Tensor):
                 self.push(TensorVariable(
                     proxy=self.create_proxy("get_attr", key, tuple(), {}),
+                    **options
+                ))
+            elif isinstance(subobj, torch.nn.Module):
+                self.push(NNModuleVariable(
+                    key,
                     **options
                 ))
             else:
