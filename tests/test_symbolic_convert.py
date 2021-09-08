@@ -71,15 +71,15 @@ def globalmodule(x):
     return e(x)
 
 
-def method_call1(a, b, c):
+def methodcall1(a, b, c):
     return constant3(a, b) * c
 
 
-def method_call2(a, b):
+def methodcall2(a, b):
     return constant3(a=b, b=a) + 1
 
 
-def method_call3(a, b):
+def methodcall3(a, b):
     return constant3(a, b=1.0) + b
 
 
@@ -170,14 +170,65 @@ def fn_with_self_set(a, b):
                         kernel_size=2, padding=1)
 
 
-class MyModule(torch.nn.Module):
+class BasicModule(torch.nn.Module):
     def __init__(self):
-        super(MyModule, self).__init__()
+        super(BasicModule, self).__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.scale = torch.randn(1, 10)
 
     def forward(self, x):
         return F.relu(self.linear1(x)) * self.scale
+
+
+class SubmoduleExample(torch.nn.Module):
+    def __init__(self):
+        super(SubmoduleExample, self).__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = BasicModule()
+        self.scale = torch.randn(1, 10)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x * self.scale
+
+
+class IsTrainingCheck(torch.nn.Module):
+    def __init__(self):
+        super(IsTrainingCheck, self).__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.linear2 = torch.nn.Linear(10, 10)
+        self.train(True)
+
+    def forward(self, x):
+        if self.training:
+            mod = self.linear1
+        else:
+            mod = self.linear2
+        return F.relu(mod(x))
+
+
+class IsEvalCheck(IsTrainingCheck):
+    def __init__(self):
+        super(IsEvalCheck, self).__init__()
+        self.train(False)
+
+
+class ModuleMethodCall(torch.nn.Module):
+    def __init__(self):
+        super(ModuleMethodCall, self).__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = BasicModule()
+        self.scale = torch.randn(1, 10)
+
+    def call_and_scale(self, mod, x):
+        x = mod(x)
+        return x * self.scale
+
+    def forward(self, x):
+        x1 = self.call_and_scale(self.layer1, x)
+        x2 = self.call_and_scale(self.layer2, x)
+        return x1 + x2
 
 
 def make_test(fn):
@@ -222,6 +273,24 @@ class SymbolicConversionTests(unittest.TestCase):
         self.assertTrue(same(val2, correct2))
         self.assertTrue(same(val3, correct3))
 
+    @unittest.skip("not implemented yet")
+    def test_callpacked(self):
+        def call_packed(args):
+            a, b, c = args
+            return a - b * c
+
+        a = torch.randn(10, 10)
+        b = torch.randn(10, 10)
+        c = torch.randn(10, 10)
+        correct = call_packed([a, b, c])
+        with eval_frame.context(convert_frame_assert):
+            val1 = call_packed([a, b, c])
+            val2 = call_packed((a, b, c))
+            val3 = call_packed([a, b, c])
+        self.assertTrue(same(val1, correct))
+        self.assertTrue(same(val2, correct))
+        self.assertTrue(same(val3, correct))
+
     test_add = make_test(add)
     test_constant1 = make_test(constant1)
     test_constant2 = make_test(constant2)
@@ -229,8 +298,6 @@ class SymbolicConversionTests(unittest.TestCase):
     test_globalfn = make_test(globalfn)
     test_viatorch = make_test(viatorch)
     test_viamethod = make_test(viamethod)
-    test_mymodule1 = make_test(MyModule())
-    test_mymodule2 = make_test(MyModule())
     test_indirect1 = make_test(indirect1)
     test_indirect2 = make_test(indirect2)
     test_indirect3 = make_test(indirect3)
@@ -251,13 +318,26 @@ class SymbolicConversionTests(unittest.TestCase):
     test_unpack2 = make_test(unpack2)
     test_unpack3 = make_test(unpack3)
     test_fn_with_self_set = make_test(fn_with_self_set)
+    test_methodcall1 = make_test(methodcall1)
+    test_methodcall2 = make_test(methodcall2)
+    test_methodcall3 = make_test(methodcall3)
+
+    test_basicmodule1 = make_test(BasicModule())
+    test_basicmodule2 = make_test(BasicModule())
+
+    # TODO(jansel): these ones aren't implemented yet
+    # test_inplace1 = make_test(inplace1)
+    # test_submodules1 = make_test(SubmoduleExample())
+    # test_submodules2 = make_test(SubmoduleExample())
+    # test_istraining1 = make_test(IsTrainingCheck())
+    # test_istraining2 = make_test(IsTrainingCheck())
+    # test_iseval1 = make_test(IsEvalCheck())
+    # test_iseval2 = make_test(IsEvalCheck())
+    # test_modulemethod1 = make_test(ModuleMethodCall())
+    # test_modulemethod2 = make_test(ModuleMethodCall())
+    # test_globalmodule = make_test(globalmodule)
 
     # TODO(jansel): need to debug a crash on this one
     # test_globalvar = make_test(globalvar)
 
-    # TODO(jansel): these ones aren't implmented yet
-    # test_methodcall1 = make_test(methodcall1)
-    # test_methodcall2 = make_test(methodcall2)
-    # test_methodcall3 = make_test(methodcall3)
-    # test_globalmodule = make_test(globalmodule)
-    # test_inplace1 = make_test(inplace1)
+    # TODO(jansel): we should make sure to expand nn.Sequential

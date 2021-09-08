@@ -7,6 +7,7 @@ import itertools
 import logging
 import pprint
 import types
+import typing
 from typing import List
 
 import torch
@@ -14,7 +15,7 @@ from torch import fx
 from torch.fx import GraphModule
 
 from .allowed_functions import is_allowed
-from .bytecode_transformation import Instruction
+from .bytecode_transformation import Instruction, cleaned_instructions
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import transform_code_object
@@ -22,7 +23,7 @@ from .bytecode_transformation import unique_id
 from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, UserFunctionVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
@@ -79,34 +80,7 @@ class GlobalArg:
         return tracer.create_load_global(self.name)
 
 
-class InstructionTracer(fx.Tracer):
-    def __init__(self, instructions: List[Instruction], f_locals, f_globals, f_builtins, code_options):
-        super(InstructionTracer, self).__init__()
-        self.graph = fx.Graph()
-        self.instructions = instructions
-        self.stack = []
-        self.f_globals = f_globals
-        self.f_builtins = f_builtins
-        self.indexof = {id(i): n for n, i in enumerate(instructions)}
-        self.instruction_pointer = 0
-        self.cnt = itertools.count()
-        self.graphargs = []
-        self.code_options = code_options
-        self.nn_modules = {}
-        self.guards = set()
-
-        self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
-                                for k in code_options["co_varnames"]
-                                if k in f_locals}
-        if DEBUG:
-            print("names     ", code_options["co_names"])
-            print("varnames  ", code_options["co_varnames"])
-            print("cellvars  ", code_options["co_cellvars"])
-            print("freevars  ", code_options["co_freevars"])
-            print("consts    ", code_options["co_consts"])
-            print("stacksize ", code_options["co_stacksize"])
-            print("argnames  ", self.graphargs)
-
+class InstructionTracerBase(fx.Tracer):
     def create_load_fast(self, name):
         assert name in self.code_options["co_varnames"]
         return create_instruction("LOAD_FAST",
@@ -189,8 +163,11 @@ class InstructionTracer(fx.Tracer):
                 ))
             else:
                 unimplemented("call custom module")
+        elif isinstance(fn, UserFunctionVariable):
+            self.guards.update(fn.guards)
+            self.push(RecursiveInstructionTracer.inline_call(self, fn.value, args, kwargs))
         else:
-            unimplemented("call_function")
+            unimplemented(f"call_function {type(fn).__name__}")
 
     def step(self):
         inst = self.instructions[self.instruction_pointer]
@@ -235,13 +212,18 @@ class InstructionTracer(fx.Tracer):
                 guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
             ))
         elif isinstance(value, torch.Tensor):
-            assert False, "TODO(jansel): need to debug a crash here"
+            assert False, "TODO(jansel): need to debug a crash here (test_globalvar)"
             # turn a load of a global tensor into an arg for the graph
             self.graphargs.append(GlobalArg(inst.argval))
             self.push(TensorVariable(
                 proxy=self.create_graph_input(inst.argval),
                 state=TracingSupported.YES,
                 guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.TYPE_MATCH)},
+            ))
+        elif isinstance(value, types.FunctionType):
+            self.push(UserFunctionVariable(
+                value=value,
+                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
             ))
         else:
             unimplemented("LOAD_GLOBAL")
@@ -386,33 +368,6 @@ class InstructionTracer(fx.Tracer):
         else:
             unimplemented(f"UNPACK_SEQUENCE {type(seq).__name__}")
 
-    def RETURN_VALUE(self, inst):
-        rv = self.pop()
-        if rv.state == TracingSupported.YES:
-            if isinstance(rv, TensorVariable):
-                self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
-            else:
-                unimplemented(f"RETURN_VALUE {type(rv).__name__}")
-            ncalls = count_calls(self.graph)
-            counters["stats"]["calls_captured"] += ncalls
-            counters["stats"]["fusions_possible"] += ncalls - 1
-            DEBUG and self.graph.print_tabular()
-            self.guards.update(rv.guards)
-            gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
-            gm.recompile()
-            name = unique_id("__translated_fn")
-            self.f_globals[name] = gm.forward
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
-            self.code_options["co_stacksize"] = len(self.graphargs) + 1
-            self.instructions[:] = (
-                    [self.create_load_global(name)] +
-                    [arg.load(self) for arg in self.graphargs] +
-                    [create_instruction("CALL_FUNCTION", len(self.graphargs)),
-                     create_instruction("RETURN_VALUE")]
-            )
-        else:
-            unimplemented("not traceable")
-
     def NOP(self, inst):
         pass
 
@@ -478,6 +433,116 @@ class InstructionTracer(fx.Tracer):
     BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
     BINARY_XOR = stack_op(lambda tos1, tos: tos1 ^ tos)
     BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
+
+    def __init__(self,
+                 cnt: typing.Iterable,
+                 graph: fx.Graph,
+                 graphargs,
+                 nn_modules,
+                 guards,
+                 instructions: List[Instruction],
+                 f_globals,
+                 f_builtins,
+                 code_options,
+                 symbolic_locals=None):
+        super(InstructionTracerBase, self).__init__()
+        self.graph = graph
+        self.instructions = instructions
+        self.indexof = {id(i): n for n, i in enumerate(instructions)}
+        self.stack = []
+        self.f_globals = f_globals
+        self.f_builtins = f_builtins
+        self.instruction_pointer = 0
+        self.cnt = cnt
+        self.graphargs = graphargs
+        self.code_options = code_options
+        self.nn_modules = nn_modules
+        self.guards = guards
+        self.symbolic_locals = symbolic_locals
+
+
+class InstructionTracer(InstructionTracerBase):
+    def __init__(self, instructions: List[Instruction], f_locals, f_globals, f_builtins, code_options):
+        super(InstructionTracer, self).__init__(
+            cnt=itertools.count(),
+            graph=fx.Graph(),
+            graphargs=[],
+            nn_modules={},
+            guards=set(),
+            instructions=instructions,
+            f_globals=f_globals,
+            f_builtins=f_builtins,
+            code_options=code_options
+        )
+        self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
+                                for k in code_options["co_varnames"]
+                                if k in f_locals}
+
+    def RETURN_VALUE(self, inst):
+        rv = self.pop()
+        if rv.state == TracingSupported.YES:
+            if isinstance(rv, TensorVariable):
+                self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
+            else:
+                unimplemented(f"RETURN_VALUE {type(rv).__name__}")
+            ncalls = count_calls(self.graph)
+            counters["stats"]["calls_captured"] += ncalls
+            counters["stats"]["fusions_possible"] += ncalls - 1
+            DEBUG and self.graph.print_tabular()
+            self.guards.update(rv.guards)
+            gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
+            gm.recompile()
+            name = unique_id("__translated_fn")
+            self.f_globals[name] = gm.forward
+            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
+            self.code_options["co_stacksize"] = len(self.graphargs) + 1
+            self.instructions[:] = (
+                    [self.create_load_global(name)] +
+                    [arg.load(self) for arg in self.graphargs] +
+                    [create_instruction("CALL_FUNCTION", len(self.graphargs)),
+                     create_instruction("RETURN_VALUE")]
+            )
+        else:
+            unimplemented("not traceable")
+
+
+class RecursiveInstructionTracer(InstructionTracerBase):
+    """ Trace and inline a called method """
+
+    @staticmethod
+    def inline_call(parent, func, args, kwargs):
+        assert callable(func) and getattr(func, "__closure__", None) is None and not hasattr(func, "__self__")
+        bound = inspect.signature(func).bind(*args, **kwargs)
+        bound.apply_defaults()
+        sub_locals = dict()
+        sub_globals = func.__globals__
+        for k, v in bound.arguments.items():
+            if isinstance(v, VariableTracker):
+                sub_locals[k] = v
+            else:
+                unimplemented(f"call user defined {v}")
+        tracer = RecursiveInstructionTracer(parent, func.__code__, sub_locals, sub_globals)
+        tracer.run()
+        assert tracer.symbolic_result is not None
+        return tracer.symbolic_result
+
+    def __init__(self, parent: InstructionTracerBase, code: types.CodeType, symbolic_locals, f_globals):
+        super(RecursiveInstructionTracer, self).__init__(
+            cnt=parent.cnt,
+            graph=parent.graph,
+            graphargs=parent.graphargs,
+            nn_modules=parent.nn_modules,
+            guards=parent.guards,
+            f_globals=f_globals,
+            f_builtins=f_globals["__builtins__"],
+            symbolic_locals=symbolic_locals,
+            instructions=cleaned_instructions(code),
+            code_options={k: getattr(code, k) for k in dir(code)},
+        )
+        self.symbolic_result = None
+
+    def RETURN_VALUE(self, inst):
+        self.symbolic_result = self.pop()
 
 
 class FakeRootModule(torch.nn.Module):

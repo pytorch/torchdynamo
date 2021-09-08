@@ -103,6 +103,13 @@ class ConstDictVariable(VariableTracker):
         self.items = items
 
 
+class UserFunctionVariable(VariableTracker):
+    """ Some unsupported user-defined thing """
+    def __init__(self, value, **kwargs):
+        super(UserFunctionVariable, self).__init__(**kwargs)
+        self.value = value
+
+
 class AllowedFunctionOrModuleVariable(VariableTracker):
     """ Points to a module or method in torch.* """
 

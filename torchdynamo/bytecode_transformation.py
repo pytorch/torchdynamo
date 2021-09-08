@@ -168,9 +168,7 @@ def transform_code_object(code, transformations):
         k: getattr(code, k) for k in keys
     }
 
-    instructions = list(map(convert_instruction, dis.get_instructions(code)))
-    check_offsets(instructions)
-    virtualize_jumps(instructions)
+    instructions = cleaned_instructions(code)
 
     transformations(instructions, code_options)
 
@@ -181,6 +179,13 @@ def transform_code_object(code, transformations):
     code_options["co_lnotab"] = lnotab
     assert set(keys) == set(code_options.keys())
     return types.CodeType(*[code_options[k] for k in keys])
+
+
+def cleaned_instructions(code):
+    instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    check_offsets(instructions)
+    virtualize_jumps(instructions)
+    return instructions
 
 
 _unique_id_counter = itertools.count()
