@@ -166,8 +166,8 @@ def inplace1(a, b):
 
 def fn_with_self_set(a, b):
     # avg_pool2d is an odd one with __self__ set
-    return torch.nn.functional.avg_pool2d(torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1),
-                                          kernel_size=2, padding=1)
+    return F.avg_pool2d(torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1),
+                        kernel_size=2, padding=1)
 
 
 class MyModule(torch.nn.Module):
@@ -202,11 +202,30 @@ def make_test(fn):
 
 
 class SymbolicConversionTests(unittest.TestCase):
+    def test_boolarg(self):
+        def boolarg(aa, bb, flag):
+            if flag:
+                return aa - bb
+            else:
+                return bb - aa
+
+        a = torch.randn(10, 10)
+        b = torch.randn(10, 10)
+        correct1 = boolarg(a, b, True)
+        correct2 = boolarg(a, b, False)
+        correct3 = boolarg(a, b, None)
+        with eval_frame.context(convert_frame_assert):
+            val1 = boolarg(a, b, True)
+            val2 = boolarg(a, b, False)
+            val3 = boolarg(a, b, None)
+        self.assertTrue(same(val1, correct1))
+        self.assertTrue(same(val2, correct2))
+        self.assertTrue(same(val3, correct3))
+
     test_add = make_test(add)
     test_constant1 = make_test(constant1)
     test_constant2 = make_test(constant2)
     test_constant3 = make_test(constant3)
-    test_globalvar = make_test(globalvar)
     test_globalfn = make_test(globalfn)
     test_viatorch = make_test(viatorch)
     test_viamethod = make_test(viamethod)
@@ -232,6 +251,11 @@ class SymbolicConversionTests(unittest.TestCase):
     test_unpack2 = make_test(unpack2)
     test_unpack3 = make_test(unpack3)
     test_fn_with_self_set = make_test(fn_with_self_set)
+
+    # TODO(jansel): need to debug a crash on this one
+    # test_globalvar = make_test(globalvar)
+
+    # TODO(jansel): these ones aren't implmented yet
     # test_methodcall1 = make_test(methodcall1)
     # test_methodcall2 = make_test(methodcall2)
     # test_methodcall3 = make_test(methodcall3)

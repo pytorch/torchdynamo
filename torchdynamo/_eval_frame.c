@@ -45,12 +45,9 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   if (extra == ALREADY_DONE) {
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
-
-  // TODO(jansel) Can we move this off the fast path?
-  PyThreadState *tstate = PyThreadState_GET();
-  PyObject *callback = set_eval_frame(Py_None, tstate);
-  if (PyFrame_FastToLocalsWithError(frame) < 0)
+  if (PyFrame_FastToLocalsWithError(frame) < 0) {
     return NULL;
+  }
   Py_INCREF(frame->f_locals);
 
   PyCodeObject *cached_code =
@@ -58,21 +55,27 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   if (cached_code != NULL) {
     // used cached version
     Py_DECREF(frame->f_locals);
-    set_eval_frame(callback, tstate);
     return swap_code_and_run(frame, cached_code, throw_flag);
   }
 
+  PyThreadState *tstate = PyThreadState_GET();
+  PyObject *callback = set_eval_frame(Py_None, tstate);
+
   PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
   if (result == NULL) {
+    printf("ERROR: Unexpected failure callback hook\n");
     return NULL; // exception
   }
+
   extra = new_cached_code(extra, frame->f_locals, frame->f_globals, result);
   Py_DECREF(result);
 
   cached_code = cached_code_lookup(extra, frame->f_locals, frame->f_globals);
   if (cached_code == NULL) {
+    printf("ERROR: Unexpected failure in cached_code_lookup\n");
     return NULL;
   }
+
   set_extra(cached_code, ALREADY_DONE); // avoid double compile
   set_extra(frame->f_code, extra);
   Py_DECREF(frame->f_locals);

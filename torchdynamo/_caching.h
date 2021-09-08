@@ -3,7 +3,15 @@
 
 #ifdef __cplusplus
 #include <vector>
-typedef std::vector<std::pair<PyObject *, PyObject *>> GuardsVector;
+
+class GuardCheck {
+public:
+  virtual bool check(PyObject *locals_or_globals) = 0;
+  GuardCheck() = default;
+  virtual ~GuardCheck() = default;
+};
+
+typedef std::vector<GuardCheck *> GuardsVector;
 
 class CacheEntry {
 public:
@@ -12,11 +20,19 @@ public:
 
   PyCodeObject *lookup(PyObject *f_locals, PyObject *f_globals);
 
+  inline ~CacheEntry() {
+    for (auto i : locals_checks_) {
+      delete i;
+    }
+    for (auto i : globals_checks_) {
+      delete i;
+    }
+    Py_XDECREF(code_);
+    delete next_;
+  }
 private:
-  GuardsVector value_locals_;
-  GuardsVector value_globals_;
-  GuardsVector type_locals_;
-  GuardsVector type_globals_;
+  GuardsVector locals_checks_;
+  GuardsVector globals_checks_;
   PyCodeObject *code_;
   CacheEntry *next_;
 };

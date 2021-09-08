@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import logging
+import pprint
 import types
 from typing import List
 
@@ -92,7 +93,7 @@ class InstructionTracer(fx.Tracer):
         self.graphargs = []
         self.code_options = code_options
         self.nn_modules = {}
-        self.guards = None
+        self.guards = set()
 
         self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
                                 for k in code_options["co_varnames"]
@@ -132,6 +133,12 @@ class InstructionTracer(fx.Tracer):
             return NNModuleVariable(
                 key=key,
                 state=TracingSupported.YES,
+                guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
+            )
+        elif value is True or value is False or value is None:
+            # For these, just specialize on exact value
+            return ConstantVariable(
+                value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
             )
         else:
@@ -222,13 +229,13 @@ class InstructionTracer(fx.Tracer):
         except KeyError:
             return self.load_builtin(inst)
         if is_allowed(value):
-            # TODO(jansel): if we wanted to be paranoid, we could generate a guard here
             self.push(AllowedFunctionOrModuleVariable(
                 value=value,
                 state=TracingSupported.YES,
                 guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
             ))
         elif isinstance(value, torch.Tensor):
+            assert False, "TODO(jansel): need to debug a crash here"
             # turn a load of a global tensor into an arg for the graph
             self.graphargs.append(GlobalArg(inst.argval))
             self.push(TensorVariable(
@@ -242,6 +249,18 @@ class InstructionTracer(fx.Tracer):
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
         unimplemented(f"load_builtin: {inst.argval}")
+
+    def jump(self, inst):
+        self.instruction_pointer = self.indexof[id(inst.target)]
+
+    def POP_JUMP_IF_FALSE(self, inst):
+        value = self.pop()
+        self.guards.update(value.guards)
+        if isinstance(value, ConstantVariable):
+            if not value.value:
+                self.jump(inst)
+        else:
+            unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
 
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
@@ -378,7 +397,7 @@ class InstructionTracer(fx.Tracer):
             counters["stats"]["calls_captured"] += ncalls
             counters["stats"]["fusions_possible"] += ncalls - 1
             DEBUG and self.graph.print_tabular()
-            self.guards = rv.guards
+            self.guards.update(rv.guards)
             gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
             name = unique_id("__translated_fn")
@@ -509,6 +528,7 @@ def convert_frame_assert(frame: types.FrameType):
         print("NEW CODE")
         print(dis.Bytecode(code).info())
         print(dis.Bytecode(code).dis())
+        pprint.pprint(guards)
     assert guards is not None
     return GuardedCode(code, guards)
 
