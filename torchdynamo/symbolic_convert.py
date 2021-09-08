@@ -4,6 +4,7 @@ import dis
 import functools
 import inspect
 import itertools
+import logging
 import types
 from typing import List
 
@@ -20,20 +21,24 @@ from .bytecode_transformation import unique_id
 from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable, GetAttrVariable, TupleVariable, ListVariable, \
-    ConstDictVariable, SliceVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import GetAttrVariable
+from .variable_tracker import ListVariable
 from .variable_tracker import NNModuleVariable
+from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
+from .variable_tracker import TupleVariable
 from .variable_tracker import VariableTracker
 
 DEBUG = False
-counters = collections.Counter()
+counters = collections.defaultdict(collections.Counter)
 
 
 def unimplemented(name):
-    counters[f"E:{name}"] += 1
+    counters["unimplemented"][name] += 1
     raise NotImplementedError(name)
 
 
@@ -50,7 +55,7 @@ def stack_op(fn):
             val = cls(proxy=fn(*[i.as_proxy() for i in inputs]),
                       **options)
         else:
-            unimplemented("stack_op")
+            unimplemented(f"stack_op {cls.__name__}")
 
         self.push(val)
 
@@ -130,7 +135,7 @@ class InstructionTracer(fx.Tracer):
                 guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
             )
         else:
-            unimplemented("wrap_local")
+            unimplemented(f"wrap_local: {type(value).__name__}")
 
     def create_graph_input(self, name):
         placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
@@ -144,7 +149,11 @@ class InstructionTracer(fx.Tracer):
     def call_function(self, fn, args, kwargs):
         if isinstance(fn, AllowedFunctionOrModuleVariable):
             options = VariableTracker.propagate([fn, ] + list(args) + list(kwargs.values()))
-            assert getattr(fn.value, "__self__", None) is None
+            self_should_be_none = getattr(fn.value, "__self__", None)
+            if self_should_be_none is not None:
+                # weird ones like torch.nn.functional.avg_pool2d have __self__
+                assert (isinstance(self_should_be_none, types.ModuleType) and
+                        self_should_be_none.__name__ == getattr(fn.value, "__module__", None))
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
             self.push(TensorVariable(
@@ -208,7 +217,10 @@ class InstructionTracer(fx.Tracer):
                                    state=TracingSupported.UNKNOWN))
 
     def LOAD_GLOBAL(self, inst):
-        value = self.f_globals[inst.argval]
+        try:
+            value = self.f_globals[inst.argval]
+        except KeyError:
+            return self.load_builtin(inst)
         if is_allowed(value):
             # TODO(jansel): if we wanted to be paranoid, we could generate a guard here
             self.push(AllowedFunctionOrModuleVariable(
@@ -226,6 +238,10 @@ class InstructionTracer(fx.Tracer):
             ))
         else:
             unimplemented("LOAD_GLOBAL")
+
+    def load_builtin(self, inst):
+        assert inst.argval in self.f_builtins
+        unimplemented(f"load_builtin: {inst.argval}")
 
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
@@ -296,7 +312,7 @@ class InstructionTracer(fx.Tracer):
                     **options
                 ))
             else:
-                unimplemented("nn.Module attr")
+                unimplemented(f"nn.Module attr {type(subobj).__name__}")
         elif isinstance(obj, TensorVariable):
             self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, AllowedFunctionOrModuleVariable):
@@ -349,15 +365,18 @@ class InstructionTracer(fx.Tracer):
             for i in reversed(seq.items):
                 self.push(i)
         else:
-            unimplemented("UNPACK_SEQUENCE")
+            unimplemented(f"UNPACK_SEQUENCE {type(seq).__name__}")
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
         if rv.state == TracingSupported.YES:
-            self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
+            if isinstance(rv, TensorVariable):
+                self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
+            else:
+                unimplemented(f"RETURN_VALUE {type(rv).__name__}")
             ncalls = count_calls(self.graph)
-            counters["calls_captured"] += ncalls
-            counters["fusions_possible"] += ncalls - 1
+            counters["stats"]["calls_captured"] += ncalls
+            counters["stats"]["fusions_possible"] += ncalls - 1
             DEBUG and self.graph.print_tabular()
             self.guards = rv.guards
             gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
@@ -495,13 +514,17 @@ def convert_frame_assert(frame: types.FrameType):
 
 
 def convert_frame(frame: types.FrameType):
-    counters["F:total"] += 1
+    counters["frames"]["total"] += 1
     try:
         result = convert_frame_assert(frame)
-        counters["F:ok"] += 1
+        counters["frames"]["ok"] += 1
         return result
     except NotImplementedError:
         pass
     except Exception as e:
-        counters[f"E:{e.__class__.__name__}:{e}"] += 1
+        logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
+        # _, _, exc_tb = sys.exc_info()
+        # frame = exc_tb.tb_frame.f_back
+        # filename = os.path.split(frame.f_code.co_filename)[-1]
+        # counters["errors"][f"{e.__class__.__name__}:{e} [{filename}:{frame.f_lineno}]"] += 1
     return GuardedCode(frame.f_code)

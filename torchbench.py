@@ -194,7 +194,12 @@ def main():
     all_speedups = []
     # print(f"median speedup over {baseline.__name__} and t-test")
     # print_row("dev", "name", [x.__name__ for x in experiment_fns])
-    totals = collections.Counter()
+    totals = collections.defaultdict(collections.Counter)
+
+    def reset_counters():
+        for k, v in symbolic_convert.counters.items():
+            totals[k].update(v)
+        symbolic_convert.counters.clear()
 
     def check_correctness(fn):
         torch.manual_seed(1337)
@@ -217,17 +222,18 @@ def main():
             results = []
 
             for fn in experiment_fns:
-                symbolic_convert.counters.clear()
+                reset_counters()
                 fn_model, fn_ok = check_correctness(fn)
 
                 results.append(fn_ok)
-                results.append(str(sorted(symbolic_convert.counters.items())))
-                totals.update(symbolic_convert.counters)
+                results.append(str(sorted(symbolic_convert.counters["frames"].items())))
 
-                symbolic_convert.counters.clear()
+                reset_counters()
+
                 fn_model(*example_inputs)
-                results.append(str(sorted(symbolic_convert.counters.items())))
-                totals.update(symbolic_convert.counters)
+                results.append(str(sorted(symbolic_convert.counters["frames"].items())))
+
+                reset_counters()
 
                 experiments.append(ExperimentResult(fn_model, fn_ok))
 
@@ -246,8 +252,9 @@ def main():
         except Exception:
             log.exception(f"ERROR from {name}")
 
-    print("NOW", totals.most_common(20))
-    print("OLD", [('convert_fail', 199), ('calls_captured', 82), ('convert_ok', 72), ('fusions_possible', 47)])
+    for k, v in sorted(totals.items()):
+        lines = '\n  '.join(map(str, v.most_common(10)))
+        print(f"STATS {k}\n  {lines}")
 
     # print_row("", "GEOMEAN", map("{:.3f}x".format, gmean(np.vstack(all_speedups), axis=0)))
 

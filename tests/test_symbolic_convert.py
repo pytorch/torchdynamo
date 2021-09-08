@@ -164,6 +164,12 @@ def inplace1(a, b):
     return o
 
 
+def fn_with_self_set(a, b):
+    # avg_pool2d is an odd one with __self__ set
+    return torch.nn.functional.avg_pool2d(torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1),
+                                          kernel_size=2, padding=1)
+
+
 class MyModule(torch.nn.Module):
     def __init__(self):
         super(MyModule, self).__init__()
@@ -225,6 +231,7 @@ class SymbolicConversionTests(unittest.TestCase):
     test_unpack1 = make_test(unpack1)
     test_unpack2 = make_test(unpack2)
     test_unpack3 = make_test(unpack3)
+    test_fn_with_self_set = make_test(fn_with_self_set)
     # test_methodcall1 = make_test(methodcall1)
     # test_methodcall2 = make_test(methodcall2)
     # test_methodcall3 = make_test(methodcall3)
