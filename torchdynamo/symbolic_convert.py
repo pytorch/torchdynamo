@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import logging
+import operator
 import pprint
 import types
 import typing
@@ -23,7 +24,7 @@ from .bytecode_transformation import unique_id
 from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable, UserFunctionVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, UserFunctionVariable, UserMethodVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
@@ -162,10 +163,13 @@ class InstructionTracerBase(fx.Tracer):
                     **options
                 ))
             else:
-                unimplemented("call custom module")
+                forward = mod.__class__.forward
+                assert forward is not torch.nn.Module.forward
+                self.guards.update(fn.guards)
+                self.push(RecursiveInstructionTracer.inline_call(self, forward, [fn] + args, kwargs))
         elif isinstance(fn, UserFunctionVariable):
             self.guards.update(fn.guards)
-            self.push(RecursiveInstructionTracer.inline_call(self, fn.value, args, kwargs))
+            self.push(RecursiveInstructionTracer.inline_call(self, fn.fn, fn.self_args() + args, kwargs))
         else:
             unimplemented(f"call_function {type(fn).__name__}")
 
@@ -222,7 +226,7 @@ class InstructionTracerBase(fx.Tracer):
             ))
         elif isinstance(value, types.FunctionType):
             self.push(UserFunctionVariable(
-                value=value,
+                value,
                 guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
             ))
         else:
@@ -238,11 +242,29 @@ class InstructionTracerBase(fx.Tracer):
     def POP_JUMP_IF_FALSE(self, inst):
         value = self.pop()
         self.guards.update(value.guards)
-        if isinstance(value, ConstantVariable):
+        if isinstance(value, (AllowedFunctionOrModuleVariable, ConstantVariable)):
             if not value.value:
                 self.jump(inst)
         else:
             unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
+
+    def COMPARE_OP(self, inst):
+        left, right = self.popn(2)
+        options = VariableTracker.propagate([left, right])
+        op = inst.argval
+        supported = {
+            "is": operator.is_,
+            "is not": operator.is_not,
+        }
+        if op in supported and isinstance(right, ConstantVariable):
+            if isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable)):
+                self.push(ConstantVariable(
+                    supported[op](left.value, right.value),
+                    **options))
+            else:
+                unimplemented(f"{type(left).__name__} is <const>")
+        else:
+            unimplemented(f"COMPARE_OP {op}")
 
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
@@ -312,6 +334,15 @@ class InstructionTracerBase(fx.Tracer):
                     key,
                     **options
                 ))
+            elif is_allowed(subobj):
+                self.push(AllowedFunctionOrModuleVariable(subobj, **options))
+            elif callable(subobj):
+                base = self.get_submodule(obj.key)
+                method = getattr(base.__class__, name, None)
+                if isinstance(method, types.FunctionType):
+                    self.push(UserMethodVariable(method, obj, **options))
+                else:
+                    unimplemented("nn.Module callable")
             else:
                 unimplemented(f"nn.Module attr {type(subobj).__name__}")
         elif isinstance(obj, TensorVariable):

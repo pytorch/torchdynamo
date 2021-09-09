@@ -1,7 +1,8 @@
 #!/usr/bin/env pytest
+import unittest
+
 import torchdynamo.testing
 from torchdynamo import eval_frame
-import unittest
 
 c = 10
 

@@ -180,6 +180,34 @@ class BasicModule(torch.nn.Module):
         return F.relu(self.linear1(x)) * self.scale
 
 
+class FnMember(torch.nn.Module):
+    def __init__(self):
+        super(FnMember, self).__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.activation = F.relu
+
+    def forward(self, x):
+        x = self.linear1(x)
+        if self.activation:
+            x = self.activation(x)
+        return x
+
+
+class FnMemberCmp(torch.nn.Module):
+    def __init__(self, activation):
+        super(FnMemberCmp, self).__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.activation = activation
+
+    def forward(self, x):
+        x = self.linear1(x)
+        if self.activation is not None:
+            x = self.activation(x)
+        if self.activation is None:
+            x = F.sigmoid(x)
+        return x
+
+
 class SubmoduleExample(torch.nn.Module):
     def __init__(self):
         super(SubmoduleExample, self).__init__()
@@ -321,20 +349,22 @@ class SymbolicConversionTests(unittest.TestCase):
     test_methodcall1 = make_test(methodcall1)
     test_methodcall2 = make_test(methodcall2)
     test_methodcall3 = make_test(methodcall3)
-
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
+    test_submodules1 = make_test(SubmoduleExample())
+    test_submodules2 = make_test(SubmoduleExample())
+    test_modulemethod1 = make_test(ModuleMethodCall())
+    test_modulemethod2 = make_test(ModuleMethodCall())
+    test_fnmember = make_test(FnMember())
+    test_fnmembercmp = make_test(FnMemberCmp(F.relu))
+    test_fnmembercmp = make_test(FnMemberCmp(None))
 
     # TODO(jansel): these ones aren't implemented yet
     # test_inplace1 = make_test(inplace1)
-    # test_submodules1 = make_test(SubmoduleExample())
-    # test_submodules2 = make_test(SubmoduleExample())
     # test_istraining1 = make_test(IsTrainingCheck())
     # test_istraining2 = make_test(IsTrainingCheck())
     # test_iseval1 = make_test(IsEvalCheck())
     # test_iseval2 = make_test(IsEvalCheck())
-    # test_modulemethod1 = make_test(ModuleMethodCall())
-    # test_modulemethod2 = make_test(ModuleMethodCall())
     # test_globalmodule = make_test(globalmodule)
 
     # TODO(jansel): need to debug a crash on this one

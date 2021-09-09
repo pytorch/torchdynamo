@@ -226,7 +226,9 @@ def main():
                 fn_model, fn_ok = check_correctness(fn)
 
                 results.append(fn_ok)
-                results.append(str(sorted(symbolic_convert.counters["frames"].items())))
+                ok = symbolic_convert.counters["frames"]["ok"]
+                total = symbolic_convert.counters["frames"]["total"]
+                results.append(f"{ok:2}/{total:2} [{ok / max(1, total):4.0%}]")
 
                 reset_counters()
 

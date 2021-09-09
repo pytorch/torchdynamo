@@ -104,10 +104,25 @@ class ConstDictVariable(VariableTracker):
 
 
 class UserFunctionVariable(VariableTracker):
-    """ Some unsupported user-defined thing """
-    def __init__(self, value, **kwargs):
+    """ Some unsupported user-defined global function """
+
+    def __init__(self, fn, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
-        self.value = value
+        self.fn = fn
+
+    def self_args(self):
+        return []
+
+
+class UserMethodVariable(UserFunctionVariable):
+    """ Some unsupported user-defined method """
+
+    def __init__(self, fn, obj, **kwargs):
+        super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
+        self.obj = obj
+
+    def self_args(self):
+        return [self.obj]
 
 
 class AllowedFunctionOrModuleVariable(VariableTracker):
