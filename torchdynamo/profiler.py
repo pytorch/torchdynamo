@@ -1,0 +1,81 @@
+import dataclasses
+
+import torch
+
+
+@dataclasses.dataclass
+class ProfileMetrics:
+    microseconds: float = 0.0
+    operators: int = 0
+    fusions: int = 0
+
+    def __iadd__(self, other: "ProfileMetrics"):
+        self.microseconds += other.microseconds
+        self.operators += other.operators
+        self.fusions += other.fusions
+        return self
+
+
+class ProfileResult:
+    def __init__(self, captured=None, total=None):
+        self.captured: ProfileMetrics = captured or ProfileMetrics()
+        self.total: ProfileMetrics = total or ProfileMetrics()
+
+    def __iadd__(self, other: ProfileMetrics):
+        self.captured += other.captured
+        self.total += other.total
+        return self
+
+    def __str__(self):
+        pct = ProfileMetrics(
+            self.captured.microseconds / max(1, self.total.microseconds),
+            self.captured.operators / max(1, self.total.operators),
+            self.captured.fusions / max(1, self.total.fusions),
+        )
+        return (f"{self.captured.operators:3}/{self.total.operators:3} = " +
+                f"{pct.operators:4.0%} ops {pct.fusions:4.0%} fusions {pct.microseconds:4.0%} time")
+
+
+class Profiler:
+    def __init__(self):
+        self.prof = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU])
+
+    def results(self):
+        captured_regions = 0
+        captured_ops = 0
+        captured_microseconds = 0
+        total_ops = 0
+        total_microseconds = 0
+
+        last_op_end_time = -1
+        captured_region_end_time = -1
+        events = list(sorted(self.prof.events(), key=lambda x: x.time_range.start))
+        for e in events:
+            if e.name == "TORCHDYNAMO":
+                captured_region_end_time = e.time_range.end
+                captured_regions += 1
+            elif e.time_range.start >= last_op_end_time:
+                last_op_end_time = e.time_range.end
+                if e.time_range.end <= captured_region_end_time:
+                    captured_ops += 1
+                    captured_microseconds += e.time_range.elapsed_us()
+                total_ops += 1
+                total_microseconds += e.time_range.elapsed_us()
+            else:
+                pass  # ops recursively called from other ops (ignored)
+
+        return ProfileResult(
+            captured=ProfileMetrics(microseconds=captured_microseconds,
+                                    operators=captured_ops,
+                                    fusions=captured_ops - captured_regions),
+            total=ProfileMetrics(microseconds=total_microseconds,
+                                 operators=total_ops,
+                                 fusions=total_ops - 1))
+
+
+def fx_insert_profiling(gm: torch.fx.GraphModule):
+    def _wrapped(*args, **kwargs):
+        with torch.profiler.record_function("TORCHDYNAMO"):
+            return gm.forward(*args, **kwargs)
+
+    return _wrapped

@@ -493,7 +493,7 @@ class InstructionTracerBase(fx.Tracer):
 
 
 class InstructionTracer(InstructionTracerBase):
-    def __init__(self, instructions: List[Instruction], f_locals, f_globals, f_builtins, code_options):
+    def __init__(self, instructions: List[Instruction], f_locals, f_globals, f_builtins, code_options, compiler_fn):
         super(InstructionTracer, self).__init__(
             cnt=itertools.count(),
             graph=fx.Graph(),
@@ -508,6 +508,7 @@ class InstructionTracer(InstructionTracerBase):
         self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
                                 for k in code_options["co_varnames"]
                                 if k in f_locals}
+        self.compiler_fn = compiler_fn
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
@@ -524,7 +525,7 @@ class InstructionTracer(InstructionTracerBase):
             gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
             name = unique_id("__translated_fn")
-            self.f_globals[name] = gm.forward
+            self.f_globals[name] = self.compiler_fn(gm)
             self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
             self.code_options["co_stacksize"] = len(self.graphargs) + 1
             self.instructions[:] = (
@@ -598,49 +599,58 @@ def count_calls(g: fx.Graph):
     return c
 
 
-def convert_frame_assert(frame: types.FrameType):
-    code = frame.f_code
-    if code.co_filename.startswith("<eval_with_key>"):
-        return GuardedCode(code)  # skip FX output
-    # TODO(jansel): detect and skip other types of generated code
-    debug_checks(code)
-    guards = None
-
-    def transform(instructions, code_options):
-        nonlocal guards
-        tracer = InstructionTracer(instructions,
-                                   frame.f_locals,
-                                   frame.f_globals,
-                                   frame.f_builtins,
-                                   code_options)
-        tracer.run()
-        guards = tracer.guards
-
-    code = transform_code_object(frame.f_code, transform)
-    if DEBUG:
-        print("ORIGINAL")
-        print(dis.Bytecode(code).info())
-        print(dis.Bytecode(code).dis())
-        print("NEW CODE")
-        print(dis.Bytecode(code).info())
-        print(dis.Bytecode(code).dis())
-        pprint.pprint(guards)
-    assert guards is not None
-    return GuardedCode(code, guards)
+def dummy_fx_compile(gm: fx.GraphModule):
+    return gm.forward
 
 
-def convert_frame(frame: types.FrameType):
-    counters["frames"]["total"] += 1
-    try:
-        result = convert_frame_assert(frame)
-        counters["frames"]["ok"] += 1
-        return result
-    except NotImplementedError:
-        pass
-    except Exception as e:
-        logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
-        # _, _, exc_tb = sys.exc_info()
-        # frame = exc_tb.tb_frame.f_back
-        # filename = os.path.split(frame.f_code.co_filename)[-1]
-        # counters["errors"][f"{e.__class__.__name__}:{e} [{filename}:{frame.f_lineno}]"] += 1
-    return GuardedCode(frame.f_code)
+def convert_frame_assert(compiler_fn: typing.Callable):
+    def _convert_frame_assert(frame: types.FrameType):
+        code = frame.f_code
+        if code.co_filename.startswith("<eval_with_key>"):
+            return GuardedCode(code)  # skip FX output
+        # TODO(jansel): detect and skip other types of generated code
+        debug_checks(code)
+        guards = None
+
+        def transform(instructions, code_options):
+            nonlocal guards
+            tracer = InstructionTracer(instructions,
+                                       frame.f_locals,
+                                       frame.f_globals,
+                                       frame.f_builtins,
+                                       code_options,
+                                       compiler_fn)
+            tracer.run()
+            guards = tracer.guards
+
+        code = transform_code_object(frame.f_code, transform)
+        if DEBUG:
+            print("ORIGINAL")
+            print(dis.Bytecode(code).info())
+            print(dis.Bytecode(code).dis())
+            print("NEW CODE")
+            print(dis.Bytecode(code).info())
+            print(dis.Bytecode(code).dis())
+            pprint.pprint(guards)
+        assert guards is not None
+        return GuardedCode(code, guards)
+
+    return _convert_frame_assert
+
+
+def convert_frame(compiler_fn: typing.Callable):
+    inner_convert = convert_frame_assert(compiler_fn)
+
+    def _convert_frame(frame: types.FrameType):
+        counters["frames"]["total"] += 1
+        try:
+            result = inner_convert(frame)
+            counters["frames"]["ok"] += 1
+            return result
+        except NotImplementedError:
+            pass
+        except Exception as e:
+            logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
+        return GuardedCode(frame.f_code)
+
+    return _convert_frame

@@ -16,10 +16,9 @@ import numpy as np
 import torch
 from scipy.stats import ttest_ind
 
+import torchdynamo
 from torchdynamo import symbolic_convert
-from torchdynamo.eval_frame import context
-from torchdynamo.symbolic_convert import convert_frame
-from torchdynamo.testing import debug_insert_nops
+from torchdynamo.profiler import Profiler, fx_insert_profiling, ProfileResult
 from torchdynamo.testing import same
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
@@ -28,7 +27,6 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-EXPERIMENTS = []
 SKIP = {
     # torchbench `get_model()` is broken these:
     "albert", "demucs", "hf_T5", "hf_Reformer", "hf_Longformer",
@@ -37,7 +35,6 @@ SKIP = {
     # TODO: need to debug a crash in this one on debug_insert_nops
     "pyhpc_isoneutral_mixing",
 }
-register_experiment = EXPERIMENTS.append
 current_name = ""
 
 
@@ -48,21 +45,6 @@ def synchronize():
         synchronize()
     else:
         synchronize = lambda: None
-
-
-@register_experiment
-def eager(model, example_inputs):
-    return model
-
-
-@register_experiment
-def torchdynamo_nops(model, example_inputs):
-    return context(debug_insert_nops)(model)
-
-
-@register_experiment
-def torchdynamo(model, example_inputs):
-    return context(convert_frame)(model)
 
 
 def short_name(name, limit=20):
@@ -132,14 +114,16 @@ class ExperimentResult(object):
         return self.ok
 
 
-def print_row(device, name, speedups, sec="sec"):
-    print(f"{device:4} {name:20} " + " - ".join(map("{:10}".format, speedups)))  # + f" -- {sec or -1:.1f}")
+def print_row(device, name, results, sec="sec"):
+    print(f"{device:4} {name:20} " + " ".join(results))  # + f" -- {sec or -1:.1f}")
+
+
+def insert_profiling(model, example_inputs):
+    return torchdynamo.context(fx_insert_profiling)(model)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment", "-e", action="append",
-                        help="experiment to run")
     parser.add_argument("--baseline", "-b", default="eager",
                         help="baseline to normalize to")
     parser.add_argument("--filter", "-k", action="append",
@@ -167,7 +151,6 @@ def main():
     args.verbose = True
 
     # defaults
-    args.experiment = args.experiment or ["torchdynamo"]
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
@@ -181,19 +164,6 @@ def main():
     if args.threads:
         torch.set_num_threads(args.threads)
 
-    named_fns = {fn.__name__: fn for fn in EXPERIMENTS}
-    baseline = named_fns[args.baseline]
-    try:
-        assert args.experiment
-        experiment_fns = [named_fns[x] for x in args.experiment]
-    except (KeyError, AssertionError):
-        print(f"--experiment=<NAME> must be one of:\n" +
-              "\n".join(x.__name__ for x in EXPERIMENTS))
-        return
-
-    all_speedups = []
-    # print(f"median speedup over {baseline.__name__} and t-test")
-    # print_row("dev", "name", [x.__name__ for x in experiment_fns])
     totals = collections.defaultdict(collections.Counter)
 
     def reset_counters():
@@ -213,31 +183,34 @@ def main():
                 log.exception("error running fn.__name__")
             return None, "ERROR"  # f"{type(e).__name__}: {str(e)[:40]}"
 
+    prof_totals = ProfileResult()
     for device, name, original_model, example_inputs in iter_models(args):
         try:
             t0 = time.time()
-            model = baseline(copy.deepcopy(original_model), example_inputs)
+            model = copy.deepcopy(original_model)
             result, sec = timed(model, example_inputs, args.warmup)
-            experiments = []
-            results = []
 
-            for fn in experiment_fns:
-                reset_counters()
-                fn_model, fn_ok = check_correctness(fn)
+            reset_counters()
+            fn_model, fn_ok = check_correctness(insert_profiling)
+            results = [fn_ok]
 
-                results.append(fn_ok)
-                ok = symbolic_convert.counters["frames"]["ok"]
-                total = symbolic_convert.counters["frames"]["total"]
-                results.append(f"{ok:2}/{total:2} [{ok / max(1, total):4.0%}]")
+            ok = symbolic_convert.counters["frames"]["ok"]
+            total = symbolic_convert.counters["frames"]["total"]
+            reset_counters()
 
-                reset_counters()
-
+            profiler = Profiler()
+            with profiler.prof:
                 fn_model(*example_inputs)
-                results.append(str(sorted(symbolic_convert.counters["frames"].items())))
+            prof_results = profiler.results()
+            prof_totals += prof_results
 
-                reset_counters()
+            frames_second_pass = symbolic_convert.counters["frames"]["total"]
+            reset_counters()
 
-                experiments.append(ExperimentResult(fn_model, fn_ok))
+            results.extend([
+                f"{ok:2}/{total:2} frames (+{frames_second_pass:2}),",
+                str(prof_results)
+            ])
 
             print_row(device, name, results, time.time() - t0)
 
@@ -255,8 +228,11 @@ def main():
             log.exception(f"ERROR from {name}")
 
     for k, v in sorted(totals.items()):
-        lines = '\n  '.join(map(str, v.most_common(10)))
+        lines = '\n  '.join(map(str, v.most_common(20)))
         print(f"STATS {k}\n  {lines}")
+
+    print()
+    print("PROFILE:", prof_totals)
 
     # print_row("", "GEOMEAN", map("{:.3f}x".format, gmean(np.vstack(all_speedups), axis=0)))
 

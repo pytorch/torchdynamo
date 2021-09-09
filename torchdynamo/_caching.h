@@ -30,6 +30,7 @@ public:
     Py_XDECREF(code_);
     delete next_;
   }
+
 private:
   GuardsVector locals_checks_;
   GuardsVector globals_checks_;

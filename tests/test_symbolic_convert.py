@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 import torchdynamo
 from torchdynamo import eval_frame
-from torchdynamo.symbolic_convert import convert_frame_assert
+from torchdynamo.symbolic_convert import convert_frame_assert, dummy_fx_compile
 from torchdynamo.testing import same
 
 torchdynamo.symbolic_convert.DEBUG = True
@@ -267,7 +267,7 @@ def make_test(fn):
         args2 = [torch.randn(10, 10) for _ in range(nargs)]
         correct1 = fn(*args1)
         correct2 = fn(*args2)
-        with eval_frame.context(convert_frame_assert):
+        with eval_frame.context(convert_frame_assert(dummy_fx_compile)):
             val1a = fn(*args1)
             val2a = fn(*args2)
             val1b = fn(*args1)
@@ -293,7 +293,7 @@ class SymbolicConversionTests(unittest.TestCase):
         correct1 = boolarg(a, b, True)
         correct2 = boolarg(a, b, False)
         correct3 = boolarg(a, b, None)
-        with eval_frame.context(convert_frame_assert):
+        with eval_frame.context(convert_frame_assert(dummy_fx_compile)):
             val1 = boolarg(a, b, True)
             val2 = boolarg(a, b, False)
             val3 = boolarg(a, b, None)
@@ -311,7 +311,7 @@ class SymbolicConversionTests(unittest.TestCase):
         b = torch.randn(10, 10)
         c = torch.randn(10, 10)
         correct = call_packed([a, b, c])
-        with eval_frame.context(convert_frame_assert):
+        with eval_frame.context(convert_frame_assert(dummy_fx_compile)):
             val1 = call_packed([a, b, c])
             val2 = call_packed((a, b, c))
             val3 = call_packed([a, b, c])
