@@ -1,7 +1,6 @@
 #include "_caching.h"
 #include <iostream>
 
-#define unlikely(x) __builtin_expect((x), 0)
 #define NULL_CHECK(val)                                                        \
   if (unlikely((val) == NULL)) {                                               \
     std::cerr << "NULL ERROR: " << __FILE__ << ":" << __LINE__ << std::endl;   \

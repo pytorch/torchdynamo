@@ -25,15 +25,14 @@ inline static CacheEntry *get_extra(PyCodeObject *code) {
 }
 
 inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
+  // TODO(jansel): would it be faster to bypass this?
   _PyCode_SetExtra((PyObject *)code, extra_index, extra);
 }
 
 inline static PyObject *swap_code_and_run(PyFrameObject *frame,
                                           PyCodeObject *code, int throw_flag) {
-  if (code != frame->f_code) {
-    Py_INCREF(code);
-    Py_DECREF(frame->f_code);
-  }
+  Py_INCREF(code);
+  Py_DECREF(frame->f_code);
   frame->f_code = code;
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 }
@@ -63,14 +62,14 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   PyObject *callback = set_eval_frame(Py_None, tstate);
 
   PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
-  if (result == NULL) {
+  if (unlikely(result == NULL)) {
     printf("ERROR: Unexpected failure callback hook\n");
     return NULL; // exception
   } else if (result != Py_None) {
     // setup guarded cache
     extra = new_cached_code(extra, frame->f_locals, frame->f_globals, result);
     cached_code = cached_code_lookup(extra, frame->f_locals, frame->f_globals);
-    if (cached_code == NULL) {
+    if (unlikely(cached_code == NULL)) {
       printf("ERROR: Unexpected failure in cached_code_lookup\n");
       return NULL;
     }
@@ -95,21 +94,21 @@ static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
   if (extra == NULL || extra == SKIP_CODE) {
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
+
+  // TODO(jansel): investigate directly using the "fast" representation
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
     return NULL;
   }
-  Py_INCREF(frame->f_locals);
-
+  // Py_INCREF(frame->f_locals); // is this needed?
   PyCodeObject *cached_code =
       cached_code_lookup(extra, frame->f_locals, frame->f_globals);
+  // Py_DECREF(frame->f_locals); // is this needed?
   if (cached_code != NULL) {
     // used cached version
-    Py_DECREF(frame->f_locals);
     return swap_code_and_run(frame, cached_code, throw_flag);
+  } else {
+    return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
-
-  Py_DECREF(frame->f_locals);
-  return _PyEval_EvalFrameDefault(frame, throw_flag);
 }
 
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {

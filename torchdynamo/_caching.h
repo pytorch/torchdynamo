@@ -1,6 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#define unlikely(x) __builtin_expect((x), 0)
+
 #ifdef __cplusplus
 #include <vector>
 
