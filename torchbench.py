@@ -2,11 +2,13 @@
 import argparse
 import collections
 import copy
+import functools
 import gc
 import logging
 import os
 import re
 import sys
+import textwrap
 import time
 import warnings
 from os.path import abspath
@@ -14,11 +16,11 @@ from os.path import exists
 
 import numpy as np
 import torch
-from scipy.stats import ttest_ind
+from scipy.stats import ttest_ind, gmean
 
 import torchdynamo
 from torchdynamo import symbolic_convert
-from torchdynamo.profiler import Profiler, fx_insert_profiling, ProfileResult
+from torchdynamo.profiler import Profiler, fx_insert_profiling, ProfileMetrics
 from torchdynamo.testing import same
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
@@ -36,6 +38,7 @@ SKIP = {
     "pyhpc_isoneutral_mixing",
 }
 current_name = ""
+current_device = ""
 
 
 def synchronize():
@@ -65,9 +68,9 @@ def iter_models(args):
                 model, example_inputs = benchmark.get_module()
                 model.eval()
                 gc.collect()
-                global current_name
+                global current_name, current_device
+                current_device = device
                 current_name = short_name(benchmark.name)
-                # print(current_name)
                 yield device, current_name, model, example_inputs
             except NotImplementedError:
                 pass
@@ -76,8 +79,9 @@ def iter_models(args):
 
 
 def timed(model, example_inputs, times=1):
-    torch.manual_seed(1337)
+    synchronize()
     gc.collect()
+    torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
         result = model(*example_inputs)
@@ -86,40 +90,57 @@ def timed(model, example_inputs, times=1):
     return result, t1 - t0
 
 
-def measure_speedups(models, example_inputs, times, repeat):
-    timings = np.zeros((repeat, len(models)), np.float64)
-    for rep in range(repeat):
+def format_speedup(speedup, pvalue, pvalue_threshold=0.1):
+    if pvalue > pvalue_threshold:
+        return f"{speedup:.3f}x SAME"
+    return f"{speedup:.3f}x p={pvalue:.2f}"
+
+
+def print_row(results):
+    print(f"{current_device:4} {current_name:20} " + " ".join(map(str, results)))
+
+
+class Stats:
+    totals = collections.defaultdict(collections.Counter)
+
+    @classmethod
+    def reset_counters(cls):
+        for k, v in symbolic_convert.counters.items():
+            cls.totals[k].update(v)
+        ok = symbolic_convert.counters["frames"]["ok"]
+        total = symbolic_convert.counters["frames"]["total"]
+        symbolic_convert.counters.clear()
+        return ok, total
+
+    @classmethod
+    def print_summary(cls):
+        for k, v in sorted(cls.totals.items()):
+            lines = '\n  '.join(map(str, v.most_common(20)))
+            print(f"STATS {k}\n  {lines}")
+
+
+def coverage_experiment(coverage_results, model, example_inputs):
+    profiler = Profiler()
+    with profiler.prof, torchdynamo.run():
+        model(*example_inputs)
+    coverage_result = profiler.results()
+    coverage_results.append(coverage_result.percent())
+    return coverage_result
+
+
+def speedup_experiment(speedups, args, model, example_inputs):
+    timings = np.zeros((args.repeat, 2), np.float64)
+    for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        for i in range(len(models)):
-            if models[i] is not None:
-                _, timings[rep, i] = timed(models[i], example_inputs, times)
-
-    pvalues = [ttest_ind(timings[:, 0], timings[:, i])[1] for i in range(1, len(models))]
-    timings = np.median(timings, axis=0)
-    return timings[0] / timings[1:], pvalues
-
-
-class ExperimentResult(object):
-    pvalue_threshold = 0.1
-
-    def __init__(self, model, ok):
-        self.model = model
-        self.ok = ok
-
-    def format_speedup(self, speedup, pvalue):
-        if self.ok == "OK":
-            if pvalue > self.pvalue_threshold:
-                return f"{speedup:.3f}x SAME"
-            return f"{speedup:.3f}x p={pvalue:.2f}"
-        return self.ok
-
-
-def print_row(device, name, results, sec="sec"):
-    print(f"{device:4} {name:20} " + " ".join(results))  # + f" -- {sec or -1:.1f}")
-
-
-def insert_profiling(model, example_inputs):
-    return torchdynamo.context(fx_insert_profiling)(model)
+        _, timings[rep, 0] = timed(model, example_inputs)
+        with torchdynamo.run():
+            _, timings[rep, 1] = timed(model, example_inputs)
+    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
+    median = np.median(timings, axis=0)
+    speedup = median[0] / median[1]
+    speedups.append(speedup)
+    result = format_speedup(speedup, pvalue)
+    return result
 
 
 def main():
@@ -132,9 +153,7 @@ def main():
                         help="filter benchmarks")
     parser.add_argument("--devices", "-d", action="append",
                         help="cpu or cuda")
-    parser.add_argument("--warmup", type=int, default=1,
-                        help="warmup runs to do")
-    parser.add_argument("--repeat", "-n", type=int, default=1,
+    parser.add_argument("--repeat", "-n", type=int, default=30,
                         help="number of timing runs")
     parser.add_argument("--threads", "-t", type=int,
                         help="number of threads to use")
@@ -146,6 +165,8 @@ def main():
                         help="show errors")
     parser.add_argument("--no-skip", action="store_true",
                         help="run models that don't fx cleanly")
+    parser.add_argument("--overhead", "-s", action="store_true",
+                        help="measure overheads")
     args = parser.parse_args()
 
     args.verbose = True
@@ -154,6 +175,10 @@ def main():
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+
+    if args.devices == ["cpu"]:
+        global synchronize
+        synchronize = lambda: None
 
     if args.no_skip:
         SKIP.clear()
@@ -164,77 +189,45 @@ def main():
     if args.threads:
         torch.set_num_threads(args.threads)
 
-    totals = collections.defaultdict(collections.Counter)
+    coverage_results = []
+    speedups = []
 
-    def reset_counters():
-        for k, v in symbolic_convert.counters.items():
-            totals[k].update(v)
-        symbolic_convert.counters.clear()
+    if args.overhead:
+        optimize_ctx = torchdynamo.optimize(lambda gm: gm.forward)
+        experiment = functools.partial(speedup_experiment, speedups, args)
+    else:
+        optimize_ctx = torchdynamo.optimize(fx_insert_profiling)
+        experiment = functools.partial(coverage_experiment, coverage_results)
 
-    def check_correctness(fn):
+    for device, name, model, example_inputs in iter_models(args):
         torch.manual_seed(1337)
-        try:
-            alt_model = fn(copy.deepcopy(original_model), example_inputs)
-            if same(result, alt_model(*example_inputs)):
-                return alt_model, "OK"
-            return None, "INCORRECT"
-        except Exception:
-            if args.verbose:
-                log.exception("error running fn.__name__")
-            return None, "ERROR"  # f"{type(e).__name__}: {str(e)[:40]}"
+        correct_result = copy.deepcopy(model)(*example_inputs)
+        torch.manual_seed(1337)
+        with optimize_ctx:
+            new_result = model(*example_inputs)
+        if not same(correct_result, new_result):
+            print_row(["INCORRECT"])
+            continue
+        ok, total = Stats.reset_counters()
+        results = []
 
-    prof_totals = ProfileResult()
-    for device, name, original_model, example_inputs in iter_models(args):
-        try:
-            t0 = time.time()
-            model = copy.deepcopy(original_model)
-            result, sec = timed(model, example_inputs, args.warmup)
+        # run one more time to see if we reached a fixed point
+        with optimize_ctx:
+            model(*example_inputs)
+        _, frames_second_pass = Stats.reset_counters()  # should be 0
+        results.append(f"{ok:2}/{total:2} frames (+{frames_second_pass:2}),")
 
-            reset_counters()
-            fn_model, fn_ok = check_correctness(insert_profiling)
-            results = [fn_ok]
+        results.append(experiment(model, example_inputs))
+        print_row(results)
 
-            ok = symbolic_convert.counters["frames"]["ok"]
-            total = symbolic_convert.counters["frames"]["total"]
-            reset_counters()
-
-            profiler = Profiler()
-            with profiler.prof:
-                fn_model(*example_inputs)
-            prof_results = profiler.results()
-            prof_totals += prof_results
-
-            frames_second_pass = symbolic_convert.counters["frames"]["total"]
-            reset_counters()
-
-            results.extend([
-                f"{ok:2}/{total:2} frames (+{frames_second_pass:2}),",
-                str(prof_results)
-            ])
-
-            print_row(device, name, results, time.time() - t0)
-
-            # speedups, pvalues = measure_speedups([model] + [x.model for x in experiments],
-            #                                      example_inputs,
-            #                                      max(1, int(args.min_measure_sec / sec)),
-            #                                      args.repeat)
-            # if all(x.ok == "OK" for x in experiments):
-            #     all_speedups.append(speedups)
-
-            # print_row(device, name,
-            #           [e.format_speedup(s, p)
-            #            for e, s, p in zip(experiments, speedups, pvalues)], f"{time.time() - t0:.1f}s")
-        except Exception:
-            log.exception(f"ERROR from {name}")
-
-    for k, v in sorted(totals.items()):
-        lines = '\n  '.join(map(str, v.most_common(20)))
-        print(f"STATS {k}\n  {lines}")
-
-    print()
-    print("PROFILE:", prof_totals)
-
-    # print_row("", "GEOMEAN", map("{:.3f}x".format, gmean(np.vstack(all_speedups), axis=0)))
+    Stats.print_summary()
+    if coverage_results:
+        print("\nMEAN COVERAGE:",
+              functools.reduce(ProfileMetrics.__add__, coverage_results) / len(coverage_results))
+    if speedups:
+        print(textwrap.dedent(f"""
+        MEAN SPEEDUP {np.mean(speedups):.3f}x
+        GEOMEAN SPEEDUP {gmean(speedups):.3f}x"""))
 
 
 if __name__ == '__main__':

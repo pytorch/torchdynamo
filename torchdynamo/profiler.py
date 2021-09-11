@@ -15,6 +15,24 @@ class ProfileMetrics:
         self.fusions += other.fusions
         return self
 
+    def __add__(self, other: "ProfileMetrics"):
+        assert isinstance(other, ProfileMetrics)
+        return ProfileMetrics(
+            self.microseconds + other.microseconds,
+            self.operators + other.operators,
+            self.fusions + other.fusions)
+
+    def __truediv__(self, other):
+        if isinstance(other, int):
+            other = ProfileMetrics(other, other, other)
+        return ProfileMetrics(
+            self.microseconds / max(1, other.microseconds),
+            self.operators / max(1, other.operators),
+            self.fusions / max(1, other.fusions))
+
+    def __str__(self):
+        return f"{self.operators:4.0%} ops {self.fusions:4.0%} fusions {self.microseconds:4.0%} time"
+
 
 class ProfileResult:
     def __init__(self, captured=None, total=None):
@@ -26,14 +44,11 @@ class ProfileResult:
         self.total += other.total
         return self
 
+    def percent(self):
+        return self.captured / self.total
+
     def __str__(self):
-        pct = ProfileMetrics(
-            self.captured.microseconds / max(1, self.total.microseconds),
-            self.captured.operators / max(1, self.total.operators),
-            self.captured.fusions / max(1, self.total.fusions),
-        )
-        return (f"{self.captured.operators:3}/{self.total.operators:3} = " +
-                f"{pct.operators:4.0%} ops {pct.fusions:4.0%} fusions {pct.microseconds:4.0%} time")
+        return f"{self.captured.operators:3}/{self.total.operators:3} = " + str(self.percent())
 
 
 class Profiler:

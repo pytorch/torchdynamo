@@ -651,6 +651,6 @@ def convert_frame(compiler_fn: typing.Callable):
             pass
         except Exception as e:
             logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
-        return GuardedCode(frame.f_code)
+        return None
 
     return _convert_frame

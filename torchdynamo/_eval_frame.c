@@ -38,11 +38,61 @@ inline static PyObject *swap_code_and_run(PyFrameObject *frame,
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 }
 
-#define ALREADY_DONE ((void *)0x1)
+#define SKIP_CODE ((void *)0x1)
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   CacheEntry *extra = get_extra(frame->f_code);
-  if (extra == ALREADY_DONE) {
+  if (extra == SKIP_CODE) {
+    return _PyEval_EvalFrameDefault(frame, throw_flag);
+  }
+  if (PyFrame_FastToLocalsWithError(frame) < 0) {
+    return NULL;
+  }
+  Py_INCREF(frame->f_locals);
+
+  PyCodeObject *cached_code =
+      cached_code_lookup(extra, frame->f_locals, frame->f_globals);
+  if (cached_code != NULL) {
+    // used cached version
+    Py_DECREF(frame->f_locals);
+    return swap_code_and_run(frame, cached_code, throw_flag);
+  }
+  // cache miss
+
+  PyThreadState *tstate = PyThreadState_GET();
+  PyObject *callback = set_eval_frame(Py_None, tstate);
+
+  PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
+  if (result == NULL) {
+    printf("ERROR: Unexpected failure callback hook\n");
+    return NULL; // exception
+  } else if (result != Py_None) {
+    // setup guarded cache
+    extra = new_cached_code(extra, frame->f_locals, frame->f_globals, result);
+    cached_code = cached_code_lookup(extra, frame->f_locals, frame->f_globals);
+    if (cached_code == NULL) {
+      printf("ERROR: Unexpected failure in cached_code_lookup\n");
+      return NULL;
+    }
+  } else {
+    // compile failed, skip this frame next time
+    extra = SKIP_CODE;
+    cached_code = frame->f_code;
+  }
+
+  Py_DECREF(result);
+  set_extra(cached_code, SKIP_CODE); // avoid double compile
+  set_extra(frame->f_code, extra);
+  Py_DECREF(frame->f_locals);
+  set_eval_frame(callback, tstate);
+  return swap_code_and_run(frame, cached_code, throw_flag);
+}
+
+static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
+                                            int throw_flag) {
+  // do not dynamically compile anything, just reuse prior compiles
+  CacheEntry *extra = get_extra(frame->f_code);
+  if (extra == NULL || extra == SKIP_CODE) {
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
@@ -58,29 +108,8 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
     return swap_code_and_run(frame, cached_code, throw_flag);
   }
 
-  PyThreadState *tstate = PyThreadState_GET();
-  PyObject *callback = set_eval_frame(Py_None, tstate);
-
-  PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
-  if (result == NULL) {
-    printf("ERROR: Unexpected failure callback hook\n");
-    return NULL; // exception
-  }
-
-  extra = new_cached_code(extra, frame->f_locals, frame->f_globals, result);
-  Py_DECREF(result);
-
-  cached_code = cached_code_lookup(extra, frame->f_locals, frame->f_globals);
-  if (cached_code == NULL) {
-    printf("ERROR: Unexpected failure in cached_code_lookup\n");
-    return NULL;
-  }
-
-  set_extra(cached_code, ALREADY_DONE); // avoid double compile
-  set_extra(frame->f_code, extra);
   Py_DECREF(frame->f_locals);
-  set_eval_frame(callback, tstate);
-  return swap_code_and_run(frame, cached_code, throw_flag);
+  return _PyEval_EvalFrameDefault(frame, throw_flag);
 }
 
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
@@ -109,8 +138,17 @@ static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
+static PyObject *set_eval_frame_run_only(PyObject *dummy, PyObject *args) {
+  PyThreadState_GET()->interp->eval_frame = &custom_eval_frame_run_only;
+  PyObject *old_callback = eval_frame_callback;
+  Py_INCREF(Py_None);
+  eval_frame_callback = Py_None;
+  return old_callback;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
+    {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

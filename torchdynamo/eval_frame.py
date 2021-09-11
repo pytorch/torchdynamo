@@ -4,18 +4,16 @@ import logging
 
 from . import skipfiles
 from ._eval_frame import set_eval_frame
+from ._eval_frame import set_eval_frame_run_only
 from .guards import GuardedCode
 
 
 class _Context:
-    def __init__(self, callback):
-        assert callable(callback)
-        self.callback = callback
+    def __init__(self):
         self.prior = None
 
     def __enter__(self):
-        assert self.prior is None
-        self.prior = set_eval_frame(self.callback)
+        raise NotImplementedError()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         set_eval_frame(self.prior)
@@ -30,6 +28,23 @@ class _Context:
                 return fn(*args, **kwargs)
 
         return _fn
+
+
+class _OptimizeContext(_Context):
+    def __init__(self, callback):
+        super(_OptimizeContext, self).__init__()
+        assert callable(callback)
+        self.callback = callback
+
+    def __enter__(self):
+        assert self.prior is None
+        self.prior = set_eval_frame(self.callback)
+
+
+class _RunContext(_Context):
+    def __enter__(self):
+        assert self.prior is None
+        self.prior = set_eval_frame_run_only()
 
 
 def catch_errors_wrapper(callback):
@@ -50,5 +65,10 @@ def catch_errors_wrapper(callback):
     return catch_errors
 
 
-def context(callback):
-    return _Context(catch_errors_wrapper(callback))
+def optimize(compile_fn):
+    return _OptimizeContext(catch_errors_wrapper(compile_fn))
+
+
+def run():
+    """ Don't do any dynamic compiles, just use prior optimizations """
+    return _RunContext()
