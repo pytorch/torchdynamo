@@ -89,6 +89,9 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
 
+    def as_proxy(self):
+        return getattr(self.obj.as_proxy(), self.name)
+
 
 class ListVariable(VariableTracker):
     def __init__(self, items, **kwargs):
@@ -143,6 +146,9 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(AllowedFunctionOrModuleVariable, self).__init__(**kwargs)
         self.value = value
+
+    def as_proxy(self):
+        return self.value
 
 
 class MethodNameVariable(VariableTracker):

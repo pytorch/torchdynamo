@@ -744,7 +744,7 @@ def convert_frame_assert(compiler_fn: typing.Callable):
             print()
             pprint.pprint(tracer.guards)
         assert tracer.guards is not None
-        return GuardedCode(code, tracer.guards)
+        return GuardedCode(code, tracer.guards, frame.f_locals, frame.f_globals)
 
     return _convert_frame_assert
 

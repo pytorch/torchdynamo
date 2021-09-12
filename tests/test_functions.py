@@ -9,7 +9,7 @@ from torch.nn import functional as F
 import torchdynamo
 from torchdynamo import eval_frame
 from torchdynamo.symbolic_convert import convert_frame_assert, dummy_fx_compile
-from torchdynamo.testing import same
+from torchdynamo.testing import same, CompileCounter
 
 torchdynamo.symbolic_convert.DEBUG = True
 
@@ -43,29 +43,39 @@ class FunctionTests(unittest.TestCase):
         correct1 = boolarg(a, b, True)
         correct2 = boolarg(a, b, False)
         correct3 = boolarg(a, b, None)
-        with eval_frame.optimize(convert_frame_assert(dummy_fx_compile)):
+        counter = CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(counter)):
             val1 = boolarg(a, b, True)
             val2 = boolarg(a, b, False)
             val3 = boolarg(a, b, None)
+            val4 = boolarg(a, b, True)
         self.assertTrue(same(val1, correct1))
         self.assertTrue(same(val2, correct2))
         self.assertTrue(same(val3, correct3))
+        self.assertTrue(same(val4, correct1))
+        self.assertEqual(counter.frame_count, 3)
 
-    @unittest.skip("need to debug this")
+    @unittest.skip("need to debug crash in densnet121")
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
             return a - b * c
 
+        counter = CompileCounter()
         a = torch.randn(10, 10)
         b = torch.randn(10, 10)
         c = torch.randn(10, 10)
         correct = call_packed([a, b, c])
-        with eval_frame.optimize(convert_frame_assert(dummy_fx_compile)):
+        with eval_frame.optimize(convert_frame_assert(counter)):
             val1 = call_packed([a, b, c])
             val2 = call_packed((a, b, c))
+            val3 = call_packed([a, b, c])
+            val4 = call_packed((a, b, c))
         self.assertTrue(same(val1, correct))
         self.assertTrue(same(val2, correct))
+        self.assertTrue(same(val3, correct))
+        self.assertTrue(same(val4, correct))
+        self.assertEqual(counter.frame_count, 2)
 
     @make_test
     def test_add(a, b):
@@ -239,7 +249,7 @@ class FunctionTests(unittest.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torchdynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
-    @unittest.skip("buggy")
+    @unittest.skip("buggy/crashing")
     @make_test
     def test_globalvar(a, b):
         return a - b + d

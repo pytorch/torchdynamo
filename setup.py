@@ -9,5 +9,4 @@ setup(name='torchdynamo',
       packages=["torchdynamo"],
       ext_modules=[Extension('torchdynamo._eval_frame', [
             'torchdynamo/_eval_frame.c',
-            'torchdynamo/_caching.cpp',
       ])])
