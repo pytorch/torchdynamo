@@ -1,9 +1,23 @@
+import torchdynamo.convert_frame
 from . import eval_frame
-from . import symbolic_convert
+
+DEBUG = False
 
 
 def optimize(fx_compile_fn):
-    return eval_frame.optimize(symbolic_convert.convert_frame(fx_compile_fn))
+    return eval_frame.optimize(torchdynamo.convert_frame.convert_frame(fx_compile_fn))
 
 
 run = eval_frame.run
+
+
+def reset():
+    from torchdynamo._eval_frame import reset_code
+
+    for code in (
+        torchdynamo.convert_frame.input_codes.seen
+        + torchdynamo.convert_frame.output_codes.seen
+    ):
+        reset_code(code)
+    torchdynamo.convert_frame.input_codes.clear()
+    torchdynamo.convert_frame.output_codes.clear()

@@ -10,22 +10,50 @@
 #undef Py_BUILD_CORE
 #endif
 
+//#define TORCHDYNAMO_DEBUG
+#define bool char
+#define false 0
+#define true 1
 #define unlikely(x) __builtin_expect((x), 0)
 
 #define NULL_CHECK(val)                                                        \
   if (unlikely((val) == NULL)) {                                               \
-    printf("NULL ERROR: %s:%d\n", __FILE__, __LINE__);                         \
+    fprintf(stderr, "NULL ERROR: %s:%d\n", __FILE__, __LINE__);                \
     PyErr_Print();                                                             \
     abort();                                                                   \
   } else {                                                                     \
   }
 
+#ifdef TORCHDYNAMO_DEBUG
+
+#define DEBUG_CHECK(cond)                                                      \
+  if (unlikely(!(cond))) {                                                     \
+    fprintf(stderr, "DEBUG CHECK FAILED: %s:%d\n", __FILE__, __LINE__);        \
+    abort();                                                                   \
+  } else {                                                                     \
+  }
+#define DEBUG_TRACE(msg, ...)                                                  \
+  fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__, __VA_ARGS__)
+#define DEBUG_TRACE0(msg)                                                      \
+  fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__)
+#define DEBUG_NULL_CHECK(val) NULL_CHECK(val)
+
+#else
+
+#define DEBUG_CHECK(cond)
+#define DEBUG_NULL_CHECK(val)
+#define DEBUG_TRACE(msg, ...)
+#define DEBUG_TRACE0(msg)
+
+#endif
+
+// Flag to just run a frame normally
 #define SKIP_CODE ((void *)0x1)
 
 // TODO(jansel): make this threadlocal to support MT
 static PyObject *eval_frame_callback = NULL;
 
-static PyObject *noargs = NULL; /* empty tuple */
+static PyObject *noargs = NULL; /* cached empty tuple */
 
 size_t extra_index = -1;
 
@@ -54,7 +82,7 @@ typedef struct cache_entry {
 static CacheEntry *create_cache_entry(CacheEntry *next,
                                       PyObject *guarded_code) {
   CacheEntry *e = (CacheEntry *)malloc(sizeof(CacheEntry));
-  NULL_CHECK(e);
+  DEBUG_NULL_CHECK(e);
   e->check_fn = PyObject_GetAttrString(guarded_code, "check_fn");
   NULL_CHECK(e->check_fn);
   e->code = (PyCodeObject *)PyObject_GetAttrString(guarded_code, "code");
@@ -63,17 +91,20 @@ static CacheEntry *create_cache_entry(CacheEntry *next,
   return e;
 }
 
-/*
-// TODO(jansel): need to clean things up eventually
-static void destroy_cache_entry(CacheEntry* e) {
-    Py_XDECREF(e->check_fn);
-    Py_XDECREF(e->code);
-    if (e->next != NULL) {
-      destroy_cache_entry(e->next);
-    }
-    free(e);
+static void destroy_cache_entry(CacheEntry *e) {
+  if (e == NULL || e == SKIP_CODE) {
+    return;
+  }
+  Py_XDECREF(e->check_fn);
+  Py_XDECREF(e->code);
+  destroy_cache_entry(e->next);
+  free(e);
 }
-*/
+
+inline static const char *name(PyFrameObject *frame) {
+  DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
+  return PyUnicode_AsUTF8(frame->f_code->co_name);
+}
 
 static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
   if (e == NULL) {
@@ -101,20 +132,27 @@ inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
 
 inline static PyObject *swap_code_and_run(PyFrameObject *frame,
                                           PyCodeObject *code, int throw_flag) {
-  Py_INCREF(code);
-  Py_DECREF(frame->f_code);
+  PyCodeObject *prior_code = frame->f_code;
   frame->f_code = code;
-  return _PyEval_EvalFrameDefault(frame, throw_flag);
+  PyObject *result = _PyEval_EvalFrameDefault(frame, throw_flag);
+  frame->f_code = prior_code;
+  return result;
 }
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
+  DEBUG_TRACE("begin %s", name(frame));
   CacheEntry *extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE) {
+    DEBUG_TRACE("skip %s", name(frame));
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
+    DEBUG_TRACE("error %s", name(frame));
     return NULL;
   }
+  DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
+  DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
+  DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
   PyThreadState *tstate = PyThreadState_GET();
   // don't run custom_eval_frame() for guard function
@@ -123,6 +161,7 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   PyCodeObject *cached_code = lookup(extra, frame->f_locals);
   if (cached_code != NULL) {
     // used cached version
+    DEBUG_TRACE("cache hit %s", name(frame));
     set_eval_frame(callback, tstate);
     return swap_code_and_run(frame, cached_code, throw_flag);
   }
@@ -131,38 +170,42 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
   NULL_CHECK(result);
   if (result != Py_None) {
-    // setup guarded cache
+    DEBUG_TRACE("create cache %s", name(frame));
     extra = create_cache_entry(extra, result);
-    cached_code = extra->code;
+    Py_DECREF(result);
+    set_extra(frame->f_code, extra);
+    set_eval_frame(callback, tstate);
+    return swap_code_and_run(frame, extra->code, throw_flag);
   } else {
-    // compile failed, skip this frame next time
-    extra = SKIP_CODE;
-    cached_code = frame->f_code;
+    DEBUG_TRACE("create skip %s", name(frame));
+    Py_DECREF(result);
+    set_extra(frame->f_code, SKIP_CODE);
+    set_eval_frame(callback, tstate);
+    return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
-  Py_DECREF(result);
-
-  set_extra(cached_code, SKIP_CODE); // avoid double compile
-  set_extra(frame->f_code, extra);
-  set_eval_frame(callback, tstate);
-  return swap_code_and_run(frame, cached_code, throw_flag);
 }
 
 static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
                                             int throw_flag) {
   // do not dynamically compile anything, just reuse prior compiles
+  DEBUG_TRACE("begin %s", name(frame));
   CacheEntry *extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || extra == NULL) {
+    DEBUG_TRACE("skip %s", name(frame));
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
   // TODO(jansel): investigate directly using the "fast" representation
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
+    DEBUG_TRACE("error %s", name(frame));
     return NULL;
   }
   PyCodeObject *cached_code = lookup(extra, frame->f_locals);
   if (cached_code != NULL) {
     // used cached version
+    DEBUG_TRACE("cache hit %s", name(frame));
     return swap_code_and_run(frame, cached_code, throw_flag);
   } else {
+    DEBUG_TRACE("cache miss %s", name(frame));
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
 }
@@ -172,9 +215,11 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   eval_frame_callback = new_callback;
   if (new_callback == Py_None) {
     // disable eval frame hook
+    DEBUG_TRACE0("disable");
     tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
   } else if (old_callback == Py_None) {
     // enable eval frame hook
+    DEBUG_TRACE0("enable");
     tstate->interp->eval_frame = &custom_eval_frame;
   }
   return old_callback;
@@ -183,17 +228,21 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
 static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
   PyObject *callback = NULL;
   if (!PyArg_ParseTuple(args, "O:callback", &callback)) {
+    DEBUG_TRACE0("arg error");
     return NULL;
   }
   if (callback != Py_None && !PyCallable_Check(callback)) {
+    DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
     return NULL;
   }
   Py_INCREF(callback);
+  DEBUG_TRACE("python enabled=%d", callback != Py_None);
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
 static PyObject *set_eval_frame_run_only(PyObject *dummy, PyObject *args) {
+  DEBUG_TRACE0("enable: run_only");
   PyThreadState_GET()->interp->eval_frame = &custom_eval_frame_run_only;
   PyObject *old_callback = eval_frame_callback;
   Py_INCREF(Py_None);
@@ -201,9 +250,27 @@ static PyObject *set_eval_frame_run_only(PyObject *dummy, PyObject *args) {
   return old_callback;
 }
 
+static PyObject *reset_code(PyObject *dummy, PyObject *args) {
+  PyObject *code = NULL;
+  if (!PyArg_ParseTuple(args, "O:code", &code)) {
+    DEBUG_TRACE0("arg error");
+    return NULL;
+  }
+  if (!PyCode_Check(code)) {
+    DEBUG_TRACE0("arg error");
+    PyErr_SetString(PyExc_TypeError, "expected a code object");
+    return NULL;
+  }
+
+  destroy_cache_entry(get_extra((PyCodeObject *)code));
+  set_extra((PyCodeObject *)code, NULL);
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
+    {"reset_code", reset_code, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

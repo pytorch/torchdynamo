@@ -1,12 +1,10 @@
 import collections
 import dataclasses
-import dis
 import functools
 import inspect
 import itertools
-import logging
 import operator
-import pprint
+import sys
 import types
 import typing
 from typing import List
@@ -18,13 +16,10 @@ from .allowed_functions import is_allowed
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
 from .bytecode_transformation import create_instruction
-from .bytecode_transformation import debug_checks
-from .bytecode_transformation import transform_code_object
 from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .guards import GuardSource
-from .guards import GuardedCode
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstDictVariable
@@ -144,9 +139,8 @@ class InstructionTracerBase(fx.Tracer):
         elif type(value) in (tuple, list) and all(
             isinstance(x, torch.Tensor) for x in value
         ):
-            unimplemented(
-                "tensor list input"
-            )  # TODO(jansel): debug crash in densenet121
+            if sys.version_info < (3, 8):
+                unimplemented("TODO: debug crash in older pythons")
             guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
             items = []
             self.graphargs.append(TensorListArgs(name, len(value)))
@@ -316,7 +310,6 @@ class InstructionTracerBase(fx.Tracer):
                 )
             )
         elif isinstance(value, torch.Tensor):
-            unimplemented("need to debug crash here")
             # turn a load of a global tensor into an arg for the graph
             self.graphargs.append(GlobalArg(inst.argval))
             self.push(
@@ -336,6 +329,17 @@ class InstructionTracerBase(fx.Tracer):
                         Guard(
                             inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
                         )
+                    },
+                )
+            )
+        elif isinstance(value, torch.nn.Module):
+            key = unique_id(inst.argval)
+            self.nn_modules[key] = value
+            self.push(
+                NNModuleVariable(
+                    key,
+                    guards={
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
                     },
                 )
             )
@@ -798,67 +802,3 @@ def count_calls(g: fx.Graph):
         if "call" in n.op:
             c += 1
     return c
-
-
-def dummy_fx_compile(gm: fx.GraphModule):
-    return gm.forward
-
-
-def convert_frame_assert(compiler_fn: typing.Callable):
-    """Fully convert a frame into an FX graph"""
-
-    def _convert_frame_assert(frame: types.FrameType):
-        code = frame.f_code
-        # TODO(jansel): detect and skip other types of generated code
-        if code.co_filename.startswith("<eval_with_key>"):
-            return None  # skip FX output
-        debug_checks(code)
-        tracer = None
-
-        def transform(instructions, code_options):
-            nonlocal tracer
-            tracer = InstructionTracer(
-                instructions,
-                frame.f_locals,
-                frame.f_globals,
-                frame.f_builtins,
-                code_options,
-                compiler_fn,
-            )
-            tracer.run()
-
-        code = transform_code_object(frame.f_code, transform)
-        if DEBUG:
-            print("\nORIGINAL")
-            # print(dis.Bytecode(frame.f_code).info())
-            print(dis.Bytecode(frame.f_code).dis())
-            print("\nNEW CODE")
-            # print(dis.Bytecode(code).info())
-            print(dis.Bytecode(code).dis())
-
-            tracer.graph.print_tabular()
-            print()
-            pprint.pprint(tracer.guards)
-        assert tracer.guards is not None
-        return GuardedCode(code, tracer.guards, frame.f_locals, frame.f_globals)
-
-    return _convert_frame_assert
-
-
-def convert_frame(compiler_fn: typing.Callable):
-    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn)
-
-    def _convert_frame(frame: types.FrameType):
-        counters["frames"]["total"] += 1
-        try:
-            result = inner_convert(frame)
-            counters["frames"]["ok"] += 1
-            return result
-        except NotImplementedError:
-            pass
-        except Exception:
-            logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
-        return None
-
-    return _convert_frame

@@ -1,17 +1,18 @@
 #!/usr/bin/env pytest
 import inspect
+import sys
 import unittest
 
 import torch
 from torch import sub
 from torch.nn import functional as F
 
-import torchdynamo
+import torchdynamo.testing
 from torchdynamo import eval_frame
-from torchdynamo.symbolic_convert import convert_frame_assert
+from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.testing import same, CompileCounter
 
-torchdynamo.symbolic_convert.DEBUG = True
+torchdynamo.DEBUG = True
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -30,7 +31,7 @@ def make_test(fn):
     return test_fn
 
 
-class FunctionTests(unittest.TestCase):
+class FunctionTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -55,7 +56,7 @@ class FunctionTests(unittest.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @unittest.skip("need to debug crash in densnet121")
+    @unittest.skipIf(sys.version_info < (3, 8), "needs python 3.8+")
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
@@ -250,12 +251,10 @@ class FunctionTests(unittest.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torchdynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
-    @unittest.skip("need to debug crash here")
     @make_test
     def test_globalvar(a, b):
         return a - b + d
 
-    @unittest.skip("not implemented")
     @make_test
     def test_globalmodule(x):
         return e(x)

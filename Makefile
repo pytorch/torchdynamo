@@ -1,17 +1,21 @@
-
-default: test
+.PHONY: default develop test torchbench format lint setup
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard tests/*.py)
 C_FILES := $(wildcard torchdynamo/*.c)
 
-build:
+default: test
+
+develop:
 	python setup.py develop
 
-test: build
-	pytest
+test: develop
+	pytest -v
 
-torchbench: test
+torchbench: develop
 	python torchbench.py
+
+overhead: develop
+	python torchbench.py --overhead
 
 format:
 	black $(PY_FILES)
@@ -19,7 +23,8 @@ format:
 
 lint:
 	flake8 $(PY_FILES)
-	clang-tidy $(C_FILES) -- -I$(shell python -c "from distutils.sysconfig import get_python_inc as X; print(X())")
+	clang-tidy $(C_FILES)  -- \
+		-I$(shell python -c "from distutils.sysconfig import get_python_inc as X; print(X())")
 
 setup:
-	pip install flake8 black
+	pip install flake8 black pytest

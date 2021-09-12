@@ -1,11 +1,13 @@
 import types
 from functools import lru_cache
+import warnings
 
 import torch
 
 
 @lru_cache(None)
 def _allowed_function_ids():
+    warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = set()
 
     def _find_torch_objects(module):

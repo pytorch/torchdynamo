@@ -1,12 +1,10 @@
 #!/usr/bin/env pytest
-import unittest
-
 import torch
 from torch.nn import functional as F
 
-import torchdynamo
+import torchdynamo.testing
 
-torchdynamo.symbolic_convert.DEBUG = True
+torchdynamo.DEBUG = True
 
 
 class BasicModule(torch.nn.Module):
@@ -43,7 +41,7 @@ class FnMemberCmp(torch.nn.Module):
         if self.activation is not None:
             x = self.activation(x)
         if self.activation is None:
-            x = F.sigmoid(x)
+            x = torch.sigmoid(x)
         return x
 
 
@@ -106,7 +104,7 @@ class ConstLoop(torch.nn.Module):
 
     def forward(self, x):
         for i in range(self.count):
-            x = F.sigmoid(self.linear1(x))
+            x = torch.sigmoid(self.linear1(x))
         return x
 
 
@@ -117,7 +115,7 @@ def make_test(fn):
     return test_fn
 
 
-class NNModuleTests(unittest.TestCase):
+class NNModuleTests(torchdynamo.testing.TestCase):
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
     test_submodules1 = make_test(SubmoduleExample())
@@ -127,10 +125,10 @@ class NNModuleTests(unittest.TestCase):
     test_fnmember = make_test(FnMember())
     test_fnmembercmp = make_test(FnMemberCmp(F.relu))
     test_fnmembercmp = make_test(FnMemberCmp(None))
+    test_constloop = make_test(ConstLoop())
     test_istraining1 = make_test(IsTrainingCheck())
     test_istraining2 = make_test(IsTrainingCheck())
     test_iseval1 = make_test(IsEvalCheck())
     test_iseval2 = make_test(IsEvalCheck())
-    test_constloop = make_test(ConstLoop())
 
     # TODO(jansel): we should make sure to expand nn.Sequential

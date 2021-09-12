@@ -20,7 +20,7 @@ The name is a reference/homage to [DynamoRIO], which dynamically translates mach
 ```
 git clone git@github.com:pytorch/benchmark.git torchbenchmark
 cd torchbenchmark
-./scripts/recreate_conda_environment.sh
+env PYTHON_VERSION=3.8 ./scripts/recreate_conda_environment.sh
 cd ..
 
 git clone git@github.com:jansel/torchdynamo.git
@@ -54,8 +54,7 @@ The `torchbench.py` script contains many options for working with torchbench mod
 
 ## Development workflow
 
-Tests set `torchdynamo.symbolic_convert.DEBUG = True`, which triggers useful printouts if you add the `-vs` option when
-running tests.
+Tests set `torchdynamo.DEBUG = True`, which triggers useful printouts if you add the `-vs` option when running tests.
 
 For example, to look deeper into what this test is doing:
 

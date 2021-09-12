@@ -1,11 +1,14 @@
+import unittest
+
 import torch
 
+import torchdynamo
 from torchdynamo import eval_frame
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
-from torchdynamo.symbolic_convert import convert_frame_assert
+from torchdynamo.convert_frame import convert_frame_assert
 
 
 def same(a, b):
@@ -50,10 +53,15 @@ def standard_test(self, fn, nargs, expected_ops=None):
     actual = CompileCounter()
     if expected_ops is None:
         expected = CompileCounter()
-        gm = torch.fx.symbolic_trace(fn)
-        expected(gm)
-        gm.graph.print_tabular()
-        expected_ops = expected.op_count
+        try:
+            gm = torch.fx.symbolic_trace(fn)
+            expected(gm)
+            print("\nfx.symbolic_trace graph:")
+            gm.graph.print_tabular()
+            expected_ops = expected.op_count
+        except Exception:
+            pass  # Silently ignore FX errors (not our issue)
+
     args1 = [torch.randn(10, 10) for _ in range(nargs)]
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
     correct1 = fn(*args1)
@@ -68,4 +76,15 @@ def standard_test(self, fn, nargs, expected_ops=None):
     self.assertTrue(same(val2a, correct2))
     self.assertTrue(same(val2b, correct2))
     self.assertEqual(actual.frame_count, 1)
-    self.assertEqual(actual.op_count, expected_ops)
+    if expected_ops is not None:
+        self.assertEqual(actual.op_count, expected_ops)
+
+
+class TestCase(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        torchdynamo.reset()
+
+    @classmethod
+    def setUpClass(cls):
+        torchdynamo.reset()

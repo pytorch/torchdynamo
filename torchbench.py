@@ -237,7 +237,7 @@ def main():
         with optimize_ctx:
             model(*example_inputs)
         _, frames_second_pass = Stats.reset_counters()  # should be 0
-        results.append(f"{ok:2}/{total:2} frames (+{frames_second_pass:2}),")
+        results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
 
         results.append(experiment(model, example_inputs))
         print_row(results)
