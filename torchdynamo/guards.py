@@ -1,39 +1,46 @@
 import dataclasses
 import enum
-import itertools
 import types
 import weakref
-from typing import Optional, Set, Dict
+from typing import Any
+from typing import Callable
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Set
 
 
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
 
-
-class GuardRequirement(enum.Enum):
-    TYPE_MATCH = 0
-    VALUE_MATCH = 1
-    FUNCTION_MATCH = 2  # e.q. "from torch import add"
-    FIXED_TENSOR_LIST = 3
+    def select(self, locals_, globals_):
+        if self == GuardSource.LOCAL:
+            return locals_
+        if self == GuardSource.GLOBAL:
+            return globals_
 
 
 @dataclasses.dataclass
 class Guard:
     name: str
     source: GuardSource
-    requirement: GuardRequirement
+    create_fn: Callable
 
     def __hash__(self):
-        return hash((self.name, self.source, self.requirement))
+        return hash((self.name, self.source, id(self.create_fn)))
+
+    def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
+        return self.create_fn(self.source.select(local_builder, global_builder), self)
 
 
 class GuardBuilder:
-    def __init__(self, id_ref, scope):
+    def __init__(self, id_ref: Callable, scope: Dict[str, Any]):
         self.id_ref = id_ref
-        self.argnames = []
-        self.code = []
         self.scope = scope
+        self.argnames: List[str] = []
+        # Code is python expression strings generated for each guard
+        self.code: List[str] = []
 
     def arg_ref(self, guard: Guard):
         if guard.name not in self.argnames:
@@ -47,6 +54,7 @@ class GuardBuilder:
         self.code.append(f"id({self.arg_ref(guard)}) == {self.id_ref(self.scope[guard.name])}")
 
     def FUNCTION_MATCH(self, guard: Guard):
+        """ things like torch.add and user defined functions """
         pass  # should we add more checks here?
 
     def FIXED_TENSOR_LIST(self, guard: Guard):
@@ -62,8 +70,6 @@ class GuardBuilder:
 
 
 class GuardedCode:
-    identifier = itertools.count()
-
     def __init__(self,
                  code: types.CodeType,
                  guards: Optional[Set[Guard]] = None,
@@ -77,21 +83,19 @@ class GuardedCode:
         local_builder = GuardBuilder(self.id_ref, f_locals)
         global_builder = GuardBuilder(self.id_ref, f_globals)
         for guard in (guards or []):
-            if guard.source == GuardSource.LOCAL:
-                getattr(local_builder, guard.requirement.name)(guard)
-            else:
-                getattr(global_builder, guard.requirement.name)(guard)
+            guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
+        self._seen_ids.clear()
 
     def compile_check_fn(self, local_builder, global_builder):
-        local_builder.argnames.append("**___kwargs_ignored")
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
-        code = [f"__guarded_code.valid"] + local_builder.code + global_builder.code
-        py_code = f"lambda __guarded_code: lambda {','.join(local_builder.argnames)}: ({' and '.join(code)})"
+        args = local_builder.argnames + ["**___kwargs_ignored"]
+        code = [f"___guarded_code.valid"] + local_builder.code + global_builder.code
+        py_code = f"lambda ___guarded_code: lambda {','.join(args)}: ({' and '.join(code)})"
         return eval(py_code, global_builder.scope)(self)
 
     def invalidate(self, ref):
-        # A weakref is no longer valid
+        # A weakref is no longer valid, self.check_fn should return false
         self.valid = False
 
     def id_ref(self, obj):

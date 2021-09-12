@@ -16,6 +16,7 @@ class Instruction:
     offset: Optional[int] = None
     starts_line: Optional[int] = None
     is_jump_target: bool = False
+    # extra fields to make modification easier:
     target: Optional["Instruction"] = None
 
 

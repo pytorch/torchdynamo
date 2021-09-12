@@ -43,7 +43,7 @@ static inline PyObject *PyObject_CallOneArg(PyObject *callable, PyObject *arg) {
 #endif
 
 typedef struct cache_entry {
-  // check the guards: <locals of user function> => bool
+  // check the guards: lambda: <locals of user function>: bool
   PyObject *check_fn;
   // modified user bytecode (protected by check_fn's guards)
   PyCodeObject *code;

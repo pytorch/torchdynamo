@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 import torchdynamo
 from torchdynamo import eval_frame
-from torchdynamo.symbolic_convert import convert_frame_assert, dummy_fx_compile
+from torchdynamo.symbolic_convert import convert_frame_assert
 from torchdynamo.testing import same, CompileCounter
 
 torchdynamo.symbolic_convert.DEBUG = True

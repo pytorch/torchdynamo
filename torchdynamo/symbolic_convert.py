@@ -13,28 +13,32 @@ from typing import List
 
 import torch
 from torch import fx
-from torch.fx import GraphModule
 
 from .allowed_functions import is_allowed
-from .bytecode_transformation import Instruction, cleaned_instructions
+from .bytecode_transformation import Instruction
+from .bytecode_transformation import cleaned_instructions
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import transform_code_object
 from .bytecode_transformation import unique_id
-from .guards import Guard, GuardedCode
-from .guards import GuardRequirement
+from .guards import Guard
+from .guards import GuardBuilder
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable, UserFunctionVariable, UserMethodVariable, \
-    BuiltinVariable, IterVariable
+from .guards import GuardedCode
+from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
+from .variable_tracker import IterVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import NNModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
 from .variable_tracker import TupleVariable
+from .variable_tracker import UserFunctionVariable
+from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
 
 DEBUG = False
@@ -120,7 +124,7 @@ class InstructionTracerBase(fx.Tracer):
             return TensorVariable(
                 proxy=self.create_graph_input(name),
                 state=TracingSupported.YES,
-                guards={Guard(name, GuardSource.LOCAL, GuardRequirement.TYPE_MATCH)},
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
         elif isinstance(value, torch.nn.Module):
             key = f"{name}_{next(self.cnt)}"
@@ -128,18 +132,18 @@ class InstructionTracerBase(fx.Tracer):
             return NNModuleVariable(
                 key=key,
                 state=TracingSupported.YES,
-                guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
             )
         elif value is True or value is False or value is None:
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
-                guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
             )
         elif (type(value) in (tuple, list) and
               all(isinstance(x, torch.Tensor) for x in value)):
             unimplemented("tensor list input")  # TODO(jansel): debug crash in densenet121
-            guards = {Guard(name, GuardSource.LOCAL, GuardRequirement.FIXED_TENSOR_LIST)}
+            guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
             items = []
             self.graphargs.append(TensorListArgs(name, len(value)))
             for i in reversed(range(len(value))):
@@ -261,7 +265,7 @@ class InstructionTracerBase(fx.Tracer):
             self.push(AllowedFunctionOrModuleVariable(
                 value=value,
                 state=TracingSupported.YES,
-                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
+                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH)},
             ))
         elif isinstance(value, torch.Tensor):
             assert False, "TODO(jansel): need to debug a crash here (test_globalvar)"
@@ -270,12 +274,12 @@ class InstructionTracerBase(fx.Tracer):
             self.push(TensorVariable(
                 proxy=self.create_graph_input(inst.argval),
                 state=TracingSupported.YES,
-                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.TYPE_MATCH)},
+                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)},
             ))
         elif isinstance(value, types.FunctionType):
             self.push(UserFunctionVariable(
                 value,
-                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardRequirement.FUNCTION_MATCH)},
+                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH)},
             ))
         else:
             unimplemented("LOAD_GLOBAL")
@@ -546,8 +550,6 @@ class InstructionTracerBase(fx.Tracer):
 
     BINARY_POWER = stack_op(lambda tos1, tos: tos1 ** tos)
     BINARY_MULTIPLY = stack_op(lambda tos1, tos: tos1 * tos)
-    # TODO(jansel): looks like FX lacks support for this one
-    BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1.__matmul__(tos))
     BINARY_FLOOR_DIVIDE = stack_op(lambda tos1, tos: tos1 // tos)
     BINARY_TRUE_DIVIDE = stack_op(lambda tos1, tos: tos1 / tos)
     BINARY_MODULO = stack_op(lambda tos1, tos: tos1 % tos)
@@ -559,6 +561,9 @@ class InstructionTracerBase(fx.Tracer):
     BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
     BINARY_XOR = stack_op(lambda tos1, tos: tos1 ^ tos)
     BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
+
+    # TODO(jansel): looks like FX lacks support for this one
+    BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1.__matmul__(tos))
 
     INPLACE_POWER = stack_op(operator.ipow)
     INPLACE_MULTIPLY = stack_op(operator.imul)
@@ -630,7 +635,7 @@ class InstructionTracer(InstructionTracerBase):
             counters["stats"]["calls_captured"] += ncalls
             counters["stats"]["fusions_possible"] += ncalls - 1
             self.guards.update(rv.guards)
-            gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
+            gm = fx.GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
             name = unique_id("__translated_fn")
             self.f_globals[name] = self.compiler_fn(gm)
@@ -713,11 +718,13 @@ def dummy_fx_compile(gm: fx.GraphModule):
 
 
 def convert_frame_assert(compiler_fn: typing.Callable):
+    """ Fully convert a frame into an FX graph """
+
     def _convert_frame_assert(frame: types.FrameType):
         code = frame.f_code
+        # TODO(jansel): detect and skip other types of generated code
         if code.co_filename.startswith("<eval_with_key>"):
             return None  # skip FX output
-        # TODO(jansel): detect and skip other types of generated code
         debug_checks(code)
         tracer = None
 
@@ -750,6 +757,7 @@ def convert_frame_assert(compiler_fn: typing.Callable):
 
 
 def convert_frame(compiler_fn: typing.Callable):
+    """ Try to convert a frame into an FX graph, if error leave frame unmodified """
     inner_convert = convert_frame_assert(compiler_fn)
 
     def _convert_frame(frame: types.FrameType):
