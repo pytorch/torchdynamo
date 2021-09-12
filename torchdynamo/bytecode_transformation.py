@@ -8,7 +8,8 @@ from typing import Any, Optional, List
 
 @dataclasses.dataclass
 class Instruction:
-    """ A mutable version of dis.Instruction """
+    """A mutable version of dis.Instruction"""
+
     opcode: int
     opname: str
     arg: int
@@ -71,20 +72,20 @@ def lnotab_writer(lineno, byteno=0):
 
 
 def assemble(instructions: List[dis.Instruction], firstlineno):
-    """ Do the opposite of dis.get_instructions() """
+    """Do the opposite of dis.get_instructions()"""
     code = []
     lnotab, update_lineno = lnotab_writer(firstlineno)
     for inst in instructions:
         if inst.starts_line is not None:
             update_lineno(inst.starts_line, len(code))
         arg = inst.arg or 0
-        code.extend((inst.opcode, arg & 0xff))
+        code.extend((inst.opcode, arg & 0xFF))
 
     return bytes(code), bytes(lnotab)
 
 
 def virtualize_jumps(instructions):
-    """ Replace jump targets with pointers to make editing easier """
+    """Replace jump targets with pointers to make editing easier"""
     jump_targets = dict()
 
     for inst in instructions:
@@ -97,7 +98,7 @@ def virtualize_jumps(instructions):
 
 
 def devirtualize_jumps(instructions):
-    """ Fill in args for virtualized jump target after instructions may have moved """
+    """Fill in args for virtualized jump target after instructions may have moved"""
     for inst in instructions:
         if inst.opcode in dis.hasjabs:
             inst.arg = inst.target.offset
@@ -131,14 +132,16 @@ def update_offsets(instructions):
 def debug_bytes(*args):
     index = range(max(map(len, args)))
     result = []
-    for arg in [index] + list(args) + [[int(a != b) for a, b in zip(args[-1], args[-2])]]:
+    for arg in (
+        [index] + list(args) + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
+    ):
         result.append(" ".join(f"{x:03}" for x in arg))
 
     return "bytes mismatch\n" + "\n".join(result)
 
 
 def debug_checks(code):
-    """ Make sure our assembler produces same bytes as we start with """
+    """Make sure our assembler produces same bytes as we start with"""
     dode = transform_code_object(code, lambda x, y: None)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == code.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
@@ -165,9 +168,7 @@ def transform_code_object(code, transformations):
     ]
     if sys.version_info < (3, 8):
         keys.pop(1)
-    code_options = {
-        k: getattr(code, k) for k in keys
-    }
+    code_options = {k: getattr(code, k) for k in keys}
 
     instructions = cleaned_instructions(code)
 

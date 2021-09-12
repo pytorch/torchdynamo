@@ -9,7 +9,7 @@ from torchdynamo.symbolic_convert import convert_frame_assert
 
 
 def same(a, b):
-    """ Check correctness to see if a and b match """
+    """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple)):
         assert isinstance(b, (list, tuple))
         return all(same(ai, bi) for ai, bi in zip(a, b))
@@ -23,7 +23,7 @@ def same(a, b):
 
 
 def debug_insert_nops(frame):
-    """ used to debug jump updates """
+    """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
         instructions.insert(0, create_instruction("NOP"))

@@ -25,5 +25,5 @@ def _allowed_function_ids():
 
 
 def is_allowed(obj):
-    """ Is this safe to trace like torch.add ? """
+    """Is this safe to trace like torch.add ?"""
     return id(obj) in _allowed_function_ids()

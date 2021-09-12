@@ -17,7 +17,7 @@ combine_guards = functools.partial(functools.reduce, set.union)
 
 
 class VariableTracker:
-    """ Base class for tracked locals and stack values """
+    """Base class for tracked locals and stack values"""
 
     @staticmethod
     def propagate(vars):
@@ -34,8 +34,17 @@ class VariableTracker:
         if len(vars) == 0:
             return ConstantVariable, {}
         vars = list(vars)
-        priority = [TensorVariable, AllowedFunctionOrModuleVariable, NNModuleVariable, ConstantVariable,
-                    MethodNameVariable, GetAttrVariable, ListVariable, TupleVariable, SliceVariable]
+        priority = [
+            TensorVariable,
+            AllowedFunctionOrModuleVariable,
+            NNModuleVariable,
+            ConstantVariable,
+            MethodNameVariable,
+            GetAttrVariable,
+            ListVariable,
+            TupleVariable,
+            SliceVariable,
+        ]
         vars.sort(key=lambda v: priority.index(type(v)))
         return type(vars[0])
 
@@ -46,7 +55,7 @@ class VariableTracker:
 
 
 class TensorVariable(VariableTracker):
-    """ Points to a tensor """
+    """Points to a tensor"""
 
     def __init__(self, proxy, **kwargs):
         super(TensorVariable, self).__init__(**kwargs)
@@ -119,7 +128,7 @@ class ConstDictVariable(VariableTracker):
 
 
 class UserFunctionVariable(VariableTracker):
-    """ Some unsupported user-defined global function """
+    """Some unsupported user-defined global function"""
 
     def __init__(self, fn, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
@@ -130,7 +139,7 @@ class UserFunctionVariable(VariableTracker):
 
 
 class UserMethodVariable(UserFunctionVariable):
-    """ Some unsupported user-defined method """
+    """Some unsupported user-defined method"""
 
     def __init__(self, fn, obj, **kwargs):
         super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
@@ -141,7 +150,7 @@ class UserMethodVariable(UserFunctionVariable):
 
 
 class AllowedFunctionOrModuleVariable(VariableTracker):
-    """ Points to a module or method in torch.* """
+    """Points to a module or method in torch.*"""
 
     def __init__(self, value, **kwargs):
         super(AllowedFunctionOrModuleVariable, self).__init__(**kwargs)

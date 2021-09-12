@@ -24,21 +24,36 @@ from torchdynamo.profiler import Profiler, fx_insert_profiling, ProfileMetrics
 from torchdynamo.testing import same
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-torchbench_dir = abspath("../torchbench" if exists("../torchbench") else "../torchbenchmark")
+torchbench_dir = abspath(
+    "../torchbench" if exists("../torchbench") else "../torchbenchmark"
+)
 assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
 SKIP = {
     # torchbench `get_model()` is broken these:
-    "albert", "demucs", "hf_T5", "hf_Reformer", "hf_Longformer",
-    "hf_GPT2", "hf_DistilBert", "hf_BigBird", "hf_Bert", "hf_Bart",
-    "nvidia_deeprecommender", "hf_Albert",
+    "albert",
+    "demucs",
+    "hf_T5",
+    "hf_Reformer",
+    "hf_Longformer",
+    "hf_GPT2",
+    "hf_DistilBert",
+    "hf_BigBird",
+    "hf_Bert",
+    "hf_Bart",
+    "nvidia_deeprecommender",
+    "hf_Albert",
     # TODO: need to debug a crash in this one on debug_insert_nops
     "pyhpc_isoneutral_mixing",
 }
 current_name = ""
 current_device = ""
+
+
+def nothing():
+    pass
 
 
 def synchronize():
@@ -47,20 +62,23 @@ def synchronize():
         synchronize = torch.cuda.synchronize
         synchronize()
     else:
-        synchronize = lambda: None
+        synchronize = nothing
 
 
 def short_name(name, limit=20):
-    """ Truncate a model name to limit chars"""
+    """Truncate a model name to limit chars"""
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
 
 
 def iter_models(args):
     from torchbenchmark import list_models  # noqa
+
     for benchmark_cls in list_models():
-        if (not re.search("|".join(args.filter), benchmark_cls.name, re.I) or
-                re.search("|".join(args.exclude), benchmark_cls.name, re.I) or
-                benchmark_cls.name in SKIP):
+        if (
+            not re.search("|".join(args.filter), benchmark_cls.name, re.I)
+            or re.search("|".join(args.exclude), benchmark_cls.name, re.I)
+            or benchmark_cls.name in SKIP
+        ):
             continue
         for device in args.devices:
             try:
@@ -115,7 +133,7 @@ class Stats:
     @classmethod
     def print_summary(cls):
         for k, v in sorted(cls.totals.items()):
-            lines = '\n  '.join(map(str, v.most_common(20)))
+            lines = "\n  ".join(map(str, v.most_common(20)))
             print(f"STATS {k}\n  {lines}")
 
 
@@ -145,28 +163,32 @@ def speedup_experiment(speedups, args, model, example_inputs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--baseline", "-b", default="eager",
-                        help="baseline to normalize to")
-    parser.add_argument("--filter", "-k", action="append",
-                        help="filter benchmarks")
-    parser.add_argument("--exclude", "-x", action="append",
-                        help="filter benchmarks")
-    parser.add_argument("--devices", "-d", action="append",
-                        help="cpu or cuda")
-    parser.add_argument("--repeat", "-n", type=int, default=30,
-                        help="number of timing runs")
-    parser.add_argument("--threads", "-t", type=int,
-                        help="number of threads to use")
-    parser.add_argument("--min-measure-sec", type=float, default=0.1,
-                        help="floor of how long a timing run can take (introduces multiple calls to hit this)")
-    parser.add_argument("--cpu-fusion", action="store_true",
-                        help="enable can_fuse_on_cpu")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="show errors")
-    parser.add_argument("--no-skip", action="store_true",
-                        help="run models that don't fx cleanly")
-    parser.add_argument("--overhead", "-s", action="store_true",
-                        help="measure overheads")
+    parser.add_argument(
+        "--baseline", "-b", default="eager", help="baseline to normalize to"
+    )
+    parser.add_argument("--filter", "-k", action="append", help="filter benchmarks")
+    parser.add_argument("--exclude", "-x", action="append", help="filter benchmarks")
+    parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
+    parser.add_argument(
+        "--repeat", "-n", type=int, default=30, help="number of timing runs"
+    )
+    parser.add_argument("--threads", "-t", type=int, help="number of threads to use")
+    parser.add_argument(
+        "--min-measure-sec",
+        type=float,
+        default=0.1,
+        help="floor of how long a timing run can take (introduces multiple calls to hit this)",
+    )
+    parser.add_argument(
+        "--cpu-fusion", action="store_true", help="enable can_fuse_on_cpu"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="show errors")
+    parser.add_argument(
+        "--no-skip", action="store_true", help="run models that don't fx cleanly"
+    )
+    parser.add_argument(
+        "--overhead", "-s", action="store_true", help="measure overheads"
+    )
     args = parser.parse_args()
 
     args.verbose = True
@@ -178,7 +200,7 @@ def main():
 
     if args.devices == ["cpu"]:
         global synchronize
-        synchronize = lambda: None
+        synchronize = nothing
 
     if args.no_skip:
         SKIP.clear()
@@ -222,15 +244,22 @@ def main():
 
     Stats.print_summary()
     if coverage_results:
-        print("\nMEAN COVERAGE:",
-              functools.reduce(ProfileMetrics.__add__, coverage_results) / len(coverage_results))
+        print(
+            "\nMEAN COVERAGE:",
+            functools.reduce(ProfileMetrics.__add__, coverage_results)
+            / len(coverage_results),
+        )
     if speedups:
-        print(textwrap.dedent(f"""
+        print(
+            textwrap.dedent(
+                f"""
         MEAN SPEEDUP {np.mean(speedups):.3f}x
-        GEOMEAN SPEEDUP {gmean(speedups):.3f}x"""))
+        GEOMEAN SPEEDUP {gmean(speedups):.3f}x"""
+            )
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main()

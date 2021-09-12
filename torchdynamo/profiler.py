@@ -20,7 +20,8 @@ class ProfileMetrics:
         return ProfileMetrics(
             self.microseconds + other.microseconds,
             self.operators + other.operators,
-            self.fusions + other.fusions)
+            self.fusions + other.fusions,
+        )
 
     def __truediv__(self, other):
         if isinstance(other, int):
@@ -28,7 +29,8 @@ class ProfileMetrics:
         return ProfileMetrics(
             self.microseconds / max(1, other.microseconds),
             self.operators / max(1, other.operators),
-            self.fusions / max(1, other.fusions))
+            self.fusions / max(1, other.fusions),
+        )
 
     def __str__(self):
         return f"{self.operators:4.0%} ops {self.fusions:4.0%} fusions {self.microseconds:4.0%} time"
@@ -48,12 +50,16 @@ class ProfileResult:
         return self.captured / self.total
 
     def __str__(self):
-        return f"{self.captured.operators:3}/{self.total.operators:3} = " + str(self.percent())
+        return f"{self.captured.operators:3}/{self.total.operators:3} = " + str(
+            self.percent()
+        )
 
 
 class Profiler:
     def __init__(self):
-        self.prof = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU])
+        self.prof = torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        )
 
     def results(self):
         captured_regions = 0
@@ -80,12 +86,17 @@ class Profiler:
                 pass  # ops recursively called from other ops (ignored)
 
         return ProfileResult(
-            captured=ProfileMetrics(microseconds=captured_microseconds,
-                                    operators=captured_ops,
-                                    fusions=captured_ops - captured_regions),
-            total=ProfileMetrics(microseconds=total_microseconds,
-                                 operators=total_ops,
-                                 fusions=total_ops - 1))
+            captured=ProfileMetrics(
+                microseconds=captured_microseconds,
+                operators=captured_ops,
+                fusions=captured_ops - captured_regions,
+            ),
+            total=ProfileMetrics(
+                microseconds=total_microseconds,
+                operators=total_ops,
+                fusions=total_ops - 1,
+            ),
+        )
 
 
 def fx_insert_profiling(gm: torch.fx.GraphModule):

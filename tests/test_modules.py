@@ -5,7 +5,6 @@ import torch
 from torch.nn import functional as F
 
 import torchdynamo
-from torchdynamo.testing import same
 
 torchdynamo.symbolic_convert.DEBUG = True
 

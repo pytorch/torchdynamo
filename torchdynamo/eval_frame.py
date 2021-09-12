@@ -69,5 +69,5 @@ def optimize(compile_fn):
 
 
 def run():
-    """ Don't do any dynamic compiles, just use prior optimizations """
+    """Don't do any dynamic compiles, just use prior optimizations"""
     return _RunContext()

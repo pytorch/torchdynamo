@@ -48,13 +48,17 @@ class GuardBuilder:
         return guard.name
 
     def TYPE_MATCH(self, guard: Guard):
-        self.code.append(f"id(type({self.arg_ref(guard)})) == {self.id_ref(type(self.scope[guard.name]))}")
+        self.code.append(
+            f"id(type({self.arg_ref(guard)})) == {self.id_ref(type(self.scope[guard.name]))}"
+        )
 
     def VALUE_MATCH(self, guard: Guard):
-        self.code.append(f"id({self.arg_ref(guard)}) == {self.id_ref(self.scope[guard.name])}")
+        self.code.append(
+            f"id({self.arg_ref(guard)}) == {self.id_ref(self.scope[guard.name])}"
+        )
 
     def FUNCTION_MATCH(self, guard: Guard):
-        """ things like torch.add and user defined functions """
+        """things like torch.add and user defined functions"""
         pass  # should we add more checks here?
 
     def FIXED_TENSOR_LIST(self, guard: Guard):
@@ -70,11 +74,13 @@ class GuardBuilder:
 
 
 class GuardedCode:
-    def __init__(self,
-                 code: types.CodeType,
-                 guards: Optional[Set[Guard]] = None,
-                 f_locals: Optional[Dict] = None,
-                 f_globals: Optional[Dict] = None):
+    def __init__(
+        self,
+        code: types.CodeType,
+        guards: Optional[Set[Guard]] = None,
+        f_locals: Optional[Dict] = None,
+        f_globals: Optional[Dict] = None,
+    ):
         self.code = code
         self.valid = True
         self._weakrefs = []
@@ -82,7 +88,7 @@ class GuardedCode:
 
         local_builder = GuardBuilder(self.id_ref, f_locals)
         global_builder = GuardBuilder(self.id_ref, f_globals)
-        for guard in (guards or []):
+        for guard in guards or []:
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
@@ -90,8 +96,10 @@ class GuardedCode:
     def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         args = local_builder.argnames + ["**___kwargs_ignored"]
-        code = [f"___guarded_code.valid"] + local_builder.code + global_builder.code
-        py_code = f"lambda ___guarded_code: lambda {','.join(args)}: ({' and '.join(code)})"
+        code = ["___guarded_code.valid"] + local_builder.code + global_builder.code
+        py_code = (
+            f"lambda ___guarded_code: lambda {','.join(args)}: ({' and '.join(code)})"
+        )
         return eval(py_code, global_builder.scope)(self)
 
     def invalidate(self, ref):
@@ -99,7 +107,7 @@ class GuardedCode:
         self.valid = False
 
     def id_ref(self, obj):
-        """ add a weakref, return the id """
+        """add a weakref, return the id"""
         try:
             if id(obj) not in self._seen_ids:
                 self._weakrefs.append(weakref.ref(obj, self.invalidate))

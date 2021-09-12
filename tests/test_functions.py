@@ -195,21 +195,22 @@ class FunctionTests(unittest.TestCase):
 
     @make_test
     def test_unpack2(a):
-        l = [a[:5], a[5:]]
-        a, b = l
+        packed = [a[:5], a[5:]]
+        a, b = packed
         return a - b
 
     @make_test
     def test_unpack3(a):
-        l = (a[:5], a[5:])
-        a, b = l
+        packed = (a[:5], a[5:])
+        a, b = packed
         return a - b
 
     @make_test
     def test_fn_with_self_set(a, b):
         # avg_pool2d is an odd one with __self__ set
-        return F.avg_pool2d(torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1),
-                            kernel_size=2, padding=1)
+        return F.avg_pool2d(
+            torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1), kernel_size=2, padding=1
+        )
 
     def test_inplace(self):
         def inplace1(a, b):
@@ -249,7 +250,7 @@ class FunctionTests(unittest.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torchdynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
-    @unittest.skip("buggy/crashing")
+    @unittest.skip("need to debug crash here")
     @make_test
     def test_globalvar(a, b):
         return a - b + d

@@ -60,8 +60,7 @@ def stack_op(fn):
         cls = VariableTracker.combine_type(inputs)
         options = VariableTracker.propagate(inputs)
         if issubclass(cls, TensorVariable):
-            val = cls(proxy=fn(*[i.as_proxy() for i in inputs]),
-                      **options)
+            val = cls(proxy=fn(*[i.as_proxy() for i in inputs]), **options)
         else:
             unimplemented(f"stack_op {cls.__name__}")
 
@@ -101,22 +100,24 @@ class TensorListArgs:
         return self.count
 
     def load(self, tracer):
-        return [tracer.create_load_fast(self.name),
-                create_instruction("UNPACK_SEQUENCE", self.count)]
+        return [
+            tracer.create_load_fast(self.name),
+            create_instruction("UNPACK_SEQUENCE", self.count),
+        ]
 
 
 class InstructionTracerBase(fx.Tracer):
     def create_load_fast(self, name):
         assert name in self.code_options["co_varnames"]
-        return create_instruction("LOAD_FAST",
-                                  self.code_options["co_varnames"].index(name),
-                                  name)
+        return create_instruction(
+            "LOAD_FAST", self.code_options["co_varnames"].index(name), name
+        )
 
     def create_load_global(self, name):
         assert name in self.code_options["co_names"]
-        return create_instruction("LOAD_GLOBAL",
-                                  self.code_options["co_names"].index(name),
-                                  name)
+        return create_instruction(
+            "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
+        )
 
     def wrap_local(self, name, value):
         if isinstance(value, torch.Tensor):
@@ -140,18 +141,23 @@ class InstructionTracerBase(fx.Tracer):
                 value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
             )
-        elif (type(value) in (tuple, list) and
-              all(isinstance(x, torch.Tensor) for x in value)):
-            unimplemented("tensor list input")  # TODO(jansel): debug crash in densenet121
+        elif type(value) in (tuple, list) and all(
+            isinstance(x, torch.Tensor) for x in value
+        ):
+            unimplemented(
+                "tensor list input"
+            )  # TODO(jansel): debug crash in densenet121
             guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
             items = []
             self.graphargs.append(TensorListArgs(name, len(value)))
             for i in reversed(range(len(value))):
-                items.append(TensorVariable(
-                    proxy=self.create_graph_input(f"{name}_{i}"),
-                    state=TracingSupported.YES,
-                    guards=guards
-                ))
+                items.append(
+                    TensorVariable(
+                        proxy=self.create_graph_input(f"{name}_{i}"),
+                        state=TracingSupported.YES,
+                        guards=guards,
+                    )
+                )
             items = list(reversed(items))
             cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
             return cls(items, guards=guards)
@@ -165,57 +171,94 @@ class InstructionTracerBase(fx.Tracer):
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy('placeholder', f'{name}_{next(self.cnt)}', (), {})
+            return self.create_proxy("placeholder", f"{name}_{next(self.cnt)}", (), {})
 
     def call_function(self, fn, args, kwargs):
         if isinstance(fn, AllowedFunctionOrModuleVariable):
-            options = VariableTracker.propagate([fn, ] + list(args) + list(kwargs.values()))
+            options = VariableTracker.propagate(
+                [
+                    fn,
+                ]
+                + list(args)
+                + list(kwargs.values())
+            )
             self_should_be_none = getattr(fn.value, "__self__", None)
             if self_should_be_none is not None:
                 # weird ones like torch.nn.functional.avg_pool2d have __self__
-                assert (isinstance(self_should_be_none, types.ModuleType) and
-                        self_should_be_none.__name__ == getattr(fn.value, "__module__", None))
+                assert isinstance(
+                    self_should_be_none, types.ModuleType
+                ) and self_should_be_none.__name__ == getattr(
+                    fn.value, "__module__", None
+                )
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-            self.push(TensorVariable(
-                proxy=self.create_proxy('call_function', fn.value, proxy_args, proxy_kwargs),
-                **options
-            ))
+            self.push(
+                TensorVariable(
+                    proxy=self.create_proxy(
+                        "call_function", fn.value, proxy_args, proxy_kwargs
+                    ),
+                    **options,
+                )
+            )
         elif isinstance(fn, GetAttrVariable):
             name = fn.name
             obj = fn.obj
             args = [obj] + list(args)
-            options = VariableTracker.propagate([fn, ] + list(args) + list(kwargs.values()))
+            options = VariableTracker.propagate(
+                [
+                    fn,
+                ]
+                + list(args)
+                + list(kwargs.values())
+            )
             proxy_args = tuple(arg.as_proxy() for arg in args)
             proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-            self.push(TensorVariable(
-                proxy=self.create_proxy('call_method', name, proxy_args, proxy_kwargs),
-                **options
-            ))
+            self.push(
+                TensorVariable(
+                    proxy=self.create_proxy(
+                        "call_method", name, proxy_args, proxy_kwargs
+                    ),
+                    **options,
+                )
+            )
         elif isinstance(fn, NNModuleVariable):
             mod = self.get_submodule(fn.key)
             if is_allowed(mod.__class__):
                 options = VariableTracker.propagate([fn] + args)
                 proxy_args = tuple(x.as_proxy() for x in args)
-                self.push(TensorVariable(
-                    proxy=self.create_proxy('call_module', fn.key, proxy_args, {}),
-                    **options
-                ))
+                self.push(
+                    TensorVariable(
+                        proxy=self.create_proxy("call_module", fn.key, proxy_args, {}),
+                        **options,
+                    )
+                )
             else:
                 forward = mod.__class__.forward
                 assert forward is not torch.nn.Module.forward
                 self.guards.update(fn.guards)
-                self.push(RecursiveInstructionTracer.inline_call(self, forward, [fn] + args, kwargs))
+                self.push(
+                    RecursiveInstructionTracer.inline_call(
+                        self, forward, [fn] + args, kwargs
+                    )
+                )
         elif isinstance(fn, UserFunctionVariable):
             self.guards.update(fn.guards)
-            self.push(RecursiveInstructionTracer.inline_call(self, fn.fn, fn.self_args() + args, kwargs))
+            self.push(
+                RecursiveInstructionTracer.inline_call(
+                    self, fn.fn, fn.self_args() + args, kwargs
+                )
+            )
         elif isinstance(fn, BuiltinVariable):
             allargs = args + list(kwargs.values())
             options = VariableTracker.propagate(allargs)
             constant_args = all(isinstance(x, ConstantVariable) for x in allargs)
             if fn.fn is range and constant_args:
-                items = list(fn.fn(*[x.value for x in args],
-                                   **{k: v.value for k, v in kwargs.items()}))
+                items = list(
+                    fn.fn(
+                        *[x.value for x in args],
+                        **{k: v.value for k, v in kwargs.items()},
+                    )
+                )
                 self.push(ListVariable(items, **options))
             elif fn.fn is iter and args and isinstance(args[0], ListVariable):
                 assert not kwargs and len(args) == 1
@@ -253,8 +296,7 @@ class InstructionTracerBase(fx.Tracer):
         self.symbolic_locals[inst.argval] = self.pop()
 
     def LOAD_CONST(self, inst):
-        self.push(ConstantVariable(value=inst.argval,
-                                   state=TracingSupported.UNKNOWN))
+        self.push(ConstantVariable(value=inst.argval, state=TracingSupported.UNKNOWN))
 
     def LOAD_GLOBAL(self, inst):
         try:
@@ -262,25 +304,41 @@ class InstructionTracerBase(fx.Tracer):
         except KeyError:
             return self.load_builtin(inst)
         if is_allowed(value):
-            self.push(AllowedFunctionOrModuleVariable(
-                value=value,
-                state=TracingSupported.YES,
-                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH)},
-            ))
+            self.push(
+                AllowedFunctionOrModuleVariable(
+                    value=value,
+                    state=TracingSupported.YES,
+                    guards={
+                        Guard(
+                            inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
+                        )
+                    },
+                )
+            )
         elif isinstance(value, torch.Tensor):
-            assert False, "TODO(jansel): need to debug a crash here (test_globalvar)"
+            unimplemented("need to debug crash here")
             # turn a load of a global tensor into an arg for the graph
             self.graphargs.append(GlobalArg(inst.argval))
-            self.push(TensorVariable(
-                proxy=self.create_graph_input(inst.argval),
-                state=TracingSupported.YES,
-                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)},
-            ))
+            self.push(
+                TensorVariable(
+                    proxy=self.create_graph_input(inst.argval),
+                    state=TracingSupported.YES,
+                    guards={
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)
+                    },
+                )
+            )
         elif isinstance(value, types.FunctionType):
-            self.push(UserFunctionVariable(
-                value,
-                guards={Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH)},
-            ))
+            self.push(
+                UserFunctionVariable(
+                    value,
+                    guards={
+                        Guard(
+                            inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
+                        )
+                    },
+                )
+            )
         else:
             unimplemented("LOAD_GLOBAL")
 
@@ -332,9 +390,9 @@ class InstructionTracerBase(fx.Tracer):
         }
         if op in supported and isinstance(right, ConstantVariable):
             if isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable)):
-                self.push(ConstantVariable(
-                    supported[op](left.value, right.value),
-                    **options))
+                self.push(
+                    ConstantVariable(supported[op](left.value, right.value), **options)
+                )
             else:
                 unimplemented(f"{type(left).__name__} is <const>")
         else:
@@ -368,7 +426,7 @@ class InstructionTracerBase(fx.Tracer):
         fn = self.pop()
         assert isinstance(argnames, ConstantVariable)
         argnames = argnames.value
-        args, kwargs = args[:-len(argnames)], args[-len(argnames):]
+        args, kwargs = args[: -len(argnames)], args[-len(argnames) :]
         kwargs = dict(zip(argnames, kwargs))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
@@ -402,22 +460,22 @@ class InstructionTracerBase(fx.Tracer):
             key = f"{obj.key}.{name}"
             subobj = self.get_submodule(key)
             if isinstance(subobj, torch.Tensor):
-                self.push(TensorVariable(
-                    proxy=self.create_proxy("get_attr", key, tuple(), {}),
-                    **options
-                ))
+                self.push(
+                    TensorVariable(
+                        proxy=self.create_proxy("get_attr", key, tuple(), {}), **options
+                    )
+                )
             elif isinstance(subobj, torch.nn.Module):
-                self.push(NNModuleVariable(
-                    key,
-                    **options
-                ))
+                self.push(NNModuleVariable(key, **options))
             elif isinstance(subobj, (int, float, bool, type(None))):
                 # Assumes module attributes are constant
                 # TODO(jansel): add guards?
-                self.push(ConstantVariable(
-                    subobj,
-                    **options,
-                ))
+                self.push(
+                    ConstantVariable(
+                        subobj,
+                        **options,
+                    )
+                )
             elif is_allowed(subobj):
                 self.push(AllowedFunctionOrModuleVariable(subobj, **options))
             elif callable(subobj):
@@ -432,10 +490,11 @@ class InstructionTracerBase(fx.Tracer):
         elif isinstance(obj, TensorVariable):
             self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, AllowedFunctionOrModuleVariable):
-            self.push(AllowedFunctionOrModuleVariable(
-                value=getattr(obj.value, name),
-                **options
-            ))
+            self.push(
+                AllowedFunctionOrModuleVariable(
+                    value=getattr(obj.value, name), **options
+                )
+            )
         else:
             unimplemented("LOAD_ATTR")
 
@@ -485,18 +544,12 @@ class InstructionTracerBase(fx.Tracer):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable(
-                    proxy[i],
-                    **options
-                ))
+                self.push(TensorVariable(proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable(
-                    proxy[i],
-                    **options
-                ))
+                self.push(TensorVariable(proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {type(seq).__name__}")
 
@@ -579,17 +632,19 @@ class InstructionTracerBase(fx.Tracer):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
-    def __init__(self,
-                 cnt: typing.Iterable,
-                 graph: fx.Graph,
-                 graphargs,
-                 nn_modules,
-                 guards,
-                 instructions: List[Instruction],
-                 f_globals,
-                 f_builtins,
-                 code_options,
-                 symbolic_locals=None):
+    def __init__(
+        self,
+        cnt: typing.Iterable,
+        graph: fx.Graph,
+        graphargs,
+        nn_modules,
+        guards,
+        instructions: List[Instruction],
+        f_globals,
+        f_builtins,
+        code_options,
+        symbolic_locals=None,
+    ):
         super(InstructionTracerBase, self).__init__()
         self.graph = graph
         self.instructions = instructions
@@ -607,7 +662,15 @@ class InstructionTracerBase(fx.Tracer):
 
 
 class InstructionTracer(InstructionTracerBase):
-    def __init__(self, instructions: List[Instruction], f_locals, f_globals, f_builtins, code_options, compiler_fn):
+    def __init__(
+        self,
+        instructions: List[Instruction],
+        f_locals,
+        f_globals,
+        f_builtins,
+        code_options,
+        compiler_fn,
+    ):
         super(InstructionTracer, self).__init__(
             cnt=itertools.count(),
             graph=fx.Graph(),
@@ -617,18 +680,20 @@ class InstructionTracer(InstructionTracerBase):
             instructions=instructions,
             f_globals=f_globals,
             f_builtins=f_builtins,
-            code_options=code_options
+            code_options=code_options,
         )
-        self.symbolic_locals = {k: self.wrap_local(k, f_locals[k])
-                                for k in code_options["co_varnames"]
-                                if k in f_locals}
+        self.symbolic_locals = {
+            k: self.wrap_local(k, f_locals[k])
+            for k in code_options["co_varnames"]
+            if k in f_locals
+        }
         self.compiler_fn = compiler_fn
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
         if rv.state == TracingSupported.YES:
             if isinstance(rv, TensorVariable):
-                self.create_node('output', 'output', (self.create_arg(rv.proxy),), {})
+                self.create_node("output", "output", (self.create_arg(rv.proxy),), {})
             else:
                 unimplemented(f"RETURN_VALUE {type(rv).__name__}")
             ncalls = count_calls(self.graph)
@@ -639,25 +704,39 @@ class InstructionTracer(InstructionTracerBase):
             gm.recompile()
             name = unique_id("__translated_fn")
             self.f_globals[name] = self.compiler_fn(gm)
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
+            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
+                name,
+            )
             nargs = sum(map(len, self.graphargs))
-            self.code_options["co_stacksize"] = max(self.code_options["co_stacksize"], 1 + nargs)
+            self.code_options["co_stacksize"] = max(
+                self.code_options["co_stacksize"], 1 + nargs
+            )
             self.instructions[:] = (
-                    [self.create_load_global(name)] +
-                    list(itertools.chain.from_iterable(arg.load(self) for arg in self.graphargs)) +
-                    [create_instruction("CALL_FUNCTION", nargs),
-                     create_instruction("RETURN_VALUE")]
+                [self.create_load_global(name)]
+                + list(
+                    itertools.chain.from_iterable(
+                        arg.load(self) for arg in self.graphargs
+                    )
+                )
+                + [
+                    create_instruction("CALL_FUNCTION", nargs),
+                    create_instruction("RETURN_VALUE"),
+                ]
             )
         else:
             unimplemented("not traceable")
 
 
 class RecursiveInstructionTracer(InstructionTracerBase):
-    """ Trace and inline a called method """
+    """Trace and inline a called method"""
 
     @staticmethod
     def inline_call(parent, func, args, kwargs):
-        assert callable(func) and getattr(func, "__closure__", None) is None and not hasattr(func, "__self__")
+        assert (
+            callable(func)
+            and getattr(func, "__closure__", None) is None
+            and not hasattr(func, "__self__")
+        )
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         sub_locals = dict()
@@ -667,12 +746,20 @@ class RecursiveInstructionTracer(InstructionTracerBase):
                 sub_locals[k] = v
             else:
                 unimplemented(f"call user defined {v}")
-        tracer = RecursiveInstructionTracer(parent, func.__code__, sub_locals, sub_globals)
+        tracer = RecursiveInstructionTracer(
+            parent, func.__code__, sub_locals, sub_globals
+        )
         tracer.run()
         assert tracer.symbolic_result is not None
         return tracer.symbolic_result
 
-    def __init__(self, parent: InstructionTracerBase, code: types.CodeType, symbolic_locals, f_globals):
+    def __init__(
+        self,
+        parent: InstructionTracerBase,
+        code: types.CodeType,
+        symbolic_locals,
+        f_globals,
+    ):
         super(RecursiveInstructionTracer, self).__init__(
             cnt=parent.cnt,
             graph=parent.graph,
@@ -692,7 +779,7 @@ class RecursiveInstructionTracer(InstructionTracerBase):
 
 
 class FakeRootModule(torch.nn.Module):
-    """ Trick the constructor of fx.GraphModule """
+    """Trick the constructor of fx.GraphModule"""
 
     def __init__(self, nn_modules: dict):
         super(FakeRootModule, self).__init__()
@@ -718,7 +805,7 @@ def dummy_fx_compile(gm: fx.GraphModule):
 
 
 def convert_frame_assert(compiler_fn: typing.Callable):
-    """ Fully convert a frame into an FX graph """
+    """Fully convert a frame into an FX graph"""
 
     def _convert_frame_assert(frame: types.FrameType):
         code = frame.f_code
@@ -730,12 +817,14 @@ def convert_frame_assert(compiler_fn: typing.Callable):
 
         def transform(instructions, code_options):
             nonlocal tracer
-            tracer = InstructionTracer(instructions,
-                                       frame.f_locals,
-                                       frame.f_globals,
-                                       frame.f_builtins,
-                                       code_options,
-                                       compiler_fn)
+            tracer = InstructionTracer(
+                instructions,
+                frame.f_locals,
+                frame.f_globals,
+                frame.f_builtins,
+                code_options,
+                compiler_fn,
+            )
             tracer.run()
 
         code = transform_code_object(frame.f_code, transform)
@@ -757,7 +846,7 @@ def convert_frame_assert(compiler_fn: typing.Callable):
 
 
 def convert_frame(compiler_fn: typing.Callable):
-    """ Try to convert a frame into an FX graph, if error leave frame unmodified """
+    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn)
 
     def _convert_frame(frame: types.FrameType):
@@ -768,7 +857,7 @@ def convert_frame(compiler_fn: typing.Callable):
             return result
         except NotImplementedError:
             pass
-        except Exception as e:
+        except Exception:
             logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
         return None
 
