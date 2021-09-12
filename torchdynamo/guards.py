@@ -13,6 +13,7 @@ class GuardRequirement(enum.Enum):
     TYPE_MATCH = 0
     VALUE_MATCH = 1
     FUNCTION_MATCH = 2  # e.q. "from torch import add"
+    FIXED_TENSOR_LIST = 3
 
 
 @dataclasses.dataclass
@@ -32,6 +33,7 @@ class GuardedCode:
         self.value_globals: List[str] = []
         self.type_locals: List[str] = []
         self.type_globals: List[str] = []
+        self.fixed_tensor_list_locals: List[str] = []
         for guard in (guards or []):
             if guard.requirement == GuardRequirement.VALUE_MATCH:
                 if guard.source == GuardSource.LOCAL:
@@ -45,6 +47,9 @@ class GuardedCode:
                 else:
                     assert guard.source == GuardSource.GLOBAL
                     self.type_globals.append(guard.name)
+            elif guard.requirement == GuardRequirement.FIXED_TENSOR_LIST:
+                assert guard.source == GuardSource.LOCAL
+                self.fixed_tensor_list_locals.append(guard.name)
             else:
                 assert guard.requirement == GuardRequirement.FUNCTION_MATCH
                 # TODO(jansel): may want to guard "from torch import add" in the future

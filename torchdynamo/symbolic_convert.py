@@ -24,7 +24,8 @@ from .bytecode_transformation import unique_id
 from .guards import Guard, GuardedCode
 from .guards import GuardRequirement
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable, UserFunctionVariable, UserMethodVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, UserFunctionVariable, UserMethodVariable, \
+    BuiltinVariable, IterVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
@@ -69,16 +70,35 @@ def stack_op(fn):
 class LocalArg:
     name: str
 
+    def __len__(self):
+        return 1
+
     def load(self, tracer):
-        return tracer.create_load_fast(self.name)
+        return [tracer.create_load_fast(self.name)]
 
 
 @dataclasses.dataclass
 class GlobalArg:
     name: str
 
+    def __len__(self):
+        return 1
+
     def load(self, tracer):
-        return tracer.create_load_global(self.name)
+        return [tracer.create_load_global(self.name)]
+
+
+@dataclasses.dataclass
+class TensorListArgs:
+    name: str
+    count: int
+
+    def __len__(self):
+        return self.count
+
+    def load(self, tracer):
+        return [tracer.create_load_fast(self.name),
+                create_instruction("UNPACK_SEQUENCE", self.count)]
 
 
 class InstructionTracerBase(fx.Tracer):
@@ -116,6 +136,21 @@ class InstructionTracerBase(fx.Tracer):
                 value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardRequirement.VALUE_MATCH)},
             )
+        elif (type(value) in (tuple, list) and
+              all(isinstance(x, torch.Tensor) for x in value)):
+            unimplemented("tensor list input")  # TODO(jansel): debug crash in densenet121
+            guards = {Guard(name, GuardSource.LOCAL, GuardRequirement.FIXED_TENSOR_LIST)}
+            items = []
+            self.graphargs.append(TensorListArgs(name, len(value)))
+            for i in reversed(range(len(value))):
+                items.append(TensorVariable(
+                    proxy=self.create_graph_input(f"{name}_{i}"),
+                    state=TracingSupported.YES,
+                    guards=guards
+                ))
+            items = list(reversed(items))
+            cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
+            return cls(items, guards=guards)
         else:
             unimplemented(f"wrap_local: {type(value).__name__}")
 
@@ -170,6 +205,19 @@ class InstructionTracerBase(fx.Tracer):
         elif isinstance(fn, UserFunctionVariable):
             self.guards.update(fn.guards)
             self.push(RecursiveInstructionTracer.inline_call(self, fn.fn, fn.self_args() + args, kwargs))
+        elif isinstance(fn, BuiltinVariable):
+            allargs = args + list(kwargs.values())
+            options = VariableTracker.propagate(allargs)
+            constant_args = all(isinstance(x, ConstantVariable) for x in allargs)
+            if fn.fn is range and constant_args:
+                items = list(fn.fn(*[x.value for x in args],
+                                   **{k: v.value for k, v in kwargs.items()}))
+                self.push(ListVariable(items, **options))
+            elif fn.fn is iter and args and isinstance(args[0], ListVariable):
+                assert not kwargs and len(args) == 1
+                self.push(IterVariable(iter(args[0].items), **options))
+            else:
+                unimplemented(f"builtin call {fn.fn}")
         else:
             unimplemented(f"call_function {type(fn).__name__}")
 
@@ -234,10 +282,13 @@ class InstructionTracerBase(fx.Tracer):
 
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
-        unimplemented(f"load_builtin: {inst.argval}")
+        self.push(BuiltinVariable(self.f_builtins[inst.argval]))
 
     def jump(self, inst):
         self.instruction_pointer = self.indexof[id(inst.target)]
+
+    JUMP_FORWARD = jump
+    JUMP_ABSOLUTE = jump
 
     def POP_JUMP_IF_FALSE(self, inst):
         value = self.pop()
@@ -247,6 +298,25 @@ class InstructionTracerBase(fx.Tracer):
                 self.jump(inst)
         else:
             unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
+
+    def FOR_ITER(self, inst):
+        it = self.pop()
+        if isinstance(it, IterVariable):
+            self.guards.update(it.guards)
+            try:
+                val = next(it.it)
+                self.push(it)
+                self.push(val)
+            except StopIteration:
+                self.jump(inst)
+        else:
+            unimplemented(f"FOR_ITER {type(it).__name__}")
+
+    def SETUP_LOOP(self, inst):
+        pass  # TODO(jansel): support blocks
+
+    def POP_BLOCK(self, inst):
+        pass  # TODO(jansel): support blocks
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
@@ -270,6 +340,9 @@ class InstructionTracerBase(fx.Tracer):
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
+
+    def GET_ITER(self, inst):
+        self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
@@ -334,6 +407,13 @@ class InstructionTracerBase(fx.Tracer):
                     key,
                     **options
                 ))
+            elif isinstance(subobj, (int, float, bool, type(None))):
+                # Assumes module attributes are constant
+                # TODO(jansel): add guards?
+                self.push(ConstantVariable(
+                    subobj,
+                    **options,
+                ))
             elif is_allowed(subobj):
                 self.push(AllowedFunctionOrModuleVariable(subobj, **options))
             elif callable(subobj):
@@ -392,10 +472,27 @@ class InstructionTracerBase(fx.Tracer):
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
+        options = VariableTracker.propagate([seq])
         if isinstance(seq, ListVariable):
             assert len(seq.items) == inst.argval
+            self.guards.update(seq.guards)
             for i in reversed(seq.items):
                 self.push(i)
+        elif isinstance(seq, TensorVariable):
+            proxy = seq.as_proxy()
+            for i in reversed(range(inst.argval)):
+                self.push(TensorVariable(
+                    proxy[i],
+                    **options
+                ))
+        elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
+            # x, y = a.shape
+            proxy = getattr(seq.obj.as_proxy(), seq.name)
+            for i in reversed(range(inst.argval)):
+                self.push(TensorVariable(
+                    proxy[i],
+                    **options
+                ))
         else:
             unimplemented(f"UNPACK_SEQUENCE {type(seq).__name__}")
 
@@ -447,12 +544,10 @@ class InstructionTracerBase(fx.Tracer):
     UNARY_NOT = stack_op(lambda tos: not tos)
     UNARY_INVERT = stack_op(lambda tos: ~tos)
 
-    # GET_ITER
-    # GET_YIELD_FROM_ITER
-
     BINARY_POWER = stack_op(lambda tos1, tos: tos1 ** tos)
     BINARY_MULTIPLY = stack_op(lambda tos1, tos: tos1 * tos)
-    BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1 @ tos)
+    # TODO(jansel): looks like FX lacks support for this one
+    BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1.__matmul__(tos))
     BINARY_FLOOR_DIVIDE = stack_op(lambda tos1, tos: tos1 // tos)
     BINARY_TRUE_DIVIDE = stack_op(lambda tos1, tos: tos1 / tos)
     BINARY_MODULO = stack_op(lambda tos1, tos: tos1 % tos)
@@ -464,6 +559,20 @@ class InstructionTracerBase(fx.Tracer):
     BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
     BINARY_XOR = stack_op(lambda tos1, tos: tos1 ^ tos)
     BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
+
+    INPLACE_POWER = stack_op(operator.ipow)
+    INPLACE_MULTIPLY = stack_op(operator.imul)
+    INPLACE_MATRIX_MULTIPLY = stack_op(operator.imatmul)
+    INPLACE_FLOOR_DIVIDE = stack_op(operator.ifloordiv)
+    INPLACE_TRUE_DIVIDE = stack_op(operator.itruediv)
+    INPLACE_MODULO = stack_op(operator.imod)
+    INPLACE_ADD = stack_op(operator.iadd)
+    INPLACE_SUBTRACT = stack_op(operator.isub)
+    INPLACE_LSHIFT = stack_op(operator.ilshift)
+    INPLACE_RSHIFT = stack_op(operator.irshift)
+    INPLACE_AND = stack_op(operator.iand)
+    INPLACE_XOR = stack_op(operator.ixor)
+    INPLACE_OR = stack_op(operator.ior)
 
     def __init__(self,
                  cnt: typing.Iterable,
@@ -520,18 +629,18 @@ class InstructionTracer(InstructionTracerBase):
             ncalls = count_calls(self.graph)
             counters["stats"]["calls_captured"] += ncalls
             counters["stats"]["fusions_possible"] += ncalls - 1
-            DEBUG and self.graph.print_tabular()
             self.guards.update(rv.guards)
             gm = GraphModule(FakeRootModule(self.nn_modules), self.graph)
             gm.recompile()
             name = unique_id("__translated_fn")
             self.f_globals[name] = self.compiler_fn(gm)
             self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
-            self.code_options["co_stacksize"] = len(self.graphargs) + 1
+            nargs = sum(map(len, self.graphargs))
+            self.code_options["co_stacksize"] = max(self.code_options["co_stacksize"], 1 + nargs)
             self.instructions[:] = (
                     [self.create_load_global(name)] +
-                    [arg.load(self) for arg in self.graphargs] +
-                    [create_instruction("CALL_FUNCTION", len(self.graphargs)),
+                    list(itertools.chain.from_iterable(arg.load(self) for arg in self.graphargs)) +
+                    [create_instruction("CALL_FUNCTION", nargs),
                      create_instruction("RETURN_VALUE")]
             )
         else:
@@ -607,13 +716,13 @@ def convert_frame_assert(compiler_fn: typing.Callable):
     def _convert_frame_assert(frame: types.FrameType):
         code = frame.f_code
         if code.co_filename.startswith("<eval_with_key>"):
-            return GuardedCode(code)  # skip FX output
+            return None  # skip FX output
         # TODO(jansel): detect and skip other types of generated code
         debug_checks(code)
-        guards = None
+        tracer = None
 
         def transform(instructions, code_options):
-            nonlocal guards
+            nonlocal tracer
             tracer = InstructionTracer(instructions,
                                        frame.f_locals,
                                        frame.f_globals,
@@ -621,19 +730,21 @@ def convert_frame_assert(compiler_fn: typing.Callable):
                                        code_options,
                                        compiler_fn)
             tracer.run()
-            guards = tracer.guards
 
         code = transform_code_object(frame.f_code, transform)
         if DEBUG:
-            print("ORIGINAL")
-            print(dis.Bytecode(code).info())
+            print("\nORIGINAL")
+            # print(dis.Bytecode(frame.f_code).info())
+            print(dis.Bytecode(frame.f_code).dis())
+            print("\nNEW CODE")
+            # print(dis.Bytecode(code).info())
             print(dis.Bytecode(code).dis())
-            print("NEW CODE")
-            print(dis.Bytecode(code).info())
-            print(dis.Bytecode(code).dis())
-            pprint.pprint(guards)
-        assert guards is not None
-        return GuardedCode(code, guards)
+
+            tracer.graph.print_tabular()
+            print()
+            pprint.pprint(tracer.guards)
+        assert tracer.guards is not None
+        return GuardedCode(code, tracer.guards)
 
     return _convert_frame_assert
 

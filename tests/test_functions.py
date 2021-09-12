@@ -22,22 +22,10 @@ def constant3(a, b):
 
 
 def make_test(fn):
+    nargs = len(inspect.signature(fn).parameters)
+
     def test_fn(self):
-        torch.fx.symbolic_trace(fn).graph.print_tabular()
-        nargs = len(inspect.signature(fn).parameters)
-        args1 = [torch.randn(10, 10) for _ in range(nargs)]
-        args2 = [torch.randn(10, 10) for _ in range(nargs)]
-        correct1 = fn(*args1)
-        correct2 = fn(*args2)
-        with eval_frame.optimize(convert_frame_assert(dummy_fx_compile)):
-            val1a = fn(*args1)
-            val2a = fn(*args2)
-            val1b = fn(*args1)
-            val2b = fn(*args2)
-        self.assertTrue(same(val1a, correct1))
-        self.assertTrue(same(val1b, correct1))
-        self.assertTrue(same(val2a, correct2))
-        self.assertTrue(same(val2b, correct2))
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=nargs)
 
     return test_fn
 
@@ -63,7 +51,7 @@ class FunctionTests(unittest.TestCase):
         self.assertTrue(same(val2, correct2))
         self.assertTrue(same(val3, correct3))
 
-    @unittest.skip("not implemented yet")
+    @unittest.skip("need to debug this")
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
@@ -76,10 +64,8 @@ class FunctionTests(unittest.TestCase):
         with eval_frame.optimize(convert_frame_assert(dummy_fx_compile)):
             val1 = call_packed([a, b, c])
             val2 = call_packed((a, b, c))
-            val3 = call_packed([a, b, c])
         self.assertTrue(same(val1, correct))
         self.assertTrue(same(val2, correct))
-        self.assertTrue(same(val3, correct))
 
     @make_test
     def test_add(a, b):
@@ -215,13 +201,43 @@ class FunctionTests(unittest.TestCase):
         return F.avg_pool2d(torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1),
                             kernel_size=2, padding=1)
 
-    @unittest.skip("not implemented")
-    @make_test
-    def test_inplace1(a, b):
-        o = torch.empty((10,))
-        o.copy_(a)
-        o -= b
-        return o
+    def test_inplace(self):
+        def inplace1(a, b):
+            o = torch.empty((10, 10))
+            o.copy_(a)
+            o -= b
+            return o
+
+        torchdynamo.testing.standard_test(self, inplace1, 2, expected_ops=3)
+
+    def test_unpack4(self):
+        def unpack4(a, b):
+            a = a[:5, :]
+            b = b[:5, :]
+            x, y = a.size()
+            o = torch.empty((x, y))
+            o.copy_(a / b)
+            return o
+
+        torchdynamo.testing.standard_test(self, unpack4, 2, expected_ops=8)
+
+    def test_unpack5(self):
+        def unpack5(a, b):
+            a = a[:5, :]
+            b = b[:5, :]
+            x, y = a.shape
+            o = torch.empty((x, y))
+            o.copy_(a / b)
+            return o
+
+        torchdynamo.testing.standard_test(self, unpack5, 2, expected_ops=8)
+
+    def test_matmul1(self):
+        def matmul_op1(a, b):
+            return a @ b
+
+        # TODO(jansel): FX doesn't support this, should add upstream support
+        torchdynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
     @unittest.skip("buggy")
     @make_test

@@ -47,7 +47,6 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
     return NULL;
   }
-  Py_INCREF(frame->f_locals);
 
   PyCodeObject *cached_code =
       cached_code_lookup(extra, frame->f_locals, frame->f_globals);
@@ -80,9 +79,9 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   }
 
   Py_DECREF(result);
+
   set_extra(cached_code, SKIP_CODE); // avoid double compile
   set_extra(frame->f_code, extra);
-  Py_DECREF(frame->f_locals);
   set_eval_frame(callback, tstate);
   return swap_code_and_run(frame, cached_code, throw_flag);
 }
@@ -94,15 +93,12 @@ static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
   if (extra == NULL || extra == SKIP_CODE) {
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
-
   // TODO(jansel): investigate directly using the "fast" representation
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
     return NULL;
   }
-  // Py_INCREF(frame->f_locals); // is this needed?
   PyCodeObject *cached_code =
       cached_code_lookup(extra, frame->f_locals, frame->f_globals);
-  // Py_DECREF(frame->f_locals); // is this needed?
   if (cached_code != NULL) {
     // used cached version
     return swap_code_and_run(frame, cached_code, throw_flag);

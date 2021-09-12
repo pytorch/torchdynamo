@@ -71,6 +71,18 @@ class ConstantVariable(VariableTracker):
         return self.value
 
 
+class BuiltinVariable(VariableTracker):
+    def __init__(self, fn, **kwargs):
+        super(BuiltinVariable, self).__init__(**kwargs)
+        self.fn = fn
+
+
+class IterVariable(VariableTracker):
+    def __init__(self, it, **kwargs):
+        super(IterVariable, self).__init__(**kwargs)
+        self.it = it
+
+
 class GetAttrVariable(VariableTracker):
     def __init__(self, obj, name, **kwargs):
         super(GetAttrVariable, self).__init__(**kwargs)

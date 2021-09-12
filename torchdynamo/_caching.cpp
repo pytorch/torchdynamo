@@ -87,8 +87,6 @@ public:
   }
   bool check(PyObject *scope) {
     PyObject *value1 = PyWeakref_GET_OBJECT(valref_);
-    // PyObject *value1 = PyWeakref_GetObject(valref_);
-    // NULL_CHECK(value1);
     PyObject *value2 = PyObject_GetItem(scope, key_); // new ref
     Py_XDECREF(value2);
     return value1 == value2;
@@ -134,6 +132,73 @@ void init_value_guards(GuardsVector &out, PyObject *in, PyObject *scope) {
   }
 }
 
+#define TUPLE_OR_LIST_CHECK(NAME)                                              \
+  class Tensor##NAME##Check : public GuardCheck {                              \
+    int len_;                                                                  \
+    PyObject *key_;                                                            \
+    PyObject *objtype_;                                                        \
+                                                                               \
+  public:                                                                      \
+    Tensor##NAME##Check(PyObject *key, PyObject *value) {                      \
+      len_ = Py##NAME##_Size(value);                                           \
+                                                                               \
+      key_ = key;                                                              \
+      Py_INCREF(key_);                                                         \
+                                                                               \
+      PyObject *item = Py##NAME##_GetItem(value, 0); /* borrows */             \
+      NULL_CHECK(item);                                                        \
+      objtype_ = (PyObject *)Py_TYPE(item); /* borrows */                      \
+      NULL_CHECK(objtype_);                                                    \
+      Py_INCREF(objtype_);                                                     \
+    }                                                                          \
+    ~Tensor##NAME##Check() {                                                   \
+      Py_DECREF(key_);                                                         \
+      Py_DECREF(objtype_);                                                     \
+    }                                                                          \
+    bool check(PyObject *scope) {                                              \
+      PyObject *value = PyObject_GetItem(scope, key_); /* new ref*/            \
+      if (value == NULL) {                                                     \
+        return false;                                                          \
+      }                                                                        \
+      Py_DECREF(value);                                                        \
+      if (!Py##NAME##_CheckExact(value)) {                                     \
+        return false;                                                          \
+      }                                                                        \
+      if (Py##NAME##_Size(value) != len_) {                                    \
+        return false;                                                          \
+      }                                                                        \
+      for (int i = 0; i < len_; ++i) {                                         \
+        PyObject *item = Py##NAME##_GET_ITEM(value, i); /* borrows */          \
+        if ((PyObject *)Py_TYPE(item) != objtype_) {                           \
+          return false;                                                        \
+        }                                                                      \
+      }                                                                        \
+      return true;                                                             \
+    }                                                                          \
+  }
+
+TUPLE_OR_LIST_CHECK(List);
+TUPLE_OR_LIST_CHECK(Tuple);
+
+void init_tensor_list_guards(GuardsVector &out, PyObject *in, PyObject *scope) {
+  long len = PyObject_Length(in);
+  out.reserve(len + out.size());
+  for (long i = 0; i < len; ++i) {
+    PyObject *key = PyList_GetItem(in, i); // borrows
+    NULL_CHECK(key);
+    PyObject *value = PyObject_GetItem(scope, key); // new ref
+    NULL_CHECK(value);
+    if (PyList_CheckExact(value)) {
+      out.emplace_back(new TensorListCheck(key, value));
+    } else if (PyTuple_CheckExact(value)) {
+      out.emplace_back(new TensorTupleCheck(key, value));
+    } else {
+      abort_error("list expected");
+    }
+    Py_DECREF(value);
+  }
+}
+
 } // namespace
 
 extern "C" PyCodeObject *
@@ -169,6 +234,8 @@ CacheEntry::CacheEntry(CacheEntry *next, PyObject *f_locals,
       PyObject_GetAttrString(guarded_code, "value_globals");
   PyObject *type_locals = PyObject_GetAttrString(guarded_code, "type_locals");
   PyObject *type_globals = PyObject_GetAttrString(guarded_code, "type_globals");
+  PyObject *fixed_tensor_list_locals =
+      PyObject_GetAttrString(guarded_code, "fixed_tensor_list_locals");
   if (code == NULL || value_locals == NULL || value_globals == NULL ||
       type_locals == NULL || type_globals == NULL) {
     abort_error("callback must return a GuardedCode()");
@@ -178,10 +245,12 @@ CacheEntry::CacheEntry(CacheEntry *next, PyObject *f_locals,
   init_value_guards(globals_checks_, value_globals, f_globals);
   init_type_guards(locals_checks_, type_locals, f_locals);
   init_type_guards(globals_checks_, type_globals, f_globals);
+  init_tensor_list_guards(locals_checks_, fixed_tensor_list_locals, f_locals);
 
   Py_DECREF(value_locals);
   Py_DECREF(value_globals);
   Py_DECREF(type_locals);
   Py_DECREF(type_globals);
+  Py_DECREF(fixed_tensor_list_locals);
   code_ = (PyCodeObject *)code;
 }

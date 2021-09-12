@@ -5,8 +5,6 @@ import torch
 from torch.nn import functional as F
 
 import torchdynamo
-from torchdynamo import eval_frame
-from torchdynamo.symbolic_convert import convert_frame_assert, dummy_fx_compile
 from torchdynamo.testing import same
 
 torchdynamo.symbolic_convert.DEBUG = True
@@ -101,22 +99,21 @@ class ModuleMethodCall(torch.nn.Module):
         return x1 + x2
 
 
+class ConstLoop(torch.nn.Module):
+    def __init__(self):
+        super(ConstLoop, self).__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.count = 3
+
+    def forward(self, x):
+        for i in range(self.count):
+            x = F.sigmoid(self.linear1(x))
+        return x
+
+
 def make_test(fn):
     def test_fn(self):
-        torch.fx.symbolic_trace(fn).graph.print_tabular()
-        args1 = [torch.randn(10, 10)]
-        args2 = [torch.randn(10, 10)]
-        correct1 = fn(*args1)
-        correct2 = fn(*args2)
-        with eval_frame.optimize(convert_frame_assert(dummy_fx_compile)):
-            val1a = fn(*args1)
-            val2a = fn(*args2)
-            val1b = fn(*args1)
-            val2b = fn(*args2)
-        self.assertTrue(same(val1a, correct1))
-        self.assertTrue(same(val1b, correct1))
-        self.assertTrue(same(val2a, correct2))
-        self.assertTrue(same(val2b, correct2))
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1)
 
     return test_fn
 
@@ -131,11 +128,10 @@ class NNModuleTests(unittest.TestCase):
     test_fnmember = make_test(FnMember())
     test_fnmembercmp = make_test(FnMemberCmp(F.relu))
     test_fnmembercmp = make_test(FnMemberCmp(None))
-
-    # TODO(jansel): these ones aren't implemented yet
-    # test_istraining1 = make_test(IsTrainingCheck())
-    # test_istraining2 = make_test(IsTrainingCheck())
-    # test_iseval1 = make_test(IsEvalCheck())
-    # test_iseval2 = make_test(IsEvalCheck())
+    test_istraining1 = make_test(IsTrainingCheck())
+    test_istraining2 = make_test(IsTrainingCheck())
+    test_iseval1 = make_test(IsEvalCheck())
+    test_iseval2 = make_test(IsEvalCheck())
+    test_constloop = make_test(ConstLoop())
 
     # TODO(jansel): we should make sure to expand nn.Sequential
