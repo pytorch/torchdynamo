@@ -1,7 +1,5 @@
 #!/usr/bin/env pytest
 import inspect
-import sys
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -9,11 +7,11 @@ from torch import sub
 from torch.nn import functional as F
 
 import torchdynamo.testing
-from torchdynamo import eval_frame, symbolic_convert
 from torchdynamo.convert_frame import convert_frame_assert
-from torchdynamo.testing import same, CompileCounter
-
-torchdynamo.DEBUG = True
+from torchdynamo import eval_frame
+from torchdynamo import symbolic_convert
+from torchdynamo.testing import CompileCounter
+from torchdynamo.testing import same
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)

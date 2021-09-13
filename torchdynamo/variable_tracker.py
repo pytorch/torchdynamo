@@ -48,10 +48,11 @@ class VariableTracker:
         vars.sort(key=lambda v: priority.index(type(v)))
         return type(vars[0])
 
-    def __init__(self, state=TracingSupported.UNKNOWN, guards=None):
+    def __init__(self, state=TracingSupported.UNKNOWN, guards=None, arg_name=None):
         super(VariableTracker, self).__init__()
         self.state = state
         self.guards = guards or set()
+        self.arg_name = arg_name
 
 
 class TensorVariable(VariableTracker):

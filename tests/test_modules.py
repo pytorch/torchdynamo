@@ -4,8 +4,6 @@ from torch.nn import functional as F
 
 import torchdynamo.testing
 
-torchdynamo.DEBUG = True
-
 
 class BasicModule(torch.nn.Module):
     def __init__(self):

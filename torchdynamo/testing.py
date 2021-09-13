@@ -7,8 +7,8 @@ from torchdynamo import eval_frame
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import transform_code_object
-from torchdynamo.guards import GuardedCode
 from torchdynamo.convert_frame import convert_frame_assert
+from torchdynamo.guards import GuardedCode
 
 
 def same(a, b):
@@ -84,7 +84,10 @@ class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         torchdynamo.reset()
+        torchdynamo.DEBUG = cls.prior_debug
 
     @classmethod
     def setUpClass(cls):
         torchdynamo.reset()
+        cls.prior_debug = torchdynamo.DEBUG
+        torchdynamo.DEBUG = True

@@ -1,6 +1,4 @@
 #!/usr/bin/env pytest
-import unittest
-
 import torchdynamo.testing
 from torchdynamo import eval_frame
 
@@ -33,7 +31,7 @@ def fn3():
 with_debug_nops = eval_frame.optimize(torchdynamo.testing.debug_insert_nops)
 
 
-class NopTests(unittest.TestCase):
+class NopTests(torchdynamo.testing.TestCase):
     @with_debug_nops
     def test1(self):
         self.assertEqual(fn1(1, 2), -7)

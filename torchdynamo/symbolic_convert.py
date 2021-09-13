@@ -4,7 +4,6 @@ import functools
 import inspect
 import itertools
 import operator
-import sys
 import types
 import typing
 from typing import List
@@ -108,6 +107,12 @@ class InstructionTracerBase(fx.Tracer):
             "LOAD_FAST", self.code_options["co_varnames"].index(name), name
         )
 
+    def create_store_fast(self, name):
+        assert name in self.code_options["co_varnames"]
+        return create_instruction(
+            "STORE_FAST", self.code_options["co_varnames"].index(name), name
+        )
+
     def create_load_global(self, name):
         assert name in self.code_options["co_names"]
         return create_instruction(
@@ -121,6 +126,7 @@ class InstructionTracerBase(fx.Tracer):
                 proxy=self.create_graph_input(name),
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
+                arg_name=name,
             )
         elif isinstance(value, torch.nn.Module):
             key = f"{name}_{next(self.cnt)}"
@@ -129,12 +135,14 @@ class InstructionTracerBase(fx.Tracer):
                 key=key,
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
+                arg_name=name,
             )
         elif value is True or value is False or value is None:
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
+                arg_name=name,
             )
         elif type(value) in (tuple, list) and all(
             isinstance(x, torch.Tensor) for x in value
@@ -267,7 +275,8 @@ class InstructionTracerBase(fx.Tracer):
         if not hasattr(self, inst.opname):
             unimplemented(f"missing: {inst.opname}")
         getattr(self, inst.opname)(inst)
-        return inst.opname != "RETURN_VALUE"
+        # print(len(self.stack), inst.opname)
+        return inst.opname != "RETURN_VALUE" and self.instruction_pointer is not None
 
     def run(self):
         while self.step():
@@ -361,8 +370,50 @@ class InstructionTracerBase(fx.Tracer):
         if isinstance(value, (AllowedFunctionOrModuleVariable, ConstantVariable)):
             if not value.value:
                 self.jump(inst)
+        elif isinstance(value, TensorVariable) and isinstance(self, InstructionTracer):
+            # compile a partial subgraph prefix then jump into user code
+            assert len(self.stack) == 0
+            # TODO(jansel): add some liveness analysis to see if we need all these
+            jump_to_user_code = [
+                create_instruction("POP_JUMP_IF_FALSE", target=inst.target),
+                create_instruction(
+                    "JUMP_ABSOLUTE", target=self.instructions[self.instruction_pointer]
+                ),
+            ]
+            var_names = [k for k, v in self.symbolic_locals.items() if v.arg_name != k]
+            if var_names:
+                self.insert_instruction_prefix(
+                    self.compile_subgraph(
+                        [self.symbolic_locals[k] for k in var_names] + [value]
+                    )
+                    + self.restore_locals(var_names, 1)
+                    + jump_to_user_code
+                )
+            else:
+                self.insert_instruction_prefix(
+                    self.compile_subgraph(value) + jump_to_user_code
+                )
         else:
             unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
+
+    def insert_instruction_prefix(self, prefix: List[Instruction]):
+        """
+        We call this on the creation of a new compiled subgraph that is inserted
+        before user code.
+
+        Currently, this stops the analysis (we only support a prefix of user code).
+
+        Later we should extend this to continue the analysis
+        """
+        self.instructions[:] = prefix + self.instructions
+        # TODO(jansel): resume the analysis instead of exiting
+        self.instruction_pointer = None  # exit analysi
+
+    def restore_locals(self, var_names, extra):
+        code = [create_instruction("UNPACK_SEQUENCE", len(var_names) + extra)]
+        for name in var_names:
+            code.append(self.create_store_fast(name))
+        return code
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -387,19 +438,41 @@ class InstructionTracerBase(fx.Tracer):
         left, right = self.popn(2)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
-        supported = {
+        supported_is_const = {
             "is": operator.is_,
             "is not": operator.is_not,
         }
-        if op in supported and isinstance(right, ConstantVariable):
+        if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
+            supported_tensors = {
+                ">": operator.gt,
+                "<": operator.lt,
+                ">=": operator.ge,
+                "<=": operator.le,
+            }
+            if op in supported_tensors:
+                self.push(
+                    TensorVariable(
+                        supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                        **options,
+                    )
+                )
+            else:
+                unimplemented(
+                    f"COMPARE_OP {type(left).__name__} {op} {type(right).__name__}"
+                )
+        elif op in supported_is_const and isinstance(right, ConstantVariable):
             if isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable)):
                 self.push(
-                    ConstantVariable(supported[op](left.value, right.value), **options)
+                    ConstantVariable(
+                        supported_is_const[op](left.value, right.value), **options
+                    )
                 )
             else:
                 unimplemented(f"{type(left).__name__} is <const>")
         else:
-            unimplemented(f"COMPARE_OP {op}")
+            unimplemented(
+                f"COMPARE_OP {type(left).__name__} {op} {type(right).__name__}"
+            )
 
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
@@ -635,6 +708,50 @@ class InstructionTracerBase(fx.Tracer):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
+    def compile_subgraph(self, rv):
+        if isinstance(rv, TensorVariable):
+            self.create_node("output", "output", (self.create_arg(rv.as_proxy()),), {})
+        elif isinstance(rv, list):
+            outputs = []
+            for x in rv:
+                if isinstance(x, TensorVariable):
+                    outputs.append(self.create_arg(x.as_proxy()))
+                elif isinstance(x, NNModuleVariable):
+                    outputs.append(
+                        self.create_arg(
+                            self.create_proxy("get_attr", x.key, tuple(), {})
+                        )
+                    )
+                else:
+                    assert False, type(x).__name__
+            outputs = tuple(outputs)
+            rv = VariableTracker(**VariableTracker.propagate(rv))
+            self.create_node("output", "output", (outputs,), {})
+        else:
+            unimplemented(f"RETURN_VALUE {type(rv).__name__}")
+        ncalls = count_calls(self.graph)
+        counters["stats"]["calls_captured"] += ncalls
+        counters["stats"]["fusions_possible"] += ncalls - 1
+        self.guards.update(rv.guards)
+        gm = fx.GraphModule(FakeRootModule(self.nn_modules), self.graph)
+        gm.recompile()
+        name = unique_id("__translated_fn")
+        self.f_globals[name] = self.compiler_fn(gm)
+        self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
+        nargs = sum(map(len, self.graphargs))
+        self.code_options["co_stacksize"] = max(
+            self.code_options["co_stacksize"], 1 + nargs
+        )
+        return (
+            [self.create_load_global(name)]
+            + list(
+                itertools.chain.from_iterable(arg.load(self) for arg in self.graphargs)
+            )
+            + [
+                create_instruction("CALL_FUNCTION", nargs),
+            ]
+        )
+
     def __init__(
         self,
         cnt: typing.Iterable,
@@ -695,37 +812,9 @@ class InstructionTracer(InstructionTracerBase):
     def RETURN_VALUE(self, inst):
         rv = self.pop()
         if rv.state == TracingSupported.YES:
-            if isinstance(rv, TensorVariable):
-                self.create_node("output", "output", (self.create_arg(rv.proxy),), {})
-            else:
-                unimplemented(f"RETURN_VALUE {type(rv).__name__}")
-            ncalls = count_calls(self.graph)
-            counters["stats"]["calls_captured"] += ncalls
-            counters["stats"]["fusions_possible"] += ncalls - 1
-            self.guards.update(rv.guards)
-            gm = fx.GraphModule(FakeRootModule(self.nn_modules), self.graph)
-            gm.recompile()
-            name = unique_id("__translated_fn")
-            self.f_globals[name] = self.compiler_fn(gm)
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
-                name,
-            )
-            nargs = sum(map(len, self.graphargs))
-            self.code_options["co_stacksize"] = max(
-                self.code_options["co_stacksize"], 1 + nargs
-            )
-            self.instructions[:] = (
-                [self.create_load_global(name)]
-                + list(
-                    itertools.chain.from_iterable(
-                        arg.load(self) for arg in self.graphargs
-                    )
-                )
-                + [
-                    create_instruction("CALL_FUNCTION", nargs),
-                    create_instruction("RETURN_VALUE"),
-                ]
-            )
+            self.instructions[:] = self.compile_subgraph(rv) + [
+                create_instruction("RETURN_VALUE")
+            ]
         else:
             unimplemented("not traceable")
 

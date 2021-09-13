@@ -37,15 +37,12 @@ class _NotProvided:
     pass
 
 
-def create_instruction(name, arg=None, argval=_NotProvided):
+def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     assert arg is None or 0 <= arg < 256
     if argval is _NotProvided:
         argval = arg
     return Instruction(
-        opcode=dis.opmap[name],
-        opname=name,
-        arg=arg,
-        argval=argval,
+        opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
 
 

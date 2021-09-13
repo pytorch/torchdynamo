@@ -8,6 +8,12 @@ def optimize(fx_compile_fn):
     return eval_frame.optimize(torchdynamo.convert_frame.convert_frame(fx_compile_fn))
 
 
+def optimize_assert(fx_compile_fn):
+    return eval_frame.optimize(
+        torchdynamo.convert_frame.convert_frame_assert(fx_compile_fn)
+    )
+
+
 run = eval_frame.run
 
 
