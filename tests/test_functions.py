@@ -2,13 +2,14 @@
 import inspect
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch import sub
 from torch.nn import functional as F
 
 import torchdynamo.testing
-from torchdynamo import eval_frame
+from torchdynamo import eval_frame, symbolic_convert
 from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.testing import same, CompileCounter
 
@@ -56,7 +57,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @unittest.skipIf(sys.version_info < (3, 8), "needs python 3.8+")
+    # Note, support for this causes a crash in torchbench on some version of python
+    # still need to debug it, so this feature is gated behind symbolic_convert.LIST_UNPACK
+    @patch.object(symbolic_convert, "LIST_UNPACK", True)
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args

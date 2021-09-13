@@ -36,7 +36,7 @@ from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
 
-DEBUG = False
+LIST_UNPACK = False
 counters = collections.defaultdict(collections.Counter)
 
 
@@ -139,8 +139,7 @@ class InstructionTracerBase(fx.Tracer):
         elif type(value) in (tuple, list) and all(
             isinstance(x, torch.Tensor) for x in value
         ):
-            if sys.version_info < (3, 8):
-                unimplemented("TODO: debug crash in older pythons")
+            LIST_UNPACK or unimplemented("TODO: debug torchbench crash caused by this")
             guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
             items = []
             self.graphargs.append(TensorListArgs(name, len(value)))
