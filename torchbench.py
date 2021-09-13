@@ -253,8 +253,8 @@ def main():
         print(
             textwrap.dedent(
                 f"""
-        MEAN SPEEDUP {np.mean(speedups):.3f}x
-        GEOMEAN SPEEDUP {gmean(speedups):.3f}x"""
+                MEAN SPEEDUP {np.mean(speedups):.3f}x
+                GEOMEAN SPEEDUP {gmean(speedups):.3f}x"""
             )
         )
 

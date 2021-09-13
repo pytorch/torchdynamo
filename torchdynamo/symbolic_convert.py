@@ -100,7 +100,7 @@ class TensorListArgs:
         ]
 
 
-class InstructionTracerBase(fx.Tracer):
+class InstructionTranslatorBase(fx.Tracer):
     def create_load_fast(self, name):
         assert name in self.code_options["co_varnames"]
         return create_instruction(
@@ -120,13 +120,15 @@ class InstructionTracerBase(fx.Tracer):
         )
 
     def wrap_local(self, name, value):
+        """
+        Turn an arg/input to the frame into a VariableTracker instance
+        """
         if isinstance(value, torch.Tensor):
             self.graphargs.append(LocalArg(name))
             return TensorVariable(
                 proxy=self.create_graph_input(name),
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
-                arg_name=name,
             )
         elif isinstance(value, torch.nn.Module):
             key = f"{name}_{next(self.cnt)}"
@@ -135,14 +137,12 @@ class InstructionTracerBase(fx.Tracer):
                 key=key,
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
-                arg_name=name,
             )
         elif value is True or value is False or value is None:
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
-                arg_name=name,
             )
         elif type(value) in (tuple, list) and all(
             isinstance(x, torch.Tensor) for x in value
@@ -164,6 +164,10 @@ class InstructionTracerBase(fx.Tracer):
             return cls(items, guards=guards)
         else:
             unimplemented(f"wrap_local: {type(value).__name__}")
+
+    def mark_initial_state(self):
+        for k, v in self.symbolic_locals.items():
+            self.symbolic_locals[k] = v.with_initial_name(k)
 
     def create_graph_input(self, name):
         placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
@@ -238,14 +242,14 @@ class InstructionTracerBase(fx.Tracer):
                 assert forward is not torch.nn.Module.forward
                 self.guards.update(fn.guards)
                 self.push(
-                    RecursiveInstructionTracer.inline_call(
+                    RecursiveInstructionTranslator.inline_call(
                         self, forward, [fn] + args, kwargs
                     )
                 )
         elif isinstance(fn, UserFunctionVariable):
             self.guards.update(fn.guards)
             self.push(
-                RecursiveInstructionTracer.inline_call(
+                RecursiveInstructionTranslator.inline_call(
                     self, fn.fn, fn.self_args() + args, kwargs
                 )
             )
@@ -370,7 +374,7 @@ class InstructionTracerBase(fx.Tracer):
         if isinstance(value, (AllowedFunctionOrModuleVariable, ConstantVariable)):
             if not value.value:
                 self.jump(inst)
-        elif isinstance(value, TensorVariable) and isinstance(self, InstructionTracer):
+        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             assert len(self.stack) == 0
             # TODO(jansel): add some liveness analysis to see if we need all these
@@ -380,7 +384,9 @@ class InstructionTracerBase(fx.Tracer):
                     "JUMP_ABSOLUTE", target=self.instructions[self.instruction_pointer]
                 ),
             ]
-            var_names = [k for k, v in self.symbolic_locals.items() if v.arg_name != k]
+            var_names = [
+                k for k, v in self.symbolic_locals.items() if v.initial_name != k
+            ]
             if var_names:
                 self.insert_instruction_prefix(
                     self.compile_subgraph(
@@ -395,25 +401,6 @@ class InstructionTracerBase(fx.Tracer):
                 )
         else:
             unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
-
-    def insert_instruction_prefix(self, prefix: List[Instruction]):
-        """
-        We call this on the creation of a new compiled subgraph that is inserted
-        before user code.
-
-        Currently, this stops the analysis (we only support a prefix of user code).
-
-        Later we should extend this to continue the analysis
-        """
-        self.instructions[:] = prefix + self.instructions
-        # TODO(jansel): resume the analysis instead of exiting
-        self.instruction_pointer = None  # exit analysi
-
-    def restore_locals(self, var_names, extra):
-        code = [create_instruction("UNPACK_SEQUENCE", len(var_names) + extra)]
-        for name in var_names:
-            code.append(self.create_store_fast(name))
-        return code
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -752,6 +739,28 @@ class InstructionTracerBase(fx.Tracer):
             ]
         )
 
+    def should_compile_partial_graph(self):
+        return isinstance(self, InstructionTranslator) and count_calls(self.graph) > 0
+
+    def insert_instruction_prefix(self, prefix: List[Instruction]):
+        """
+        We call this on the creation of a new compiled subgraph that is inserted
+        before user code.
+
+        Currently, this stops the analysis (we only support a prefix of user code).
+
+        Later we should extend this to continue the analysis
+        """
+        self.instructions[:] = prefix + self.instructions
+        # TODO(jansel): resume the analysis instead of exiting
+        self.instruction_pointer = None  # exit analysi
+
+    def restore_locals(self, var_names, extra):
+        code = [create_instruction("UNPACK_SEQUENCE", len(var_names) + extra)]
+        for name in var_names:
+            code.append(self.create_store_fast(name))
+        return code
+
     def __init__(
         self,
         cnt: typing.Iterable,
@@ -765,7 +774,7 @@ class InstructionTracerBase(fx.Tracer):
         code_options,
         symbolic_locals=None,
     ):
-        super(InstructionTracerBase, self).__init__()
+        super(InstructionTranslatorBase, self).__init__()
         self.graph = graph
         self.instructions = instructions
         self.indexof = {id(i): n for n, i in enumerate(instructions)}
@@ -781,7 +790,7 @@ class InstructionTracerBase(fx.Tracer):
         self.symbolic_locals = symbolic_locals
 
 
-class InstructionTracer(InstructionTracerBase):
+class InstructionTranslator(InstructionTranslatorBase):
     def __init__(
         self,
         instructions: List[Instruction],
@@ -791,7 +800,7 @@ class InstructionTracer(InstructionTracerBase):
         code_options,
         compiler_fn,
     ):
-        super(InstructionTracer, self).__init__(
+        super(InstructionTranslator, self).__init__(
             cnt=itertools.count(),
             graph=fx.Graph(),
             graphargs=[],
@@ -802,16 +811,20 @@ class InstructionTracer(InstructionTracerBase):
             f_builtins=f_builtins,
             code_options=code_options,
         )
+        self.compiler_fn = compiler_fn
         self.symbolic_locals = {
             k: self.wrap_local(k, f_locals[k])
             for k in code_options["co_varnames"]
             if k in f_locals
         }
-        self.compiler_fn = compiler_fn
+        self.mark_initial_state()
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
-        if rv.state == TracingSupported.YES:
+        self.instruction_pointer = None
+        if count_calls(self.graph) == 0:
+            unimplemented("no graph found")
+        elif rv.state == TracingSupported.YES:
             self.instructions[:] = self.compile_subgraph(rv) + [
                 create_instruction("RETURN_VALUE")
             ]
@@ -819,7 +832,7 @@ class InstructionTracer(InstructionTracerBase):
             unimplemented("not traceable")
 
 
-class RecursiveInstructionTracer(InstructionTracerBase):
+class RecursiveInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
     @staticmethod
@@ -838,7 +851,7 @@ class RecursiveInstructionTracer(InstructionTracerBase):
                 sub_locals[k] = v
             else:
                 unimplemented(f"call user defined {v}")
-        tracer = RecursiveInstructionTracer(
+        tracer = RecursiveInstructionTranslator(
             parent, func.__code__, sub_locals, sub_globals
         )
         tracer.run()
@@ -847,12 +860,12 @@ class RecursiveInstructionTracer(InstructionTracerBase):
 
     def __init__(
         self,
-        parent: InstructionTracerBase,
+        parent: InstructionTranslatorBase,
         code: types.CodeType,
         symbolic_locals,
         f_globals,
     ):
-        super(RecursiveInstructionTracer, self).__init__(
+        super(RecursiveInstructionTranslator, self).__init__(
             cnt=parent.cnt,
             graph=parent.graph,
             graphargs=parent.graphargs,
@@ -868,6 +881,7 @@ class RecursiveInstructionTracer(InstructionTracerBase):
 
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
+        self.instruction_pointer = None
 
 
 class FakeRootModule(torch.nn.Module):

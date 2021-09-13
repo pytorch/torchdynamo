@@ -10,7 +10,7 @@ import torchdynamo
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
-from torchdynamo.symbolic_convert import InstructionTracer
+from torchdynamo.symbolic_convert import InstructionTranslator
 from torchdynamo.symbolic_convert import counters
 
 
@@ -53,7 +53,7 @@ def convert_frame_assert(compiler_fn: typing.Callable):
 
         def transform(instructions, code_options):
             nonlocal tracer
-            tracer = InstructionTracer(
+            tracer = InstructionTranslator(
                 instructions,
                 frame.f_locals,
                 frame.f_globals,
