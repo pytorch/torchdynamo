@@ -1,4 +1,5 @@
 import collections
+import copy
 import dataclasses
 import functools
 import inspect
@@ -20,11 +21,12 @@ from .guards import Guard
 from .guards import GuardBuilder
 from .guards import GuardSource
 from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import BaseListVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
-from .variable_tracker import IterVariable
+from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import NNModuleVariable
 from .variable_tracker import SliceVariable
@@ -240,47 +242,61 @@ class InstructionTranslatorBase(fx.Tracer):
             else:
                 forward = mod.__class__.forward
                 assert forward is not torch.nn.Module.forward
-                self.guards.update(fn.guards)
-                self.push(
-                    RecursiveInstructionTranslator.inline_call(
-                        self, forward, [fn] + args, kwargs
-                    )
-                )
+                self.inline_user_function(fn.guards, forward, [fn] + args, kwargs)
         elif isinstance(fn, UserFunctionVariable):
-            self.guards.update(fn.guards)
-            self.push(
-                RecursiveInstructionTranslator.inline_call(
-                    self, fn.fn, fn.self_args() + args, kwargs
-                )
-            )
+            self.inline_user_function(fn.guards, fn.fn, fn.self_args() + args, kwargs)
         elif isinstance(fn, BuiltinVariable):
             allargs = args + list(kwargs.values())
             options = VariableTracker.propagate(allargs)
             constant_args = all(isinstance(x, ConstantVariable) for x in allargs)
             if fn.fn is range and constant_args:
                 items = list(
-                    fn.fn(
+                    range(
                         *[x.value for x in args],
                         **{k: v.value for k, v in kwargs.items()},
                     )
                 )
                 self.push(ListVariable(items, **options))
-            elif fn.fn is iter and args and isinstance(args[0], ListVariable):
+            elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
                 assert not kwargs and len(args) == 1
-                self.push(IterVariable(iter(args[0].items), **options))
+                self.push(ListIteratorVariable(args[0].items, **options))
             else:
                 unimplemented(f"builtin call {fn.fn}")
         else:
             unimplemented(f"call_function {type(fn).__name__}")
 
+    def inline_user_function(self, guards, fn, args, kwargs):
+        """
+        A call to some user defined function by inlining it.
+        """
+        self.guards.update(guards)
+        self.push(RecursiveInstructionTranslator.inline_call(self, fn, args, kwargs))
+
     def step(self):
         inst = self.instructions[self.instruction_pointer]
         self.instruction_pointer += 1
-        if not hasattr(self, inst.opname):
-            unimplemented(f"missing: {inst.opname}")
-        getattr(self, inst.opname)(inst)
-        # print(len(self.stack), inst.opname)
-        return inst.opname != "RETURN_VALUE" and self.instruction_pointer is not None
+
+        if len(self.stack) == 0 and self.should_compile_partial_graph():
+            self.checkpoint = inst, self.copy_graphstate()
+
+        try:
+            if not hasattr(self, inst.opname):
+                unimplemented(f"missing: {inst.opname}")
+            getattr(self, inst.opname)(inst)
+            # print(len(self.stack), inst.opname)
+            return (
+                inst.opname != "RETURN_VALUE" and self.instruction_pointer is not None
+            )
+        except NotImplementedError:
+            if self.checkpoint:
+                continue_inst, state = self.checkpoint
+                self.restore_graphstate(state)
+                self.compile_partial_subgraph(
+                    self.stack,
+                    [create_instruction("JUMP_ABSOLUTE", target=continue_inst)],
+                )
+            else:
+                raise
 
     def run(self):
         while self.step():
@@ -355,8 +371,18 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
+        elif (
+            isinstance(value, types.BuiltinFunctionType)
+            and self.should_compile_partial_graph()
+        ):
+            self.compile_partial_subgraph(
+                self.stack,
+                [
+                    create_instruction("JUMP_ABSOLUTE", target=inst),
+                ],
+            )
         else:
-            unimplemented("LOAD_GLOBAL")
+            unimplemented(f"LOAD_GLOBAL {type(value).__name__}")
 
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
@@ -377,38 +403,23 @@ class InstructionTranslatorBase(fx.Tracer):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             assert len(self.stack) == 0
-            # TODO(jansel): add some liveness analysis to see if we need all these
             jump_to_user_code = [
                 create_instruction("POP_JUMP_IF_FALSE", target=inst.target),
                 create_instruction(
                     "JUMP_ABSOLUTE", target=self.instructions[self.instruction_pointer]
                 ),
             ]
-            var_names = [
-                k for k, v in self.symbolic_locals.items() if v.initial_name != k
-            ]
-            if var_names:
-                self.insert_instruction_prefix(
-                    self.compile_subgraph(
-                        [self.symbolic_locals[k] for k in var_names] + [value]
-                    )
-                    + self.restore_locals(var_names, 1)
-                    + jump_to_user_code
-                )
-            else:
-                self.insert_instruction_prefix(
-                    self.compile_subgraph(value) + jump_to_user_code
-                )
+            self.compile_partial_subgraph([value], jump_to_user_code)
         else:
             unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
 
     def FOR_ITER(self, inst):
         it = self.pop()
-        if isinstance(it, IterVariable):
+        if isinstance(it, ListIteratorVariable):
             self.guards.update(it.guards)
             try:
-                val = next(it.it)
-                self.push(it)
+                val, next_iter = it.next_variables()
+                self.push(next_iter)
                 self.push(val)
             except StopIteration:
                 self.jump(inst)
@@ -479,7 +490,7 @@ class InstructionTranslatorBase(fx.Tracer):
         else:
             unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
-        assert isinstance(argsvars, ListVariable)
+        assert isinstance(argsvars, BaseListVariable)
         assert isinstance(kwargsvars, ConstDictVariable)
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
@@ -599,7 +610,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
         options = VariableTracker.propagate([seq])
-        if isinstance(seq, ListVariable):
+        if isinstance(seq, BaseListVariable):
             assert len(seq.items) == inst.argval
             self.guards.update(seq.guards)
             for i in reversed(seq.items):
@@ -696,6 +707,10 @@ class InstructionTranslatorBase(fx.Tracer):
     INPLACE_OR = stack_op(operator.ior)
 
     def compile_subgraph(self, rv):
+        """
+        Generate code from self.graph and return the Instruction()s to
+        call that generated code.
+        """
         if isinstance(rv, TensorVariable):
             self.create_node("output", "output", (self.create_arg(rv.as_proxy()),), {})
         elif isinstance(rv, list):
@@ -710,7 +725,7 @@ class InstructionTranslatorBase(fx.Tracer):
                         )
                     )
                 else:
-                    assert False, type(x).__name__
+                    unimplemented(f"restore state for {type(x).__name__}")
             outputs = tuple(outputs)
             rv = VariableTracker(**VariableTracker.propagate(rv))
             self.create_node("output", "output", (outputs,), {})
@@ -739,6 +754,36 @@ class InstructionTranslatorBase(fx.Tracer):
             ]
         )
 
+    def compile_partial_subgraph(
+        self, stack_values: List[VariableTracker], jump_to_user_code: List[Instruction]
+    ):
+        """
+        Generate a subgraph to continue execution on user code.
+        Automatically restore live variables.
+        """
+        # TODO(jansel): some dead code elimination code help this
+        # TODO(jansel): add some liveness analysis to see if we need all these
+        var_names = [k for k, v in self.symbolic_locals.items() if v.initial_name != k]
+        if len(var_names) == 0 and len(stack_values) == 1:
+            self.insert_instruction_prefix(
+                self.compile_subgraph(stack_values[0]) + jump_to_user_code
+            )
+        elif len(var_names) == 1 and len(stack_values) == 0:
+            self.insert_instruction_prefix(
+                self.compile_subgraph(self.symbolic_locals[var_names[0]])
+                + self.restore_locals(var_names, 0, unpack=False)
+                + jump_to_user_code
+            )
+        else:
+            self.insert_instruction_prefix(
+                self.compile_subgraph(
+                    [self.symbolic_locals[k] for k in var_names]
+                    + list(reversed(stack_values))
+                )
+                + self.restore_locals(var_names, len(stack_values))
+                + jump_to_user_code
+            )
+
     def should_compile_partial_graph(self):
         return isinstance(self, InstructionTranslator) and count_calls(self.graph) > 0
 
@@ -755,11 +800,41 @@ class InstructionTranslatorBase(fx.Tracer):
         # TODO(jansel): resume the analysis instead of exiting
         self.instruction_pointer = None  # exit analysi
 
-    def restore_locals(self, var_names, extra):
-        code = [create_instruction("UNPACK_SEQUENCE", len(var_names) + extra)]
+    def restore_locals(self, var_names, extra, unpack=True):
+        """
+        Used by compile_partial_subgraph() to set local variables from
+        the result of a self.compile_subgraph() call.
+        """
+        code = []
+        if unpack:
+            code.append(create_instruction("UNPACK_SEQUENCE", len(var_names) + extra))
         for name in var_names:
             code.append(self.create_store_fast(name))
         return code
+
+    def copy_graphstate(self):
+        """Create a checkpoint of the current state by copying everything"""
+        graph_nodes = set(self.graph.nodes)
+        guards = copy.deepcopy(self.guards)
+        graphargs = copy.deepcopy(self.graphargs)
+        symbolic_locals = dict(self.symbolic_locals)
+        stack = list(self.stack)
+        nn_modules = dict(self.nn_modules)
+        return graph_nodes, graphargs, guards, symbolic_locals, stack, nn_modules
+
+    def restore_graphstate(self, state):
+        """Restore a checkpoint created by self.copy_graphstate()"""
+        (
+            graph_nodes,
+            self.graphargs,
+            self.guards,
+            self.symbolic_locals,
+            self.stack,
+            self.nn_modules,
+        ) = state
+        for node in reversed(list(self.graph.nodes)):
+            if node not in graph_nodes:
+                self.graph.erase_node(node)
 
     def __init__(
         self,
@@ -776,18 +851,20 @@ class InstructionTranslatorBase(fx.Tracer):
     ):
         super(InstructionTranslatorBase, self).__init__()
         self.graph = graph
-        self.instructions = instructions
-        self.indexof = {id(i): n for n, i in enumerate(instructions)}
+        self.graphargs = graphargs
         self.stack = []
+        self.symbolic_locals = symbolic_locals
+        self.guards = guards
+        self.nn_modules = nn_modules
+
+        self.instructions = instructions
+        self.code_options = code_options
+        self.instruction_pointer = 0
+        self.indexof = {id(i): n for n, i in enumerate(instructions)}
         self.f_globals = f_globals
         self.f_builtins = f_builtins
-        self.instruction_pointer = 0
         self.cnt = cnt
-        self.graphargs = graphargs
-        self.code_options = code_options
-        self.nn_modules = nn_modules
-        self.guards = guards
-        self.symbolic_locals = symbolic_locals
+        self.checkpoint = None
 
 
 class InstructionTranslator(InstructionTranslatorBase):
@@ -904,3 +981,7 @@ def count_calls(g: fx.Graph):
         if "call" in n.op:
             c += 1
     return c
+
+
+def identity(x):
+    return x

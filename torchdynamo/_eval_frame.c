@@ -267,10 +267,22 @@ static PyObject *reset_code(PyObject *dummy, PyObject *args) {
   Py_RETURN_NONE;
 }
 
+static PyObject *unsupported(PyObject *dummy, PyObject *args) {
+  // a dummy C function used in testing
+  PyObject *obj1 = NULL;
+  PyObject *obj2 = NULL;
+  if (!PyArg_ParseTuple(args, "OO", &obj1, &obj2)) {
+    return NULL;
+  }
+  Py_INCREF(obj2);
+  return obj2;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
+    {"unsupported", unsupported, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

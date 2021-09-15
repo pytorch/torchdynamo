@@ -7,6 +7,9 @@ import torch
 
 @lru_cache(None)
 def _allowed_function_ids():
+    """
+    Walk torch.* and get the ids of all the stuff in it
+    """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = set()
 
@@ -22,6 +25,9 @@ def _allowed_function_ids():
                     torch_object_ids.add(id(obj))
 
     _find_torch_objects(torch)
+
+    for obj in (True, False, None):
+        torch_object_ids.remove(id(obj))
 
     return torch_object_ids
 

@@ -10,6 +10,8 @@ from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.guards import GuardedCode
 
+unsupported = torchdynamo._eval_frame.unsupported
+
 
 def same(a, b):
     """Check correctness to see if a and b match"""
@@ -19,6 +21,8 @@ def same(a, b):
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
+    elif isinstance(a, (int, float)):
+        return a == b
     elif type(a).__name__ == "SquashedNormal":
         return same(a.mean, b.mean)
     else:
@@ -83,11 +87,13 @@ def standard_test(self, fn, nargs, expected_ops=None):
 class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
+        torchdynamo.symbolic_convert.counters.clear()
         torchdynamo.reset()
         torchdynamo.DEBUG = cls.prior_debug
 
     @classmethod
     def setUpClass(cls):
+        torchdynamo.symbolic_convert.counters.clear()
         torchdynamo.reset()
         cls.prior_debug = torchdynamo.DEBUG
         torchdynamo.DEBUG = True
