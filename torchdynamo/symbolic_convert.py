@@ -20,7 +20,7 @@ from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, PythonModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstDictVariable
@@ -37,13 +37,16 @@ from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
 
-LIST_UNPACK = False
 counters = collections.defaultdict(collections.Counter)
 
 
-def unimplemented(name):
-    counters["unimplemented"][name] += 1
-    raise NotImplementedError(name)
+def typestr(*objs):
+    return " ".join(type(obj).__name__ for obj in objs)
+
+
+def unimplemented(msg: str):
+    counters["unimplemented"][msg] += 1
+    raise NotImplementedError(msg)
 
 
 def stack_op(fn):
@@ -53,12 +56,14 @@ def stack_op(fn):
     def impl(self, inst):
         inputs = self.popn(nargs)
 
-        cls = VariableTracker.combine_type(inputs)
         options = VariableTracker.propagate(inputs)
-        if issubclass(cls, TensorVariable):
-            val = cls(proxy=fn(*[i.as_proxy() for i in inputs]), **options)
+        if any(isinstance(i, TensorVariable) for i in inputs):
+            val = TensorVariable(fn(*[i.as_proxy() for i in inputs]), **options)
+        elif all(isinstance(i, ConstantVariable) for i in inputs):
+            # constant fold
+            val = ConstantVariable(fn(*[i.value for i in inputs]), **options)
         else:
-            unimplemented(f"stack_op {cls.__name__}")
+            unimplemented(f"stack_op {typestr(*inputs)}")
 
         self.push(val)
 
@@ -121,6 +126,14 @@ class InstructionTranslatorBase(fx.Tracer):
             "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
         )
 
+    def create_load_const(self, value):
+        co_consts = self.code_options["co_consts"]
+        assert isinstance(co_consts, tuple)
+        if value not in co_consts:
+            co_consts = co_consts + (value,)
+            self.code_options["co_consts"] = co_consts
+        return create_instruction("LOAD_CONST", co_consts.index(value), value)
+
     def wrap_local(self, name, value):
         """
         Turn an arg/input to the frame into a VariableTracker instance
@@ -149,23 +162,22 @@ class InstructionTranslatorBase(fx.Tracer):
         elif type(value) in (tuple, list) and all(
             isinstance(x, torch.Tensor) for x in value
         ):
-            LIST_UNPACK or unimplemented("TODO: debug torchbench crash caused by this")
             guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
+            self.graphargs.append(LocalArg(name))
+            proxy = self.create_graph_input(name)
             items = []
-            self.graphargs.append(TensorListArgs(name, len(value)))
-            for i in reversed(range(len(value))):
+            for i in range(len(value)):
                 items.append(
                     TensorVariable(
-                        proxy=self.create_graph_input(f"{name}_{i}"),
+                        proxy=proxy[i],
                         state=TracingSupported.YES,
                         guards=guards,
                     )
                 )
-            items = list(reversed(items))
             cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
             return cls(items, guards=guards)
         else:
-            unimplemented(f"wrap_local: {type(value).__name__}")
+            unimplemented(f"wrap_local: {typestr(value)}")
 
     def mark_initial_state(self):
         for k, v in self.symbolic_locals.items():
@@ -360,6 +372,17 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
+        elif isinstance(value, types.ModuleType):
+            self.push(
+                PythonModuleVariable(
+                    value,
+                    guards={
+                        Guard(
+                            inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
+                        )
+                    },
+                )
+            )
         elif isinstance(value, torch.nn.Module):
             key = unique_id(inst.argval)
             self.nn_modules[key] = value
@@ -382,7 +405,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 ],
             )
         else:
-            unimplemented(f"LOAD_GLOBAL {type(value).__name__}")
+            unimplemented(f"LOAD_GLOBAL {typestr(value)}")
 
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
@@ -411,7 +434,7 @@ class InstructionTranslatorBase(fx.Tracer):
             ]
             self.compile_partial_subgraph([value], jump_to_user_code)
         else:
-            unimplemented(f"POP_JUMP_IF_FALSE {type(value).__name__}")
+            unimplemented(f"POP_JUMP_IF_FALSE {typestr(value)}")
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -424,7 +447,7 @@ class InstructionTranslatorBase(fx.Tracer):
             except StopIteration:
                 self.jump(inst)
         else:
-            unimplemented(f"FOR_ITER {type(it).__name__}")
+            unimplemented(f"FOR_ITER {typestr(it)}")
 
     def SETUP_LOOP(self, inst):
         pass  # TODO(jansel): support blocks
@@ -440,37 +463,58 @@ class InstructionTranslatorBase(fx.Tracer):
             "is": operator.is_,
             "is not": operator.is_not,
         }
-        if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
-            supported_tensors = {
-                ">": operator.gt,
-                "<": operator.lt,
-                ">=": operator.ge,
-                "<=": operator.le,
-            }
-            if op in supported_tensors:
-                self.push(
-                    TensorVariable(
-                        supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                        **options,
-                    )
+        supported_tensors = {
+            ">": operator.gt,
+            "<": operator.lt,
+            ">=": operator.ge,
+            "<=": operator.le,
+            "==": operator.eq,
+            "!=": operator.ne,
+        }
+        supported_any = dict(
+            itertools.chain(supported_tensors.items(), supported_is_const.items())
+        )
+        if (
+            isinstance(left, (TensorVariable, NNModuleVariable))
+            and isinstance(right, ConstantVariable)
+            and right.value is None
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(
+                    supported_is_const[op](object(), right.value), **options
                 )
-            else:
-                unimplemented(
-                    f"COMPARE_OP {type(left).__name__} {op} {type(right).__name__}"
-                )
-        elif op in supported_is_const and isinstance(right, ConstantVariable):
-            if isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable)):
-                self.push(
-                    ConstantVariable(
-                        supported_is_const[op](left.value, right.value), **options
-                    )
-                )
-            else:
-                unimplemented(f"{type(left).__name__} is <const>")
-        else:
-            unimplemented(
-                f"COMPARE_OP {type(left).__name__} {op} {type(right).__name__}"
             )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                TensorVariable(
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, ConstantVariable)
+            and isinstance(right, ConstantVariable)
+            and op in supported_any
+        ):
+            # constant fold
+            self.push(
+                ConstantVariable(supported_any[op](left.value, right.value), **options)
+            )
+        elif (
+            isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable))
+            and isinstance(right, ConstantVariable)
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(
+                    supported_is_const[op](left.value, right.value), **options
+                )
+            )
+        else:
+            unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
@@ -569,6 +613,14 @@ class InstructionTranslatorBase(fx.Tracer):
                     value=getattr(obj.value, name), **options
                 )
             )
+        elif isinstance(obj, PythonModuleVariable):
+            member = obj.value.__dict__[name]
+            if is_allowed(member):
+                self.push(AllowedFunctionOrModuleVariable(member, **options))
+            elif callable(member):
+                self.push(UserFunctionVariable(member, **options))
+            else:
+                unimplemented("PythonModuleVariable attribute")
         else:
             unimplemented("LOAD_ATTR")
 
@@ -685,12 +737,30 @@ class InstructionTranslatorBase(fx.Tracer):
     BINARY_SUBSCR = stack_op(lambda tos1, tos: tos1[tos])
     BINARY_LSHIFT = stack_op(lambda tos1, tos: tos1 << tos)
     BINARY_RSHIFT = stack_op(lambda tos1, tos: tos1 >> tos)
-    BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
     BINARY_XOR = stack_op(lambda tos1, tos: tos1 ^ tos)
     BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
 
-    # TODO(jansel): looks like FX lacks support for this one
+    # TODO(jansel): looks like FX lacks support for this one, submit upstream fix
     BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1.__matmul__(tos))
+
+    # TODO(jansel): FX is buggy here too, submit upstream fix
+    # BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
+    # workaround version:
+    def BINARY_AND(self, inst):
+        inputs = self.popn(2)
+
+        options = VariableTracker.propagate(inputs)
+        if any(isinstance(i, TensorVariable) for i in inputs):
+            val = TensorVariable(
+                self.create_proxy("call_function", operator.and_, inputs, {}), **options
+            )
+        elif all(isinstance(i, ConstantVariable) for i in inputs):
+            # constant fold
+            val = ConstantVariable(operator.and_(*[i.value for i in inputs]), **options)
+        else:
+            unimplemented(f"stack_op {typestr(*inputs)}")
+
+        self.push(val)
 
     INPLACE_POWER = stack_op(operator.ipow)
     INPLACE_MULTIPLY = stack_op(operator.imul)
@@ -763,20 +833,44 @@ class InstructionTranslatorBase(fx.Tracer):
         """
         # TODO(jansel): some dead code elimination code help this
         # TODO(jansel): add some liveness analysis to see if we need all these
-        var_names = [k for k, v in self.symbolic_locals.items() if v.initial_name != k]
+        stack_values = list(stack_values)
+        prefix = []
+        var_names = []
+        for k, v in self.symbolic_locals.items():
+            if v.initial_name == k:
+                continue  # no need to restore initial state
+            elif isinstance(v, ConstantVariable):
+                unimplemented("TODO: debug issue in pyhpc_equation_of...")
+                # no need to get a constant from the compiled graph
+                self.guards.update(v.guards)
+                prefix.extend(
+                    [self.create_load_const(v.value), self.create_store_fast(k)]
+                )
+            else:
+                # must get the value from compiled graph
+                var_names.append(k)
+
+        # this should work, but need a testcase to make sure
+        # while stack_values and isinstance(stack_values[0], ConstantVariable):
+        #     # no need to get a constant from the compiled graph
+        #     self.guards.update(stack_values[0].guards)
+        #     prefix.append(self.create_load_const(stack_values.pop(0).value))
+
         if len(var_names) == 0 and len(stack_values) == 1:
             self.insert_instruction_prefix(
-                self.compile_subgraph(stack_values[0]) + jump_to_user_code
+                prefix + self.compile_subgraph(stack_values[0]) + jump_to_user_code
             )
         elif len(var_names) == 1 and len(stack_values) == 0:
             self.insert_instruction_prefix(
-                self.compile_subgraph(self.symbolic_locals[var_names[0]])
+                prefix
+                + self.compile_subgraph(self.symbolic_locals[var_names[0]])
                 + self.restore_locals(var_names, 0, unpack=False)
                 + jump_to_user_code
             )
         else:
             self.insert_instruction_prefix(
-                self.compile_subgraph(
+                prefix
+                + self.compile_subgraph(
                     [self.symbolic_locals[k] for k in var_names]
                     + list(reversed(stack_values))
                 )
@@ -914,11 +1008,11 @@ class RecursiveInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call(parent, func, args, kwargs):
-        assert (
-            callable(func)
-            and getattr(func, "__closure__", None) is None
-            and not hasattr(func, "__self__")
-        )
+        assert callable(func)
+        if getattr(func, "__closure__", None) is not None:
+            unimplemented("inline with  __closure__")
+        if getattr(func, "__self__", None) is not None:
+            unimplemented("inline with  __self__")
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         sub_locals = dict()
@@ -966,13 +1060,8 @@ class FakeRootModule(torch.nn.Module):
 
     def __init__(self, nn_modules: dict):
         super(FakeRootModule, self).__init__()
-        training = None
         for k, v in nn_modules.items():
             setattr(self, k, v)
-            training2 = getattr(v, "training", None)
-            assert None in (training, training2) or training == training2
-            if training2 is not None:
-                training = training2
 
 
 def count_calls(g: fx.Graph):

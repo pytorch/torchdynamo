@@ -16,6 +16,7 @@ def indirectly_unsupported(a, b):
 
 class SubGraphTests(torchdynamo.testing.TestCase):
     def _common(self, fn, frame_count, op_count):
+        torchdynamo.reset()
         v1 = torch.ones(10)
         v2 = torch.ones(10) * -2.0
         correct1 = fn(v1, v2)
@@ -77,7 +78,6 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
         self._common(fn, 1, 2)
 
-    @unittest.skip("todo")
     def test_capi_call3(self):
         def fn(a, b):
             c1 = a - b

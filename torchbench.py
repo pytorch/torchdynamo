@@ -114,10 +114,6 @@ def format_speedup(speedup, pvalue, pvalue_threshold=0.1):
     return f"{speedup:.3f}x p={pvalue:.2f}"
 
 
-def print_row(results):
-    print(f"{current_device:4} {current_name:20} " + " ".join(map(str, results)))
-
-
 class Stats:
     totals = collections.defaultdict(collections.Counter)
 
@@ -222,13 +218,16 @@ def main():
         experiment = functools.partial(coverage_experiment, coverage_results)
 
     for device, name, model, example_inputs in iter_models(args):
+        sys.stdout.write(f"{current_device:4} {current_name:20} ")
+        sys.stdout.flush()
         torch.manual_seed(1337)
         correct_result = copy.deepcopy(model)(*example_inputs)
         torch.manual_seed(1337)
+        torchdynamo.reset()
         with optimize_ctx:
             new_result = model(*example_inputs)
         if not same(correct_result, new_result):
-            print_row(["INCORRECT"])
+            print("INCORRECT")
             continue
         ok, total = Stats.reset_counters()
         results = []
@@ -240,7 +239,7 @@ def main():
         results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
 
         results.append(experiment(model, example_inputs))
-        print_row(results)
+        print(" ".join(map(str, results)))
 
     Stats.print_summary()
     if coverage_results:

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 import inspect
-from unittest.mock import patch
 
 import torch
 from torch import sub
@@ -9,7 +8,6 @@ from torch.nn import functional as F
 import torchdynamo.testing
 from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo import eval_frame
-from torchdynamo import symbolic_convert
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
 
@@ -55,9 +53,6 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    # Note, support for this causes a crash in torchbench on some version of python
-    # still need to debug it, so this feature is gated behind symbolic_convert.LIST_UNPACK
-    @patch.object(symbolic_convert, "LIST_UNPACK", True)
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
@@ -84,12 +79,32 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return a + b
 
     @make_test
+    def test_is_not_null(a, b):
+        if a is not None and b is not None:
+            return a + b
+
+    @make_test
     def test_constant1(a, b, c):
         return a - b * c + 1.0
 
     @make_test
     def test_constant2(a, b, c):
         return a - b * c + 1
+
+    @make_test
+    def test_constant3(a):
+        b = 1
+        c = 2
+        d = 3
+        return b + c - d + a
+
+    @make_test
+    def test_constant4(a, b):
+        c = 2
+        d = 3
+        if c > d:
+            return a - b
+        return b - a
 
     @make_test
     def test_globalfn(a, b):

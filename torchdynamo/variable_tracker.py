@@ -37,24 +37,6 @@ class VariableTracker:
             "guards": combine_guards(v.guards for v in vars),
         }
 
-    @staticmethod
-    def combine_type(vars: List["VariableTracker"]):
-        if len(vars) == 0:
-            return ConstantVariable
-        vars = list(vars)
-        priority = [
-            TensorVariable,
-            AllowedFunctionOrModuleVariable,
-            NNModuleVariable,
-            ConstantVariable,
-            GetAttrVariable,
-            BaseListVariable,
-            TupleVariable,
-            SliceVariable,
-        ]
-        vars.sort(key=lambda v: priority.index(type(v)))
-        return type(vars[0])
-
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
         args = dict(self.__dict__)
@@ -226,3 +208,9 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
 
     def as_proxy(self):
         return self.value
+
+
+class PythonModuleVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(PythonModuleVariable, self).__init__(**kwargs)
+        self.value = value
