@@ -878,9 +878,6 @@ class InstructionTranslatorBase(fx.Tracer):
                 + jump_to_user_code
             )
 
-    def should_compile_partial_graph(self):
-        return isinstance(self, InstructionTranslator) and count_calls(self.graph) > 0
-
     def insert_instruction_prefix(self, prefix: List[Instruction]):
         """
         We call this on the creation of a new compiled subgraph that is inserted
@@ -911,8 +908,8 @@ class InstructionTranslatorBase(fx.Tracer):
         graph_nodes = set(self.graph.nodes)
         guards = copy.deepcopy(self.guards)
         graphargs = copy.deepcopy(self.graphargs)
-        symbolic_locals = dict(self.symbolic_locals)
-        stack = list(self.stack)
+        symbolic_locals = VariableTracker.copy(self.symbolic_locals)
+        stack = VariableTracker.copy(self.stack)
         nn_modules = dict(self.nn_modules)
         return graph_nodes, graphargs, guards, symbolic_locals, stack, nn_modules
 
@@ -926,6 +923,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.stack,
             self.nn_modules,
         ) = state
+        # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
             if node not in graph_nodes:
                 self.graph.erase_node(node)
@@ -934,16 +932,17 @@ class InstructionTranslatorBase(fx.Tracer):
         self,
         cnt: typing.Iterable,
         graph: fx.Graph,
-        graphargs,
-        nn_modules,
-        guards,
+        graphargs: List,
+        nn_modules: typing.Dict,
+        guards: typing.Set[Guard],
         instructions: List[Instruction],
-        f_globals,
-        f_builtins,
-        code_options,
+        f_globals: typing.Dict[str, typing.Any],
+        f_builtins: typing.Dict[str, typing.Any],
+        code_options: typing.Dict[str, typing.Any],
         symbolic_locals=None,
     ):
         super(InstructionTranslatorBase, self).__init__()
+        # Mutable state checkpointed by copy_graphstate()
         self.graph = graph
         self.graphargs = graphargs
         self.stack = []
@@ -951,14 +950,17 @@ class InstructionTranslatorBase(fx.Tracer):
         self.guards = guards
         self.nn_modules = nn_modules
 
+        # Properties of the input/output code
         self.instructions = instructions
-        self.code_options = code_options
-        self.instruction_pointer = 0
         self.indexof = {id(i): n for n, i in enumerate(instructions)}
         self.f_globals = f_globals
         self.f_builtins = f_builtins
-        self.cnt = cnt
+        self.code_options = code_options
+
+        # Dynamic state not checkpointed
+        self.instruction_pointer = 0
         self.checkpoint = None
+        self.cnt = cnt
 
 
 class InstructionTranslator(InstructionTranslatorBase):
@@ -970,6 +972,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_builtins,
         code_options,
         compiler_fn,
+        minimum_call_count=1,
     ):
         super(InstructionTranslator, self).__init__(
             cnt=itertools.count(),
@@ -983,12 +986,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             code_options=code_options,
         )
         self.compiler_fn = compiler_fn
+        self.minimum_call_count = minimum_call_count
         self.symbolic_locals = {
             k: self.wrap_local(k, f_locals[k])
             for k in code_options["co_varnames"]
             if k in f_locals
         }
         self.mark_initial_state()
+
+    def should_compile_partial_graph(self):
+        return count_calls(self.graph) >= self.minimum_call_count
 
     def RETURN_VALUE(self, inst):
         rv = self.pop()
@@ -1049,6 +1056,9 @@ class RecursiveInstructionTranslator(InstructionTranslatorBase):
             code_options={k: getattr(code, k) for k in dir(code)},
         )
         self.symbolic_result = None
+
+    def should_compile_partial_graph(self):
+        return False  # inlining functions is all-or-nothing
 
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()

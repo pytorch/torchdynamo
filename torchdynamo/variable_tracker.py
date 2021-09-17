@@ -19,6 +19,10 @@ combine_states = functools.partial(functools.reduce, TracingSupported.combine)
 combine_guards = functools.partial(functools.reduce, set.union)
 
 
+def identity(x):
+    return x
+
+
 class VariableTracker:
     """
     Base class for tracked locals and stack values
@@ -43,24 +47,25 @@ class VariableTracker:
         args.update(kwargs)
         return self.__class__(**args)
 
-    def apply(self, fn: Callable[["VariableTracker"], "VariableTracker"]):
+    @classmethod
+    def copy(cls, value):
+        """Deeper (but not full) copy, leaving FX and user objects alone"""
+        return cls._apply(identity, value)
+
+    @classmethod
+    def _apply(cls, fn: Callable[["VariableTracker"], "VariableTracker"], value):
         """
         Walk this object and call fn on all the VariableTracker
         instances to produce a new VariableTracker with the results.
         """
-        updates = {}
-        for key, value in dict(self.__dict__).items():
-            if isinstance(value, VariableTracker):
-                updates[key] = value.apply(fn)
-            elif isinstance(value, list):
-                assert len(value) == 0 or isinstance(value[0], VariableTracker)
-                updates[key] = [item.apply(fn) for item in value]
-            elif isinstance(value, dict):
-                assert len(value) == 0 or isinstance(
-                    next(iter(value.values())), VariableTracker
-                )
-                updates[key] = {k: item.apply(fn) for k, item in value.items()}
-        return fn(self.clone(**updates))
+        if isinstance(value, VariableTracker):
+            return fn(value.clone(**cls._apply(fn, value.__dict__)))
+        elif isinstance(value, list):
+            return [cls._apply(fn, v) for v in value]
+        elif isinstance(value, dict):
+            return {k: cls._apply(fn, v) for k, v in value.items()}
+        else:
+            return value
 
     def visit(self, fn: Callable[["VariableTracker"], None]):
         """Walk this object and call fn on all the VariableTracker instances"""
@@ -69,7 +74,7 @@ class VariableTracker:
             fn(obj)
             return obj
 
-        self.apply(fn_)
+        VariableTracker._apply(fn_)
         return
 
     def with_initial_name(self, name: str):
@@ -130,7 +135,11 @@ class ListIteratorVariable(VariableTracker):
     def next_variables(self):
         if self.index >= len(self.items):
             raise StopIteration()
-        return self.items[self.index], self.clone(index=self.index + 1)
+        # Note this is the only mutation in VariableTracker so far
+        item = self.items[self.index]
+        self.index += 1
+        self.initial_name = None
+        return item, self
 
 
 class GetAttrVariable(VariableTracker):

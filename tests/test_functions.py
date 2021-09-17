@@ -1,13 +1,14 @@
 #!/usr/bin/env pytest
 import inspect
+import unittest
 
 import torch
 from torch import sub
 from torch.nn import functional as F
 
 import torchdynamo.testing
-from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo import eval_frame
+from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
 
@@ -228,6 +229,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return F.avg_pool2d(
             torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1), kernel_size=2, padding=1
         )
+
+    @unittest.skip("not implemented yet")
+    @make_test
+    def test_return_tuple(a, b):
+        return (a - b, b - a, a, b)
 
     def test_inplace(self):
         def inplace1(a, b):
