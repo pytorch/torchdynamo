@@ -50,32 +50,25 @@ class VariableTracker:
     @classmethod
     def copy(cls, value):
         """Deeper (but not full) copy, leaving FX and user objects alone"""
-        return cls._apply(identity, value)
+        return cls.apply(identity, value)
 
     @classmethod
-    def _apply(cls, fn: Callable[["VariableTracker"], "VariableTracker"], value):
+    def apply(cls, fn: Callable[["VariableTracker"], "VariableTracker"], value):
         """
         Walk this object and call fn on all the VariableTracker
         instances to produce a new VariableTracker with the results.
         """
         if isinstance(value, VariableTracker):
-            return fn(value.clone(**cls._apply(fn, value.__dict__)))
+            return fn(value.clone(**cls.apply(fn, value.__dict__)))
         elif isinstance(value, list):
-            return [cls._apply(fn, v) for v in value]
+            return [cls.apply(fn, v) for v in value]
         elif isinstance(value, dict):
-            return {k: cls._apply(fn, v) for k, v in value.items()}
+            return {k: cls.apply(fn, value[k]) for k in sorted(value.keys())}
         else:
             return value
 
-    def visit(self, fn: Callable[["VariableTracker"], None]):
-        """Walk this object and call fn on all the VariableTracker instances"""
-
-        def fn_(obj: VariableTracker):
-            fn(obj)
-            return obj
-
-        VariableTracker._apply(fn_)
-        return
+    def get_key(self):
+        return self.__class__
 
     def with_initial_name(self, name: str):
         """Shallow copy with a different value for self.initial_name"""
@@ -105,9 +98,12 @@ class TensorVariable(VariableTracker):
 
 
 class NNModuleVariable(VariableTracker):
-    def __init__(self, key: str, **kwargs):
+    def __init__(self, module_key: str, **kwargs):
         super(NNModuleVariable, self).__init__(**kwargs)
-        self.key = key
+        self.module_key = module_key
+
+    def get_key(self):
+        return self.__class__, self.module_key
 
 
 class ConstantVariable(VariableTracker):
@@ -118,11 +114,17 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
+    def get_key(self):
+        return self.__class__, self.value
+
 
 class BuiltinVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
         super(BuiltinVariable, self).__init__(**kwargs)
         self.fn = fn
+
+    def get_key(self):
+        return self.__class__, id(self.fn)
 
 
 class ListIteratorVariable(VariableTracker):
@@ -141,6 +143,9 @@ class ListIteratorVariable(VariableTracker):
         self.initial_name = None
         return item, self
 
+    def get_key(self):
+        return self.__class__, id(self.index), tuple(v.get_key() for v in self.items)
+
 
 class GetAttrVariable(VariableTracker):
     def __init__(self, obj, name, **kwargs):
@@ -153,6 +158,9 @@ class GetAttrVariable(VariableTracker):
     def as_proxy(self):
         return getattr(self.obj.as_proxy(), self.name)
 
+    def get_key(self):
+        return self.__class__, self.name, self.obj.get_key()
+
 
 class BaseListVariable(VariableTracker):
     def __init__(self, items, **kwargs):
@@ -162,6 +170,9 @@ class BaseListVariable(VariableTracker):
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
+
+    def get_key(self):
+        return self.__class__, tuple(v.get_key() for v in self.items)
 
 
 class ListVariable(BaseListVariable):
@@ -185,6 +196,11 @@ class ConstDictVariable(VariableTracker):
         assert isinstance(items, dict)
         self.items = items
 
+    def get_key(self):
+        return self.__class__, tuple(
+            (k, self.itmes[k].get_key()) for k in sorted(self.items.keys())
+        )
+
 
 class UserFunctionVariable(VariableTracker):
     """Some unsupported user-defined global function"""
@@ -195,6 +211,9 @@ class UserFunctionVariable(VariableTracker):
 
     def self_args(self):
         return []
+
+    def get_key(self):
+        return self.__class__, id(self.fn)
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -207,6 +226,9 @@ class UserMethodVariable(UserFunctionVariable):
     def self_args(self):
         return [self.obj]
 
+    def get_key(self):
+        return self.__class__, id(self.fn), self.obj.get_key()
+
 
 class AllowedFunctionOrModuleVariable(VariableTracker):
     """Points to a module or method in torch.*"""
@@ -218,8 +240,14 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
+    def get_key(self):
+        return self.__class__, id(self.value)
+
 
 class PythonModuleVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(PythonModuleVariable, self).__init__(**kwargs)
         self.value = value
+
+    def get_key(self):
+        return self.__class__, id(self.value)

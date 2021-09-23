@@ -30,6 +30,16 @@ class Guard:
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
 
+    def __lt__(self, other):
+        return (self.source.value, self.name, self.create_fn.__name__) < (
+            other.source.value,
+            other.name,
+            other.create_fn.__name__,
+        )
+
+    def __str__(self):
+        return f"{self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
+
     def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
 

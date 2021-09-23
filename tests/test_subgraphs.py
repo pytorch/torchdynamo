@@ -60,7 +60,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             else:
                 return m(c2)
 
-        self._common(fn, 1, 5)
+        self._common(fn, 3, 7)
 
     def test_capi_call1(self):
         def fn(a, b):
@@ -94,20 +94,50 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
         self._common(fn, 2, 3)
 
-    @unittest.skip("todo")
     def test_indirect_unsupported2(self):
         def fn(a, b):
-            local_const = 1
+            local_const1 = 7
+            local_const2 = 22
             c1 = a - b
             c2 = b - a
-            return local_const + indirectly_unsupported(c1, c2)
+            return local_const1 / (local_const2 - indirectly_unsupported(c1, c2))
 
         self._common(fn, 2, 3)
 
-    @unittest.skip("todo")
+    @unittest.skip("TODO")
     def test_indirect_unsupported3(self):
         def fn(a, b):
             args = [a - b, b - a]
             return indirectly_unsupported(*args)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 2, 5)
+
+    def test_stack_state1(self):
+        def fn(a, b):
+            t1 = 1.23 * a
+            t2 = 4.56 * a
+            c1 = a - b
+            c2 = b - a
+            return t1 / (t2 - unsupported(c1, c2))
+
+        self._common(fn, 1, 4)
+
+    def test_stack_state2(self):
+        def fn(a, b):
+            t1 = 1.23 * a
+            t2 = 4.56 * a
+            c1 = a - b
+            c2 = b - a
+            return t1 / (t2 - indirectly_unsupported(c1, c2))
+
+        self._common(fn, 2, 5)
+
+    def test_multigraph(self):
+        def fn(a, b):
+            x = torch.add(a, b)
+            x = torch.div(x, 2.0)
+            if x.sum() < 0:
+                x = torch.mul(x, -1.0)
+            return x
+
+        self._common(fn, 2, 5)

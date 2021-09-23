@@ -3,6 +3,7 @@ import unittest
 import torch
 
 import torchdynamo
+import torchdynamo.config
 from torchdynamo import eval_frame
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.bytecode_transformation import debug_checks
@@ -87,13 +88,19 @@ def standard_test(self, fn, nargs, expected_ops=None):
 class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
-        torchdynamo.symbolic_convert.counters.clear()
         torchdynamo.reset()
-        torchdynamo.DEBUG = cls.prior_debug
+        torchdynamo.config.debug = cls.prior_debug
 
     @classmethod
     def setUpClass(cls):
-        torchdynamo.symbolic_convert.counters.clear()
         torchdynamo.reset()
-        cls.prior_debug = torchdynamo.DEBUG
-        torchdynamo.DEBUG = True
+        cls.prior_debug = torchdynamo.config.debug
+        torchdynamo.config.debug = True
+
+    def setUp(self):
+        torchdynamo.symbolic_convert.counters.clear()
+
+    def tearDown(self):
+        for k, v in torchdynamo.symbolic_convert.counters.items():
+            print(k, v.most_common())
+        torchdynamo.symbolic_convert.counters.clear()

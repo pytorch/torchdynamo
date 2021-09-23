@@ -1,8 +1,6 @@
 import torchdynamo.convert_frame
 from . import eval_frame
 
-DEBUG = False
-
 
 def optimize(fx_compile_fn):
     return eval_frame.optimize(torchdynamo.convert_frame.convert_frame(fx_compile_fn))
