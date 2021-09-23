@@ -50,6 +50,10 @@ def unimplemented(msg: str):
     raise NotImplementedError(msg)
 
 
+def warning(msg: str):
+    counters["warnings"][msg] += 1
+
+
 def stack_op(fn):
     nargs = len(inspect.signature(fn).parameters)
 
@@ -59,7 +63,12 @@ def stack_op(fn):
 
         options = VariableTracker.propagate(inputs)
         if any(isinstance(i, TensorVariable) for i in inputs):
-            val = TensorVariable(fn(*[i.as_proxy() for i in inputs]), **options)
+            val = TensorVariable(
+                self.create_proxy(
+                    "call_function", fn, tuple(i.as_proxy() for i in inputs), {}
+                ),
+                **options,
+            )
         elif all(isinstance(i, ConstantVariable) for i in inputs):
             # constant fold
             val = ConstantVariable(fn(*[i.value for i in inputs]), **options)
@@ -737,46 +746,25 @@ class InstructionTranslatorBase(fx.Tracer):
         self.push(b)
         self.push(a)
 
-    UNARY_POSITIVE = stack_op(lambda tos: +tos)
-    UNARY_NEGATIVE = stack_op(lambda tos: -tos)
-    UNARY_NOT = stack_op(lambda tos: not tos)
-    UNARY_INVERT = stack_op(lambda tos: ~tos)
+    UNARY_POSITIVE = stack_op(operator.pos)
+    UNARY_NEGATIVE = stack_op(operator.neg)
+    UNARY_NOT = stack_op(operator.not_)
+    UNARY_INVERT = stack_op(operator.invert)
 
-    BINARY_POWER = stack_op(lambda tos1, tos: tos1 ** tos)
-    BINARY_MULTIPLY = stack_op(lambda tos1, tos: tos1 * tos)
-    BINARY_FLOOR_DIVIDE = stack_op(lambda tos1, tos: tos1 // tos)
-    BINARY_TRUE_DIVIDE = stack_op(lambda tos1, tos: tos1 / tos)
-    BINARY_MODULO = stack_op(lambda tos1, tos: tos1 % tos)
-    BINARY_ADD = stack_op(lambda tos1, tos: tos1 + tos)
-    BINARY_SUBTRACT = stack_op(lambda tos1, tos: tos1 - tos)
-    BINARY_SUBSCR = stack_op(lambda tos1, tos: tos1[tos])
-    BINARY_LSHIFT = stack_op(lambda tos1, tos: tos1 << tos)
-    BINARY_RSHIFT = stack_op(lambda tos1, tos: tos1 >> tos)
-    BINARY_XOR = stack_op(lambda tos1, tos: tos1 ^ tos)
-    BINARY_OR = stack_op(lambda tos1, tos: tos1 | tos)
-
-    # TODO(jansel): FX was buggy here, remove when fix lands
-    # BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1 @ tos)
-    BINARY_MATRIX_MULTIPLY = stack_op(lambda tos1, tos: tos1.__matmul__(tos))
-
-    # TODO(jansel): FX was buggy here, remove when fix lands
-    # BINARY_AND = stack_op(lambda tos1, tos: tos1 & tos)
-    # workaround version:
-    def BINARY_AND(self, inst):
-        inputs = self.popn(2)
-
-        options = VariableTracker.propagate(inputs)
-        if any(isinstance(i, TensorVariable) for i in inputs):
-            val = TensorVariable(
-                self.create_proxy("call_function", operator.and_, inputs, {}), **options
-            )
-        elif all(isinstance(i, ConstantVariable) for i in inputs):
-            # constant fold
-            val = ConstantVariable(operator.and_(*[i.value for i in inputs]), **options)
-        else:
-            unimplemented(f"stack_op {typestr(*inputs)}")
-
-        self.push(val)
+    BINARY_POWER = stack_op(operator.pow)
+    BINARY_MULTIPLY = stack_op(operator.mul)
+    BINARY_MATRIX_MULTIPLY = stack_op(operator.matmul)
+    BINARY_FLOOR_DIVIDE = stack_op(operator.floordiv)
+    BINARY_TRUE_DIVIDE = stack_op(operator.truediv)
+    BINARY_MODULO = stack_op(operator.mod)
+    BINARY_ADD = stack_op(operator.add)
+    BINARY_SUBTRACT = stack_op(operator.sub)
+    BINARY_SUBSCR = stack_op(operator.getitem)
+    BINARY_LSHIFT = stack_op(operator.lshift)
+    BINARY_RSHIFT = stack_op(operator.rshift)
+    BINARY_AND = stack_op(operator.and_)
+    BINARY_OR = stack_op(operator.or_)
+    BINARY_XOR = stack_op(operator.xor)
 
     INPLACE_POWER = stack_op(operator.ipow)
     INPLACE_MULTIPLY = stack_op(operator.imul)
