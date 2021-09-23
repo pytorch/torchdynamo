@@ -62,6 +62,27 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
         self._common(fn, 3, 7)
 
+    def test_control_flow4(self):
+        def fn(a, b):
+            tmp1 = a.sum() > b.sum() and a.sum() > 0
+            if tmp1:
+                return 1
+            else:
+                return 2
+
+        self._common(fn, 2, 5)
+
+    def test_control_flow5(self):
+        def fn(a, b):
+            tmp1 = a.sum() > b.sum() and a.sum() > 0
+            tmp2 = a.sum() < b.sum() or b.sum() > 0
+            if tmp1 and tmp2:
+                return 1, tmp1, tmp2
+            else:
+                return 2, tmp1, tmp2
+
+        self._common(fn, 4, 13)
+
     def test_capi_call1(self):
         def fn(a, b):
             c1 = a - b
@@ -134,10 +155,10 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
     def test_multigraph(self):
         def fn(a, b):
-            x = torch.add(a, b)
-            x = torch.div(x, 2.0)
+            x = a + b
+            x = x / 2.0
             if x.sum() < 0:
-                x = torch.mul(x, -1.0)
+                return x * -1.0
             return x
 
         self._common(fn, 2, 5)

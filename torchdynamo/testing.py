@@ -1,3 +1,5 @@
+import dis
+import sys
 import unittest
 
 import torch
@@ -12,6 +14,10 @@ from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.guards import GuardedCode
 
 unsupported = torchdynamo._eval_frame.unsupported
+
+
+def exc_bytecode_offset():
+    dis.Bytecode.from_traceback(sys.exc_info()[2]).current_offset
 
 
 def same(a, b):

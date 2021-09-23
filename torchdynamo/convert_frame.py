@@ -5,12 +5,12 @@ import typing
 
 from torch import fx
 
+from torchdynamo import config
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
 from torchdynamo.symbolic_convert import InstructionTranslator, unimplemented
 from torchdynamo.symbolic_convert import counters
-from torchdynamo import config
 
 
 def remove_dead_code(instructions):

@@ -12,6 +12,7 @@ from typing import List
 import torch
 from torch import fx
 
+from . import config
 from .allowed_functions import is_allowed
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
@@ -36,7 +37,6 @@ from .variable_tracker import TupleVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
-from . import config
 
 counters = collections.defaultdict(collections.Counter)
 
@@ -80,6 +80,32 @@ def stack_op(fn):
     return impl
 
 
+def generic_jump(truth_fn: typing.Callable, push: bool):
+    def inner(self, inst):
+        value = self.pop()
+        self.guards.update(value.guards)
+        if isinstance(value, (AllowedFunctionOrModuleVariable, ConstantVariable)):
+            if truth_fn(value.value):
+                push and self.push(value)
+                self.jump(inst)
+
+        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+            # compile a partial subgraph prefix then jump into user code
+            assert len(self.stack) == 0
+            if_next = ContinuationInstructionTranslator(self, self.next_instruction)
+            push and self.push(value)
+            if_jump = ContinuationInstructionTranslator(self, inst.target)
+            self.compile_partial_subgraph(
+                [value], [(create_instruction(inst.opname, target=if_jump))]
+            )
+            self.append_continuation(if_next)
+            self.append_continuation(if_jump)
+        else:
+            unimplemented(f"generic_jump {typestr(value)}")
+
+    return inner
+
+
 @dataclasses.dataclass
 class Arg:
     name: str
@@ -98,6 +124,12 @@ class LocalArg(Arg):
 class GlobalArg(Arg):
     def load(self, tracer):
         return [tracer.create_load_global(self.name)]
+
+
+@dataclasses.dataclass
+class StackArg(Arg):
+    def load(self, tracer):
+        return []
 
 
 class InstructionTranslatorBase(fx.Tracer):
@@ -425,24 +457,10 @@ class InstructionTranslatorBase(fx.Tracer):
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
 
-    def POP_JUMP_IF_FALSE(self, inst):
-        value = self.pop()
-        self.guards.update(value.guards)
-        if isinstance(value, (AllowedFunctionOrModuleVariable, ConstantVariable)):
-            if not value.value:
-                self.jump(inst)
-        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
-            # compile a partial subgraph prefix then jump into user code
-            assert len(self.stack) == 0
-            if_true = ContinuationInstructionTranslator(self, self.next_instruction)
-            if_false = ContinuationInstructionTranslator(self, inst.target)
-            self.compile_partial_subgraph(
-                [value], [(create_instruction("POP_JUMP_IF_FALSE", target=if_false))]
-            )
-            self.append_continuation(if_true)
-            self.append_continuation(if_false)
-        else:
-            unimplemented(f"POP_JUMP_IF_FALSE {typestr(value)}")
+    POP_JUMP_IF_FALSE = generic_jump(operator.not_, False)
+    POP_JUMP_IF_TRUE = generic_jump(operator.truth, False)
+    JUMP_IF_FALSE_OR_POP = generic_jump(operator.not_, True)
+    JUMP_IF_TRUE_OR_POP = generic_jump(operator.truth, True)
 
     def append_continuation(self, cont: "ContinuationInstructionTranslator"):
         key = cont.key()
@@ -822,22 +840,37 @@ class InstructionTranslatorBase(fx.Tracer):
         self.code_options["co_stacksize"] = max(
             self.code_options["co_stacksize"], 1 + nargs
         )
-        return (
-            [self.create_load_global(name)]
-            + list(
-                itertools.chain.from_iterable(arg.load(self) for arg in self.graphargs)
-            )
-            + [
-                create_instruction("CALL_FUNCTION", nargs),
-            ]
-        )
+        return self.create_call_generated_code(name, nargs)
+
+    def create_call_generated_code(self, fn_name: str, nargs: int) -> List[Instruction]:
+        """Call the generated code function stored in fn_name"""
+        output = [self.create_load_global(fn_name)]
+
+        num_on_stack = sum(int(isinstance(x, StackArg)) for x in self.graphargs)
+        if num_on_stack == 0:
+            pass
+        elif num_on_stack == 1:
+            output.append(create_instruction("ROT_TWO"))
+        elif num_on_stack == 2:
+            output.append(create_instruction("ROT_THREE"))
+        elif num_on_stack == 3:
+            output.append(create_instruction("ROT_FOUR"))
+        else:
+            unimplemented("3+ stack args")
+
+        for arg in self.graphargs[num_on_stack:]:
+            assert not (isinstance(arg, StackArg))
+            output.extend(arg.load(self))
+
+        output.append(create_instruction("CALL_FUNCTION", nargs))
+        return output
 
     def remove_unused_graphargs(self):
         output = []
         for node, arg in list(zip(self.graph.nodes, self.graphargs)):
             assert node.op == "placeholder"
             assert len(arg) == 1
-            if len(node.users) == 0:
+            if len(node.users) == 0 and isinstance(arg, (LocalArg, GlobalArg)):
                 self.graph.erase_node(node)
             else:
                 output.append(arg)
@@ -1086,15 +1119,15 @@ class ContinuationInstructionTranslator(InstructionTranslatorBase):
             blocks=parent.blocks,
         )
         self.instruction_pointer = self.indexof[id(start_instruction)]
+        self.stack = [
+            self.convert_local(f"__stack_{i}__", parent.stack[i], StackArg)
+            for i in range(len(parent.stack))
+        ]
         self.symbolic_locals = {
-            k: self.convert_local(k, parent.symbolic_locals[k])
+            k: self.convert_local(k, parent.symbolic_locals[k], LocalArg)
             for k in self.code_options["co_varnames"]
             if k in parent.symbolic_locals
         }
-        assert not parent.stack
-        # self.stack = [
-        #     ...
-        # ]
         self.mark_initial_state()
         self.target = start_instruction
 
@@ -1106,11 +1139,11 @@ class ContinuationInstructionTranslator(InstructionTranslatorBase):
             result.append(v.get_key())
         return tuple(result)
 
-    def convert_local(self, name: str, var: VariableTracker):
+    def convert_local(self, name: str, var: VariableTracker, arg_cls):
         """Take a symbolic local from a parent translator and convert it to
         and input"""
         if isinstance(var, TensorVariable):
-            self.graphargs.append(LocalArg(name))
+            self.graphargs.append(arg_cls(name))
             return TensorVariable(
                 proxy=self.create_graph_input(name), **VariableTracker.propagate([var])
             )
