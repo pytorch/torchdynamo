@@ -97,6 +97,15 @@ class TensorVariable(VariableTracker):
         return self.proxy
 
 
+class BasicTypeVariable(TensorVariable):
+    """
+    Points to a simple type, e.g. int, float, str. So far, we treat this
+    the same as TensorVariable
+    """
+
+    pass
+
+
 class NNModuleVariable(VariableTracker):
     def __init__(self, module_key: str, **kwargs):
         super(NNModuleVariable, self).__init__(**kwargs)
