@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+from numbers import Real
 import operator
 import types
 import typing
@@ -178,7 +179,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
             )
-        elif value is True or value is False or value is None:
+        elif value is True or value is False or value is None or isinstance(value, Real):
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
