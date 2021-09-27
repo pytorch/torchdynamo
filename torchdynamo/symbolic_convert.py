@@ -645,6 +645,24 @@ class InstructionTranslatorBase(fx.Tracer):
                     self.push(UserMethodVariable(method, obj, **options))
                 else:
                     unimplemented("nn.Module callable")
+            elif isinstance(subobj, list):
+                # If the list contains exclusively nn.Modules, transform
+                # each module into a torchdynamo.NNModuleVariable
+                l = []
+                for i, item in enumerate(subobj):
+                    if isinstance(item, torch.nn.Module):
+                        key = f"{obj.module_key}.{name}_{i}"
+                        self.nn_modules[key] = item
+                        l.append(
+                            NNModuleVariable(
+                                module_key=key,
+                                **options,
+                            )
+                        )
+                if len(l) != len(subobj):
+                    unimplemented("non-nn.Module items in list")
+                subobj = l
+                self.push(ListVariable(subobj, **options))
             else:
                 unimplemented(f"nn.Module attr {type(subobj).__name__}")
         elif isinstance(obj, TensorVariable):
