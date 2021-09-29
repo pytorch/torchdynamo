@@ -645,13 +645,15 @@ class InstructionTranslatorBase(fx.Tracer):
                     self.push(UserMethodVariable(method, obj, **options))
                 else:
                     unimplemented("nn.Module callable")
-            elif isinstance(subobj, list):
-                # If the list contains exclusively nn.Modules, transform
-                # each module into a torchdynamo.NNModuleVariable
+            elif isinstance(subobj, (list, tuple)):
+                subobj_proxy = self.create_proxy("get_attr", key, tuple(), {})
+                # If the container has exclusively nn.Modules, transform
+                # each module into a torchdynamo.NNModuleVariable;
+                # similarly for Tensors/torchdynamo.TensorVariable
                 l = []
                 for i, item in enumerate(subobj):
+                    key = f"{obj.module_key}.{name}_{i}"
                     if isinstance(item, torch.nn.Module):
-                        key = f"{name}_{i}"
                         self.nn_modules[key] = item
                         l.append(
                             NNModuleVariable(
@@ -659,10 +661,25 @@ class InstructionTranslatorBase(fx.Tracer):
                                 **options,
                             )
                         )
+                    if isinstance(item, torch.Tensor):
+                        l.append(
+                            TensorVariable(
+                                proxy=self.create_proxy(
+                                    "call_function",
+                                    operator.getitem,
+                                    (subobj_proxy, i),
+                                    {},
+                                ),
+                                **options,
+                            )
+                        )
                 if len(l) != len(subobj):
                     unimplemented("non-nn.Module items in list")
                 subobj = l
-                self.push(ListVariable(subobj, **options))
+                tracker_type = (
+                    ListVariable if isinstance(subobj, list) else TupleVariable
+                )
+                self.push(tracker_type(subobj, **options))
             else:
                 unimplemented(f"nn.Module attr {type(subobj).__name__}")
         elif isinstance(obj, TensorVariable):
