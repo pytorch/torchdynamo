@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+from numbers import Real
 import operator
 import types
 import typing
@@ -23,6 +24,7 @@ from .guards import GuardBuilder
 from .guards import GuardSource
 from .variable_tracker import AllowedFunctionOrModuleVariable, PythonModuleVariable
 from .variable_tracker import BaseListVariable
+from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
@@ -183,6 +185,13 @@ class InstructionTranslatorBase(fx.Tracer):
             return ConstantVariable(
                 value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
+            )
+        elif isinstance(value, Real):
+            self.graphargs.append(LocalArg(name))
+            return BasicTypeVariable(
+                proxy=self.create_graph_input(name),
+                state=TracingSupported.UNKNOWN,
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
         elif type(value) in (tuple, list) and all(
             isinstance(x, torch.Tensor) for x in value
