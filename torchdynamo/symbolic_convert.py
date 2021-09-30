@@ -626,7 +626,7 @@ class InstructionTranslatorBase(fx.Tracer):
         name = inst.argval
         options = VariableTracker.propagate([obj])
         if isinstance(obj, NNModuleVariable):
-            key = f"{obj.module_key}.{name}"
+            key = f"{obj.module_key}_{name}_{i}"
             subobj = self.get_submodule(key)
             if isinstance(subobj, torch.Tensor):
                 self.push(
