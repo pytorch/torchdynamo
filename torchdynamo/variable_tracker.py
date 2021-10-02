@@ -70,6 +70,11 @@ class VariableTracker:
     def get_key(self):
         return self.__class__
 
+    def __str__(self):
+        return f"{self.__class__.__name__}()"
+
+    __repr__ = __str__
+
     def with_initial_name(self, name: str):
         """Shallow copy with a different value for self.initial_name"""
         return self.clone(initial_name=name)

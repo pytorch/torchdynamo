@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import sys
 from numbers import Real
 import operator
 import types
@@ -324,6 +325,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         inst = self.instructions[self.instruction_pointer]
+        self.current_instruction = inst
         self.instruction_pointer += 1
         if self.instruction_pointer < len(self.instructions):
             self.next_instruction = self.instructions[self.instruction_pointer]
@@ -356,9 +358,19 @@ class InstructionTranslatorBase(fx.Tracer):
                 raise
 
     def run(self):
-        while self.step():
-            pass
-        self.finalize()
+        try:
+            while self.step():
+                pass
+            self.finalize()
+        except NotImplementedError:
+            raise
+        except Exception:
+            sys.stderr.write(
+                f"ERROR FROM offset={self.current_instruction.offset} "
+                f"filename={self.code_options.get('co_filename')}:"
+                f"{self.code_options.get('co_firstlineno')}\n"
+            )
+            raise
 
     def finalize(self):
         pass
@@ -634,8 +646,13 @@ class InstructionTranslatorBase(fx.Tracer):
         name = inst.argval
         options = VariableTracker.propagate([obj])
         if isinstance(obj, NNModuleVariable):
+            base = self.get_submodule(obj.module_key)
             key = f"{obj.module_key}.{name}"
-            subobj = self.get_submodule(key)
+            try:
+                subobj = inspect.getattr_static(base, name)
+            except AttributeError:
+                # TODO(jansel): figure out how to remove this
+                subobj = self.get_submodule(key)
             if isinstance(subobj, torch.Tensor):
                 self.push(
                     TensorVariable(
@@ -655,13 +672,16 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             elif is_allowed(subobj):
                 self.push(AllowedFunctionOrModuleVariable(subobj, **options))
-            elif callable(subobj):
-                base = self.get_submodule(obj.module_key)
-                method = getattr(base.__class__, name, None)
-                if isinstance(method, types.FunctionType):
-                    self.push(UserMethodVariable(method, obj, **options))
-                else:
-                    unimplemented("nn.Module callable")
+            elif isinstance(subobj, property):
+                unimplemented("property")
+            elif isinstance(subobj, classmethod):
+                unimplemented("classmethod")
+            elif isinstance(subobj, staticmethod):
+                self.push(UserFunctionVariable(subobj.__get__(base), **options))
+            elif isinstance(subobj, types.FunctionType) and name not in base.__dict__:
+                self.push(UserMethodVariable(subobj, obj, **options))
+            elif isinstance(subobj, types.FunctionType) and name in base.__dict__:
+                self.push(UserFunctionVariable(subobj, **options))
             elif isinstance(subobj, list):
                 # If the list contains exclusively nn.Modules, transform
                 # each module into a torchdynamo.NNModuleVariable
@@ -1086,6 +1106,7 @@ class InstructionTranslatorBase(fx.Tracer):
         # Dynamic state not checkpointed
         self.instruction_pointer = 0
         self.next_instruction = None
+        self.current_instruction = create_instruction("NOP")
         self.checkpoint = None
         self.cnt = cnt
         self.blocks = blocks
