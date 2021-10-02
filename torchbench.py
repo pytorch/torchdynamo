@@ -52,17 +52,16 @@ current_name = ""
 current_device = ""
 
 
-def nothing():
-    pass
+class NullContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 def synchronize():
-    global synchronize
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
-        synchronize()
-    else:
-        synchronize = nothing
+    pass
 
 
 def short_name(name, limit=20):
@@ -157,6 +156,10 @@ def speedup_experiment(speedups, args, model, example_inputs):
     return result
 
 
+def null_experiment(model, example_inputs):
+    return []
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -170,12 +173,6 @@ def main():
     )
     parser.add_argument("--threads", "-t", type=int, help="number of threads to use")
     parser.add_argument(
-        "--min-measure-sec",
-        type=float,
-        default=0.1,
-        help="floor of how long a timing run can take (introduces multiple calls to hit this)",
-    )
-    parser.add_argument(
         "--cpu-fusion", action="store_true", help="enable can_fuse_on_cpu"
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="show errors")
@@ -185,18 +182,23 @@ def main():
     parser.add_argument(
         "--overhead", "-s", action="store_true", help="measure overheads"
     )
+    parser.add_argument(
+        "--nothing", action="store_true", help="just check the benchmark works"
+    )
+    parser.add_argument(
+        "--nops", action="store_true", help="check bytecode rewriting works"
+    )
+    parser.add_argument("--minimum-call-count", type=int)
     args = parser.parse_args()
-
-    args.verbose = True
 
     # defaults
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
-    if args.devices == ["cpu"]:
+    if args.devices != ["cpu"] and torch.cuda.is_available():
         global synchronize
-        synchronize = nothing
+        synchronize = torch.cuda.synchronize
 
     if args.no_skip:
         SKIP.clear()
@@ -207,15 +209,28 @@ def main():
     if args.threads:
         torch.set_num_threads(args.threads)
 
+    if args.verbose:
+        torchdynamo.config.debug = True
+
     coverage_results = []
     speedups = []
+    experiment = null_experiment
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(lambda gm: gm.forward)
         experiment = functools.partial(speedup_experiment, speedups, args)
+    elif args.nothing:
+        optimize_ctx = NullContext()
+    elif args.nops:
+        optimize_ctx = torchdynamo.eval_frame.optimize(
+            torchdynamo.testing.debug_insert_nops
+        )
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling)
         experiment = functools.partial(coverage_experiment, coverage_results)
+
+    if args.minimum_call_count:
+        torchdynamo.config.minimum_call_count = args.minimum_call_count
 
     for device, name, model, example_inputs in iter_models(args):
         sys.stdout.write(f"{current_device:4} {current_name:20} ")

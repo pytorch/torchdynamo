@@ -7,7 +7,7 @@ import unittest
 import torch
 
 import torchdynamo
-from torchdynamo import eval_frame, config
+from torchdynamo import eval_frame
 from torchdynamo.bytecode_transformation import create_instruction, is_generator
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import transform_code_object
