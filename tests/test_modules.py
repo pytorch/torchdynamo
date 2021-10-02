@@ -200,5 +200,4 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_layerlist = make_test(LayerList())
     # test_tensorlist = make_test(TensorList())
 
-
     # TODO(jansel): we should make sure to expand nn.Sequential
