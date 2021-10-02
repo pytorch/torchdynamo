@@ -83,29 +83,77 @@ def assemble(instructions: List[dis.Instruction], firstlineno):
 
 def virtualize_jumps(instructions):
     """Replace jump targets with pointers to make editing easier"""
-    jump_targets = dict()
-
-    for inst in instructions:
-        if inst.is_jump_target:
-            jump_targets[inst.offset] = inst
+    jump_targets = {inst.offset: inst for inst in instructions}
 
     for inst in instructions:
         if inst.opcode in dis.hasjabs or inst.opcode in dis.hasjrel:
-            inst.target = jump_targets[inst.argval]
+            for offset in (0, 2, 4, 6):
+                if jump_targets[inst.argval + offset].opcode != dis.EXTENDED_ARG:
+                    inst.target = jump_targets[inst.argval + offset]
+                    break
 
 
 def devirtualize_jumps(instructions):
     """Fill in args for virtualized jump target after instructions may have moved"""
+    indexof = {id(inst): i for i, inst, in enumerate(instructions)}
+    jumps = set(dis.hasjabs).union(set(dis.hasjrel))
+
     for inst in instructions:
-        if inst.opcode in dis.hasjabs:
-            inst.arg = inst.target.offset
-        elif inst.opcode in dis.hasjrel:
-            inst.arg = inst.target.offset - inst.offset - instruction_size(inst)
-        else:
-            continue
-        inst.argval = inst.target.offset
-        inst.argrepr = f"to {inst.target.offset}"
-        inst.target = None
+        if inst.opcode in jumps:
+            target = inst.target
+            target_index = indexof[id(target)]
+            for offset in (1, 2, 3):
+                if (
+                    target_index >= offset
+                    and instructions[target_index - offset].opcode == dis.EXTENDED_ARG
+                ):
+                    target = instructions[target_index - offset]
+                else:
+                    break
+
+            if inst.opcode in dis.hasjabs:
+                inst.arg = target.offset
+            else:  # relative jump
+                inst.arg = target.offset - inst.offset - instruction_size(inst)
+            inst.argval = target.offset
+            inst.argrepr = f"to {target.offset}"
+
+
+def strip_extended_args(instructions: List[Instruction]):
+    instructions[:] = [i for i in instructions if i.opcode != dis.EXTENDED_ARG]
+
+
+def fix_extended_args(instructions: List[Instruction]):
+    """Fill in correct argvals for EXTENDED_ARG ops"""
+    output = []
+
+    def maybe_pop_n(n):
+        for _ in range(n):
+            if output[-1].opcode == dis.EXTENDED_ARG:
+                output.pop()
+
+    for i, inst in enumerate(instructions):
+        if inst.opcode == dis.EXTENDED_ARG:
+            # Leave this instruction alone for now so we never shrink code
+            inst.arg = 0
+        elif inst.arg and inst.arg > 0xFFFFFF:
+            maybe_pop_n(3)
+            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 24))
+            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
+            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+        elif inst.arg and inst.arg > 0xFFFF:
+            maybe_pop_n(2)
+            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
+            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+        elif inst.arg and inst.arg > 0xFF:
+            maybe_pop_n(1)
+            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+        output.append(inst)
+
+    added = len(output) - len(instructions)
+    assert added >= 0
+    instructions[:] = output
+    return added
 
 
 def instruction_size(inst):
@@ -171,8 +219,13 @@ def transform_code_object(code, transformations):
 
     transformations(instructions, code_options)
 
-    update_offsets(instructions)
-    devirtualize_jumps(instructions)
+    dirty = True
+    while dirty:
+        update_offsets(instructions)
+        devirtualize_jumps(instructions)
+        # this pass might change offsets, if so we need to try again
+        dirty = fix_extended_args(instructions)
+
     bytecode, lnotab = assemble(instructions, code.co_firstlineno)
     code_options["co_code"] = bytecode
     code_options["co_lnotab"] = lnotab
@@ -184,6 +237,7 @@ def cleaned_instructions(code):
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     virtualize_jumps(instructions)
+    strip_extended_args(instructions)
     return instructions
 
 
@@ -192,3 +246,8 @@ _unique_id_counter = itertools.count()
 
 def unique_id(name):
     return f"{name}_{next(_unique_id_counter)}"
+
+
+def is_generator(code: types.CodeType):
+    co_generator = 0x20
+    return (code.co_flags & co_generator) > 0

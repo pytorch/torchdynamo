@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import torch
 import torchdynamo.testing
 from torchdynamo import eval_frame
 
@@ -48,3 +49,14 @@ class NopTests(torchdynamo.testing.TestCase):
         self.assertEqual(next(t), 1)
         self.assertEqual(next(t), 2)
         self.assertRaises(StopIteration, lambda: next(t))
+
+    def test_extended_args(self):
+        too_many_adds = "+".join(["a", "b"] * 256)
+        source = (
+            f"lambda a, b: ({too_many_adds}+a if a.sum() > 0 else {too_many_adds} - b)"
+        )
+        fn = eval(source)
+        a = torch.ones(1)
+        b = torch.ones(1)
+        with with_debug_nops:
+            self.assertEqual(fn(a, b).sum(), 513)

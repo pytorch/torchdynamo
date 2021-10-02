@@ -298,12 +298,13 @@ class InstructionTranslatorBase(fx.Tracer):
             options = VariableTracker.propagate(allargs)
             constant_args = all(isinstance(x, ConstantVariable) for x in allargs)
             if fn.fn is range and constant_args:
-                items = list(
-                    range(
+                items = [
+                    ConstantVariable(x, **options)
+                    for x in range(
                         *[x.value for x in args],
                         **{k: v.value for k, v in kwargs.items()},
                     )
-                )
+                ]
                 self.push(ListVariable(items, **options))
             elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
                 assert not kwargs and len(args) == 1
@@ -363,6 +364,9 @@ class InstructionTranslatorBase(fx.Tracer):
         pass
 
     def push(self, val):
+        assert val is None or isinstance(
+            val, VariableTracker
+        ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)
 
     def pop(self):
@@ -372,6 +376,8 @@ class InstructionTranslatorBase(fx.Tracer):
         return list(reversed([self.pop() for _ in range(n)]))
 
     def LOAD_FAST(self, inst):
+        if inst.argval not in self.symbolic_locals:
+            unimplemented("undefined local")
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
@@ -585,8 +591,10 @@ class InstructionTranslatorBase(fx.Tracer):
         else:
             unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
-        assert isinstance(argsvars, BaseListVariable)
-        assert isinstance(kwargsvars, ConstDictVariable)
+        if not isinstance(argsvars, BaseListVariable) or not isinstance(
+            kwargsvars, ConstDictVariable
+        ):
+            unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
     def CALL_FUNCTION_KW(self, inst):
