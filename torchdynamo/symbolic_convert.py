@@ -23,20 +23,22 @@ from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .guards import GuardSource
-from .variable_tracker import AllowedFunctionOrModuleVariable, PythonModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import NNModuleVariable
+from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
 from .variable_tracker import TupleVariable
+from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
@@ -44,8 +46,26 @@ from .variable_tracker import VariableTracker
 counters = collections.defaultdict(collections.Counter)
 
 
+def proxy_args_kwargs(args, kwargs):
+    try:
+        proxy_args = tuple(arg.as_proxy() for arg in args)
+        proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return proxy_args, proxy_kwargs
+    except AttributeError:  # "no attribute 'as_proxy'"
+        raise unimplemented(
+            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
+        )
+
+
 def typestr(*objs):
-    return " ".join(type(obj).__name__ for obj in objs)
+    if len(objs) == 1:
+        (obj,) = objs
+        if isinstance(obj, VariableTracker):
+            return str(obj)
+        else:
+            return type(obj).__name__
+    else:
+        return " ".join(map(typestr, objs))
 
 
 def unimplemented(msg: str):
@@ -212,7 +232,11 @@ class InstructionTranslatorBase(fx.Tracer):
             cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
             return cls(items, guards=guards)
         else:
-            unimplemented(f"wrap_local: {typestr(value)}")
+            return UnsupportedVariable(
+                type(value),
+                state=TracingSupported.NO,
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
+            )
 
     def mark_initial_state(self):
         for k, v in self.symbolic_locals.items():
@@ -244,12 +268,10 @@ class InstructionTranslatorBase(fx.Tracer):
                 ) and self_should_be_none.__name__ == getattr(
                     fn.value, "__module__", None
                 )
-            proxy_args = tuple(arg.as_proxy() for arg in args)
-            proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
             self.push(
                 TensorVariable(
                     proxy=self.create_proxy(
-                        "call_function", fn.value, proxy_args, proxy_kwargs
+                        "call_function", fn.value, *proxy_args_kwargs(args, kwargs)
                     ),
                     **options,
                 )
@@ -265,12 +287,10 @@ class InstructionTranslatorBase(fx.Tracer):
                 + list(args)
                 + list(kwargs.values())
             )
-            proxy_args = tuple(arg.as_proxy() for arg in args)
-            proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
             self.push(
                 TensorVariable(
                     proxy=self.create_proxy(
-                        "call_method", name, proxy_args, proxy_kwargs
+                        "call_method", name, *proxy_args_kwargs(args, kwargs)
                     ),
                     **options,
                 )
@@ -279,11 +299,12 @@ class InstructionTranslatorBase(fx.Tracer):
             mod = self.get_submodule(fn.module_key)
             if is_allowed(mod.__class__):
                 options = VariableTracker.propagate([fn] + args)
-                proxy_args = tuple(x.as_proxy() for x in args)
                 self.push(
                     TensorVariable(
                         proxy=self.create_proxy(
-                            "call_module", fn.module_key, proxy_args, {}
+                            "call_module",
+                            fn.module_key,
+                            *proxy_args_kwargs(args, kwargs),
                         ),
                         **options,
                     )
@@ -719,7 +740,7 @@ class InstructionTranslatorBase(fx.Tracer):
             else:
                 unimplemented("PythonModuleVariable attribute")
         else:
-            unimplemented("LOAD_ATTR")
+            unimplemented(f"LOAD_ATTR {obj}")
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -1238,8 +1259,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         for k, v in bound.arguments.items():
             if isinstance(v, VariableTracker):
                 sub_locals[k] = v
+            elif isinstance(v, (bool, int, float, type(None))):
+                sub_locals[k] = ConstantVariable(v)
             else:
-                unimplemented(f"call user defined {v}")
+                unimplemented(f"inline_call unsupported default: {typestr(v)}")
         tracer = InliningInstructionTranslator(
             parent, func.__code__, sub_locals, sub_globals
         )

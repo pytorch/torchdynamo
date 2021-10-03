@@ -1,6 +1,10 @@
 import enum
 import functools
-from typing import Callable, List, Set, Optional
+import types
+from typing import Callable
+from typing import List
+from typing import Optional
+from typing import Set
 
 import torch.fx
 
@@ -261,9 +265,25 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value: types.ModuleType, **kwargs):
         super(PythonModuleVariable, self).__init__(**kwargs)
         self.value = value
 
     def get_key(self):
         return self.__class__, id(self.value)
+
+
+class UnsupportedVariable(VariableTracker):
+    """
+    Mostly objects of defined type.  Catch-all for something where we only know the type.
+    """
+
+    def __init__(self, value_type, **kwargs):
+        super(UnsupportedVariable, self).__init__(**kwargs)
+        self.value_type = value_type
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def get_key(self):
+        return self.__class__, id(self.value_type)
