@@ -776,6 +776,15 @@ class InstructionTranslatorBase(fx.Tracer):
         assert isinstance(keys, tuple)
         assert len(keys) == len(values)
         self.push(ConstDictVariable(dict(zip(keys, values)), **options))
+    
+    def MAKE_FUNCTION(self, inst):
+        fn_name = self.stack.pop().as_proxy()
+        code_obj = self.stack.pop().as_proxy()
+        assert isinstance(fn_name, str)
+        assert isinstance(code_obj, types.CodeType)
+        fn = types.FunctionType(code_obj, self.f_globals)
+        self.symbolic_locals[fn_name] = fn
+        self.push(UserFunctionVariable(fn))
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
