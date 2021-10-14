@@ -304,3 +304,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_inline_with_default(a, b, c):
         return func_with_default(a, b) * c
+
+    @make_test
+    def test_inner_function(x):
+        def fn(x):
+            return torch.add(x, x)
+
+        return fn(x)
