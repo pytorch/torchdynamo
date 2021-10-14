@@ -6,7 +6,7 @@ import typing
 from torch import fx
 
 from torchdynamo import config
-from torchdynamo.bytecode_transformation import debug_checks
+from torchdynamo.bytecode_transformation import debug_checks, is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
 from torchdynamo.symbolic_convert import InstructionTranslator, unimplemented
@@ -86,6 +86,8 @@ def convert_frame_assert(compiler_fn: typing.Callable):
         input_codes.add(code)
         if code.co_filename.startswith("<eval_with_key>") or code in output_codes:
             return None  # skip FX output
+        if is_generator(code):
+            unimplemented("generator")
         debug_checks(code)
         tracer = None
 

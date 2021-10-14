@@ -9,6 +9,7 @@ from torch.nn import functional as F
 import torchdynamo.testing
 from torchdynamo import eval_frame
 from torchdynamo.convert_frame import convert_frame_assert
+from torchdynamo.convert_frame import convert_frame
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
 
@@ -18,6 +19,11 @@ e = torch.nn.Linear(10, 10)
 
 def constant3(a, b):
     return a - b + (1.0 + 2)
+
+
+def func_with_default(a, b, some_default_arg=True):
+    if some_default_arg:
+        return a - b
 
 
 def make_test(fn):
@@ -74,6 +80,20 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(val3, correct))
         self.assertTrue(same(val4, correct))
         self.assertEqual(counter.frame_count, 2)
+
+    def test_raises(self):
+        def fn(a, b, c, cls):
+            x = a + b - c * 10
+            raise cls(str(x))
+
+        counter = CompileCounter()
+        a = torch.randn(10, 10)
+        b = torch.randn(10, 10)
+        c = torch.randn(10, 10)
+        with eval_frame.optimize(convert_frame(counter)):
+            self.assertRaises(AssertionError, lambda: fn(a, b, c, AssertionError))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 3)
 
     @make_test
     def test_add(a, b):
@@ -280,3 +300,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_globalmodule(x):
         return e(x)
+
+    @make_test
+    def test_inline_with_default(a, b, c):
+        return func_with_default(a, b) * c

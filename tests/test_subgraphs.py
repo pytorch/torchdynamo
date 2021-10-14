@@ -162,3 +162,10 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 2, 5)
+
+    def test_extended_args(self):
+        too_many_adds = "+".join(["a", "b"] * 256)
+        source = (
+            f"lambda a, b: ({too_many_adds}+a if a.sum() > 0 else {too_many_adds} - b)"
+        )
+        self._common(eval(source), 3, 1026)

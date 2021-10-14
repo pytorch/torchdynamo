@@ -1,4 +1,3 @@
-import dis
 import functools
 import logging
 
@@ -55,10 +54,7 @@ def catch_errors_wrapper(callback):
             return callback(frame)
         except Exception:
             logging.basicConfig()
-            bc = dis.Bytecode(frame.f_code)
-            for i in bc:
-                print(i)
-            logging.exception(f"Error while processing frame:\n{bc.info()}\n{bc.dis()}")
+            logging.exception("Error while processing frame")
             raise
 
     return catch_errors

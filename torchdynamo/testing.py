@@ -1,13 +1,14 @@
 import dis
+import os.path
 import sys
+import types
 import unittest
 
 import torch
 
 import torchdynamo
-import torchdynamo.config
 from torchdynamo import eval_frame
-from torchdynamo.bytecode_transformation import create_instruction
+from torchdynamo.bytecode_transformation import create_instruction, is_generator
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.convert_frame import convert_frame_assert
@@ -28,12 +29,34 @@ def same(a, b):
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-    elif isinstance(a, (int, float)):
+    elif isinstance(a, (int, float, type(None), bool)):
         return a == b
     elif type(a).__name__ == "SquashedNormal":
         return same(a.mean, b.mean)
+    elif type(a).__name__ in (
+        "MaskedLMOutput",
+        "Seq2SeqLMOutput",
+        "CausalLMOutputWithCrossAttentions",
+        "LongformerMaskedLMOutput",
+    ):
+        assert type(a) is type(b)
+        return all(same(getattr(a, key), getattr(b, key)) for key in a.__dict__.keys())
     else:
         raise RuntimeError(f"unsupported type: {type(a).__name__}")
+
+
+def debug_dir():
+    path = os.path.join(os.path.dirname(__file__), "../debug")
+    if not os.path.exists(path):
+        os.mkdir(path)
+    return path
+
+
+def debug_dump(name, code: types.CodeType, extra=""):
+    with open(os.path.join(debug_dir(), name), "w") as fd:
+        fd.write(
+            f"{dis.Bytecode(code).info()}\n\n{dis.Bytecode(code).dis()}\n\n{extra}\n"
+        )
 
 
 def debug_insert_nops(frame):
@@ -43,8 +66,13 @@ def debug_insert_nops(frame):
         instructions.insert(0, create_instruction("NOP"))
         instructions.insert(0, create_instruction("NOP"))
 
+    if is_generator(frame.f_code):
+        return None
+
     debug_checks(frame.f_code)
-    return GuardedCode(transform_code_object(frame.f_code, insert_nops))
+    code = transform_code_object(frame.f_code, insert_nops)
+
+    return GuardedCode(code)
 
 
 class CompileCounter:

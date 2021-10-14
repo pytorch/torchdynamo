@@ -140,7 +140,9 @@ inline static PyObject *swap_code_and_run(PyFrameObject *frame,
 }
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
-  DEBUG_TRACE("begin %s", name(frame));
+  DEBUG_TRACE("begin %s %s %i %i %i %i", name(frame),
+              PyUnicode_AsUTF8(frame->f_code->co_filename), frame->f_lineno,
+              frame->f_lasti, frame->f_iblock, frame->f_executing);
   CacheEntry *extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE) {
     DEBUG_TRACE("skip %s", name(frame));
@@ -168,8 +170,12 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   // cache miss
 
   PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
-  NULL_CHECK(result);
-  if (result != Py_None) {
+  if (result == NULL) {
+    // internal exception, returning here will leak the exception into user code
+    // this is useful for debugging -- but we dont want it to happen outside of
+    // testing
+    return NULL;
+  } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", name(frame));
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);

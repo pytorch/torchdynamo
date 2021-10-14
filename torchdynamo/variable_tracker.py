@@ -1,6 +1,10 @@
 import enum
 import functools
-from typing import Callable, List, Set, Optional
+import types
+from typing import Callable
+from typing import List
+from typing import Optional
+from typing import Set
 
 import torch.fx
 
@@ -70,6 +74,11 @@ class VariableTracker:
     def get_key(self):
         return self.__class__
 
+    def __str__(self):
+        return f"{self.__class__.__name__}()"
+
+    __repr__ = __str__
+
     def with_initial_name(self, name: str):
         """Shallow copy with a different value for self.initial_name"""
         return self.clone(initial_name=name)
@@ -95,6 +104,15 @@ class TensorVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+
+class BasicTypeVariable(TensorVariable):
+    """
+    Points to a simple type, e.g. int, float, str. So far, we treat this
+    the same as TensorVariable
+    """
+
+    pass
 
 
 class NNModuleVariable(VariableTracker):
@@ -131,6 +149,7 @@ class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, **kwargs):
         super(ListIteratorVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
+        assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
 
@@ -166,6 +185,7 @@ class BaseListVariable(VariableTracker):
     def __init__(self, items, **kwargs):
         super(BaseListVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
+        assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
 
     def _as_proxy(self):
@@ -245,9 +265,25 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value: types.ModuleType, **kwargs):
         super(PythonModuleVariable, self).__init__(**kwargs)
         self.value = value
 
     def get_key(self):
         return self.__class__, id(self.value)
+
+
+class UnsupportedVariable(VariableTracker):
+    """
+    Mostly objects of defined type.  Catch-all for something where we only know the type.
+    """
+
+    def __init__(self, value_type, **kwargs):
+        super(UnsupportedVariable, self).__init__(**kwargs)
+        self.value_type = value_type
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def get_key(self):
+        return self.__class__, id(self.value_type)

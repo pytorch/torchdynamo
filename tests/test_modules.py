@@ -95,6 +95,55 @@ class ModuleMethodCall(torch.nn.Module):
         return x1 + x2
 
 
+class ModuleStaticMethodCall(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = BasicModule()
+        self.scale = torch.randn(1, 10)
+
+    @staticmethod
+    def call_and_scale(scale, mod, x):
+        x = mod(x)
+        return x * scale
+
+    def forward(self, x):
+        x1 = self.call_and_scale(self.scale, self.layer1, x)
+        x2 = self.call_and_scale(self.scale, self.layer2, x)
+        return x1 + x2
+
+
+class ModuleClassMethodCall(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = BasicModule()
+        self.scale = torch.randn(1, 10)
+
+    @classmethod
+    def call_and_scale(cls, scale, mod, x):
+        x = mod(x)
+        return x * scale
+
+    def forward(self, x):
+        x1 = self.call_and_scale(self.scale, self.layer1, x)
+        x2 = self.call_and_scale(self.scale, self.layer2, x)
+        return x1 + x2
+
+
+class ModuleProperty(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scale = torch.randn(1, 10)
+
+    @property
+    def scale_alias(self):
+        return self.scale
+
+    def forward(self, x):
+        return x * self.scale_alias
+
+
 class ConstLoop(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -188,6 +237,9 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_submodules2 = make_test(SubmoduleExample())
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
+    test_module_static_method = make_test(ModuleStaticMethodCall())
+    # test_module_class_method = make_test(ModuleClassMethodCall())
+    # test_module_property = make_test(ModuleProperty())
     test_fnmember = make_test(FnMember())
     test_fnmembercmp = make_test(FnMemberCmp(F.relu))
     test_fnmembercmp = make_test(FnMemberCmp(None))
@@ -200,8 +252,6 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_isnonelayer = make_test(IsNoneLayer())
     test_layerlist = make_test(LayerList())
     test_tensorlist = make_test(TensorList(), expected_ops=8)
-
-    # not yet implemented
-    # test_intarg = make_test(IntArg())
+    test_intarg = make_test(IntArg())
 
     # TODO(jansel): we should make sure to expand nn.Sequential
