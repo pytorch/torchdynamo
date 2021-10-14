@@ -221,9 +221,11 @@ class IntArg(torch.nn.Module):
         return x
 
 
-def make_test(fn):
+def make_test(fn, expected_ops=None):
     def test_fn(self):
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1)
+        return torchdynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=expected_ops
+        )
 
     return test_fn
 
@@ -248,8 +250,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_iseval2 = make_test(IsEvalCheck())
     test_viamodulecall = make_test(ViaModuleCall())
     test_isnonelayer = make_test(IsNoneLayer())
-    test_intarg = make_test(IntArg())
     test_layerlist = make_test(LayerList())
-    # test_tensorlist = make_test(TensorList())
+    test_tensorlist = make_test(TensorList(), expected_ops=8)
+    test_intarg = make_test(IntArg())
 
     # TODO(jansel): we should make sure to expand nn.Sequential
