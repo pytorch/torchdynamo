@@ -1,5 +1,6 @@
 import types
 import warnings
+import math
 from functools import lru_cache
 
 import torch
@@ -11,23 +12,24 @@ def _allowed_function_ids():
     Walk torch.* and get the ids of all the stuff in it
     """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
-    torch_object_ids = set()
+    torch_object_ids = dict()
 
     def _find_torch_objects(module):
-        torch_object_ids.add(id(module))
+        torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
                 if isinstance(obj, types.ModuleType):
                     if obj.__name__.startswith("torch."):
-                        torch_object_ids.add(id(obj))
+                        torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 else:
-                    torch_object_ids.add(id(obj))
+                    torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
+    _find_torch_objects(math)
 
     for obj in (True, False, None):
-        torch_object_ids.remove(id(obj))
+        del torch_object_ids[id(obj)]
 
     return torch_object_ids
 

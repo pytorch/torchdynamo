@@ -10,7 +10,7 @@
 #undef Py_BUILD_CORE
 #endif
 
-//#define TORCHDYNAMO_DEBUG
+// #define TORCHDYNAMO_DEBUG
 #define bool char
 #define false 0
 #define true 1
@@ -24,19 +24,21 @@
   } else {                                                                     \
   }
 
-#ifdef TORCHDYNAMO_DEBUG
-
-#define DEBUG_CHECK(cond)                                                      \
+#define CHECK(cond)                                                            \
   if (unlikely(!(cond))) {                                                     \
     fprintf(stderr, "DEBUG CHECK FAILED: %s:%d\n", __FILE__, __LINE__);        \
     abort();                                                                   \
   } else {                                                                     \
   }
+
+#ifdef TORCHDYNAMO_DEBUG
+
+#define DEBUG_CHECK(cond) CHECK(cond)
+#define DEBUG_NULL_CHECK(val) NULL_CHECK(val)
 #define DEBUG_TRACE(msg, ...)                                                  \
   fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__, __VA_ARGS__)
 #define DEBUG_TRACE0(msg)                                                      \
   fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__)
-#define DEBUG_NULL_CHECK(val) NULL_CHECK(val)
 
 #else
 
@@ -61,14 +63,14 @@ static void ignored(void *obj) {}
 
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate);
 
-#if PY_VERSION_HEX < 0x03090000
-static inline PyObject *PyObject_CallOneArg(PyObject *callable, PyObject *arg) {
-  PyObject *args = PyTuple_Pack(1, arg);
+static inline PyObject *call_callback(PyObject *callable, PyObject *frame,
+                                      long cache_len) {
+  PyObject *args = Py_BuildValue("(Ol)", frame, cache_len);
+  NULL_CHECK(args);
   PyObject *result = PyObject_CallObject(callable, args);
   Py_DECREF(args);
   return result;
 }
-#endif
 
 typedef struct cache_entry {
   // check the guards: lambda: <locals of user function>: bool
@@ -117,6 +119,13 @@ static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
     return e->code;
   }
   return lookup(e->next, f_locals);
+}
+
+static long cache_size(CacheEntry *e) {
+  if (e == NULL) {
+    return 0;
+  }
+  return 1 + cache_size(e->next);
 }
 
 inline static CacheEntry *get_extra(PyCodeObject *code) {
@@ -169,7 +178,8 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   }
   // cache miss
 
-  PyObject *result = PyObject_CallOneArg(callback, (PyObject *)frame);
+  PyObject *result =
+      call_callback(callback, (PyObject *)frame, cache_size(extra));
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
@@ -284,11 +294,41 @@ static PyObject *unsupported(PyObject *dummy, PyObject *args) {
   return obj2;
 }
 
+static PyObject *check_type_id(PyObject *dummy, PyObject *args) {
+  // faster `lambda obj, expected: id(type(obj)) == expected`
+  PyObject *obj;
+  unsigned long expected;
+  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+    return NULL;
+  }
+  if (Py_TYPE(obj) == (void *)expected) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+static PyObject *check_obj_id(PyObject *dummy, PyObject *args) {
+  // faster `lambda obj, expected: id(obj) == expected`
+  PyObject *obj;
+  unsigned long expected;
+  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+    return NULL;
+  }
+  if (obj == (void *)expected) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
+    {"check_type_id", check_type_id, METH_VARARGS, NULL},
+    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -296,6 +336,7 @@ static struct PyModuleDef _module = {
     "Module containing hooks to override eval_frame", -1, _methods};
 
 PyMODINIT_FUNC PyInit__eval_frame(void) {
+  CHECK(sizeof(unsigned long) == sizeof(void *));
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
   Py_INCREF(Py_None);
   eval_frame_callback = Py_None;

@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import textwrap
 import types
 import weakref
 from typing import Any
@@ -8,6 +9,9 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
+
+from ._eval_frame import check_type_id
+from ._eval_frame import check_obj_id
 
 
 class GuardSource(enum.Enum):
@@ -58,13 +62,15 @@ class GuardBuilder:
         return guard.name
 
     def TYPE_MATCH(self, guard: Guard):
+        # ___check_type_id is same as `id(type(x)) == y`
         self.code.append(
-            f"id(type({self.arg_ref(guard)})) == {self.id_ref(type(self.scope[guard.name]))}"
+            f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.scope[guard.name]))})"
         )
 
     def VALUE_MATCH(self, guard: Guard):
+        # ___check_obj_id is same as `id(x) == y`
         self.code.append(
-            f"id({self.arg_ref(guard)}) == {self.id_ref(self.scope[guard.name])}"
+            f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.scope[guard.name])})"
         )
 
     def FUNCTION_MATCH(self, guard: Guard):
@@ -77,10 +83,10 @@ class GuardBuilder:
         assert len(value) > 0
         tensor_type = self.id_ref(type(value[0]))
         assert all([id(type(v)) == tensor_type for v in value])
-        self.code.append(f"id(type({ref})) == {self.id_ref(type(value))}")
+        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
         for i in range(len(value)):
-            self.code.append(f"id(type({ref}[{i}])) == {tensor_type}")
+            self.code.append(f"___check_type_id({ref}[{i}], {tensor_type})")
 
 
 class GuardedCode:
@@ -106,11 +112,19 @@ class GuardedCode:
     def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         args = local_builder.argnames + ["**___kwargs_ignored"]
+        args = ",".join(args)
         code = ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        py_code = (
-            f"lambda ___guarded_code: lambda {','.join(args)}: ({' and '.join(code)})"
+        code = " and ".join(code)
+
+        py_code = textwrap.dedent(
+            f"""
+            def ___make_guard_fn(___guarded_code, ___check_type_id, ___check_obj_id):
+                return lambda {args}: {code}
+            """
         )
-        return eval(py_code, global_builder.scope)(self)
+        out = dict()
+        exec(py_code, global_builder.scope, out)
+        return out["___make_guard_fn"](self, check_type_id, check_obj_id)
 
     def invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false

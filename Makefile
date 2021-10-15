@@ -1,6 +1,6 @@
 .PHONY: default develop test torchbench format lint setup
 
-PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard tests/*.py)
+PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) $(wildcard tests/*.py)
 C_FILES := $(wildcard torchdynamo/*.c)
 
 default: test

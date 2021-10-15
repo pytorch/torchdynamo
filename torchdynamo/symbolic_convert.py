@@ -4,11 +4,11 @@ import dataclasses
 import functools
 import inspect
 import itertools
-import sys
-from numbers import Real
 import operator
+import sys
 import types
 import typing
+from numbers import Real
 from typing import List
 
 import torch
@@ -27,8 +27,8 @@ from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
+from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
@@ -66,6 +66,18 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+def istype(obj, allowed_types):
+    """isinstance() without subclasses"""
+    if isinstance(allowed_types, (tuple, list, set)):
+        return type(obj) in allowed_types
+    return type(obj) is allowed_types
+
+
+def istensor(obj):
+    """Check of obj is a tensor"""
+    return istype(obj, (torch.Tensor, torch.nn.Parameter))
 
 
 def unimplemented(msg: str):
@@ -176,7 +188,7 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def create_load_const(self, value):
         co_consts = self.code_options["co_consts"]
-        assert isinstance(co_consts, tuple)
+        assert istype(co_consts, tuple)
         if value not in co_consts:
             co_consts = co_consts + (value,)
             self.code_options["co_consts"] = co_consts
@@ -186,10 +198,10 @@ class InstructionTranslatorBase(fx.Tracer):
         """
         Turn an arg/input to the frame into a VariableTracker instance
         """
-        if isinstance(value, torch.Tensor):
+        if istensor(value):
             self.graphargs.append(LocalArg(name))
             return TensorVariable(
-                proxy=self.create_graph_input(name),
+                proxy=self.create_graph_input(name, type(value)),
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
@@ -210,16 +222,14 @@ class InstructionTranslatorBase(fx.Tracer):
         elif isinstance(value, Real):
             self.graphargs.append(LocalArg(name))
             return BasicTypeVariable(
-                proxy=self.create_graph_input(name),
+                proxy=self.create_graph_input(name, type(value)),
                 state=TracingSupported.UNKNOWN,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
-        elif type(value) in (tuple, list) and all(
-            isinstance(x, torch.Tensor) for x in value
-        ):
+        elif istype(value, (tuple, list)) and all(istensor(x) for x in value):
             guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
             self.graphargs.append(LocalArg(name))
-            proxy = self.create_graph_input(name)
+            proxy = self.create_graph_input(name, type(value))
             items = []
             for i in range(len(value)):
                 items.append(
@@ -242,17 +252,34 @@ class InstructionTranslatorBase(fx.Tracer):
         for k, v in self.symbolic_locals.items():
             self.symbolic_locals[k] = v.with_initial_name(k)
 
-    def create_graph_input(self, name):
+    def create_graph_input(self, name, type_expr=None):
         placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
         if placeholders:
             ctx = self.graph.inserting_after(placeholders[-1])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy("placeholder", f"{name}_{next(self.cnt)}", (), {})
+            return self.create_proxy(
+                "placeholder", f"{name}_{next(self.cnt)}", (), {}, type_expr=type_expr
+            )
 
     def call_function(self, fn, args, kwargs):
-        if isinstance(fn, AllowedFunctionOrModuleVariable):
+        assert isinstance(fn, VariableTracker)
+        assert isinstance(args, list)
+        assert isinstance(kwargs, dict)
+
+        if (
+            isinstance(fn, AllowedFunctionOrModuleVariable)
+            and fn.value in config.constant_functions
+        ):
+            assert not args and not kwargs
+            self.push(
+                ConstantVariable(
+                    config.constant_functions[fn.value],
+                    **VariableTracker.propagate([fn]),
+                )
+            )
+        elif isinstance(fn, AllowedFunctionOrModuleVariable):
             options = VariableTracker.propagate(
                 [
                     fn,
@@ -297,7 +324,25 @@ class InstructionTranslatorBase(fx.Tracer):
             )
         elif isinstance(fn, NNModuleVariable):
             mod = self.get_submodule(fn.module_key)
-            if is_allowed(mod.__class__):
+            if isinstance(mod, torch.nn.Sequential):
+                if (
+                    len(args) != 1
+                    or len(kwargs) != 0
+                    or mod.__class__.forward is not torch.nn.Sequential.forward
+                ):
+                    unimplemented("custom Sequential")
+                # unroll Sequential()
+                options = VariableTracker.propagate([fn])
+                (arg,) = args
+                for idx, submod in enumerate(mod):
+                    # Just this would work most of the time, but not when using names
+                    # key = f"{fn.module_key}.{idx}"
+                    key = unique_id(f"{fn.module_key.replace('.', '_')}_{idx}")
+                    self.nn_modules[key] = submod
+                    self.call_function(NNModuleVariable(key, **options), [arg], {})
+                    arg = self.pop()
+                self.push(arg)
+            elif is_allowed(mod.__class__):
                 options = VariableTracker.propagate([fn] + args)
                 self.push(
                     TensorVariable(
@@ -436,7 +481,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
-        elif isinstance(value, torch.Tensor):
+        elif istensor(value):
             # turn a load of a global tensor into an arg for the graph
             self.graphargs.append(GlobalArg(inst.argval))
             self.push(
@@ -448,7 +493,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
-        elif isinstance(value, types.FunctionType):
+        elif istype(value, types.FunctionType):
             self.push(
                 UserFunctionVariable(
                     value,
@@ -459,7 +504,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
-        elif isinstance(value, types.ModuleType):
+        elif istype(value, types.ModuleType):
             self.push(
                 PythonModuleVariable(
                     value,
@@ -482,7 +527,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             )
         elif (
-            isinstance(value, types.BuiltinFunctionType)
+            istype(value, types.BuiltinFunctionType)
             and self.should_compile_partial_graph()
         ):
             self.compile_partial_subgraph(
@@ -674,7 +719,7 @@ class InstructionTranslatorBase(fx.Tracer):
             except AttributeError:
                 # TODO(jansel): figure out how to remove this
                 subobj = self.get_submodule(key)
-            if isinstance(subobj, torch.Tensor):
+            if istensor(subobj):
                 self.push(
                     TensorVariable(
                         proxy=self.create_proxy("get_attr", key, tuple(), {}), **options
@@ -682,7 +727,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             elif isinstance(subobj, torch.nn.Module):
                 self.push(NNModuleVariable(key, **options))
-            elif isinstance(subobj, (int, float, bool, type(None))):
+            elif istype(subobj, (int, float, bool, type(None))):
                 # Assumes module attributes are constant
                 # TODO(jansel): add guards?
                 self.push(
@@ -693,15 +738,15 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             elif is_allowed(subobj):
                 self.push(AllowedFunctionOrModuleVariable(subobj, **options))
-            elif isinstance(subobj, property):
+            elif istype(subobj, property):
                 unimplemented("property")
-            elif isinstance(subobj, classmethod):
+            elif istype(subobj, classmethod):
                 unimplemented("classmethod")
-            elif isinstance(subobj, staticmethod):
+            elif istype(subobj, staticmethod):
                 self.push(UserFunctionVariable(subobj.__get__(base), **options))
-            elif isinstance(subobj, types.FunctionType) and name not in base.__dict__:
+            elif istype(subobj, types.FunctionType) and name not in base.__dict__:
                 self.push(UserMethodVariable(subobj, obj, **options))
-            elif isinstance(subobj, types.FunctionType) and name in base.__dict__:
+            elif istype(subobj, types.FunctionType) and name in base.__dict__:
                 self.push(UserFunctionVariable(subobj, **options))
             elif callable(subobj):
                 base = self.get_submodule(obj.module_key)
@@ -715,20 +760,19 @@ class InstructionTranslatorBase(fx.Tracer):
                 # If the container has exclusively nn.Modules, transform
                 # each module into a torchdynamo.NNModuleVariable;
                 # similarly for Tensors/torchdynamo.TensorVariable
-                l = []
+                output = []
                 for i, item in enumerate(subobj):
-                    key = f"{obj.module_key}.{name}_{i}"
                     if isinstance(item, torch.nn.Module):
                         key = f"{obj.module_key}_{name}_{i}"
                         self.nn_modules[key] = item
-                        l.append(
+                        output.append(
                             NNModuleVariable(
                                 module_key=key,
                                 **options,
                             )
                         )
-                    elif isinstance(item, torch.Tensor):
-                        l.append(
+                    elif istensor(item):
+                        output.append(
                             TensorVariable(
                                 proxy=self.create_proxy(
                                     "call_function",
@@ -739,13 +783,12 @@ class InstructionTranslatorBase(fx.Tracer):
                                 **options,
                             )
                         )
-                if len(l) != len(subobj):
+                if len(output) != len(subobj):
                     unimplemented("non-nn.Module items in list")
-                subobj = l
                 tracker_type = (
                     ListVariable if isinstance(subobj, list) else TupleVariable
                 )
-                self.push(tracker_type(subobj, **options))
+                self.push(tracker_type(output, **options))
             else:
                 unimplemented(f"nn.Module attr {type(subobj).__name__}")
         elif isinstance(obj, TensorVariable):
@@ -798,18 +841,23 @@ class InstructionTranslatorBase(fx.Tracer):
         options = VariableTracker.propagate([keys] + values)
         assert isinstance(keys, ConstantVariable)
         keys = keys.value
-        assert isinstance(keys, tuple)
+        assert istype(keys, tuple)
         assert len(keys) == len(values)
         self.push(ConstDictVariable(dict(zip(keys, values)), **options))
-    
+
     def MAKE_FUNCTION(self, inst):
-        fn_name = self.stack.pop().as_proxy()
-        code_obj = self.stack.pop().as_proxy()
+        fn_name_var = self.stack.pop()
+        code_obj_var = self.stack.pop()
+        fn_name = fn_name_var.as_proxy()
+        code_obj = code_obj_var.as_proxy()
         assert isinstance(fn_name, str)
         assert isinstance(code_obj, types.CodeType)
-        fn = types.FunctionType(code_obj, self.f_globals)
-        self.symbolic_locals[fn_name] = fn
-        self.push(UserFunctionVariable(fn))
+        options = VariableTracker.propagate([fn_name_var, code_obj_var])
+        self.push(
+            UserFunctionVariable(
+                types.FunctionType(code_obj, self.f_globals), **options
+            )
+        )
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()

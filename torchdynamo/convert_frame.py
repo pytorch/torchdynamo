@@ -4,26 +4,26 @@ import types
 import typing
 
 from torch import fx
-
 from torchdynamo import config
-from torchdynamo.bytecode_transformation import debug_checks, is_generator
+from torchdynamo.bytecode_transformation import debug_checks
+from torchdynamo.bytecode_transformation import is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
-from torchdynamo.symbolic_convert import InstructionTranslator, unimplemented
+from torchdynamo.symbolic_convert import InstructionTranslator
 from torchdynamo.symbolic_convert import counters
+from torchdynamo.symbolic_convert import unimplemented
+
+TERMINAL_OPCODES = {
+    dis.opmap["RETURN_VALUE"],
+    dis.opmap["JUMP_ABSOLUTE"],
+    dis.opmap["JUMP_FORWARD"],
+    # TODO(jansel): need to handle exceptions, etc
+}
+JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 
 
 def remove_dead_code(instructions):
-    """Remove dead code"""
-    # TODO(jansel): need to handle exceptions, etc
-    terminal_ops = {
-        "JUMP_FORWARD",
-        "JUMP_ABSOLUTE",
-        "RETURN_VALUE",
-    }
-    jump_ops = {dis.opname[x] for x in dis.hasjrel + dis.hasjabs}
-
-    # dead code elimination
+    """Dead code elimination"""
     indexof = {id(inst): i for i, inst in enumerate(instructions)}
     live_code = set()
 
@@ -33,9 +33,9 @@ def remove_dead_code(instructions):
                 return
             live_code.add(i)
             inst = instructions[i]
-            if inst.opname in jump_ops:
+            if inst.opcode in JUMP_OPCODES:
                 find_live_code(indexof[id(inst.target)])
-            if inst.opname in terminal_ops:
+            if inst.opcode in TERMINAL_OPCODES:
                 return
 
     find_live_code(0)
@@ -81,13 +81,15 @@ def dummy_fx_compile(gm: fx.GraphModule):
 def convert_frame_assert(compiler_fn: typing.Callable):
     """Fully convert a frame into an FX graph"""
 
-    def _convert_frame_assert(frame: types.FrameType):
+    def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
         if code.co_filename.startswith("<eval_with_key>") or code in output_codes:
             return None  # skip FX output
         if is_generator(code):
             unimplemented("generator")
+        if cache_size >= config.cache_size_limit:
+            unimplemented("cache_size_limit reached")
         debug_checks(code)
         tracer = None
 
@@ -135,10 +137,10 @@ def convert_frame(compiler_fn: typing.Callable):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn)
 
-    def _convert_frame(frame: types.FrameType):
+    def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame)
+            result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
         except NotImplementedError:

@@ -47,11 +47,11 @@ class _RunContext(_Context):
 
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
-    def catch_errors(frame):
+    def catch_errors(frame, cache_size):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
                 return None
-            return callback(frame)
+            return callback(frame, cache_size)
         except Exception:
             logging.basicConfig()
             logging.exception("Error while processing frame")

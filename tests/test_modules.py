@@ -221,6 +221,20 @@ class IntArg(torch.nn.Module):
         return x
 
 
+class Seq(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.Sequential(
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -231,6 +245,7 @@ def make_test(fn, expected_ops=None):
 
 
 class NNModuleTests(torchdynamo.testing.TestCase):
+    test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
     test_submodules1 = make_test(SubmoduleExample())
