@@ -317,8 +317,31 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_return_tuple(x):
         return (torch.add(x, x), x)
 
+    @make_test
     def test_load_global_bool(x):
         if flag:
             return torch.add(x, x)
         else:
             return x
+
+    @make_test
+    def test_len_tensor(x):
+        z = len(x)
+        return torch.add(x, z)
+
+    @make_test
+    def test_len_constant_list(x):
+        z = len([1, 2, 3])
+        return torch.add(x, z)
+
+    @make_test
+    def test_len_constant_dict(x):
+        z = len({"foo": "bar"})
+        return torch.add(x, z)
+
+    @make_test
+    def test_len_constant_misc_iterables(x):
+        a = len((1, 2, 3))
+        b = len("test str")
+        c = a + b
+        return torch.add(x, c)

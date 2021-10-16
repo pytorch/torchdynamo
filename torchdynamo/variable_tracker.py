@@ -218,8 +218,11 @@ class ConstDictVariable(VariableTracker):
 
     def get_key(self):
         return self.__class__, tuple(
-            (k, self.itmes[k].get_key()) for k in sorted(self.items.keys())
+            (k, self.items[k].get_key()) for k in sorted(self.items.keys())
         )
+
+    def as_proxy(self):
+        return {k: v.as_proxy() for k, v in self.items.items()}
 
 
 class UserFunctionVariable(VariableTracker):
