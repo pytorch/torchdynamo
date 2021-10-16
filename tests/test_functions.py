@@ -311,3 +311,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
             return torch.add(x, x)
 
         return fn(x)
+
+    @make_test
+    def test_return_tuple(x):
+        return (torch.add(x, x), x)
