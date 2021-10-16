@@ -15,6 +15,7 @@ from torchdynamo.testing import same
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
+flag = True
 
 
 def constant3(a, b):
@@ -315,3 +316,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_return_tuple(x):
         return (torch.add(x, x), x)
+
+    def test_load_global_bool(x):
+        if flag:
+            return torch.add(x, x)
+        else:
+            return x
