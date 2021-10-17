@@ -345,3 +345,19 @@ class FunctionTests(torchdynamo.testing.TestCase):
         b = len("test str")
         c = a + b
         return torch.add(x, c)
+
+    def test_builtin_isinstance(self):
+        def fn(x):
+            t = torch.arange(1, 3)
+            a = isinstance(x, torch.Tensor)
+            b = isinstance(t, torch.Tensor)
+            c = isinstance(x, int)
+            d = isinstance(3, int)
+            e = isinstance([1, 2, 3], list)
+            f = isinstance({"foo": 1, "bar": 2}, dict)
+            res = [a, b, c, d, e, f]
+            # Can't run yet due to other unimplemented instructions
+            # res += [isinstance(torch.nn.LazyLinear(2, 3), torch.nn.Linear)]
+            return res
+
+        torchdynamo.testing.standard_test(self, fn, 1, expected_ops=1)
