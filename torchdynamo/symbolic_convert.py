@@ -376,6 +376,27 @@ class InstructionTranslatorBase(fx.Tracer):
             elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
                 assert not kwargs and len(args) == 1
                 self.push(ListIteratorVariable(args[0].items, **options))
+            elif fn.fn is len:
+                assert not kwargs and len(args) == 1
+                arg = args[0]
+                if isinstance(arg, TensorVariable):
+                    self.push(
+                        BasicTypeVariable(
+                            self.create_proxy("call_function", len, (arg.proxy,), {}),
+                            **options,
+                        )
+                    )
+                elif isinstance(
+                    arg, (ConstantVariable, ListVariable, ConstDictVariable)
+                ):
+                    item = (
+                        arg.value
+                        if isinstance(arg, ConstantVariable)
+                        else tuple(arg.as_proxy())
+                    )
+                    self.push(ConstantVariable(len(item), **options))
+                else:
+                    unimplemented(f"`len` with arg type {arg}")
             else:
                 unimplemented(f"builtin call {fn.fn}")
         else:
@@ -513,7 +534,7 @@ class InstructionTranslatorBase(fx.Tracer):
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
                     },
                 )
-        )
+            )
         elif istype(value, types.ModuleType):
             self.push(
                 PythonModuleVariable(
