@@ -504,6 +504,16 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
+        elif isinstance(value, bool):
+            self.push(
+                ConstantVariable(
+                    value=inst.argval,
+                    state=TracingSupported.UNKNOWN,
+                    guards={
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
+                    },
+                )
+        )
         elif istype(value, types.ModuleType):
             self.push(
                 PythonModuleVariable(
