@@ -961,7 +961,7 @@ class InstructionTranslatorBase(fx.Tracer):
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        if isinstance(rv, TensorVariable):
+        if isinstance(rv, TensorVariable) or isinstance(rv, TupleVariable):
             self.create_node("output", "output", (self.create_arg(rv.as_proxy()),), {})
         elif isinstance(rv, list):
             outputs = []
