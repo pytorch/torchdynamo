@@ -528,7 +528,7 @@ class InstructionTranslatorBase(fx.Tracer):
         elif isinstance(value, bool):
             self.push(
                 ConstantVariable(
-                    value=inst.argval,
+                    value=self.f_globals[inst.argval],
                     state=TracingSupported.UNKNOWN,
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
