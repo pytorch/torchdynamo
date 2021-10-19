@@ -397,6 +397,27 @@ class InstructionTranslatorBase(fx.Tracer):
                     self.push(ConstantVariable(len(item), **options))
                 else:
                     unimplemented(f"`len` with arg type {arg}")
+            elif fn.fn is isinstance:
+                assert not kwargs and len(args) == 2
+                arg, isinstance_types = args
+                arg_type = arg.python_type()
+
+                def get_and_assert_python_value(x: VariableTracker):
+                    assert isinstance(
+                        x,
+                        (AllowedFunctionOrModuleVariable, BuiltinVariable),
+                    )
+                    return x.python_value()
+
+                if isinstance(isinstance_types, VariableTracker):
+                    isinstance_types = (isinstance_types,)
+
+                isinstance_types = tuple(
+                    map(get_and_assert_python_value, isinstance_types)
+                )
+                self.push(
+                    ConstantVariable(issubclass(arg_type, isinstance_types), **options)
+                )
             elif fn.fn is float:
                 assert not kwargs and len(args) == 1
                 try:

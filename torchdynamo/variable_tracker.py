@@ -83,6 +83,14 @@ class VariableTracker:
         """Shallow copy with a different value for self.initial_name"""
         return self.clone(initial_name=name)
 
+    def python_type(self):
+        raise NotImplementedError("No known type")
+
+    def python_value(self):
+        raise NotImplementedError(
+            "Use of corresponding Python value is not supported yet"
+        )
+
     def __init__(
         self,
         state=TracingSupported.UNKNOWN,
@@ -105,6 +113,9 @@ class TensorVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def python_type(self):
+        return torch.Tensor
+
 
 class BasicTypeVariable(TensorVariable):
     """
@@ -112,7 +123,8 @@ class BasicTypeVariable(TensorVariable):
     the same as TensorVariable
     """
 
-    pass
+    def python_type(self):
+        return self.proxy
 
 
 class NNModuleVariable(VariableTracker):
@@ -122,6 +134,9 @@ class NNModuleVariable(VariableTracker):
 
     def get_key(self):
         return self.__class__, self.module_key
+
+    def python_type(self):
+        return torch.nn.Module
 
 
 class ConstantVariable(VariableTracker):
@@ -135,6 +150,9 @@ class ConstantVariable(VariableTracker):
     def get_key(self):
         return self.__class__, self.value
 
+    def python_type(self):
+        return type(self.value)
+
 
 class BuiltinVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
@@ -143,6 +161,12 @@ class BuiltinVariable(VariableTracker):
 
     def get_key(self):
         return self.__class__, id(self.fn)
+
+    def python_type(self):
+        return type(self.fn)
+
+    def python_value(self):
+        return self.fn
 
 
 class ListIteratorVariable(VariableTracker):
@@ -199,15 +223,24 @@ class ListVariable(BaseListVariable):
     def as_proxy(self):
         return list(self._as_proxy())
 
+    def python_type(self):
+        return list
+
 
 class TupleVariable(BaseListVariable):
     def as_proxy(self):
         return tuple(self._as_proxy())
 
+    def python_type(self):
+        return tuple
+
 
 class SliceVariable(BaseListVariable):
     def as_proxy(self):
         return slice(*self._as_proxy())
+
+    def python_type(self):
+        return slice
 
 
 class ConstDictVariable(VariableTracker):
@@ -224,6 +257,9 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
+    def python_type(self):
+        return dict
+
 
 class UserFunctionVariable(VariableTracker):
     """Some unsupported user-defined global function"""
@@ -237,6 +273,9 @@ class UserFunctionVariable(VariableTracker):
 
     def get_key(self):
         return self.__class__, id(self.fn)
+
+    def python_type(self):
+        return types.FunctionType
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -252,6 +291,9 @@ class UserMethodVariable(UserFunctionVariable):
     def get_key(self):
         return self.__class__, id(self.fn), self.obj.get_key()
 
+    def python_type(self):
+        return types.MethodType
+
 
 class AllowedFunctionOrModuleVariable(VariableTracker):
     """Points to a module or method in torch.*"""
@@ -266,6 +308,16 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
     def get_key(self):
         return self.__class__, id(self.value)
 
+    def python_type(self):
+        if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
+            return type(self.value)
+        return super().python_type()
+
+    def python_value(self):
+        if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
+            return self.value
+        return super().python_value()
+
 
 class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
@@ -274,6 +326,9 @@ class PythonModuleVariable(VariableTracker):
 
     def get_key(self):
         return self.__class__, id(self.value)
+
+    def python_type(self):
+        return types.ModuleType
 
 
 class UnsupportedVariable(VariableTracker):
@@ -290,3 +345,6 @@ class UnsupportedVariable(VariableTracker):
 
     def get_key(self):
         return self.__class__, id(self.value_type)
+
+    def python_type(self):
+        return self.value_type
