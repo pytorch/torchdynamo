@@ -418,6 +418,12 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.push(
                     ConstantVariable(issubclass(arg_type, isinstance_types), **options)
                 )
+            elif fn.fn is float:
+                assert not kwargs and len(args) == 1
+                try:
+                    self.push(ConstantVariable(float(args[0].value), **options))
+                except:
+                    unimplemented(f"float constructor with non-const argument")
             else:
                 unimplemented(f"builtin call {fn.fn}")
         else:
@@ -549,7 +555,7 @@ class InstructionTranslatorBase(fx.Tracer):
         elif isinstance(value, bool):
             self.push(
                 ConstantVariable(
-                    value=inst.argval,
+                    value=self.f_globals[inst.argval],
                     state=TracingSupported.UNKNOWN,
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
