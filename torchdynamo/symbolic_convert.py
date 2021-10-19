@@ -39,6 +39,7 @@ from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
 from .variable_tracker import TupleVariable
 from .variable_tracker import UnsupportedVariable
+from .variable_tracker import UserClassInstanceVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
@@ -123,7 +124,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(value.value):
                 push and self.push(value)
                 self.jump(inst)
-
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             assert len(self.stack) == 0
@@ -359,7 +359,19 @@ class InstructionTranslatorBase(fx.Tracer):
                 assert forward is not torch.nn.Module.forward
                 self.inline_user_function(fn.guards, forward, [fn] + args, kwargs)
         elif isinstance(fn, UserFunctionVariable):
-            self.inline_user_function(fn.guards, fn.fn, fn.self_args() + args, kwargs)
+            if fn.fn.__class__ is type:
+                options = VariableTracker.propagate(
+                    [
+                        fn,
+                    ]
+                    + list(args)
+                    + list(kwargs.values())
+                )
+                self.push(UserClassInstanceVariable(fn.fn(*args, **kwargs), **options))
+            else:
+                self.inline_user_function(
+                    fn.guards, fn.fn, fn.self_args() + args, kwargs
+                )
         elif isinstance(fn, BuiltinVariable):
             allargs = args + list(kwargs.values())
             options = VariableTracker.propagate(allargs)
@@ -426,6 +438,11 @@ class InstructionTranslatorBase(fx.Tracer):
                     unimplemented(f"float constructor with non-const argument")
             else:
                 unimplemented(f"builtin call {fn.fn}")
+        elif isinstance(fn, UserClassInstanceVariable):
+            args.insert(0, fn.value)
+            allargs = args + list(kwargs.values())
+            options = VariableTracker.propagate(allargs)
+            self.inline_user_function(options, fn.value.__call__, args, kwargs)
         else:
             unimplemented(f"call_function {type(fn).__name__}")
 
@@ -541,7 +558,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     },
                 )
             )
-        elif istype(value, types.FunctionType):
+        elif istype(value, types.FunctionType) or issubclass(type(value), type):
             self.push(
                 UserFunctionVariable(
                     value,
@@ -865,6 +882,20 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.push(UserFunctionVariable(member, **options))
             else:
                 unimplemented("PythonModuleVariable attribute")
+        elif isinstance(obj, UserClassInstanceVariable):
+            attr = getattr(obj.value, name)
+            if isinstance(attr, types.MethodType):
+                self.push(UserMethodVariable(attr, obj.value, **options))
+            elif isinstance(attr, types.FunctionType):
+                self.push(UserFunctionVariable(attr, **options))
+            elif isinstance(attr, (bool, str, Real, type(None))):
+                self.push(ConstantVariable(attr, **options))
+            elif isinstance(attr, VariableTracker):
+                self.push(attr)
+            else:
+                unimplemented(
+                    f"LOAD_ATTR with attr {attr} of UserClassInstanceVariable"
+                )
         else:
             unimplemented(f"LOAD_ATTR {obj}")
 
@@ -1391,7 +1422,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if getattr(func, "__closure__", None) is not None:
             unimplemented("inline with  __closure__")
         if getattr(func, "__self__", None) is not None:
-            unimplemented("inline with  __self__")
+            func = func.__func__
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         sub_locals = dict()
@@ -1401,6 +1432,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals[k] = v
             elif isinstance(v, (bool, int, float, type(None))):
                 sub_locals[k] = ConstantVariable(v)
+            elif isinstance(type(v), type):
+                sub_locals[k] = UserClassInstanceVariable(v)
             else:
                 unimplemented(f"inline_call unsupported default: {typestr(v)}")
         tracer = InliningInstructionTranslator(

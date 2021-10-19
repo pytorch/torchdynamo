@@ -295,6 +295,23 @@ class UserMethodVariable(UserFunctionVariable):
         return types.MethodType
 
 
+class UserClassInstanceVariable(VariableTracker):
+    """Some object created from a user-defined class"""
+
+    def __init__(self, value, **kwargs):
+        super(UserClassInstanceVariable, self).__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self):
+        return self.value
+
+    def python_type(self):
+        return type(self.value)
+
+    def python_value(self):
+        return self.value
+
+
 class AllowedFunctionOrModuleVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 

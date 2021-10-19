@@ -18,6 +18,19 @@ e = torch.nn.Linear(10, 10)
 flag = True
 
 
+class UserClass:
+    def __init__(self, x, n=5):
+        self.x = x
+        self.n = n
+
+    def __call__(self):
+        y = torch.arange(2, 3)
+        return self.fn(y)
+
+    def fn(self, y):
+        return torch.add(self.x, y)
+
+
 def constant3(a, b):
     return a - b + (1.0 + 2)
 
@@ -373,10 +386,25 @@ class FunctionTests(torchdynamo.testing.TestCase):
             y = float(x)
             z = torch.tensor([y, y, y])
             return z
-        
+
         def test_raises():
             s = "1.2"
             with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
                 fn(s)
 
         self.assertRaises(NotImplementedError, test_raises)
+
+    @make_test
+    def test_user_defined_class_fn_call(x, y):
+        user_class = UserClass(x)
+        return user_class.fn(y)
+
+    @make_test
+    def test_user_defined_class_attribute(x):
+        user_class = UserClass(x, 3)
+        return torch.add(x, user_class.n)
+
+    @make_test
+    def test_user_defined_class_as_callable(x):
+        user_class = UserClass(x)
+        return user_class()
