@@ -345,3 +345,22 @@ class FunctionTests(torchdynamo.testing.TestCase):
         b = len("test str")
         c = a + b
         return torch.add(x, c)
+
+    @make_test
+    def test_float(x):
+        y = float(1.2)
+        y += float("1.2")
+        return torch.add(x, y)
+
+    def test_float_nonconst(self):
+        def fn(x: str):
+            y = float(x)
+            z = torch.tensor([y, y, y])
+            return z
+        
+        def test_raises():
+            s = "1.2"
+            with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
+                fn(s)
+
+        self.assertRaises(NotImplementedError, test_raises)

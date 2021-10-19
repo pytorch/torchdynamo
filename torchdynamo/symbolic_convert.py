@@ -397,6 +397,12 @@ class InstructionTranslatorBase(fx.Tracer):
                     self.push(ConstantVariable(len(item), **options))
                 else:
                     unimplemented(f"`len` with arg type {arg}")
+            elif fn.fn is float:
+                assert not kwargs and len(args) == 1
+                try:
+                    self.push(ConstantVariable(float(args[0].value), **options))
+                except:
+                    unimplemented(f"float constructor with non-const argument")
             else:
                 unimplemented(f"builtin call {fn.fn}")
         else:
