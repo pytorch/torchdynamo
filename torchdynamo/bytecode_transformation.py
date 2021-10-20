@@ -38,7 +38,6 @@ class _NotProvided:
 
 
 def create_instruction(name, arg=None, argval=_NotProvided, target=None):
-    assert arg is None or 0 <= arg < 256
     if argval is _NotProvided:
         argval = arg
     return Instruction(
@@ -129,7 +128,7 @@ def fix_extended_args(instructions: List[Instruction]):
 
     def maybe_pop_n(n):
         for _ in range(n):
-            if output[-1].opcode == dis.EXTENDED_ARG:
+            if output and output[-1].opcode == dis.EXTENDED_ARG:
                 output.pop()
 
     for i, inst in enumerate(instructions):
@@ -192,6 +191,20 @@ def debug_checks(code):
     assert code.co_lnotab == code.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
 
+HAS_LOCAL = set(dis.haslocal)
+HAS_NAME = set(dis.hasname)
+
+
+def fix_vars(instructions: List[Instruction], code_options):
+    varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+    names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+    for i in range(len(instructions)):
+        if instructions[i].opcode in HAS_LOCAL:
+            instructions[i].arg = varnames[instructions[i].argval]
+        elif instructions[i].opcode in HAS_NAME:
+            instructions[i].arg = names[instructions[i].argval]
+
+
 def transform_code_object(code, transformations):
     keys = [
         "co_argcount",
@@ -214,10 +227,13 @@ def transform_code_object(code, transformations):
     if sys.version_info < (3, 8):
         keys.pop(1)
     code_options = {k: getattr(code, k) for k in keys}
+    assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
     instructions = cleaned_instructions(code)
 
     transformations(instructions, code_options)
+
+    fix_vars(instructions, code_options)
 
     dirty = True
     while dirty:
@@ -229,6 +245,7 @@ def transform_code_object(code, transformations):
     bytecode, lnotab = assemble(instructions, code.co_firstlineno)
     code_options["co_code"] = bytecode
     code_options["co_lnotab"] = lnotab
+    code_options["co_nlocals"] = len(code_options["co_varnames"])
     assert set(keys) == set(code_options.keys())
     return types.CodeType(*[code_options[k] for k in keys])
 

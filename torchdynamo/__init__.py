@@ -1,4 +1,5 @@
 import torchdynamo.convert_frame
+import torchdynamo.resume_execution
 from . import eval_frame
 
 
@@ -25,3 +26,4 @@ def reset():
         reset_code(code)
     torchdynamo.convert_frame.input_codes.clear()
     torchdynamo.convert_frame.output_codes.clear()
+    torchdynamo.resume_execution.ContinueExecutionCache.cache.clear()

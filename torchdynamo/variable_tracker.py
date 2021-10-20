@@ -71,6 +71,9 @@ class VariableTracker:
         else:
             return value
 
+    def add_guard(self, guard):
+        return self.clone(guards=set.union(self.guards, {guard}))
+
     def get_key(self):
         return self.__class__
 
@@ -95,12 +98,14 @@ class VariableTracker:
         self,
         state=TracingSupported.UNKNOWN,
         guards: Optional[Set] = None,
-        initial_name=None,
+        initial_name: Optional[str] = None,
+        global_name: Optional[str] = None,
     ):
         super(VariableTracker, self).__init__()
         self.state = state
         self.guards = guards or set()
         self.initial_name = initial_name
+        self.global_name = global_name
 
 
 class TensorVariable(VariableTracker):
@@ -348,3 +353,11 @@ class UnsupportedVariable(VariableTracker):
 
     def python_type(self):
         return self.value_type
+
+
+class UnknownVariable(VariableTracker):
+    """
+    It could be anything!
+    """
+
+    pass

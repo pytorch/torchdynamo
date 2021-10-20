@@ -1,9 +1,11 @@
 import dis
-import logging
+import sys
+import traceback
 import types
 import typing
 
 from torch import fx
+
 from torchdynamo import config
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import is_generator
@@ -97,6 +99,7 @@ def convert_frame_assert(compiler_fn: typing.Callable):
             nonlocal tracer
             tracer = InstructionTranslator(
                 instructions,
+                frame.f_code,
                 frame.f_locals,
                 frame.f_globals,
                 frame.f_builtins,
@@ -117,7 +120,12 @@ def convert_frame_assert(compiler_fn: typing.Callable):
         code = transform_code_object(frame.f_code, transform)
         output_codes.add(code)
         if config.debug:
-            print("\nORIGINAL BYTECODE")
+            print(
+                "\nORIGINAL BYTECODE",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+            )
             # print(dis.Bytecode(frame.f_code).info())
             print(dis.Bytecode(frame.f_code).dis())
             print("MODIFIED BYTECODE")
@@ -146,7 +154,18 @@ def convert_frame(compiler_fn: typing.Callable):
         except NotImplementedError:
             pass
         except Exception:
-            logging.exception(f"ERROR\n{dis.Bytecode(frame.f_code).dis()}")
+            sys.stderr.write("=" * 10 + " Stack Trace " + "=" * 10 + "\n")
+            traceback.print_exc()
+            if config.debug:
+                sys.stderr.write(
+                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
+                )
+                sys.stderr.write(
+                    dis.Bytecode(frame.f_code).info()
+                    + "\n"
+                    + dis.Bytecode(frame.f_code).dis()
+                )
+                sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
         return None
 
     return _convert_frame

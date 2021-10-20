@@ -10,7 +10,7 @@
 #undef Py_BUILD_CORE
 #endif
 
-// #define TORCHDYNAMO_DEBUG
+//#define TORCHDYNAMO_DEBUG
 #define bool char
 #define false 0
 #define true 1
@@ -139,13 +139,74 @@ inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
   _PyCode_SetExtra((PyObject *)code, extra_index, extra);
 }
 
-inline static PyObject *swap_code_and_run(PyFrameObject *frame,
-                                          PyCodeObject *code, int throw_flag) {
+/*
+inline static PyObject *eval_custom_code_inplace(PyFrameObject *frame,
+                                                 PyCodeObject *code,
+                                                 int throw_flag) {
   PyCodeObject *prior_code = frame->f_code;
   frame->f_code = code;
   PyObject *result = _PyEval_EvalFrameDefault(frame, throw_flag);
   frame->f_code = prior_code;
   return result;
+} */
+
+inline static PyObject *eval_custom_code_shadow_frame(PyThreadState *tstate,
+                                                      PyFrameObject *frame,
+                                                      PyCodeObject *code,
+                                                      int throw_flag) {
+  Py_ssize_t ncells = 0;
+  Py_ssize_t nfrees = 0;
+  Py_ssize_t nlocals = code->co_nlocals;
+
+  if ((code->co_flags & CO_NOFREE) == 0) {
+    ncells = PyTuple_GET_SIZE(code->co_cellvars);
+    nfrees = PyTuple_GET_SIZE(code->co_freevars);
+  }
+
+  DEBUG_NULL_CHECK(tstate);
+  DEBUG_NULL_CHECK(frame);
+  DEBUG_NULL_CHECK(code);
+  DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
+  DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+  DEBUG_CHECK(nlocals == frame->f_code->co_nlocals);
+
+  PyFrameObject *shadow =
+      _PyFrame_New_NoTrack(tstate, code, frame->f_globals, NULL);
+  if (shadow == NULL) {
+    return NULL;
+  }
+
+  PyObject **fastlocals_old = frame->f_localsplus;
+  PyObject **fastlocals_new = shadow->f_localsplus;
+
+  for (Py_ssize_t i = 0; i < ncells + nfrees + nlocals; i++) {
+    Py_XINCREF(fastlocals_old[i]);
+    fastlocals_new[i] = fastlocals_old[i];
+  }
+
+  PyObject *result = _PyEval_EvalFrameDefault(shadow, throw_flag);
+
+  // cleanup code copied from cpython/.../call.c
+  if (Py_REFCNT(shadow) > 1) {
+    Py_DECREF(shadow);
+    PyObject_GC_Track(shadow);
+  } else {
+    ++tstate->recursion_depth;
+    Py_DECREF(shadow);
+    --tstate->recursion_depth;
+  }
+  return result;
+}
+
+inline static PyObject *eval_custom_code(PyThreadState *tstate,
+                                         PyFrameObject *frame,
+                                         PyCodeObject *code, int throw_flag) {
+  // if (code->co_stacksize <= frame->f_code->co_stacksize) {
+  //   return eval_custom_code_inplace(frame, code, throw_flag);
+  // } else {
+  // need to create a new frame object in order to have a bigger stack
+  return eval_custom_code_shadow_frame(tstate, frame, code, throw_flag);
+  // }
 }
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
@@ -174,7 +235,7 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
     set_eval_frame(callback, tstate);
-    return swap_code_and_run(frame, cached_code, throw_flag);
+    return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
 
@@ -191,7 +252,7 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
     Py_DECREF(result);
     set_extra(frame->f_code, extra);
     set_eval_frame(callback, tstate);
-    return swap_code_and_run(frame, extra->code, throw_flag);
+    return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
@@ -219,7 +280,8 @@ static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    return swap_code_and_run(frame, cached_code, throw_flag);
+    return eval_custom_code(PyThreadState_GET(), frame, cached_code,
+                            throw_flag);
   } else {
     DEBUG_TRACE("cache miss %s", name(frame));
     return _PyEval_EvalFrameDefault(frame, throw_flag);

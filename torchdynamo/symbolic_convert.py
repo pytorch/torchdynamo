@@ -9,7 +9,11 @@ import sys
 import types
 import typing
 from numbers import Real
+from typing import Any
+from typing import Dict
 from typing import List
+from typing import Set
+from unittest.mock import patch
 
 import torch
 from torch import fx
@@ -23,6 +27,11 @@ from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .guards import GuardSource
+from .resume_execution import ContinueExecutionCache
+from .utils import count_calls
+from .utils import istensor
+from .utils import istype
+from .utils import typestr
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BasicTypeVariable
@@ -38,6 +47,7 @@ from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
 from .variable_tracker import TupleVariable
+from .variable_tracker import UnknownVariable
 from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
@@ -55,29 +65,6 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         )
-
-
-def typestr(*objs):
-    if len(objs) == 1:
-        (obj,) = objs
-        if isinstance(obj, VariableTracker):
-            return str(obj)
-        else:
-            return type(obj).__name__
-    else:
-        return " ".join(map(typestr, objs))
-
-
-def istype(obj, allowed_types):
-    """isinstance() without subclasses"""
-    if isinstance(allowed_types, (tuple, list, set)):
-        return type(obj) in allowed_types
-    return type(obj) is allowed_types
-
-
-def istensor(obj):
-    """Check of obj is a tensor"""
-    return istype(obj, (torch.Tensor, torch.nn.Parameter))
 
 
 def unimplemented(msg: str):
@@ -116,7 +103,7 @@ def stack_op(fn):
 
 
 def generic_jump(truth_fn: typing.Callable, push: bool):
-    def inner(self, inst):
+    def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value = self.pop()
         self.guards.update(value.guards)
         if isinstance(value, (AllowedFunctionOrModuleVariable, ConstantVariable)):
@@ -126,15 +113,14 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
 
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
-            assert len(self.stack) == 0
-            if_next = ContinuationInstructionTranslator(self, self.next_instruction)
+            if_next = self.create_call_resume_at(self.next_instruction.offset)
             push and self.push(value)
-            if_jump = ContinuationInstructionTranslator(self, inst.target)
+            if_jump = self.create_call_resume_at(inst.target.offset)
             self.compile_partial_subgraph(
-                [value], [(create_instruction(inst.opname, target=if_jump))]
+                [value], [(create_instruction(inst.opname, target=if_jump[0]))]
             )
-            self.append_continuation(if_next)
-            self.append_continuation(if_jump)
+            self.output_instructions.extend(if_next)
+            self.output_instructions.extend(if_jump)
         else:
             unimplemented(f"generic_jump {typestr(value)}")
 
@@ -169,7 +155,9 @@ class StackArg(Arg):
 
 class InstructionTranslatorBase(fx.Tracer):
     def create_load_fast(self, name):
-        assert name in self.code_options["co_varnames"]
+        assert (
+            name in self.code_options["co_varnames"]
+        ), f"{name} not in {self.code_options['co_varnames']}"
         return create_instruction(
             "LOAD_FAST", self.code_options["co_varnames"].index(name), name
         )
@@ -180,7 +168,11 @@ class InstructionTranslatorBase(fx.Tracer):
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
         )
 
-    def create_load_global(self, name):
+    def create_load_global(self, name, add=False):
+        if add and name not in self.code_options["co_names"]:
+            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
+                name,
+            )
         assert name in self.code_options["co_names"]
         return create_instruction(
             "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
@@ -359,7 +351,15 @@ class InstructionTranslatorBase(fx.Tracer):
                 assert forward is not torch.nn.Module.forward
                 self.inline_user_function(fn.guards, forward, [fn] + args, kwargs)
         elif isinstance(fn, UserFunctionVariable):
-            self.inline_user_function(fn.guards, fn.fn, fn.self_args() + args, kwargs)
+            self.guards.update(fn.guards)
+            try:
+                self.inline_user_function(
+                    fn.guards, fn.fn, fn.self_args() + args, kwargs
+                )
+            except NotImplementedError:
+                if not self.should_compile_partial_graph():
+                    raise
+                self.partial_subgraph_and_call(fn, fn.self_args() + args, kwargs)
         elif isinstance(fn, BuiltinVariable):
             allargs = args + list(kwargs.values())
             options = VariableTracker.propagate(allargs)
@@ -387,7 +387,7 @@ class InstructionTranslatorBase(fx.Tracer):
                         )
                     )
                 elif isinstance(
-                    arg, (ConstantVariable, ListVariable, ConstDictVariable)
+                    arg, (ConstantVariable, BaseListVariable, ConstDictVariable)
                 ):
                     item = (
                         arg.value
@@ -399,35 +399,50 @@ class InstructionTranslatorBase(fx.Tracer):
                     unimplemented(f"`len` with arg type {arg}")
             elif fn.fn is isinstance:
                 assert not kwargs and len(args) == 2
-                arg, isinstance_types = args
+                arg, isinstance_type = args
                 arg_type = arg.python_type()
-
-                def get_and_assert_python_value(x: VariableTracker):
-                    assert isinstance(
-                        x,
-                        (AllowedFunctionOrModuleVariable, BuiltinVariable),
-                    )
-                    return x.python_value()
-
-                if isinstance(isinstance_types, VariableTracker):
-                    isinstance_types = (isinstance_types,)
-
-                isinstance_types = tuple(
-                    map(get_and_assert_python_value, isinstance_types)
-                )
-                self.push(
-                    ConstantVariable(issubclass(arg_type, isinstance_types), **options)
-                )
+                isinstance_type = isinstance_type.python_value()
+                try:
+                    val = issubclass(arg_type, isinstance_type)
+                except TypeError:
+                    val = arg_type is isinstance_type
+                self.push(ConstantVariable(val, **options))
             elif fn.fn is float:
                 assert not kwargs and len(args) == 1
                 try:
                     self.push(ConstantVariable(float(args[0].value), **options))
-                except:
-                    unimplemented(f"float constructor with non-const argument")
+                except (TypeError, AttributeError):
+                    unimplemented("float constructor with non-const argument")
             else:
                 unimplemented(f"builtin call {fn.fn}")
+        elif self.should_compile_partial_graph():
+            warning(f"breaking graph on call({fn})")
+            self.partial_subgraph_and_call(fn, args, kwargs)
         else:
-            unimplemented(f"call_function {type(fn).__name__}")
+            unimplemented(f"call({fn})")
+
+    def partial_subgraph_and_call(self, fn, args, kwargs):
+        keys = list(kwargs.keys())
+        keys.sort(key=lambda k: (self.is_const_var(kwargs[k]), k))
+        args_and_kwargs = list(args) + [kwargs[k] for k in keys]
+        self.compile_partial_subgraph(self.stack + [fn] + args_and_kwargs, [])
+        if not kwargs:
+            self.grow_stack_to(len(self.stack) + len(args_and_kwargs) + 2)
+            self.output_instructions.append(
+                create_instruction("CALL_FUNCTION", len(args_and_kwargs))
+            )
+        else:
+            self.grow_stack_to(len(self.stack) + len(args_and_kwargs) + 3)
+            self.output_instructions.extend(
+                [
+                    self.create_load_const(tuple(keys)),
+                    create_instruction("CALL_FUNCTION_KW", len(args_and_kwargs)),
+                ]
+            )
+        self.push(UnknownVariable())
+        self.output_instructions.extend(
+            self.create_call_resume_at(self.next_instruction.offset)
+        )
 
     def inline_user_function(self, guards, fn, args, kwargs):
         """
@@ -475,19 +490,15 @@ class InstructionTranslatorBase(fx.Tracer):
         try:
             while self.step():
                 pass
-            self.finalize()
         except NotImplementedError:
             raise
-        except Exception:
+        except Exception as e:
             sys.stderr.write(
                 f"ERROR FROM offset={self.current_instruction.offset} "
-                f"filename={self.code_options.get('co_filename')}:"
-                f"{self.code_options.get('co_firstlineno')}\n"
+                f"filename {self.code_options.get('co_filename')} "
+                f"{self.code_options.get('co_firstlineno')} {typestr(e)}\n"
             )
             raise
-
-    def finalize(self):
-        pass
 
     def push(self, val):
         assert val is None or isinstance(
@@ -505,6 +516,8 @@ class InstructionTranslatorBase(fx.Tracer):
         if inst.argval not in self.symbolic_locals:
             unimplemented("undefined local")
         self.push(self.symbolic_locals[inst.argval])
+        if inst.argval.startswith("___stack"):
+            self.symbolic_locals.pop(inst.argval)
 
     def STORE_FAST(self, inst):
         self.symbolic_locals[inst.argval] = self.pop()
@@ -527,6 +540,7 @@ class InstructionTranslatorBase(fx.Tracer):
                             inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
                         )
                     },
+                    global_name=inst.argval,
                 )
             )
         elif istensor(value):
@@ -539,6 +553,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)
                     },
+                    global_name=inst.argval,
                 )
             )
         elif istype(value, types.FunctionType):
@@ -550,6 +565,7 @@ class InstructionTranslatorBase(fx.Tracer):
                             inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
                         )
                     },
+                    global_name=inst.argval,
                 )
             )
         elif isinstance(value, bool):
@@ -560,6 +576,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
                     },
+                    global_name=inst.argval,
                 )
             )
         elif istype(value, types.ModuleType):
@@ -571,6 +588,7 @@ class InstructionTranslatorBase(fx.Tracer):
                             inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
                         )
                     },
+                    global_name=inst.argval,
                 )
             )
         elif isinstance(value, torch.nn.Module):
@@ -582,20 +600,19 @@ class InstructionTranslatorBase(fx.Tracer):
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
                     },
+                    global_name=inst.argval,
                 )
             )
-        elif (
-            istype(value, types.BuiltinFunctionType)
-            and self.should_compile_partial_graph()
-        ):
-            self.compile_partial_subgraph(
-                self.stack,
-                [
-                    create_instruction("JUMP_ABSOLUTE", target=inst),
-                ],
-            )
         else:
-            unimplemented(f"LOAD_GLOBAL {typestr(value)}")
+            self.push(
+                UnsupportedVariable(
+                    type(value),
+                    guards={
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)
+                    },
+                    global_name=inst.argval,
+                )
+            )
 
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
@@ -612,22 +629,6 @@ class InstructionTranslatorBase(fx.Tracer):
     POP_JUMP_IF_TRUE = generic_jump(operator.truth, False)
     JUMP_IF_FALSE_OR_POP = generic_jump(operator.not_, True)
     JUMP_IF_TRUE_OR_POP = generic_jump(operator.truth, True)
-
-    def append_continuation(self, cont: "ContinuationInstructionTranslator"):
-        key = cont.key()
-        if key in self.blocks:
-            # already generated this
-            cont.target = self.blocks[key]
-            self.output_instructions.append(
-                create_instruction("JUMP_ABSOLUTE", target=cont.target)
-            )
-        elif len(self.blocks) > config.max_blocks:
-            unimplemented("too many blocks, bailing out")
-        else:
-            self.blocks[key] = cont
-            cont.run()
-            self.output_instructions.extend(cont.output_instructions)
-            self.guards.update(cont.guards)
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -727,6 +728,18 @@ class InstructionTranslatorBase(fx.Tracer):
         else:
             unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
+
+        if (
+            isinstance(fn, GetAttrVariable)
+            and isinstance(fn.obj, TensorVariable)
+            and fn.name == "view"
+            and isinstance(argsvars, (ConstantVariable, TensorVariable))
+        ):
+            # Hack to handle special case in some bert models.  Converts
+            # x.view(*shape) into x.view(shape), which is correct for view()
+            # but not generally.  See test_transpose_for_scores().
+            argsvars = TupleVariable([argsvars])
+
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
         ):
@@ -1019,7 +1032,7 @@ class InstructionTranslatorBase(fx.Tracer):
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        if isinstance(rv, TensorVariable) or isinstance(rv, TupleVariable):
+        if isinstance(rv, TensorVariable) or isinstance(rv, BaseListVariable):
             self.create_node("output", "output", (self.create_arg(rv.as_proxy()),), {})
         elif isinstance(rv, list):
             outputs = []
@@ -1047,22 +1060,37 @@ class InstructionTranslatorBase(fx.Tracer):
         gm = fx.GraphModule(FakeRootModule(self.nn_modules), self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")
+        self.f_globals[name] = self.compiler_fn(gm)
+        nargs = sum(map(len, self.graphargs))
         if config.debug:
             print(f"\n{name}")
             self.graph.print_tabular()
-        self.f_globals[name] = self.compiler_fn(gm)
-        self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (name,)
-        nargs = sum(map(len, self.graphargs))
-        self.code_options["co_stacksize"] = max(
-            self.code_options["co_stacksize"], 1 + nargs
-        )
         return self.create_call_generated_code(name, nargs)
+
+    def grow_stack_to(self, size):
+        self.code_options["co_stacksize"] = max(self.code_options["co_stacksize"], size)
 
     def create_call_generated_code(self, fn_name: str, nargs: int) -> List[Instruction]:
         """Call the generated code function stored in fn_name"""
-        output = [self.create_load_global(fn_name)]
-
         num_on_stack = sum(int(isinstance(x, StackArg)) for x in self.graphargs)
+
+        self.grow_stack_to(
+            # +1 for function name, +1 for scratch space (restore vars)
+            2
+            + nargs
+        )
+        output = self.load_function_name(fn_name, num_on_stack)
+
+        for arg in self.graphargs[num_on_stack:]:
+            assert not (isinstance(arg, StackArg))
+            output.extend(arg.load(self))
+
+        output.append(create_instruction("CALL_FUNCTION", nargs))
+        return output
+
+    def load_function_name(self, fn_name, num_on_stack):
+        """Load the global fn_name on the stack num_on_stack down"""
+        output = [self.create_load_global(fn_name, add=True)]
         if num_on_stack == 0:
             pass
         elif num_on_stack == 1:
@@ -1073,12 +1101,6 @@ class InstructionTranslatorBase(fx.Tracer):
             output.append(create_instruction("ROT_FOUR"))
         else:
             unimplemented("3+ stack args")
-
-        for arg in self.graphargs[num_on_stack:]:
-            assert not (isinstance(arg, StackArg))
-            output.extend(arg.load(self))
-
-        output.append(create_instruction("CALL_FUNCTION", nargs))
         return output
 
     def remove_unused_graphargs(self):
@@ -1093,56 +1115,95 @@ class InstructionTranslatorBase(fx.Tracer):
         self.graphargs = output
 
     def compile_partial_subgraph(
-        self, stack_values: List[VariableTracker], jump_to_user_code: List[Instruction]
+        self, stack_values: List[VariableTracker], suffix: List[Instruction]
     ):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
         # TODO(jansel): add some liveness analysis to see if we need all these
+
+        self.grow_stack_to(len(stack_values) + 1)
+
         stack_values = list(stack_values)
-        prefix = []
         var_names = []
+        constant_locals = []
+        clobbered = set()
         for k, v in self.symbolic_locals.items():
             if v.initial_name == k:
                 continue  # no need to restore initial state
-            elif isinstance(v, ConstantVariable):
-                # no need to get a constant from the compiled graph
-                self.guards.update(v.guards)
-                prefix.extend(
-                    [self.create_load_const(v.value), self.create_store_fast(k)]
-                )
+            elif self.is_const_var(v) and v.initial_name not in clobbered:
+                constant_locals.append(self.load_const_var(v))
+                constant_locals.append(self.create_store_fast(k))
+                clobbered.add(k)
             else:
                 # must get the value from compiled graph
                 var_names.append(k)
 
-        # this should work, but need a testcase to make sure
-        # while stack_values and isinstance(stack_values[0], ConstantVariable):
-        #     # no need to get a constant from the compiled graph
-        #     self.guards.update(stack_values[0].guards)
-        #     prefix.append(self.create_load_const(stack_values.pop(0).value))
+        clobbered.update(var_names)
+
+        const_stack_prefix = []
+        while stack_values and self.is_const_var(stack_values[0]):
+            const_stack_prefix.append(self.load_const_var(stack_values.pop(0)))
+
+        const_stack_suffix = []
+        while stack_values and self.is_const_var(stack_values[-1]):
+            if stack_values[-1].initial_name in clobbered:
+                break
+            const_stack_suffix.append(self.load_const_var(stack_values.pop()))
+        const_stack_suffix = list(reversed(const_stack_suffix))
+
+        self.grow_stack_to(len(const_stack_prefix) + len(var_names) + 1)
 
         if len(var_names) == 0 and len(stack_values) == 1:
             self.add_output_instructions(
-                prefix + self.compile_subgraph(stack_values[0]) + jump_to_user_code
+                const_stack_prefix
+                + self.compile_subgraph(stack_values[0])
+                + constant_locals
+                + const_stack_suffix
+                + suffix
             )
         elif len(var_names) == 1 and len(stack_values) == 0:
             self.add_output_instructions(
-                prefix
+                const_stack_prefix
                 + self.compile_subgraph(self.symbolic_locals[var_names[0]])
+                + constant_locals
                 + self.restore_locals(var_names, 0, unpack=False)
-                + jump_to_user_code
+                + const_stack_suffix
+                + suffix
             )
         else:
             self.add_output_instructions(
-                prefix
+                const_stack_prefix
                 + self.compile_subgraph(
                     [self.symbolic_locals[k] for k in var_names]
                     + list(reversed(stack_values))
                 )
+                + constant_locals
                 + self.restore_locals(var_names, len(stack_values))
-                + jump_to_user_code
+                + const_stack_suffix
+                + suffix
             )
+
+    def is_const_var(self, value: VariableTracker):
+        return (
+            value.initial_name is not None
+            or value.global_name is not None
+            or isinstance(value, ConstantVariable)
+        )
+
+    def load_const_var(self, value: VariableTracker):
+        if value.initial_name is not None:
+            # guards to should not be needed for a copy?
+            return self.create_load_fast(value.initial_name)
+        elif value.global_name is not None:
+            return self.create_load_global(value.global_name)
+        elif isinstance(value, ConstantVariable):
+            # no need to get a constant from the compiled graph
+            self.guards.update(value.guards)
+            return self.create_load_const(value.value)
+        else:
+            assert False
 
     def add_output_instructions(self, prefix: List[Instruction]):
         """
@@ -1177,7 +1238,9 @@ class InstructionTranslatorBase(fx.Tracer):
         graph_nodes = set(self.graph.nodes)
         guards = copy.deepcopy(self.guards)
         graphargs = copy.deepcopy(self.graphargs)
-        symbolic_locals = VariableTracker.copy(self.symbolic_locals)
+        symbolic_locals = collections.OrderedDict(
+            VariableTracker.copy(list(self.symbolic_locals.items()))
+        )
         stack = VariableTracker.copy(self.stack)
         nn_modules = dict(self.nn_modules)
         pending_instructions = list(self.pending_instructions)
@@ -1233,15 +1296,15 @@ class InstructionTranslatorBase(fx.Tracer):
         cnt: typing.Iterable,
         graph: fx.Graph,
         graphargs: List,
-        nn_modules: typing.Dict,
-        guards: typing.Set[Guard],
+        nn_modules: Dict,
+        guards: Set[Guard],
         instructions: List[Instruction],
-        f_globals: typing.Dict[str, typing.Any],
-        f_builtins: typing.Dict[str, typing.Any],
-        code_options: typing.Dict[str, typing.Any],
-        blocks: typing.Dict[typing.Any, "ContinuationInstructionTranslator"],
+        f_globals: Dict[str, Any],
+        f_builtins: Dict[str, Any],
+        code_options: Dict[str, Any],
         compiler_fn=None,
         symbolic_locals=None,
+        f_code=None,
     ):
         super(InstructionTranslatorBase, self).__init__()
         # Mutable state checkpointed by copy_graphstate()
@@ -1263,6 +1326,7 @@ class InstructionTranslatorBase(fx.Tracer):
         self.output_instructions = []
         self.fully_converted = None
         self.compiler_fn = compiler_fn
+        self.f_code = f_code
 
         # Dynamic state not checkpointed
         self.instruction_pointer = 0
@@ -1270,13 +1334,13 @@ class InstructionTranslatorBase(fx.Tracer):
         self.current_instruction = create_instruction("NOP")
         self.checkpoint = None
         self.cnt = cnt
-        self.blocks = blocks
 
 
 class InstructionTranslator(InstructionTranslatorBase):
     def __init__(
         self,
         instructions: List[Instruction],
+        f_code,
         f_locals,
         f_globals,
         f_builtins,
@@ -1294,99 +1358,48 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             code_options=code_options,
             compiler_fn=compiler_fn,
-            blocks=dict(),
+            f_code=f_code,
         )
-        self.symbolic_locals = {
-            k: self.wrap_local(k, f_locals[k])
+        self.symbolic_locals = collections.OrderedDict(
+            (k, self.wrap_local(k, f_locals[k]))
             for k in code_options["co_varnames"]
             if k in f_locals
-        }
-        self.mark_initial_state()
-
-    def finalize(self):
-        def patch_target(target):
-            if isinstance(target, ContinuationInstructionTranslator):
-                target.target = patch_target(target.target)
-                return target.target
-            return target
-
-        for inst in self.output_instructions:
-            inst.target = patch_target(inst.target)
-
-
-class ContinuationInstructionTranslator(InstructionTranslatorBase):
-    """Used to continue processing after a fork in control flow (one copy per path in the fork)"""
-
-    def __init__(
-        self,
-        parent: InstructionTranslatorBase,
-        start_instruction: Instruction,
-    ):
-        super(ContinuationInstructionTranslator, self).__init__(
-            cnt=parent.cnt,  # needed?
-            graph=fx.Graph(),
-            graphargs=[],
-            guards=set(),
-            nn_modules=parent.nn_modules,
-            instructions=parent.instructions,
-            f_globals=parent.f_globals,
-            f_builtins=parent.f_builtins,
-            code_options=parent.code_options,
-            compiler_fn=parent.compiler_fn,
-            blocks=parent.blocks,
         )
-        self.instruction_pointer = self.indexof[id(start_instruction)]
-        self.stack = [
-            self.convert_local(f"__stack_{i}__", parent.stack[i], StackArg)
-            for i in range(len(parent.stack))
-        ]
-        self.symbolic_locals = {
-            k: self.convert_local(k, parent.symbolic_locals[k], LocalArg)
-            for k in self.code_options["co_varnames"]
-            if k in parent.symbolic_locals
-        }
         self.mark_initial_state()
-        self.target = start_instruction
 
-    def key(self):
-        result = [id(self.target)]
-        for k, v in self.symbolic_locals.items():
-            result.append((k, v.get_key()))
-        for v in self.stack:
-            result.append(v.get_key())
-        return tuple(result)
+    def create_call_resume_at(self, offset):
+        # TODO(jansel): check for liveness of symbolic_locals and prune it
+        nargs = len(self.stack) + len(self.symbolic_locals)
 
-    def convert_local(self, name: str, var: VariableTracker, arg_cls):
-        """Take a symbolic local from a parent translator and convert it to
-        and input"""
-        if isinstance(var, TensorVariable):
-            self.graphargs.append(arg_cls(name))
-            return TensorVariable(
-                proxy=self.create_graph_input(name), **VariableTracker.propagate([var])
-            )
-        elif isinstance(
-            var, (ConstantVariable, AllowedFunctionOrModuleVariable, NNModuleVariable)
-        ):
-            return var.with_initial_name(None)
-        else:
-            unimplemented(f"convert_local: {typestr(var)}")
-
-    def run(self):
-        try:
-            super().run()
-            self.target = self.output_instructions[0]
-        except NotImplementedError:
-            assert not self.output_instructions
-            self.output_instructions.append(
-                create_instruction("JUMP_ABSOLUTE", target=self.target)
-            )
+        name = unique_id(f"__resume_at_{self.next_instruction.offset}")
+        self.grow_stack_to(1 + nargs)
+        self.f_globals[name] = ContinueExecutionCache.lookup(
+            self.f_code,
+            self.f_globals,
+            offset,
+            len(self.stack),
+            tuple(self.symbolic_locals.keys()),
+        )
+        return (
+            self.load_function_name(name, len(self.stack))
+            + [self.create_load_fast(k) for k in self.symbolic_locals.keys()]
+            + [
+                create_instruction("CALL_FUNCTION", nargs),
+                create_instruction("RETURN_VALUE"),
+            ]
+        )
 
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
+    @classmethod
+    def inline_call(cls, parent, func, args, kwargs):
+        with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+            return cls.inline_call_(parent, func, args, kwargs)
+
     @staticmethod
-    def inline_call(parent, func, args, kwargs):
+    def inline_call_(parent, func, args, kwargs):
         assert callable(func)
         if getattr(func, "__closure__", None) is not None:
             unimplemented("inline with  __closure__")
@@ -1408,7 +1421,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         tracer.run()
         assert tracer.symbolic_result is not None
-        return tracer.symbolic_result
+        return VariableTracker.apply(
+            lambda x: x.with_initial_name(None), tracer.symbolic_result
+        )
 
     def __init__(
         self,
@@ -1423,7 +1438,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             graphargs=parent.graphargs,
             nn_modules=parent.nn_modules,
             guards=parent.guards,
-            blocks=parent.blocks,
             f_globals=f_globals,
             f_builtins=f_globals["__builtins__"],
             symbolic_locals=symbolic_locals,
@@ -1435,6 +1449,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
+
+    def create_call_resume_at(self, offset):
+        unimplemented("cant resume while inlining")
 
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
@@ -1448,15 +1465,3 @@ class FakeRootModule(torch.nn.Module):
         super(FakeRootModule, self).__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
-
-
-def count_calls(g: fx.Graph):
-    c = 0
-    for n in g.nodes:
-        if "call" in n.op:
-            c += 1
-    return c
-
-
-def identity(x):
-    return x

@@ -1,5 +1,4 @@
 #!/usr/bin/env pytest
-import unittest
 
 import torch
 
@@ -22,7 +21,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         correct1 = fn(v1, v2)
         correct2 = fn(v2, v1)
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize_assert(cnt):
+        with torchdynamo.optimize(cnt):
             r1 = fn(v1, v2)
             r2 = fn(v2, v1)
         self.assertTrue(torchdynamo.testing.same(r1, correct1))
@@ -97,7 +96,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             c2 = b - a
             return a - (b - unsupported(c1, c2))
 
-        self._common(fn, 1, 2)
+        self._common(fn, 2, 4)
 
     def test_capi_call3(self):
         def fn(a, b):
@@ -113,7 +112,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             c2 = b - a
             return indirectly_unsupported(c1, c2)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 2, 4)
 
     def test_indirect_unsupported2(self):
         def fn(a, b):
@@ -123,15 +122,14 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             c2 = b - a
             return local_const1 / (local_const2 - indirectly_unsupported(c1, c2))
 
-        self._common(fn, 2, 3)
+        self._common(fn, 3, 6)
 
-    @unittest.skip("TODO")
     def test_indirect_unsupported3(self):
         def fn(a, b):
             args = [a - b, b - a]
             return indirectly_unsupported(*args)
 
-        self._common(fn, 2, 5)
+        self._common(fn, 2, 3)
 
     def test_stack_state1(self):
         def fn(a, b):
@@ -169,3 +167,55 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             f"lambda a, b: ({too_many_adds}+a if a.sum() > 0 else {too_many_adds} - b)"
         )
         self._common(eval(source), 3, 1026)
+
+    def test_resume1(self):
+        def fn(a, b):
+            x = a + b
+            x = x / 2.0
+            x = x + 2.0
+            x = unsupported(x, a)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 2, 6)
+
+    def test_resume2(self):
+        def fn(a, b):
+            x = a + b
+            x = x / 2.0
+            x = x + 2.0
+            x = indirectly_unsupported(x, a)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 3, 8)
+
+    def test_resume3(self):
+        def fn(a, b):
+            x = a + b
+            x = x / 2.0
+            x = x + 2.0
+            x = indirectly_unsupported(x, b=a)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 3, 8)
+
+    def test_resume4(self):
+        def fn(a, b):
+            x = a + b
+            x = x / 2.0
+            x = x + 2.0
+            x = indirectly_unsupported(a=x, b=a)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 3, 8)

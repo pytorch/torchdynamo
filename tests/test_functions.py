@@ -253,7 +253,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
 
     @unittest.skip("not implemented yet")
     @make_test
-    def test_return_tuple(a, b):
+    def test_return_tuple1(a, b):
         return (a - b, b - a, a, b)
 
     def test_inplace(self):
@@ -314,7 +314,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return fn(x)
 
     @make_test
-    def test_return_tuple(x):
+    def test_transpose_for_scores(x):
+        new_x_shape = x.size()[:-1] + (2, 5)
+        x = x.view(*new_x_shape)
+        return x.permute(0, 2, 1)
+
+    @make_test
+    def test_return_tuple2(x):
         return (torch.add(x, x), x)
 
     @make_test
@@ -373,7 +379,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
             y = float(x)
             z = torch.tensor([y, y, y])
             return z
-        
+
         def test_raises():
             s = "1.2"
             with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):

@@ -1,12 +1,12 @@
-import os
 import enum
 import inspect
-
-import re
-import torch
 import operator
+import os
+import re
 import types
 import typing
+
+import torch
 
 SKIP_DIRS = [
     # torch.*

@@ -1,6 +1,6 @@
+import math
 import types
 import warnings
-import math
 from functools import lru_cache
 
 import torch

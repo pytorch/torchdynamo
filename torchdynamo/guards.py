@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import inspect
 import textwrap
 import types
 import weakref
@@ -10,8 +11,9 @@ from typing import List
 from typing import Optional
 from typing import Set
 
-from ._eval_frame import check_type_id
 from ._eval_frame import check_obj_id
+from ._eval_frame import check_type_id
+from .utils import istype
 
 
 class GuardSource(enum.Enum):
@@ -56,22 +58,38 @@ class GuardBuilder:
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
 
+    def get(self, name: str):
+        if "." in name:
+            parts = name.split(".")
+            return inspect.getattr_static(self.get(".".join(parts[:-1])), parts[-1])
+        return self.scope[name]
+
     def arg_ref(self, guard: Guard):
-        if guard.name not in self.argnames:
-            self.argnames.append(guard.name)
-        return guard.name
+        name = guard.name
+        base = name
+        if "." in name:
+            base, attr = name.split(".", 2)
+        if base not in self.argnames:
+            self.argnames.append(base)
+        return name
 
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
         self.code.append(
-            f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.scope[guard.name]))})"
+            f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
 
+    # TODO(jansel): should rename this to ID_MATCH
     def VALUE_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         self.code.append(
-            f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.scope[guard.name])})"
+            f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
+
+    def EQUALS_MATCH(self, guard: Guard):
+        assert istype(self.get(guard.name), (int, float, bool, type(None), type))
+        # ___check_obj_id is same as `id(x) == y`
+        self.code.append(f"{self.arg_ref(guard)} == {repr(self.get(guard.name))}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -79,7 +97,7 @@ class GuardBuilder:
 
     def FIXED_TENSOR_LIST(self, guard: Guard):
         ref = self.arg_ref(guard)
-        value = self.scope[guard.name]
+        value = self.get(guard.name)
         assert len(value) > 0
         tensor_type = self.id_ref(type(value[0]))
         assert all([id(type(v)) == tensor_type for v in value])
