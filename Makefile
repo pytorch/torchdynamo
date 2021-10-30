@@ -1,7 +1,7 @@
 .PHONY: default develop test torchbench format lint setup clean
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) $(wildcard tests/*.py)
-C_FILES := $(wildcard torchdynamo/*.c)
+C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 
 default: develop
 
@@ -24,7 +24,8 @@ format:
 lint:
 	flake8 $(PY_FILES)
 	clang-tidy $(C_FILES)  -- \
-		-I$(shell python -c "from distutils.sysconfig import get_python_inc as X; print(X())")
+		-I$(shell python -c "from distutils.sysconfig import get_python_inc as X; print(X())") \
+		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
 
 setup:
 	pip install flake8 black pytest

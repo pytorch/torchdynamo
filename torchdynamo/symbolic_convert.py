@@ -216,7 +216,7 @@ class InstructionTranslatorBase(fx.Tracer):
             return TensorVariable(
                 proxy=self.create_graph_input(name, type(value)),
                 state=TracingSupported.YES,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TENSOR_MATCH)},
             )
         elif isinstance(value, torch.nn.Module):
             key = f"{name}_{next(self.cnt)}"
@@ -224,13 +224,13 @@ class InstructionTranslatorBase(fx.Tracer):
             return NNModuleVariable(
                 module_key=key,
                 state=TracingSupported.YES,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)},
             )
         elif value is True or value is False or value is None:
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.VALUE_MATCH)},
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)},
             )
         elif isinstance(value, Real):
             self.graphargs.append(LocalArg(name, value))
@@ -600,7 +600,9 @@ class InstructionTranslatorBase(fx.Tracer):
                     proxy=self.create_graph_input(inst.argval),
                     state=TracingSupported.YES,
                     guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)
+                        Guard(
+                            inst.argval, GuardSource.GLOBAL, GuardBuilder.TENSOR_MATCH
+                        )
                     },
                     global_name=inst.argval,
                 )
@@ -623,7 +625,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     value=self.f_globals[inst.argval],
                     state=TracingSupported.UNKNOWN,
                     guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
                     },
                     global_name=inst.argval,
                 )
@@ -647,7 +649,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 NNModuleVariable(
                     key,
                     guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.VALUE_MATCH)
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
                     },
                     global_name=inst.argval,
                 )

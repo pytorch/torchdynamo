@@ -11,8 +11,9 @@ from typing import List
 from typing import Optional
 from typing import Set
 
-from ._eval_frame import check_obj_id
-from ._eval_frame import check_type_id
+from ._guards import check_obj_id
+from ._guards import check_type_id
+from ._guards import TensorGuards
 from .utils import istype
 
 
@@ -57,6 +58,8 @@ class GuardBuilder:
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
+        self.tensor_check_names = []
+        self.tensor_check_examples = []
 
     def get(self, name: str):
         if "." in name:
@@ -79,8 +82,7 @@ class GuardBuilder:
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
 
-    # TODO(jansel): should rename this to ID_MATCH
-    def VALUE_MATCH(self, guard: Guard):
+    def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         self.code.append(
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
@@ -95,6 +97,10 @@ class GuardBuilder:
         """things like torch.add and user defined functions"""
         pass  # should we add more checks here?
 
+    def TENSOR_MATCH(self, guard: Guard):
+        self.tensor_check_names.append(self.arg_ref(guard))
+        self.tensor_check_examples.append(self.get(guard.name))
+
     def FIXED_TENSOR_LIST(self, guard: Guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -103,8 +109,9 @@ class GuardBuilder:
         assert all([id(type(v)) == tensor_type for v in value])
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
-        for i in range(len(value)):
-            self.code.append(f"___check_type_id({ref}[{i}], {tensor_type})")
+        for i, v in enumerate(value):
+            self.tensor_check_names.append(f"{ref}[{i}]")
+            self.tensor_check_examples.append(v)
 
 
 class GuardedCode:
@@ -132,17 +139,32 @@ class GuardedCode:
         args = local_builder.argnames + ["**___kwargs_ignored"]
         args = ",".join(args)
         code = ["___guarded_code.valid"] + local_builder.code + global_builder.code
+
+        tensor_check_names = (
+            local_builder.tensor_check_names + global_builder.tensor_check_names
+        )
+        check_tensors_fn = None
+        if tensor_check_names:
+            tensor_check_examples = (
+                local_builder.tensor_check_examples
+                + global_builder.tensor_check_examples
+            )
+            check_tensors_fn = TensorGuards(*tensor_check_examples).check
+            code.append(f"___check_tensors({', '.join(tensor_check_names)})")
+
         code = " and ".join(code)
 
         py_code = textwrap.dedent(
             f"""
-            def ___make_guard_fn(___guarded_code, ___check_type_id, ___check_obj_id):
+            def ___make_guard_fn(___guarded_code, ___check_type_id, ___check_obj_id, ___check_tensors):
                 return lambda {args}: {code}
             """
         )
         out = dict()
         exec(py_code, global_builder.scope, out)
-        return out["___make_guard_fn"](self, check_type_id, check_obj_id)
+        return out["___make_guard_fn"](
+            self, check_type_id, check_obj_id, check_tensors_fn
+        )
 
     def invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false

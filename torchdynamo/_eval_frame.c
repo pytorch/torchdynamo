@@ -356,41 +356,11 @@ static PyObject *unsupported(PyObject *dummy, PyObject *args) {
   return obj2;
 }
 
-static PyObject *check_type_id(PyObject *dummy, PyObject *args) {
-  // faster `lambda obj, expected: id(type(obj)) == expected`
-  PyObject *obj;
-  unsigned long expected;
-  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
-    return NULL;
-  }
-  if (Py_TYPE(obj) == (void *)expected) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
-static PyObject *check_obj_id(PyObject *dummy, PyObject *args) {
-  // faster `lambda obj, expected: id(obj) == expected`
-  PyObject *obj;
-  unsigned long expected;
-  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
-    return NULL;
-  }
-  if (obj == (void *)expected) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
-    {"check_type_id", check_type_id, METH_VARARGS, NULL},
-    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

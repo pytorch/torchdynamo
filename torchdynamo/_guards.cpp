@@ -1,0 +1,228 @@
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <torch/extension.h>
+
+// comment out these lines to prevent specializations for backends with dynamic
+// shape support
+#define SPECIALIZE_DTYPE_DEVICE
+#define SPECIALIZE_NDIMS
+#define SPECIALIZE_SHAPES_AND_STRIDES
+
+namespace {
+
+struct LocalState {
+  // TLS state that changes operators
+  c10::impl::LocalDispatchKeySet dispatch_modifier;
+  bool grad_mode_enabled;
+
+  at::DispatchKeySet apply(at::DispatchKeySet ks) const {
+    return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
+  }
+
+  LocalState()
+      : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
+        grad_mode_enabled(at::GradMode::is_enabled()) {}
+};
+
+class TensorCheck {
+public:
+  TensorCheck(const LocalState &state, PyTypeObject *pt, const at::Tensor &v)
+      : pytype(pt), dispatch_key_(state.apply(v.key_set()).raw_repr()),
+        dtype_(v.dtype().toScalarType()),
+        requires_grad_(state.grad_mode_enabled && v.requires_grad()) {
+    auto ndim = v.ndimension();
+    const auto &sizes = v.sizes();
+    const auto &strides = v.strides();
+    sizes_.reserve(ndim);
+    strides_.reserve(ndim);
+    for (int i = 0; i < ndim; ++i) {
+      sizes_.emplace_back(sizes[i]);
+      strides_.emplace_back(strides[i]);
+    }
+  }
+
+  bool check(const LocalState &state, const at::Tensor &v) {
+#ifdef SPECIALIZE_DTYPE_DEVICE
+    if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
+        dtype_ != v.dtype().toScalarType() ||
+        requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
+      return false;
+    }
+#endif
+#ifdef SPECIALIZE_NDIMS
+    size_t ndim = static_cast<size_t>(v.ndimension());
+    if (ndim != sizes_.size()) {
+      return false;
+    }
+#endif
+#ifdef SPECIALIZE_SHAPES_AND_STRIDES
+    const auto &sizes = v.sizes();
+    const auto &strides = v.strides();
+    for (size_t i = 0; i < ndim; ++i) {
+      if (sizes_[i] != sizes[i] || strides_[i] != strides[i]) {
+        return false;
+      }
+    }
+#endif
+    return true;
+  }
+
+  PyTypeObject *pytype;
+
+private:
+  uint64_t dispatch_key_; // DispatchKeySet includes device/layout
+  at::ScalarType dtype_;
+  bool requires_grad_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
+};
+
+typedef std::vector<TensorCheck> ChecksList;
+
+typedef struct {
+  PyObject_HEAD ChecksList *checks;
+} TensorGuards;
+
+static void TensorGuards_dealloc(TensorGuards *self) {
+  if (self->checks != NULL) {
+    delete self->checks;
+    self->checks = NULL;
+  }
+  Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *TensorGuards_new(PyTypeObject *type, PyObject *args,
+                                  PyObject *kwds) {
+  TensorGuards *self = (TensorGuards *)type->tp_alloc(type, 0);
+  if (self != NULL) {
+    self->checks = new ChecksList();
+  }
+  return (PyObject *)self;
+}
+
+static int TensorGuards_init(TensorGuards *self, PyObject *args,
+                             PyObject *kwds) {
+  if (!PyTuple_CheckExact(args)) {
+    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    return -1;
+  }
+  auto &checks = *self->checks;
+  ssize_t len = PyTuple_GET_SIZE(args);
+  checks.reserve(len);
+  LocalState state;
+  for (ssize_t i = 0; i < len; ++i) {
+    PyObject *item = PyTuple_GET_ITEM(args, i);
+    if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+      PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+      return -1;
+    }
+    checks.emplace_back(
+        TensorCheck(state, Py_TYPE(item), THPVariable_Unpack(item)));
+  }
+  return 0;
+}
+
+PyObject *TensorGuards_check(TensorGuards *self, PyObject *args) {
+  if (!PyTuple_CheckExact(args)) {
+    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    return NULL;
+  }
+  auto &checks = *self->checks;
+  ssize_t len = PyTuple_GET_SIZE(args);
+
+  if (static_cast<ssize_t>(checks.size()) != len) {
+    PyErr_SetString(PyExc_TypeError, "wrong length");
+    return NULL;
+  }
+
+  LocalState state;
+
+  for (ssize_t i = 0; i < len; ++i) {
+    PyObject *item = PyTuple_GET_ITEM(args, i);
+    if (Py_TYPE(item) != checks[i].pytype) {
+      Py_RETURN_FALSE;
+    }
+    if (!checks[i].check(state, THPVariable_Unpack(item))) {
+      Py_RETURN_FALSE;
+    }
+  }
+
+  Py_RETURN_TRUE;
+}
+
+static PyMethodDef TensorGuards_methods[] = {
+    {"check", (PyCFunction)TensorGuards_check, METH_VARARGS, ""},
+    {NULL} /* Sentinel */
+};
+
+static PyTypeObject TensorGuardsType = {
+    // NOLINTNEXTLINE
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "torchdynamo._guards.TensorGuards",
+    .tp_basicsize = sizeof(TensorGuards),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)TensorGuards_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "Check properties of a torch.Tensor",
+    .tp_methods = TensorGuards_methods,
+    .tp_init = (initproc)TensorGuards_init,
+    .tp_new = TensorGuards_new,
+};
+
+static PyObject *check_type_id(PyObject *dummy, PyObject *args) {
+  // faster `lambda obj, expected: id(type(obj)) == expected`
+  PyObject *obj;
+  unsigned long expected;
+  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+    return NULL;
+  }
+  if (Py_TYPE(obj) == (void *)expected) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+static PyObject *check_obj_id(PyObject *dummy, PyObject *args) {
+  // faster `lambda obj, expected: id(obj) == expected`
+  PyObject *obj;
+  unsigned long expected;
+  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+    return NULL;
+  }
+  if (obj == (void *)expected) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+static PyMethodDef _methods[] = {
+    {"check_type_id", check_type_id, METH_VARARGS, NULL},
+    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL}};
+
+static struct PyModuleDef _module = {PyModuleDef_HEAD_INIT, "_guards",
+                                     "Module containing checks on tensors", -1,
+                                     _methods};
+
+} // namespace
+
+PyMODINIT_FUNC PyInit__guards(void) {
+  PyObject *m;
+  if (PyType_Ready(&TensorGuardsType) < 0)
+    return NULL;
+
+  m = PyModule_Create(&_module);
+  if (m == NULL)
+    return NULL;
+
+  Py_INCREF(&TensorGuardsType);
+  if (PyModule_AddObject(m, "TensorGuards", (PyObject *)&TensorGuardsType) <
+      0) {
+    Py_DECREF(&TensorGuardsType);
+    Py_DECREF(m);
+    return NULL;
+  }
+
+  return m;
+}
