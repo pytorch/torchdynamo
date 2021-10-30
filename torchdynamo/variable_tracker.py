@@ -323,6 +323,9 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             return self.value
         return super().python_value()
 
+    def is_basic_math(self):
+        return getattr(self.value, "__module__", None) == "math"
+
 
 class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):

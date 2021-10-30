@@ -1,12 +1,17 @@
 import dis
+import functools
+import inspect
 import sys
 import traceback
 import types
 import typing
+from typing import Callable
+from typing import List
 
 from torch import fx
 
 from torchdynamo import config
+from torchdynamo.bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
@@ -14,44 +19,6 @@ from torchdynamo.guards import GuardedCode
 from torchdynamo.symbolic_convert import InstructionTranslator
 from torchdynamo.symbolic_convert import counters
 from torchdynamo.symbolic_convert import unimplemented
-
-TERMINAL_OPCODES = {
-    dis.opmap["RETURN_VALUE"],
-    dis.opmap["JUMP_ABSOLUTE"],
-    dis.opmap["JUMP_FORWARD"],
-    # TODO(jansel): need to handle exceptions, etc
-}
-JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
-
-
-def remove_dead_code(instructions):
-    """Dead code elimination"""
-    indexof = {id(inst): i for i, inst in enumerate(instructions)}
-    live_code = set()
-
-    def find_live_code(start):
-        for i in range(start, len(instructions)):
-            if i in live_code:
-                return
-            live_code.add(i)
-            inst = instructions[i]
-            if inst.opcode in JUMP_OPCODES:
-                find_live_code(indexof[id(inst.target)])
-            if inst.opcode in TERMINAL_OPCODES:
-                return
-
-    find_live_code(0)
-    return [inst for i, inst in enumerate(instructions) if i in live_code]
-
-
-def remove_pointless_jumps(instructions):
-    """Eliminate jumps to the next instruction"""
-    pointless_jumps = {
-        id(a)
-        for a, b in zip(instructions, instructions[1:])
-        if a.opname == "JUMP_ABSOLUTE" and a.target is b
-    }
-    return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
 
 class Tracker:
@@ -76,12 +43,19 @@ input_codes = Tracker()
 output_codes = Tracker()
 
 
-def dummy_fx_compile(gm: fx.GraphModule):
-    return gm.forward
+def wrap_compiler_fn(compiler_fn):
+    @functools.wraps(compiler_fn)
+    def inner(gm: fx.GraphModule, example_inputs: List):
+        return compiler_fn(gm)
+
+    return inner
 
 
-def convert_frame_assert(compiler_fn: typing.Callable):
+def convert_frame_assert(compiler_fn: Callable):
     """Fully convert a frame into an FX graph"""
+    if len(inspect.signature(compiler_fn).parameters) == 1:
+        # older 1-arg version
+        compiler_fn = wrap_compiler_fn(compiler_fn)
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code

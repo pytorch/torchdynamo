@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import unittest
 
 import torch
 
@@ -219,3 +220,72 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 3, 8)
+
+    def test_resume5(self):
+        def fn(a, b):
+            x = a + b
+            x = x / 2.0
+            x = x + 2.0
+            print(x)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 2, 6)
+
+    @unittest.skip("todo")
+    def test_start1(self):
+        def fn(a, b):
+            print(a)
+            x = a + b
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 1, 3)
+
+    @unittest.skip("todo")
+    def test_start2(self):
+        def fn(a, b):
+            x = indirectly_unsupported(a, b)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 2, 5)
+
+    @unittest.skip("todo")
+    def test_start3(self):
+        def fn(a, b):
+            x = unsupported(a, b)
+            x = x + 2.0
+            x = x + 2.0
+            x = x + 2.0
+            return x
+
+        self._common(fn, 2, 5)
+
+    @unittest.skip("todo")
+    def test_start4(self):
+        def fn(a, b, check):
+            if check:
+                return a + b + 10
+            else:
+                return a + b - 10
+
+        v1 = torch.randn(10)
+        v2 = torch.randn(10)
+        f = torch.zeros(1, dtype=torch.int32)
+        t = torch.ones(1, dtype=torch.int32)
+        correct1 = fn(v1, v2, t)
+        correct2 = fn(v1, v2, f)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            r1 = fn(v1, v2, t)
+            r2 = fn(v1, v2, f)
+        self.assertTrue(torchdynamo.testing.same(r1, correct1))
+        self.assertTrue(torchdynamo.testing.same(r2, correct2))
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)

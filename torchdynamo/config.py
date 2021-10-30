@@ -1,3 +1,6 @@
+from os.path import abspath
+from os.path import dirname
+
 import torch
 
 # print out lots of stuff
@@ -20,3 +23,6 @@ constant_functions = {
     torch.jit.is_scripting: True,
     torch.jit.is_tracing: False,
 }
+
+# root folder of the project
+base_dir = dirname(dirname(abspath(__file__)))

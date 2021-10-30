@@ -5,11 +5,13 @@ import types
 import unittest
 
 import torch
+from torch import fx
 
 import torchdynamo
 from torchdynamo import eval_frame
-from torchdynamo.bytecode_transformation import create_instruction, is_generator
+from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.bytecode_transformation import debug_checks
+from torchdynamo.bytecode_transformation import is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.guards import GuardedCode
@@ -24,7 +26,7 @@ def exc_bytecode_offset():
 def same(a, b):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple)):
-        assert isinstance(b, (list, tuple))
+        assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return all(same(ai, bi) for ai, bi in zip(a, b))
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
@@ -138,3 +140,7 @@ class TestCase(unittest.TestCase):
         for k, v in torchdynamo.symbolic_convert.counters.items():
             print(k, v.most_common())
         torchdynamo.symbolic_convert.counters.clear()
+
+
+def dummy_fx_compile(gm: fx.GraphModule):
+    return gm.forward

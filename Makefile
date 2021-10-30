@@ -1,9 +1,9 @@
-.PHONY: default develop test torchbench format lint setup
+.PHONY: default develop test torchbench format lint setup clean
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) $(wildcard tests/*.py)
 C_FILES := $(wildcard torchdynamo/*.c)
 
-default: test
+default: develop
 
 develop:
 	python setup.py develop
@@ -28,3 +28,7 @@ lint:
 
 setup:
 	pip install flake8 black pytest
+
+clean:
+	python setup.py clean
+	rm -rf build torchdynamo.egg-info torchdynamo/*.so

@@ -1,4 +1,5 @@
 import dataclasses
+from typing import List, Any
 
 import torch
 
@@ -99,7 +100,7 @@ class Profiler:
         )
 
 
-def fx_insert_profiling(gm: torch.fx.GraphModule):
+def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
     def _wrapped(*args, **kwargs):
         with torch.profiler.record_function("TORCHDYNAMO"):
             return gm.forward(*args, **kwargs)

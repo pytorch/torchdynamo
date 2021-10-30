@@ -4,3 +4,5 @@ __pycache__
 build
 .*
 *.egg-info
+subgraphs
+total_latency.tsv
