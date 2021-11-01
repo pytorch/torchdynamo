@@ -234,7 +234,6 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
         self._common(fn, 2, 6)
 
-    @unittest.skip("todo")
     def test_start1(self):
         def fn(a, b):
             print(a)
@@ -245,7 +244,6 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
         self._common(fn, 1, 3)
 
-    @unittest.skip("todo")
     def test_start2(self):
         def fn(a, b):
             x = indirectly_unsupported(a, b)
@@ -254,9 +252,8 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 5)
+        self._common(fn, 2, 4)
 
-    @unittest.skip("todo")
     def test_start3(self):
         def fn(a, b):
             x = unsupported(a, b)
@@ -265,9 +262,8 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 2, 5)
+        self._common(fn, 1, 3)
 
-    @unittest.skip("todo")
     def test_start4(self):
         def fn(a, b, check):
             if check:
@@ -287,5 +283,5 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             r2 = fn(v1, v2, f)
         self.assertTrue(torchdynamo.testing.same(r1, correct1))
         self.assertTrue(torchdynamo.testing.same(r2, correct2))
-        self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(cnt.op_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)

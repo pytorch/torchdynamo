@@ -8,6 +8,9 @@ from typing import Set
 
 import torch.fx
 
+from torchdynamo import config
+from torchdynamo.mutation_guard import real_type as type
+
 
 class TracingSupported(enum.Enum):
     UNKNOWN = 0
@@ -111,15 +114,64 @@ class VariableTracker:
 class TensorVariable(VariableTracker):
     """Points to a tensor"""
 
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        dtype=None,
+        device=None,
+        ndim=None,
+        size=None,
+        stride=None,
+        **kwargs,
+    ):
         super(TensorVariable, self).__init__(**kwargs)
         self.proxy = proxy
+        self.dtype = dtype
+        self.device = device
+        self.ndim = ndim
+        self.size = size
+        self.stride = stride
 
     def as_proxy(self):
         return self.proxy
 
     def python_type(self):
         return torch.Tensor
+
+    @staticmethod
+    def specialize(value: torch.Tensor):
+        props = {
+            "dtype": value.dtype,
+            "device": value.device,
+            "ndim": int(value.ndim),
+        }
+        if not config.dynamic_shapes:
+            props["size"] = tuple(value.size())
+            props["stride"] = tuple(value.stride())
+        return props
+
+    def const_attr(self, name):
+        result = None
+        wrapped = False
+        options = VariableTracker.propagate([self])
+        if name in ("ndim", "ndimension", "dim") and self.ndim is not None:
+            wrapped = name != "ndim"
+            result = ConstantVariable(self.ndim, **options)
+        elif name == "dtype" and self.dtype is not None:
+            result = AllowedFunctionOrModuleVariable(self.dtype, **options)
+        elif name == "device" and self.device is not None:
+            result = AllowedFunctionOrModuleVariable(self.device, **options)
+        elif name == "is_cuda" and self.device is not None:
+            result = ConstantVariable(self.device.type == "cuda", **options)
+        elif name in ("size", "shape") and self.size is not None:
+            wrapped = name == "size"
+            result = ConstantVariable(self.size, **options)
+        elif name == "stride" and self.stride is not None:
+            wrapped = True
+            result = ConstantVariable(self.stride, **options)
+        if wrapped:
+            result = FunctionConstantWrapper(result, **options)
+        return result
 
 
 class BasicTypeVariable(TensorVariable):
@@ -157,6 +209,40 @@ class ConstantVariable(VariableTracker):
 
     def python_type(self):
         return type(self.value)
+
+    def python_value(self):
+        return self.value
+
+    def getitem_const(self, arg):
+        return ConstantVariable(
+            self.value[arg.python_value()], **VariableTracker.propagate([self, arg])
+        )
+
+    @staticmethod
+    def is_literal(obj):
+        if type(obj) in (int, float, bool, type(None)):
+            return True
+        if type(obj) in (list, tuple):
+            return all(ConstantVariable.is_literal(x) for x in obj)
+        return False
+
+
+class FunctionConstantWrapper(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(FunctionConstantWrapper, self).__init__(**kwargs)
+        self.value = value
+
+    def get_key(self):
+        return self.__class__, self.value
+
+    def call_const(self, args, kwargs):
+        # this is used to implement Tensor.size(1)
+        assert not kwargs
+        if len(args) == 1:
+            return self.value.getitem_const(args[0])
+        elif args:
+            return tuple(self.value.getitem_const(a) for a in args)
+        return self.value
 
 
 class BuiltinVariable(VariableTracker):
@@ -246,6 +332,9 @@ class SliceVariable(BaseListVariable):
 
     def python_type(self):
         return slice
+
+    def python_value(self):
+        return slice(*[x.python_value() for x in self.items])
 
 
 class ConstDictVariable(VariableTracker):
@@ -344,9 +433,10 @@ class UnsupportedVariable(VariableTracker):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    def __init__(self, value_type, **kwargs):
+    def __init__(self, value, value_type=None, **kwargs):
         super(UnsupportedVariable, self).__init__(**kwargs)
-        self.value_type = value_type
+        self.value = value
+        self.value_type = value_type or type(value)
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.value_type.__name__})"

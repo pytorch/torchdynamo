@@ -26,3 +26,6 @@ constant_functions = {
 
 # root folder of the project
 base_dir = dirname(dirname(abspath(__file__)))
+
+# Also need to remove SPECIALIZE_SHAPES_AND_STRIDES from _guards.cpp
+dynamic_shapes = False

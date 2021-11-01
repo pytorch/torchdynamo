@@ -69,4 +69,10 @@ class ContinueExecutionCache:
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
-        return types.FunctionType(transform_code_object(code, update), f_globals)
+        return types.FunctionType(
+            transform_code_object(code, update),
+            f_globals,
+            f"resume_{code.co_name}",
+            None,  # argdefs
+            None,  # closure
+        )

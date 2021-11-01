@@ -15,6 +15,7 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from ._guards import TensorGuards
 from .utils import istype
+from . import mutation_guard
 
 
 class GuardSource(enum.Enum):
@@ -52,7 +53,7 @@ class Guard:
 
 
 class GuardBuilder:
-    def __init__(self, id_ref: Callable, scope: Dict[str, Any]):
+    def __init__(self, id_ref: Callable, scope: Dict[str, Any], guarded_code):
         self.id_ref = id_ref
         self.scope = scope
         self.argnames: List[str] = []
@@ -60,6 +61,7 @@ class GuardBuilder:
         self.code: List[str] = []
         self.tensor_check_names = []
         self.tensor_check_examples = []
+        self.guarded_code = guarded_code
 
     def get(self, name: str):
         if "." in name:
@@ -89,7 +91,9 @@ class GuardBuilder:
         )
 
     def EQUALS_MATCH(self, guard: Guard):
-        assert istype(self.get(guard.name), (int, float, bool, type(None), type))
+        assert istype(
+            self.get(guard.name), (int, float, bool, type(None), type, list, tuple)
+        )
         # ___check_obj_id is same as `id(x) == y`
         self.code.append(f"{self.arg_ref(guard)} == {repr(self.get(guard.name))}")
 
@@ -100,6 +104,9 @@ class GuardBuilder:
     def TENSOR_MATCH(self, guard: Guard):
         self.tensor_check_names.append(self.arg_ref(guard))
         self.tensor_check_examples.append(self.get(guard.name))
+
+    def OBJECT_MUTATION(self, guard: Guard):
+        mutation_guard.watch(self.get(guard.name), self.guarded_code)
 
     def FIXED_TENSOR_LIST(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -127,8 +134,8 @@ class GuardedCode:
         self._weakrefs = []
         self._seen_ids = set()
 
-        local_builder = GuardBuilder(self.id_ref, f_locals)
-        global_builder = GuardBuilder(self.id_ref, f_globals)
+        local_builder = GuardBuilder(self.id_ref, f_locals, self)
+        global_builder = GuardBuilder(self.id_ref, f_globals, self)
         for guard in guards or []:
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder)

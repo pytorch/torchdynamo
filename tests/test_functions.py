@@ -373,21 +373,96 @@ class FunctionTests(torchdynamo.testing.TestCase):
         y += float("1.2")
         return torch.add(x, y)
 
-    def test_float_nonconst(self):
-        def fn(x: str):
-            y = float(x)
-            z = torch.tensor([y, y, y])
-            return z
+    @make_test
+    def test_dtype(x):
+        if x.dtype == torch.float32:
+            return x + 1
 
-        def test_raises():
-            s = "1.2"
-            with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
-                fn(s)
+    @make_test
+    def test_device(x):
+        if not x.is_cuda:
+            return x + 1
 
-        self.assertRaises(NotImplementedError, test_raises)
+    @make_test
+    def test_ndim(x):
+        if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
+            return x + 1
+
+    @make_test
+    def test_shape1(x):
+        if x.shape[0] == 10:
+            return x + 1
+
+    @make_test
+    def test_shape2(x):
+        if x.size(1) == 10:
+            return x + 1
+
+    @make_test
+    def test_del(a, b):
+        c = a + b
+        del a, b
+        return c
 
     def test_fold(self):
         def fn(a):
             return a + math.sqrt(63)
 
         torchdynamo.testing.standard_test(self, fn, 1, expected_ops=1)
+
+    def test_shape_unpack(self):
+        def fn(x):
+            a, b = x.size()
+            return x * b
+
+        i = torch.randn(5, 10)
+        r1 = fn(i)
+        with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
+            r2 = fn(i)
+        self.assertTrue(same(r1, r2))
+
+    def test_empty_list(self):
+        def fn(x, l):
+            if len(l) == 0 and not l and l is not None:
+                return x + 1
+
+        i = torch.randn(5, 10)
+        r1 = fn(i, [])
+        with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
+            r2 = fn(i, [])
+            r3 = fn(i, tuple())
+        self.assertTrue(same(r1, r2))
+        self.assertTrue(same(r1, r3))
+
+    @make_test
+    def test_chunks1(x):
+        chunk_size = 5
+        assert x.shape[0] % chunk_size == 0
+        assert x.shape[0] // chunk_size == 2
+        return x[:chunk_size] - x[chunk_size:]
+
+    def test_config_obj(self):
+        class Cfg:
+            def __init__(self):
+                self.val = 0.5
+                self.count = 3
+
+        def fn(x, cfg):
+            for i in range(cfg.count):
+                x = x + cfg.val
+            return x
+
+        cfg1 = Cfg()
+        cfg1.val = 1.0
+        cfg2 = Cfg()
+        v = torch.zeros(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            v = fn(v, cfg1)  # 3
+            v = fn(v, cfg2)  # 4.5
+            cfg2.count = 1
+            v = fn(v, cfg2)  # 5
+            cfg2.val = 2.0
+            v = fn(v, cfg2)  # 7
+        self.assertEqual(v[0], 7)
+        self.assertTrue(cnts.op_count, 8)

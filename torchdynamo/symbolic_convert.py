@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import operator
+import os
 import sys
 import types
 import typing
@@ -33,7 +34,7 @@ from .utils import count_calls
 from .utils import istensor
 from .utils import istype
 from .utils import typestr
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, FunctionConstantWrapper
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
@@ -53,6 +54,7 @@ from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
+from .mutation_guard import real_type as type
 
 counters = collections.defaultdict(collections.Counter)
 
@@ -70,6 +72,7 @@ def proxy_args_kwargs(args, kwargs):
 
 def unimplemented(msg: str):
     counters["unimplemented"][msg] += 1
+    assert msg != os.environ.get("BREAK", False)
     raise NotImplementedError(msg)
 
 
@@ -95,6 +98,9 @@ def stack_op(fn: typing.Callable):
         elif all(isinstance(i, ConstantVariable) for i in inputs):
             # constant fold
             val = ConstantVariable(fn(*[i.value for i in inputs]), **options)
+        elif isinstance(inputs[0], ConstantVariable) and fn is operator.getitem:
+            base, item = inputs
+            val = base.getitem_const(item)
         else:
             unimplemented(f"stack_op {typestr(*inputs)}")
 
@@ -148,7 +154,7 @@ class Arg:
 @dataclasses.dataclass
 class LocalArg(Arg):
     def load(self, tracer):
-        return [tracer.create_load_fast(self.name)]
+        return [tracer.create_load(self.name)]
 
 
 @dataclasses.dataclass
@@ -163,7 +169,7 @@ class LocalListArg(Arg):
 
     def load(self, tracer):
         return [
-            tracer.create_load_fast(self.name),
+            tracer.create_load(self.name),
             create_instruction("UNPACK_SEQUENCE", self.length),
         ]
 
@@ -175,15 +181,21 @@ class LocalListArg(Arg):
 
 
 class InstructionTranslatorBase(fx.Tracer):
-    def create_load_fast(self, name):
-        assert (
-            name in self.code_options["co_varnames"]
-        ), f"{name} not in {self.code_options['co_varnames']}"
+    def create_load(self, name):
+        if name in (self.code_options["co_cellvars"] or []):
+            return create_instruction(
+                "LOAD_DEREF", self.code_options["co_cellvars"].index(name), name
+            )
+        assert name in self.code_options["co_varnames"]
         return create_instruction(
             "LOAD_FAST", self.code_options["co_varnames"].index(name), name
         )
 
-    def create_store_fast(self, name):
+    def create_store(self, name):
+        if name in (self.code_options["co_cellvars"] or []):
+            return create_instruction(
+                "STORE_DEREF", self.code_options["co_cellvars"].index(name), name
+            )
         assert name in self.code_options["co_varnames"]
         return create_instruction(
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
@@ -217,6 +229,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 proxy=self.create_graph_input(name, type(value)),
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TENSOR_MATCH)},
+                **TensorVariable.specialize(value),
             )
         elif isinstance(value, torch.nn.Module):
             key = f"{name}_{next(self.cnt)}"
@@ -226,13 +239,23 @@ class InstructionTranslatorBase(fx.Tracer):
                 state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)},
             )
-        elif value is True or value is False or value is None:
+        elif value is None or istype(value, bool):
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)},
             )
-        elif isinstance(value, Real):
+        elif (
+            istype(value, int)
+            or (istype(value, float) and value in (-1.0, 0.0, 1.0, 2.0))
+            or (istype(value, (list, tuple)) and len(value) == 0)
+        ):
+            # For these, just specialize on exact value
+            return ConstantVariable(
+                value=value,
+                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.EQUALS_MATCH)},
+            )
+        elif istype(value, float):
             self.graphargs.append(LocalArg(name, value))
             return BasicTypeVariable(
                 proxy=self.create_graph_input(name, type(value)),
@@ -248,6 +271,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     proxy=self.create_graph_input(f"{name}_{idx}", type(v)),
                     state=TracingSupported.YES,
                     guards=guards,
+                    **TensorVariable.specialize(v),
                 )
                 for idx, v in reversed(list(enumerate(value)))
             ]
@@ -255,7 +279,7 @@ class InstructionTranslatorBase(fx.Tracer):
             return cls(list(reversed(items)), guards=guards)
         else:
             return UnsupportedVariable(
-                type(value),
+                value,
                 state=TracingSupported.NO,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
@@ -454,10 +478,12 @@ class InstructionTranslatorBase(fx.Tracer):
                 except (TypeError, AttributeError):
                     unimplemented("float constructor with non-const argument")
             elif self.should_compile_partial_graph():
-                warning(f"breaking graph on call({fn})")
+                warning(f"breaking graph on call({fn.fn})")
                 self.partial_subgraph_and_call(fn, args, kwargs)
             else:
                 unimplemented(f"builtin call {fn.fn}")
+        elif isinstance(fn, FunctionConstantWrapper):
+            self.push(fn.call_const(args, kwargs))
         elif self.should_compile_partial_graph():
             warning(f"breaking graph on call({fn})")
             self.partial_subgraph_and_call(fn, args, kwargs)
@@ -562,11 +588,19 @@ class InstructionTranslatorBase(fx.Tracer):
         return list(reversed([self.pop() for _ in range(n)]))
 
     def LOAD_FAST(self, inst):
+        assert inst.argval not in (self.code_options["co_cellvars"] or [])
         if inst.argval not in self.symbolic_locals:
             unimplemented("undefined local")
         self.push(self.symbolic_locals[inst.argval])
         if inst.argval.startswith("___stack"):
             self.symbolic_locals.pop(inst.argval)
+
+    def LOAD_DEREF(self, inst):
+        if inst.argval not in self.code_options["co_cellvars"]:
+            unimplemented("LOAD_DEREF freevar")
+        if inst.argval not in self.symbolic_locals:
+            unimplemented("undefined local deref")
+        self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
         self.symbolic_locals[inst.argval] = self.pop()
@@ -605,6 +639,7 @@ class InstructionTranslatorBase(fx.Tracer):
                         )
                     },
                     global_name=inst.argval,
+                    **TensorVariable.specialize(value),
                 )
             )
         elif istype(value, types.FunctionType):
@@ -657,7 +692,7 @@ class InstructionTranslatorBase(fx.Tracer):
         else:
             self.push(
                 UnsupportedVariable(
-                    type(value),
+                    value,
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)
                     },
@@ -708,6 +743,8 @@ class InstructionTranslatorBase(fx.Tracer):
         supported_is_const = {
             "is": operator.is_,
             "is not": operator.is_not,
+            "==": operator.eq,
+            "!=": operator.ne,
         }
         supported_tensors = {
             ">": operator.gt,
@@ -751,7 +788,7 @@ class InstructionTranslatorBase(fx.Tracer):
             )
         elif (
             isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable))
-            and isinstance(right, ConstantVariable)
+            and isinstance(right, (AllowedFunctionOrModuleVariable, ConstantVariable))
             and op in supported_is_const
         ):
             self.push(
@@ -843,6 +880,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 # TODO(jansel): figure out how to remove this
                 subobj = self.get_submodule(key)
             if istensor(subobj):
+                options.update(TensorVariable.specialize(subobj))
                 self.push(
                     TensorVariable(
                         proxy=self.create_proxy("get_attr", key, tuple(), {}), **options
@@ -915,7 +953,11 @@ class InstructionTranslatorBase(fx.Tracer):
             else:
                 unimplemented(f"nn.Module attr {type(subobj).__name__}")
         elif isinstance(obj, TensorVariable):
-            self.push(GetAttrVariable(obj, name, **options))
+            const_result = obj.const_attr(name)
+            if const_result is not None:
+                self.push(const_result)
+            else:
+                self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, AllowedFunctionOrModuleVariable):
             self.push(
                 AllowedFunctionOrModuleVariable(
@@ -930,6 +972,29 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.push(UserFunctionVariable(member, **options))
             else:
                 unimplemented("PythonModuleVariable attribute")
+        elif isinstance(obj, UnsupportedVariable) and name in obj.value.__dict__:
+            try:
+                subobj = inspect.getattr_static(obj.value, name)
+                assert id(subobj) == id(obj.value.__dict__[name])
+                if not ConstantVariable.is_literal(subobj):
+                    unimplemented("non basic UnsupportedVariable")
+                old_len = len(options["guards"])
+                guards = {g for g in options["guards"] if g.name != obj.initial_name}
+                guards.add(
+                    Guard(obj.initial_name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)
+                )
+                guards.add(
+                    Guard(
+                        obj.initial_name,
+                        GuardSource.LOCAL,
+                        GuardBuilder.OBJECT_MUTATION,
+                    )
+                )
+                assert old_len + 1 == len(guards), f"{old_len} {len(guards)}"
+                options["guards"] = guards
+                self.push(ConstantVariable(subobj, **options))
+            except AttributeError:
+                unimplemented("dynamic attr UnsupportedVariable")
         else:
             unimplemented(f"LOAD_ATTR {obj}")
 
@@ -990,6 +1055,10 @@ class InstructionTranslatorBase(fx.Tracer):
             self.guards.update(seq.guards)
             for i in reversed(seq.items):
                 self.push(i)
+        elif isinstance(seq, ConstantVariable):
+            assert len(seq.value) == inst.argval
+            for i in reversed(seq.value):
+                self.push(ConstantVariable(i, **options))
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
@@ -1000,7 +1069,7 @@ class InstructionTranslatorBase(fx.Tracer):
             for i in reversed(range(inst.argval)):
                 self.push(TensorVariable(proxy[i], **options))
         else:
-            unimplemented(f"UNPACK_SEQUENCE {type(seq).__name__}")
+            unimplemented(f"UNPACK_SEQUENCE {seq}")
 
     def NOP(self, inst):
         pass
@@ -1085,7 +1154,12 @@ class InstructionTranslatorBase(fx.Tracer):
         call that generated code.
         """
         if isinstance(rv, TensorVariable) or isinstance(rv, BaseListVariable):
-            self.create_node("output", "output", (self.create_arg(rv.as_proxy()),), {})
+            try:
+                self.create_node(
+                    "output", "output", (self.create_arg(rv.as_proxy()),), {}
+                )
+            except AttributeError:
+                unimplemented("unsupported value in output")
         elif isinstance(rv, list):
             outputs = []
             for x in rv:
@@ -1199,7 +1273,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 continue  # no need to restore initial state
             elif self.is_const_var(v) and v.initial_name not in clobbered:
                 constant_locals.append(self.load_const_var(v))
-                constant_locals.append(self.create_store_fast(k))
+                constant_locals.append(self.create_store(k))
                 clobbered.add(k)
             else:
                 # must get the value from compiled graph
@@ -1220,7 +1294,11 @@ class InstructionTranslatorBase(fx.Tracer):
 
         self.grow_stack_to(len(const_stack_prefix) + len(var_names) + 1)
 
-        if len(var_names) == 0 and len(stack_values) == 1:
+        if len(var_names) == 0 and len(stack_values) == 0:
+            self.add_output_instructions(
+                const_stack_prefix + constant_locals + const_stack_suffix
+            )
+        elif len(var_names) == 0 and len(stack_values) == 1:
             self.add_output_instructions(
                 const_stack_prefix
                 + self.compile_subgraph(stack_values[0])
@@ -1257,7 +1335,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def load_const_var(self, value: VariableTracker):
         if value.initial_name is not None:
             # guards to should not be needed for a copy?
-            return self.create_load_fast(value.initial_name)
+            return self.create_load(value.initial_name)
         elif value.global_name is not None:
             return self.create_load_global(value.global_name)
         elif isinstance(value, ConstantVariable):
@@ -1291,7 +1369,7 @@ class InstructionTranslatorBase(fx.Tracer):
         if unpack:
             code.append(create_instruction("UNPACK_SEQUENCE", len(var_names) + extra))
         for name in var_names:
-            code.append(self.create_store_fast(name))
+            code.append(self.create_store(name))
         return code
 
     def copy_graphstate(self):
@@ -1408,15 +1486,21 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def should_compile_partial_graph(self):
-        if count_calls(self.graph) >= config.minimum_call_count:
-            self.should_compile_partial_graph = lambda: True
-            return True
-        return False
+        return True
+        # if count_calls(self.graph) >= config.minimum_call_count:
+        #     self.should_compile_partial_graph = lambda: True
+        #     return True
+        # return False
 
     def create_call_resume_at(self, inst):
         reads = livevars_analysis(self.instructions, inst)
         argnames = tuple(k for k in self.symbolic_locals.keys() if k in reads)
         nargs = len(self.stack) + len(argnames)
+
+        if self.code_options["co_cellvars"]:
+            raise unimplemented("resume_at with cellvars")
+        if self.code_options["co_freevars"]:
+            raise unimplemented("resume_at with freevars")
 
         name = unique_id(f"__resume_at_{self.next_instruction.offset}")
         self.grow_stack_to(1 + nargs)
@@ -1429,7 +1513,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         return (
             self.load_function_name(name, len(self.stack))
-            + [self.create_load_fast(k) for k in argnames]
+            + [self.create_load(k) for k in argnames]
             + [
                 create_instruction("CALL_FUNCTION", nargs),
                 create_instruction("RETURN_VALUE"),
@@ -1466,8 +1550,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("inline with  __closure__")
         if getattr(func, "__self__", None) is not None:
             unimplemented("inline with  __self__")
-        bound = inspect.signature(func).bind(*args, **kwargs)
-        bound.apply_defaults()
+        try:
+            bound = inspect.signature(func).bind(*args, **kwargs)
+            bound.apply_defaults()
+        except Exception as e:
+            raise unimplemented(f"signature issues {e}")
         sub_locals = dict()
         sub_globals = func.__globals__
         for k, v in bound.arguments.items():

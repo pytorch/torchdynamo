@@ -144,3 +144,11 @@ class TestCase(unittest.TestCase):
 
 def dummy_fx_compile(gm: fx.GraphModule):
     return gm.forward
+
+
+def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
+    if not is_correct:
+        return "ERROR"
+    if pvalue > pvalue_threshold:
+        return f"{speedup:.3f}x SAME"
+    return f"{speedup:.3f}x p={pvalue:.2f}"

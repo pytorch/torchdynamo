@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+
 import torch
 from torch.nn import functional as F
 
@@ -253,8 +254,6 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
     test_module_static_method = make_test(ModuleStaticMethodCall())
-    # test_module_class_method = make_test(ModuleClassMethodCall())
-    # test_module_property = make_test(ModuleProperty())
     test_fnmember = make_test(FnMember())
     test_fnmembercmp = make_test(FnMemberCmp(F.relu))
     test_fnmembercmp = make_test(FnMemberCmp(None))
@@ -269,4 +268,6 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_tensorlist = make_test(TensorList(), expected_ops=8)
     test_intarg = make_test(IntArg())
 
-    # TODO(jansel): we should make sure to expand nn.Sequential
+    # not implemented yet:
+    # test_module_class_method = make_test(ModuleClassMethodCall())
+    # test_module_property = make_test(ModuleProperty()))

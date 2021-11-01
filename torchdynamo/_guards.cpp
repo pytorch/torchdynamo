@@ -2,10 +2,7 @@
 #include <Python.h>
 #include <torch/extension.h>
 
-// comment out these lines to prevent specializations for backends with dynamic
-// shape support
-#define SPECIALIZE_DTYPE_DEVICE
-#define SPECIALIZE_NDIMS
+// comment out for backends with dynamic shape support
 #define SPECIALIZE_SHAPES_AND_STRIDES
 
 namespace {
@@ -42,19 +39,15 @@ public:
   }
 
   bool check(const LocalState &state, const at::Tensor &v) {
-#ifdef SPECIALIZE_DTYPE_DEVICE
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||
         requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
       return false;
     }
-#endif
-#ifdef SPECIALIZE_NDIMS
     size_t ndim = static_cast<size_t>(v.ndimension());
     if (ndim != sizes_.size()) {
       return false;
     }
-#endif
 #ifdef SPECIALIZE_SHAPES_AND_STRIDES
     const auto &sizes = v.sizes();
     const auto &strides = v.strides();
