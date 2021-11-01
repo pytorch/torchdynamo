@@ -1,5 +1,6 @@
 import enum
 import functools
+import inspect
 import types
 from typing import Callable
 from typing import List
@@ -96,6 +97,30 @@ class VariableTracker:
         raise NotImplementedError(
             "Use of corresponding Python value is not supported yet"
         )
+
+    def can_create_guard(self):
+        try:
+            self.create_guard(None)
+            return True
+        except NotImplementedError:
+            return False
+
+    def has_python_value(self):
+        try:
+            self.python_value()
+            return True
+        except NotImplementedError:
+            return False
+
+    def create_guard(self, fn):
+        from torchdynamo.guards import Guard, GuardSource
+
+        if self.initial_name:
+            return Guard(self.initial_name, GuardSource.LOCAL, fn)
+        raise NotImplementedError()
+
+    def has_const_attr(self, tx, name):
+        return False
 
     def __init__(
         self,
@@ -295,6 +320,30 @@ class GetAttrVariable(VariableTracker):
     def get_key(self):
         return self.__class__, self.name, self.obj.get_key()
 
+    def has_const_attr(self, tx, name):
+        try:
+            return ConstantVariable.is_literal(self.get_const_attr(tx, name))
+        except NotImplementedError:
+            return False
+
+    def get_const_attr(self, tx, name):
+        if not isinstance(self.obj, NNModuleVariable):
+            raise NotImplementedError()
+        step1 = tx.get_submodule(self.obj.module_key)
+        if self.name not in step1.__dict__:
+            raise NotImplementedError()
+        step2 = inspect.getattr_static(step1, self.name)
+        if name not in step2.__dict__:
+            raise NotImplementedError()
+        return inspect.getattr_static(step2, name)
+
+    def create_guard(self, fn):
+        from torchdynamo.guards import Guard, GuardSource
+
+        if self.obj.initial_name:
+            return Guard(f"{self.obj.initial_name}.{self.name}", GuardSource.LOCAL, fn)
+        raise NotImplementedError()
+
 
 class BaseListVariable(VariableTracker):
     def __init__(self, items, **kwargs):
@@ -446,6 +495,16 @@ class UnsupportedVariable(VariableTracker):
 
     def python_type(self):
         return self.value_type
+
+    def has_const_attr(self, tx, name):
+        if name not in self.value.__dict__:
+            return False
+        subobj = self.get_const_attr(tx, name)
+        assert id(subobj) == id(self.value.__dict__[name])
+        return ConstantVariable.is_literal(subobj)
+
+    def get_const_attr(self, tx, name):
+        return inspect.getattr_static(self.value, name)
 
 
 class UnknownVariable(VariableTracker):

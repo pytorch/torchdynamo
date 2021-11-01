@@ -236,6 +236,24 @@ class Seq(torch.nn.Module):
         return self.layers(x)
 
 
+class Cfg:
+    def __init__(self):
+        self.val = 0.5
+        self.count = 3
+
+
+class CfgModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.cfg = Cfg()
+        self.layer = torch.nn.Linear(10, 10)
+
+    def forward(self, x):
+        for i in range(self.cfg.count):
+            x = self.layer(x + self.cfg.val)
+        return x
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -255,8 +273,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_modulemethod2 = make_test(ModuleMethodCall())
     test_module_static_method = make_test(ModuleStaticMethodCall())
     test_fnmember = make_test(FnMember())
-    test_fnmembercmp = make_test(FnMemberCmp(F.relu))
-    test_fnmembercmp = make_test(FnMemberCmp(None))
+    test_fnmembercmp1 = make_test(FnMemberCmp(F.relu))
+    test_fnmembercmp2 = make_test(FnMemberCmp(None))
     test_constloop = make_test(ConstLoop())
     test_istraining1 = make_test(IsTrainingCheck())
     test_istraining2 = make_test(IsTrainingCheck())
@@ -267,6 +285,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_layerlist = make_test(LayerList())
     test_tensorlist = make_test(TensorList(), expected_ops=8)
     test_intarg = make_test(IntArg())
+    test_cfgmod = make_test(CfgModule())
 
     # not implemented yet:
     # test_module_class_method = make_test(ModuleClassMethodCall())

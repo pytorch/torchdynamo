@@ -951,7 +951,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
                 self.push(tracker_type(output, **options))
             else:
-                unimplemented(f"nn.Module attr {type(subobj).__name__}")
+                self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, TensorVariable):
             const_result = obj.const_attr(name)
             if const_result is not None:
@@ -972,27 +972,15 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.push(UserFunctionVariable(member, **options))
             else:
                 unimplemented("PythonModuleVariable attribute")
-        elif isinstance(obj, UnsupportedVariable) and name in obj.value.__dict__:
+        elif obj.has_const_attr(self, name) and obj.can_create_guard():
             try:
-                subobj = inspect.getattr_static(obj.value, name)
-                assert id(subobj) == id(obj.value.__dict__[name])
-                if not ConstantVariable.is_literal(subobj):
-                    unimplemented("non basic UnsupportedVariable")
-                old_len = len(options["guards"])
-                guards = {g for g in options["guards"] if g.name != obj.initial_name}
-                guards.add(
-                    Guard(obj.initial_name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)
-                )
-                guards.add(
-                    Guard(
-                        obj.initial_name,
-                        GuardSource.LOCAL,
-                        GuardBuilder.OBJECT_MUTATION,
-                    )
-                )
-                assert old_len + 1 == len(guards), f"{old_len} {len(guards)}"
-                options["guards"] = guards
-                self.push(ConstantVariable(subobj, **options))
+                options["guards"] = {
+                    g for g in options["guards"] if g.name != obj.initial_name
+                }
+                if obj.initial_name:
+                    options["guards"].add(obj.create_guard(GuardBuilder.ID_MATCH))
+                options["guards"].add(obj.create_guard(GuardBuilder.OBJECT_MUTATION))
+                self.push(ConstantVariable(obj.get_const_attr(self, name), **options))
             except AttributeError:
                 unimplemented("dynamic attr UnsupportedVariable")
         else:
