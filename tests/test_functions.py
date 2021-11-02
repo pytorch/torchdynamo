@@ -422,8 +422,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
 
     def test_empty_list(self):
-        def fn(x, l):
-            if len(l) == 0 and not l and l is not None:
+        def fn(x, ll):
+            if len(ll) == 0 and not ll and ll is not None:
                 return x + 1
 
         i = torch.randn(5, 10)
@@ -466,3 +466,21 @@ class FunctionTests(torchdynamo.testing.TestCase):
             v = fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
         self.assertTrue(cnts.op_count, 8)
+
+    @make_test
+    def test_import1(x, y):
+        import torch
+
+        return torch.add(x, y)
+
+    @make_test
+    def test_import2(x, y):
+        import torch as t
+
+        return t.add(x, y)
+
+    @make_test
+    def test_import3(x, y):
+        from torch import add
+
+        return add(x, y)

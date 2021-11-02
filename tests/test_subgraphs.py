@@ -1,6 +1,4 @@
 #!/usr/bin/env pytest
-import unittest
-
 import torch
 
 import torchdynamo.testing

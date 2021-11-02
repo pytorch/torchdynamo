@@ -18,21 +18,23 @@ SKIP_DIRS = [
     os.path.dirname(torch.__file__) + "/",
     # torchdynamo.*
     os.path.dirname(__file__) + "/",
+    "<frozen importlib",
 ] + [
     # skip some standard libs
     re.sub(r"__init__.py$", "", m.__file__)
     for m in (
-        os,
         enum,
+        importlib,
         inspect,
-        re,
+        multiprocessing,
         operator,
+        os,
+        re,
+        selectors,
+        threading,
         types,
         typing,
-        threading,
-        multiprocessing,
         _weakrefset,
-        selectors,
     )
 ]
 

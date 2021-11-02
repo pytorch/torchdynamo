@@ -78,6 +78,10 @@ class VariableTracker:
     def add_guard(self, guard):
         return self.clone(guards=set.union(self.guards, {guard}))
 
+    def add_guards(self, guards):
+        assert isinstance(guards, set)
+        return self.clone(guards=set.union(self.guards, guards))
+
     def get_key(self):
         return self.__class__
 
@@ -94,20 +98,21 @@ class VariableTracker:
         raise NotImplementedError("No known type")
 
     def python_value(self):
+        """For constants"""
         raise NotImplementedError(
             "Use of corresponding Python value is not supported yet"
         )
 
-    def can_create_guard(self):
+    def has_python_value(self):
         try:
-            self.create_guard(None)
+            self.python_value()
             return True
         except NotImplementedError:
             return False
 
-    def has_python_value(self):
+    def can_create_guard(self):
         try:
-            self.python_value()
+            self.create_guard(None)
             return True
         except NotImplementedError:
             return False
@@ -117,6 +122,8 @@ class VariableTracker:
 
         if self.initial_name:
             return Guard(self.initial_name, GuardSource.LOCAL, fn)
+        if self.global_name:
+            return Guard(self.global_name, GuardSource.GLOBAL, fn)
         raise NotImplementedError()
 
     def has_const_attr(self, tx, name):
@@ -238,7 +245,7 @@ class ConstantVariable(VariableTracker):
     def python_value(self):
         return self.value
 
-    def getitem_const(self, arg):
+    def getitem_const(self, arg: VariableTracker):
         return ConstantVariable(
             self.value[arg.python_value()], **VariableTracker.propagate([self, arg])
         )
@@ -358,19 +365,27 @@ class BaseListVariable(VariableTracker):
     def get_key(self):
         return self.__class__, tuple(v.get_key() for v in self.items)
 
+    def python_value(self):
+        return self.python_type()([x.python_value() for x in self.items])
+
+    def as_proxy(self):
+        return self.python_type()(self._as_proxy())
+
+    def getitem_const(self, arg: VariableTracker):
+        index = arg.python_value()
+        if isinstance(index, slice):
+            return self.clone(items=self.items[index]).add_guards(arg.guards)
+        else:
+            assert isinstance(index, int)
+            return self.items[index].add_guards(self.guards).add_guards(arg.guards)
+
 
 class ListVariable(BaseListVariable):
-    def as_proxy(self):
-        return list(self._as_proxy())
-
     def python_type(self):
         return list
 
 
 class TupleVariable(BaseListVariable):
-    def as_proxy(self):
-        return tuple(self._as_proxy())
-
     def python_type(self):
         return tuple
 
@@ -457,9 +472,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
         return super().python_type()
 
     def python_value(self):
-        if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
-            return self.value
-        return super().python_value()
+        return self.value
 
     def is_basic_math(self):
         return getattr(self.value, "__module__", None) == "math"

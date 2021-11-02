@@ -2,6 +2,7 @@ import collections
 import copy
 import dataclasses
 import functools
+import importlib
 import inspect
 import itertools
 import operator
@@ -9,7 +10,6 @@ import os
 import sys
 import types
 import typing
-from numbers import Real
 from typing import Any
 from typing import Dict
 from typing import List
@@ -34,12 +34,13 @@ from .utils import count_calls
 from .utils import istensor
 from .utils import istype
 from .utils import typestr
-from .variable_tracker import AllowedFunctionOrModuleVariable, FunctionConstantWrapper
+from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
+from .variable_tracker import FunctionConstantWrapper
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
@@ -98,7 +99,11 @@ def stack_op(fn: typing.Callable):
         elif all(isinstance(i, ConstantVariable) for i in inputs):
             # constant fold
             val = ConstantVariable(fn(*[i.value for i in inputs]), **options)
-        elif isinstance(inputs[0], ConstantVariable) and fn is operator.getitem:
+        elif (
+            isinstance(inputs[0], (ConstantVariable, BaseListVariable))
+            and fn is operator.getitem
+            and inputs[1].has_python_value()
+        ):
             base, item = inputs
             val = base.getitem_const(item)
         else:
@@ -237,7 +242,10 @@ class InstructionTranslatorBase(fx.Tracer):
             return NNModuleVariable(
                 module_key=key,
                 state=TracingSupported.YES,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)},
+                guards={
+                    Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
+                    Guard(name, GuardSource.LOCAL, GuardBuilder.OBJECT_MUTATION),
+                },
             )
         elif value is None or istype(value, bool):
             # For these, just specialize on exact value
@@ -247,7 +255,7 @@ class InstructionTranslatorBase(fx.Tracer):
             )
         elif (
             istype(value, int)
-            or (istype(value, float) and value in (-1.0, 0.0, 1.0, 2.0))
+            or (istype(value, float) and value in (-1.0, 0.0, 0.25, 0.5, 1.0, 2.0))
             or (istype(value, (list, tuple)) and len(value) == 0)
         ):
             # For these, just specialize on exact value
@@ -700,6 +708,21 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             )
 
+    def IMPORT_NAME(self, inst):
+        value = importlib.import_module(inst.argval)
+        if is_allowed(value):
+            self.push(
+                AllowedFunctionOrModuleVariable(value=value, state=TracingSupported.YES)
+            )
+        elif istype(value, types.ModuleType):
+            self.push(
+                PythonModuleVariable(
+                    value,
+                )
+            )
+        else:
+            unimplemented(f"IMPORT_NAME {typestr(value)}")
+
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
         self.push(
@@ -778,22 +801,13 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             )
         elif (
-            isinstance(left, ConstantVariable)
-            and isinstance(right, ConstantVariable)
-            and op in supported_any
+            left.has_python_value() and right.has_python_value() and op in supported_any
         ):
             # constant fold
             self.push(
-                ConstantVariable(supported_any[op](left.value, right.value), **options)
-            )
-        elif (
-            isinstance(left, (AllowedFunctionOrModuleVariable, ConstantVariable))
-            and isinstance(right, (AllowedFunctionOrModuleVariable, ConstantVariable))
-            and op in supported_is_const
-        ):
-            self.push(
                 ConstantVariable(
-                    supported_is_const[op](left.value, right.value), **options
+                    supported_any[op](left.python_value(), right.python_value()),
+                    **options,
                 )
             )
         else:
@@ -985,6 +999,8 @@ class InstructionTranslatorBase(fx.Tracer):
                 unimplemented("dynamic attr UnsupportedVariable")
         else:
             unimplemented(f"LOAD_ATTR {obj}")
+
+    IMPORT_FROM = LOAD_ATTR
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
