@@ -4,6 +4,7 @@ import collections
 import copy
 import functools
 import gc
+import getpass
 import logging
 import os
 import re
@@ -16,12 +17,19 @@ from os.path import exists
 
 import numpy as np
 import torch
-from scipy.stats import ttest_ind, gmean
+from scipy.stats import gmean
+from scipy.stats import ttest_ind
 
-import torchdynamo
 from torchdynamo import symbolic_convert
-from torchdynamo.profiler import Profiler, fx_insert_profiling, ProfileMetrics
+from torchdynamo.optimizations.backends import optimize_for_inference
+from torchdynamo.optimizations.inference import user_compiler
+from torchdynamo.profiler import fx_insert_profiling
+from torchdynamo.profiler import ProfileMetrics
+from torchdynamo.profiler import Profiler
+from torchdynamo.testing import dummy_fx_compile
+from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
+import torchdynamo
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 torchbench_dir = abspath(
@@ -45,11 +53,13 @@ SKIP = {
     "hf_Bart",
     "nvidia_deeprecommender",
     "hf_Albert",
-    # TODO: need to debug a crash in this one on debug_insert_nops
-    "pyhpc_isoneutral_mixing",
 }
 current_name = ""
 current_device = ""
+
+if getpass.getuser() == "jansel":
+    # jansel applied this fix https://github.com/pytorch/benchmark/pull/479
+    SKIP.clear()
 
 
 class NullContext:
@@ -107,12 +117,6 @@ def timed(model, example_inputs, times=1):
     return result, t1 - t0
 
 
-def format_speedup(speedup, pvalue, pvalue_threshold=0.1):
-    if pvalue > pvalue_threshold:
-        return f"{speedup:.3f}x SAME"
-    return f"{speedup:.3f}x p={pvalue:.2f}"
-
-
 class Stats:
     totals = collections.defaultdict(collections.Counter)
 
@@ -128,7 +132,7 @@ class Stats:
     @classmethod
     def print_summary(cls):
         for k, v in sorted(cls.totals.items()):
-            lines = "\n  ".join(map(str, v.most_common(20)))
+            lines = "\n  ".join(map(str, v.most_common(50)))
             print(f"STATS {k}\n  {lines}")
 
 
@@ -156,6 +160,43 @@ def speedup_experiment(speedups, args, model, example_inputs):
     return result
 
 
+def speedup_experiment2(speedups, args, model, example_inputs):
+    ts = None
+    # sr = None
+    try:
+        ts = optimize_for_inference(torch.jit.script(model), example_inputs)
+        # sr = static_runtime(torch.jit.trace(model, example_inputs), example_inputs)
+    except Exception:
+        pass
+
+    timings = np.zeros((args.repeat, 3), np.float64)
+    timings.fill(1.0e10)
+    for rep in range(args.repeat):
+        # interleave the runs to handle frequency scaling and load changes
+        _, timings[rep, 0] = timed(model, example_inputs)
+        if ts is not None:
+            _, timings[rep, 1] = timed(ts, example_inputs)
+        # if sr is not None:
+        #    _, timings[rep, 2] = timed(sr, example_inputs)
+        with torchdynamo.run():
+            _, timings[rep, 2] = timed(model, example_inputs)
+
+    pvalue = [
+        ttest_ind(timings[:, 0], timings[:, i]).pvalue
+        for i in range(1, timings.shape[1])
+    ]
+    median = np.median(timings, axis=0)
+    speedup = median[0] / median[1:]
+    speedups.append(speedup)
+    result = "ts={:12} td={:12}".format(
+        *[
+            format_speedup(s, p, m is not None)
+            for s, p, m in zip(speedup, pvalue, [ts, model])
+        ]
+    )
+    return result
+
+
 def null_experiment(model, example_inputs):
     return []
 
@@ -179,8 +220,13 @@ def main():
     parser.add_argument(
         "--no-skip", action="store_true", help="run models that don't fx cleanly"
     )
+    parser.add_argument("--overhead", action="store_true", help="measure overheads")
     parser.add_argument(
-        "--overhead", "-s", action="store_true", help="measure overheads"
+        "--speedup", action="store_true", help="measure speedup with default passes"
+    )
+    parser.add_argument(
+        "--speedup2",
+        action="store_true",
     )
     parser.add_argument(
         "--nothing", action="store_true", help="just check the benchmark works"
@@ -217,8 +263,14 @@ def main():
     experiment = null_experiment
 
     if args.overhead:
-        optimize_ctx = torchdynamo.optimize(lambda gm: gm.forward)
+        optimize_ctx = torchdynamo.optimize(dummy_fx_compile)
         experiment = functools.partial(speedup_experiment, speedups, args)
+    elif args.speedup:
+        optimize_ctx = torchdynamo.optimize(user_compiler)
+        experiment = functools.partial(speedup_experiment, speedups, args)
+    elif args.speedup2:
+        optimize_ctx = torchdynamo.optimize(user_compiler)
+        experiment = functools.partial(speedup_experiment2, speedups, args)
     elif args.nothing:
         optimize_ctx = NullContext()
     elif args.nops:
@@ -267,8 +319,8 @@ def main():
         print(
             textwrap.dedent(
                 f"""
-                MEAN SPEEDUP {np.mean(speedups):.3f}x
-                GEOMEAN SPEEDUP {gmean(speedups):.3f}x"""
+                MEAN SPEEDUP {np.mean(speedups, axis=0)}
+                GEOMEAN SPEEDUP {gmean(speedups, axis=0)}"""
             )
         )
 
