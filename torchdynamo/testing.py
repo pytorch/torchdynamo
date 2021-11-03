@@ -28,6 +28,10 @@ def same(a, b):
     if isinstance(a, (list, tuple)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return all(same(ai, bi) for ai, bi in zip(a, b))
+    elif isinstance(a, dict):
+        assert isinstance(b, dict)
+        assert set(a.keys()) == set(b.keys())
+        return all(same(a[k], b[k]) for k in a.keys())
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)

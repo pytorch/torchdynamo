@@ -10,6 +10,7 @@ import threading
 import types
 import typing
 import _weakrefset
+import unittest
 
 import torch
 
@@ -35,6 +36,7 @@ SKIP_DIRS = [
         types,
         typing,
         _weakrefset,
+        unittest,
     )
 ]
 

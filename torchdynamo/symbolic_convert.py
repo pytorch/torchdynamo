@@ -33,8 +33,7 @@ from .resume_execution import ContinueExecutionCache
 from .utils import count_calls
 from .utils import istensor
 from .utils import istype
-from .utils import typestr
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, typestr
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
@@ -55,7 +54,6 @@ from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
-from .mutation_guard import real_type as type
 
 counters = collections.defaultdict(collections.Counter)
 
@@ -71,10 +69,14 @@ def proxy_args_kwargs(args, kwargs):
         )
 
 
+class Unsupported(RuntimeError):
+    pass
+
+
 def unimplemented(msg: str):
     counters["unimplemented"][msg] += 1
     assert msg != os.environ.get("BREAK", False)
-    raise NotImplementedError(msg)
+    raise Unsupported(msg)
 
 
 def warning(msg: str):
@@ -96,11 +98,11 @@ def stack_op(fn: typing.Callable):
                 ),
                 **options,
             )
-        elif all(isinstance(i, ConstantVariable) for i in inputs):
+        elif all(i.has_python_value() for i in inputs):
             # constant fold
-            val = ConstantVariable(fn(*[i.value for i in inputs]), **options)
+            val = ConstantVariable(fn(*[i.python_value() for i in inputs]), **options)
         elif (
-            isinstance(inputs[0], (ConstantVariable, BaseListVariable))
+            isinstance(inputs[0], BaseListVariable)
             and fn is operator.getitem
             and inputs[1].has_python_value()
         ):
@@ -256,7 +258,11 @@ class InstructionTranslatorBase(fx.Tracer):
         elif (
             istype(value, int)
             or (istype(value, float) and value in (-1.0, 0.0, 0.25, 0.5, 1.0, 2.0))
-            or (istype(value, (list, tuple)) and len(value) == 0)
+            or (istype(value, (list, tuple, list)) and len(value) == 0)
+            or (
+                istype(value, (tuple, list, torch.Size))
+                and all(istype(x, int) for x in value)
+            )
         ):
             # For these, just specialize on exact value
             return ConstantVariable(
@@ -429,7 +435,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.inline_user_function(
                     fn.guards, fn.fn, fn.self_args() + args, kwargs
                 )
-            except NotImplementedError:
+            except Unsupported:
                 if not self.should_compile_partial_graph():
                     raise
                 self.partial_subgraph_and_call(fn, fn.self_args() + args, kwargs)
@@ -553,7 +559,7 @@ class InstructionTranslatorBase(fx.Tracer):
             return (
                 inst.opname != "RETURN_VALUE" and self.instruction_pointer is not None
             )
-        except NotImplementedError:
+        except Unsupported:
             if self.checkpoint:
                 continue_inst, state = self.checkpoint
                 self.restore_graphstate(state)
@@ -568,7 +574,7 @@ class InstructionTranslatorBase(fx.Tracer):
         try:
             while self.step():
                 pass
-        except NotImplementedError:
+        except Unsupported:
             raise
         except Exception as e:
             sys.stderr.write(
@@ -1152,41 +1158,31 @@ class InstructionTranslatorBase(fx.Tracer):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
+    def output_proxy(self, rv):
+        if isinstance(rv, VariableTracker):
+            self.guards.update(rv.guards)
+
+        if isinstance(rv, VariableTracker) and rv.can_proxy():
+            return rv.as_proxy()
+        elif isinstance(rv, NNModuleVariable):
+            return self.create_proxy("get_attr", rv.module_key, tuple(), {})
+        elif isinstance(rv, (list, tuple)):
+            return tuple(map(self.output_proxy, rv))
+
+        raise unimplemented(f"RETURN_VALUE {type(rv).__name__}")
+
     def compile_subgraph(self, rv):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        if isinstance(rv, TensorVariable) or isinstance(rv, BaseListVariable):
-            try:
-                self.create_node(
-                    "output", "output", (self.create_arg(rv.as_proxy()),), {}
-                )
-            except AttributeError:
-                unimplemented("unsupported value in output")
-        elif isinstance(rv, list):
-            outputs = []
-            for x in rv:
-                if isinstance(x, TensorVariable):
-                    outputs.append(self.create_arg(x.as_proxy()))
-                elif isinstance(x, NNModuleVariable):
-                    outputs.append(
-                        self.create_arg(
-                            self.create_proxy("get_attr", x.module_key, tuple(), {})
-                        )
-                    )
-                else:
-                    unimplemented(f"restore state for {type(x).__name__}")
-            outputs = tuple(outputs)
-            rv = VariableTracker(**VariableTracker.propagate(rv))
-            self.create_node("output", "output", (outputs,), {})
-        else:
-            unimplemented(f"RETURN_VALUE {type(rv).__name__}")
+        self.create_node(
+            "output", "output", (self.create_arg(self.output_proxy(rv)),), {}
+        )
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
-        self.guards.update(rv.guards)
         gm = fx.GraphModule(FakeRootModule(self.nn_modules), self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")

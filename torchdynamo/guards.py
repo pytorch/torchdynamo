@@ -11,6 +11,8 @@ from typing import List
 from typing import Optional
 from typing import Set
 
+import torch
+
 from ._guards import check_obj_id
 from ._guards import check_type_id
 from ._guards import TensorGuards
@@ -91,11 +93,13 @@ class GuardBuilder:
         )
 
     def EQUALS_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
         assert istype(
-            self.get(guard.name), (int, float, bool, type(None), type, list, tuple)
+            val, (int, float, bool, type(None), type, list, tuple, torch.Size)
         )
-        # ___check_obj_id is same as `id(x) == y`
-        self.code.append(f"{self.arg_ref(guard)} == {repr(self.get(guard.name))}")
+        if istype(val, torch.Size):
+            val = tuple(val)
+        self.code.append(f"{self.arg_ref(guard)} == {val!r}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""

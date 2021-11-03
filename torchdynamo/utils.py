@@ -3,8 +3,6 @@ import weakref
 import torch
 from torch import fx
 
-from torchdynamo.variable_tracker import VariableTracker
-
 
 def count_calls(g: fx.Graph):
     c = 0
@@ -45,17 +43,6 @@ class ExactWeakKeyDictionary:
     def clear(self):
         self.values.clear()
         self.refs.clear()
-
-
-def typestr(*objs):
-    if len(objs) == 1:
-        (obj,) = objs
-        if isinstance(obj, VariableTracker):
-            return str(obj)
-        else:
-            return type(obj).__name__
-    else:
-        return " ".join(map(typestr, objs))
 
 
 def istype(obj, allowed_types):

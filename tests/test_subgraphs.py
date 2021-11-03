@@ -128,7 +128,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             args = [a - b, b - a]
             return indirectly_unsupported(*args)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 2, 4)
 
     def test_stack_state1(self):
         def fn(a, b):

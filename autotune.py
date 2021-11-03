@@ -26,7 +26,8 @@ from torchdynamo.optimizations.backends import optimize_for_inference
 from torchdynamo.optimizations.backends import static_runtime
 from torchdynamo.optimizations.backends import torchscript
 from torchdynamo.optimizations.backends import tvm_compile
-from torchdynamo.testing import same, format_speedup
+from torchdynamo.testing import format_speedup
+from torchdynamo.testing import same
 
 
 def synchronize():
@@ -145,19 +146,16 @@ def run(args, name):
         ("torchscript", model1),
         ("freezing", optimize_for_inference(model1, example_inputs)),
         ("static_runtime", static_runtime(model1, example_inputs)),
-        ("onnxrt", onnxrt(model1, example_inputs)),
-        # ("tvm", tvm_compile(model1, example_inputs)),
-        (
-            "ansor128",
-            tvm_compile(
-                model1, example_inputs, os.path.join(model_dir, "ansor128"), trials=128
-            ),
-        ),
-        # ("ansor1024", tvm_compile(
-        #     model1, example_inputs, os.path.join(model_dir, "ansor1024"), trials=1024
-        # )),
+        ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
+        # ("taso", taso(example_inputs,
+        #               os.path.join(model_dir, "onnx"),
+        #               os.path.join(model_dir, "taso"))),
+        ("tvm", tvm_compile(model1, example_inputs)),
         # ("ansor10k", tvm_compile(
         #     model1, example_inputs, os.path.join(model_dir, "ansor10k), trials=10000
+        # )),
+        # ("ansor20k", tvm_compile(
+        #     model1, example_inputs, os.path.join(model_dir, "ansor20k"), trials=20000
         # )),
     ]
 

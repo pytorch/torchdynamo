@@ -2,9 +2,11 @@
 import argparse
 import collections
 import copy
+import csv
 import functools
 import gc
 import getpass
+import io
 import logging
 import os
 import re
@@ -21,7 +23,7 @@ from scipy.stats import gmean
 from scipy.stats import ttest_ind
 
 from torchdynamo import symbolic_convert
-from torchdynamo.optimizations.backends import optimize_for_inference
+from torchdynamo.optimizations.backends import optimize_for_inference, onnxrt
 from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.profiler import ProfileMetrics
@@ -160,26 +162,53 @@ def speedup_experiment(speedups, args, model, example_inputs):
     return result
 
 
-def speedup_experiment2(speedups, args, model, example_inputs):
-    ts = None
-    # sr = None
-    try:
-        ts = optimize_for_inference(torch.jit.script(model), example_inputs)
-        # sr = static_runtime(torch.jit.trace(model, example_inputs), example_inputs)
-    except Exception:
-        pass
+@functools.lru_cache(1)
+def get_output_csv(name, headers):
+    output_csv = csv.writer(
+        io.TextIOWrapper(
+            open(os.path.join(torchdynamo.config.base_dir, name), "wb", buffering=0),
+            "utf-8",
+            write_through=True,
+        )
+    )
+    output_csv.writerow(headers)
+    return output_csv
 
-    timings = np.zeros((args.repeat, 3), np.float64)
+
+def speedup_experiment2(speedups, args, model, example_inputs):
+    output_csv = get_output_csv(
+        "baseline.csv",
+        ("dev", "name", "ts", "optimize_for_inference", "onnxrt", "torchdynamo"),
+    )
+
+    try:
+        ts = torch.jit.script(model)
+    except Exception:
+        ts = None
+
+    try:
+        ofi = optimize_for_inference(torch.jit.script(model), example_inputs)
+    except Exception:
+        ofi = None
+
+    try:
+        ort = onnxrt(torch.jit.script(model), example_inputs)
+    except Exception:
+        ort = None
+
+    timings = np.zeros((args.repeat, 5), np.float64)
     timings.fill(1.0e10)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
         _, timings[rep, 0] = timed(model, example_inputs)
         if ts is not None:
             _, timings[rep, 1] = timed(ts, example_inputs)
-        # if sr is not None:
-        #    _, timings[rep, 2] = timed(sr, example_inputs)
+        if ort is not None:
+            _, timings[rep, 2] = timed(ofi, example_inputs)
+        if ort is not None:
+            _, timings[rep, 3] = timed(ort, example_inputs)
         with torchdynamo.run():
-            _, timings[rep, 2] = timed(model, example_inputs)
+            _, timings[rep, 4] = timed(model, example_inputs)
 
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
@@ -187,13 +216,18 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     ]
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1:]
+    if ts is None:
+        speedup[0] = 0.0
+    if ort is None:
+        speedup[1] = 0.0
     speedups.append(speedup)
-    result = "ts={:12} td={:12}".format(
-        *[
+    result = " ".join(
+        [
             format_speedup(s, p, m is not None)
-            for s, p, m in zip(speedup, pvalue, [ts, model])
+            for s, p, m in zip(speedup, pvalue, [ts, ofi, ort, model])
         ]
     )
+    output_csv.writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
     return result
 
 

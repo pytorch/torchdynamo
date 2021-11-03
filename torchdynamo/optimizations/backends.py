@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 import tempfile
 
 import torch
@@ -149,7 +150,17 @@ def onnxrt(scripted, example_inputs, filename=None):
         return None
     try:
         with tempfile.NamedTemporaryFile() as tmp:
-            return onnxrt_inner(scripted, example_inputs, filename or tmp.name)
+            if filename is None:
+                filename = tmp.name
+            torch.onnx.export(
+                scripted,
+                example_inputs,
+                filename,
+                input_names=[f"i{i}" for i in range(len(example_inputs))],
+                do_constant_folding=True,
+                opset_version=14,
+            )
+            return onnxrt_wrapper(filename, example_inputs)
     except KeyboardInterrupt:
         raise
     except Exception:
@@ -157,16 +168,9 @@ def onnxrt(scripted, example_inputs, filename=None):
         return None
 
 
-def onnxrt_inner(scripted, example_inputs, filename):
+def onnxrt_wrapper(filename, example_inputs):
     import onnxruntime
 
-    torch.onnx.export(
-        scripted,
-        example_inputs,
-        filename,
-        input_names=[f"i{i}" for i in range(len(example_inputs))],
-        do_constant_folding=True,
-    )
     ort_session = onnxruntime.InferenceSession(filename)
 
     def to_numpy(x):
@@ -188,3 +192,23 @@ def onnxrt_inner(scripted, example_inputs, filename):
     _call(*example_inputs)
 
     return _call
+
+
+def taso(example_inputs, onnx_filename, taso_filename):
+    if not os.path.exists(onnx_filename):
+        return None
+    try:
+        subprocess.check_call(
+            [
+                os.path.expanduser("~/conda/envs/taso/bin/python"),
+                "-c",
+                "import taso,onnx; onnx.save(taso.export_onnx(taso.optimize("
+                f"taso.load_onnx('{onnx_filename}'))), '{taso_filename}')",
+            ]
+        )
+        return onnxrt_wrapper(taso_filename, example_inputs)
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        logging.exception("TASO error")
+        return None

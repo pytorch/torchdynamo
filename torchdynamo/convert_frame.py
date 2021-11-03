@@ -16,7 +16,7 @@ from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
-from torchdynamo.symbolic_convert import InstructionTranslator
+from torchdynamo.symbolic_convert import InstructionTranslator, Unsupported
 from torchdynamo.symbolic_convert import counters
 from torchdynamo.symbolic_convert import unimplemented
 
@@ -125,7 +125,7 @@ def convert_frame(compiler_fn: typing.Callable):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
-        except NotImplementedError:
+        except Unsupported:
             pass
         except Exception:
             sys.stderr.write("=" * 10 + " Stack Trace " + "=" * 10 + "\n")

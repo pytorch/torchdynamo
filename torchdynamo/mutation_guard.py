@@ -1,7 +1,12 @@
+import functools
 import weakref
+
+from torchdynamo.utils import ExactWeakKeyDictionary
 
 
 class MutationTracker:
+    db = ExactWeakKeyDictionary()
+
     def __init__(self):
         self.mutation_count = 0
         self.watchers = []
@@ -21,25 +26,25 @@ class MutationTracker:
 
 def watch(obj, guarded_code):
     """invalidate guarded_code when obj is mutated"""
-    original_cls = type(obj)
-    if hasattr(original_cls, "___mutation_tracker"):
-        tracker = original_cls.___mutation_tracker
-    else:
-        tracker = MutationTracker()
+    ensure_patched(type(obj))
 
-        class Shim(original_cls):
-            def __setattr__(self, key, value):
-                tracker.on_mutation(key)
-                original_cls.__setattr__(self, key, value)
-
-        Shim.__name__ = original_cls.__name__
-        Shim.___mutation_tracker = tracker
-        Shim.___real_type = original_cls
-        object.__setattr__(obj, "__class__", Shim)
-
+    if obj not in MutationTracker.db:
+        MutationTracker.db[obj] = MutationTracker()
+    tracker = MutationTracker.db[obj]
     tracker.track(guarded_code)
 
 
-def real_type(obj):
-    t = type(obj)
-    return getattr(t, "__real_type", t)
+def ensure_patched(cls):
+    if getattr(cls, "___needs_mutation_patch", True):
+        cls.___needs_mutation_patch = False
+        original_setattr = cls.__setattr__
+
+        @functools.wraps(original_setattr)
+        def custom_setattr(self, key, value):
+            try:
+                MutationTracker.db[self].on_mutation(key)
+            except KeyError:
+                pass
+            return original_setattr(self, key, value)
+
+        cls.__setattr__ = custom_setattr

@@ -470,17 +470,23 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_import1(x, y):
         import torch
+        from torch import sub
 
-        return torch.add(x, y)
-
-    @make_test
-    def test_import2(x, y):
-        import torch as t
-
-        return t.add(x, y)
+        return sub(torch.add(x, y), y)
 
     @make_test
-    def test_import3(x, y):
-        from torch import add
+    def test_return_dict(x, y):
+        return {"x": x, "z": x + y}
 
-        return add(x, y)
+    def test_size_input(self):
+        def fn(x, s):
+            a, b = s
+            return x + (a - b)
+
+        v = torch.zeros(10, 20)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(v, v.size())[0, 0], -10)
+            self.assertEqual(fn(v, (10, 20))[0, 0], -10)
+            self.assertEqual(fn(v, [10, 20])[0, 0], -10)
+        self.assertTrue(cnts.op_count, 6)

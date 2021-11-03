@@ -10,7 +10,6 @@ from typing import Set
 import torch.fx
 
 from torchdynamo import config
-from torchdynamo.mutation_guard import real_type as type
 
 
 class TracingSupported(enum.Enum):
@@ -127,7 +126,20 @@ class VariableTracker:
         raise NotImplementedError()
 
     def has_const_attr(self, tx, name):
-        return False
+        try:
+            return ConstantVariable.is_literal(self.get_const_attr(tx, name))
+        except NotImplementedError:
+            return False
+
+    def get_const_attr(self, tx, name):
+        raise NotImplementedError()
+
+    def can_proxy(self):
+        try:
+            self.as_proxy()
+            return True
+        except (NotImplementedError, AttributeError):
+            return False
 
     def __init__(
         self,
@@ -327,12 +339,6 @@ class GetAttrVariable(VariableTracker):
     def get_key(self):
         return self.__class__, self.name, self.obj.get_key()
 
-    def has_const_attr(self, tx, name):
-        try:
-            return ConstantVariable.is_literal(self.get_const_attr(tx, name))
-        except NotImplementedError:
-            return False
-
     def get_const_attr(self, tx, name):
         if not isinstance(self.obj, NNModuleVariable):
             raise NotImplementedError()
@@ -509,15 +515,14 @@ class UnsupportedVariable(VariableTracker):
     def python_type(self):
         return self.value_type
 
-    def has_const_attr(self, tx, name):
-        if name not in self.value.__dict__:
-            return False
-        subobj = self.get_const_attr(tx, name)
-        assert id(subobj) == id(self.value.__dict__[name])
-        return ConstantVariable.is_literal(subobj)
-
     def get_const_attr(self, tx, name):
-        return inspect.getattr_static(self.value, name)
+        if name not in getattr(self.value, "__dict__", {}):
+            raise NotImplementedError()
+        subobj = inspect.getattr_static(self.value, name)
+        assert id(subobj) == id(self.value.__dict__[name])
+        if not ConstantVariable.is_literal(subobj):
+            raise NotImplementedError()
+        return subobj
 
 
 class UnknownVariable(VariableTracker):
@@ -526,3 +531,14 @@ class UnknownVariable(VariableTracker):
     """
 
     pass
+
+
+def typestr(*objs):
+    if len(objs) == 1:
+        (obj,) = objs
+        if isinstance(obj, VariableTracker):
+            return str(obj)
+        else:
+            return type(obj).__name__
+    else:
+        return " ".join(map(typestr, objs))

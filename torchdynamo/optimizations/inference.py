@@ -5,6 +5,7 @@ import io
 import itertools
 import json
 import os
+import shutil
 from collections import defaultdict
 
 import torch
@@ -96,13 +97,15 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
 
     path = folder_name(gm, example_inputs)
     if not os.path.exists(path):
-        gm.to_folder(path)
-        with open(os.path.join(path, "key"), "w") as fd:
-            fd.write(string_key(gm, example_inputs))
-        with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
-            torch.save(example_inputs, fd)
-        # with open(os.path.join(path, "graph.pk"), "wb") as fd:
-        #    pickle.dump(gm.graph, fd, pickle.HIGHEST_PROTOCOL)
+        try:
+            gm.to_folder(path)
+            with open(os.path.join(path, "key"), "w") as fd:
+                fd.write(string_key(gm, example_inputs))
+            with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
+                torch.save(example_inputs, fd)
+        except Exception:
+            shutil.rmtree(path)
+            raise
     elif os.path.exists(os.path.join(path, "perf.json")):
         ts = functools.partial(torchscript, gm, example_inputs)
         backends = {
