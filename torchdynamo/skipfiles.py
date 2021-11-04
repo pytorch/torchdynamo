@@ -4,6 +4,7 @@ import inspect
 import multiprocessing
 import operator
 import os
+import random
 import re
 import selectors
 import threading
@@ -30,24 +31,27 @@ SKIP_DIRS = [
         multiprocessing,
         operator,
         os,
+        random,
         re,
         selectors,
         threading,
         types,
         typing,
-        _weakrefset,
         unittest,
+        _weakrefset,
     )
 ]
 
 # skip common third party libs
-for _name in ("numpy", "onnx", "tvm", "onnxruntime", "tqdm"):
+for _name in ("numpy", "onnx", "tvm", "onnxruntime", "tqdm", "pandas", "sklearn"):
     try:
         SKIP_DIRS.append(os.path.dirname(importlib.import_module(_name).__file__) + "/")
     except ImportError:
         pass
 
+SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+
 
 def check(filename):
     """Should skip this file?"""
-    return any(filename.startswith(d) for d in SKIP_DIRS)
+    return bool(SKIP_DIRS_RE.match(filename))

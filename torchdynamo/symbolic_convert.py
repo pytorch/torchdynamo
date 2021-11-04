@@ -8,6 +8,7 @@ import itertools
 import math
 import operator
 import os
+import re
 import sys
 import types
 import typing
@@ -20,7 +21,7 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import config
+from . import config, skipfiles
 from .allowed_functions import is_allowed
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import Instruction
@@ -89,9 +90,9 @@ def stack_op(fn: typing.Callable):
 
     @functools.wraps(fn)
     def impl(self: "InstructionTranslatorBase", inst: Instruction):
-        inputs = self.popn(nargs)
-
+        inputs: List[VariableTracker] = self.popn(nargs)
         options = VariableTracker.propagate(inputs)
+
         if any(isinstance(i, TensorVariable) for i in inputs):
             val = TensorVariable(
                 self.create_proxy(
@@ -111,6 +112,22 @@ def stack_op(fn: typing.Callable):
         ):
             base, item = inputs
             val = base.getitem_const(item)
+        elif (
+            isinstance(inputs[0], NNModuleVariable)
+            and fn is operator.getitem
+            and inputs[1].is_python_constant()
+        ):
+            assert len(inputs) == 2
+            key = inputs[0].module_key
+            mod = self.get_submodule(key)
+            assert type(mod).__getitem__ is torch.nn.ModuleList.__getitem__, typestr(
+                mod
+            )
+            submod = mod[inputs[1].as_python_constant()]
+            val = NNModuleVariable(
+                self.add_submodule(submod, key, inputs[1].as_python_constant()),
+                **options,
+            )
         else:
             unimplemented(f"stack_op {typestr(*inputs)}")
 
@@ -287,10 +304,8 @@ class InstructionTranslatorBase(fx.Tracer):
                 **TensorVariable.specialize(value),
             )
         elif isinstance(value, torch.nn.Module):
-            key = f"{name}_{next(self.cnt)}"
-            self.nn_modules[key] = value
             return NNModuleVariable(
-                module_key=key,
+                module_key=self.add_submodule(value, name),
                 state=TracingSupported.YES,
                 guards={
                     Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
@@ -344,6 +359,26 @@ class InstructionTranslatorBase(fx.Tracer):
                 state=TracingSupported.NO,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
+
+    def add_submodule(self, mod: torch.nn.Module, *names):
+        assert isinstance(mod, torch.nn.Module)
+
+        for k, v in self.nn_modules.items():
+            if v is mod:
+                return k
+
+        name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
+        if not name or not name[0].isalpha():
+            name = "sub" + name
+
+        base = name
+        for i in itertools.count():
+            if name not in self.nn_modules:
+                self.nn_modules[name] = mod
+                return name
+            name = f"{base}_{i}"
+
+        assert False
 
     def prune_dead_locals(self):
         reads = livevars_analysis(self.instructions, self.current_instruction)
@@ -462,11 +497,14 @@ class InstructionTranslatorBase(fx.Tracer):
                 options = VariableTracker.propagate([fn])
                 (arg,) = args
                 for idx, submod in enumerate(mod):
-                    # Just this would work most of the time, but not when using names
-                    # key = f"{fn.module_key}.{idx}"
-                    key = unique_id(f"{fn.module_key.replace('.', '_')}_{idx}")
-                    self.nn_modules[key] = submod
-                    self.call_function(NNModuleVariable(key, **options), [arg], {})
+                    self.call_function(
+                        NNModuleVariable(
+                            self.add_submodule(submod, fn.module_key, idx),
+                            **options,
+                        ),
+                        [arg],
+                        {},
+                    )
                     arg = self.pop()
                 self.push(arg)
             elif is_allowed(mod.__class__):
@@ -542,6 +580,11 @@ class InstructionTranslatorBase(fx.Tracer):
             elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
                 assert not kwargs and len(args) == 1
                 self.push(ListIteratorVariable(args[0].items, **options))
+            elif fn.fn is iter and args and isinstance(args[0], NNModuleVariable):
+                assert not kwargs and len(args) == 1
+                self.push(
+                    ListIteratorVariable(args[0].expand_module_list(self), **options)
+                )
             elif fn.fn is len:
                 assert not kwargs and len(args) == 1
                 arg = args[0]
@@ -560,6 +603,13 @@ class InstructionTranslatorBase(fx.Tracer):
                         )
                 elif isinstance(arg, (BaseListVariable, ConstDictVariable)):
                     self.push(ConstantVariable(len(arg.items), **options))
+                elif isinstance(arg, NNModuleVariable):
+                    # assuming constant length of nn.ModuleList, etc
+                    self.push(
+                        ConstantVariable(
+                            len(self.get_submodule(arg.module_key)), **options
+                        )
+                    )
                 else:
                     unimplemented(f"`len` with arg type {arg}")
             elif fn.fn is isinstance:
@@ -628,9 +678,14 @@ class InstructionTranslatorBase(fx.Tracer):
         else:
             self.instruction_pointer = None
             self.next_instruction = None
+        if inst.starts_line:
+            self.lineno = inst.starts_line
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
+
+        if config.trace:
+            print("TRACE", inst.opname, inst.argval, self.stack)
 
         try:
             if not hasattr(self, inst.opname):
@@ -663,7 +718,7 @@ class InstructionTranslatorBase(fx.Tracer):
             sys.stderr.write(
                 f"ERROR FROM offset={self.current_instruction.offset} "
                 f"filename {self.code_options.get('co_filename')} "
-                f"{self.code_options.get('co_firstlineno')} {typestr(e)}\n"
+                f"{self.lineno} {typestr(e)}\n"
             )
             raise
 
@@ -776,11 +831,9 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             )
         elif isinstance(value, torch.nn.Module):
-            key = unique_id(inst.argval)
-            self.nn_modules[key] = value
             self.push(
                 NNModuleVariable(
-                    key,
+                    self.add_submodule(value, inst.argval),
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
                     },
@@ -996,7 +1049,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             elif isinstance(subobj, torch.nn.Module):
                 self.push(NNModuleVariable(key, **options))
-            elif istype(subobj, (int, float, bool, type(None))):
+            elif ConstantVariable.is_literal(subobj):
                 # Assumes module attributes are constant
                 # TODO(jansel): add guards?
                 self.push(
@@ -1032,11 +1085,11 @@ class InstructionTranslatorBase(fx.Tracer):
                 output = []
                 for i, item in enumerate(subobj):
                     if isinstance(item, torch.nn.Module):
-                        key = f"{obj.module_key}_{name}_{i}"
-                        self.nn_modules[key] = item
                         output.append(
                             NNModuleVariable(
-                                module_key=key,
+                                module_key=self.add_submodule(
+                                    item, obj.module_key, name, i
+                                ),
                                 **options,
                             )
                         )
@@ -1570,6 +1623,7 @@ class InstructionTranslatorBase(fx.Tracer):
         # Dynamic state not checkpointed
         self.checkpoint = None
         self.cnt = cnt
+        self.lineno = code_options.get("co_firstlineno")
 
 
 class InstructionTranslator(InstructionTranslatorBase):
@@ -1680,6 +1734,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             bound.apply_defaults()
         except Exception as e:
             raise unimplemented(f"signature issues {e}")
+        if skipfiles.check(func.__code__.co_filename):
+            unimplemented("inline in skipfiles")
         sub_locals = dict()
         sub_globals = func.__globals__
         for k, v in bound.arguments.items():

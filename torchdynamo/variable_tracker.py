@@ -9,6 +9,7 @@ from typing import Set
 
 import torch.fx
 
+from torchdynamo.guards import Guard, GuardSource
 from torchdynamo import config
 
 
@@ -94,13 +95,11 @@ class VariableTracker:
         return self.clone(initial_name=name)
 
     def python_type(self):
-        raise NotImplementedError("No known type")
+        raise NotImplementedError(f"{self} has no type")
 
     def as_python_constant(self):
         """For constants"""
-        raise NotImplementedError(
-            "Use of corresponding Python value is not supported yet"
-        )
+        raise NotImplementedError(f"{self} is not a constant")
 
     def is_python_constant(self):
         try:
@@ -242,6 +241,17 @@ class NNModuleVariable(VariableTracker):
     def python_type(self):
         return torch.nn.Module
 
+    def expand_module_list(self, tx):
+        # implement list/iter/tuple/etc calls
+        key = self.module_key
+        base = tx.get_submodule(self.module_key)
+        options = VariableTracker.propagate([self])
+        assert isinstance(base, torch.nn.ModuleList), typestr(base)
+        return [
+            NNModuleVariable(tx.add_submodule(submod, key, idx), **options)
+            for idx, submod in enumerate(base)
+        ]
+
 
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
@@ -268,9 +278,9 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (int, float, bool, type(None)):
+        if type(obj) in (int, float, bool, type(None), str):
             return True
-        if type(obj) in (list, tuple):
+        if type(obj) in (list, tuple, set, frozenset):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
 
@@ -355,7 +365,6 @@ class GetAttrVariable(VariableTracker):
         return inspect.getattr_static(step2, name)
 
     def create_guard(self, fn):
-        from torchdynamo.guards import Guard, GuardSource
 
         if self.obj.initial_name:
             return Guard(f"{self.obj.initial_name}.{self.name}", GuardSource.LOCAL, fn)

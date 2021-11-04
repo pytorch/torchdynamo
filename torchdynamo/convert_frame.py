@@ -75,6 +75,8 @@ def convert_frame_assert(compiler_fn: Callable):
         debug_checks(code)
         tracer = None
 
+        # from .utils import print_once;  print_once(code.co_filename)
+
         def transform(instructions, code_options):
             nonlocal tracer
             tracer = InstructionTranslator(

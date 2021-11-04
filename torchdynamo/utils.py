@@ -1,3 +1,4 @@
+import functools
 import weakref
 
 import torch
@@ -55,3 +56,8 @@ def istype(obj, allowed_types):
 def istensor(obj):
     """Check of obj is a tensor"""
     return istype(obj, (torch.Tensor, torch.nn.Parameter))
+
+
+@functools.lru_cache(None)
+def print_once(msg):
+    print(msg)

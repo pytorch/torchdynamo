@@ -196,6 +196,28 @@ class LayerList(torch.nn.Module):
         return x
 
 
+class ModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+            ]
+        )
+
+    def forward(self, x):
+        for i in range(len(self.layers)):
+            x = self.layers[i](x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        return x
+
+
 class TensorList(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -254,6 +276,17 @@ class CfgModule(torch.nn.Module):
         return x
 
 
+class StringMember(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.mode = "some_string"
+
+    def forward(self, x):
+        if self.mode == "some_string":
+            return F.relu(self.linear1(x))
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -286,6 +319,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_tensorlist = make_test(TensorList(), expected_ops=8)
     test_intarg = make_test(IntArg())
     test_cfgmod = make_test(CfgModule())
+    test_stringmember = make_test(StringMember())
+    test_modulelist = make_test(ModuleList())
 
     # not implemented yet:
     # test_module_class_method = make_test(ModuleClassMethodCall())
