@@ -125,6 +125,7 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
         best = "eager"
         best_sec = float("inf")
         for name, sec in perf.items():
+            assert name in backends
             if sec < best_sec and name in backends:
                 best = name
                 best_sec = sec

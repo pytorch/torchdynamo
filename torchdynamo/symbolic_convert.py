@@ -63,7 +63,7 @@ def proxy_args_kwargs(args, kwargs):
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
-    except AttributeError:  # "no attribute 'as_proxy'"
+    except NotImplementedError:
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         )
@@ -98,13 +98,15 @@ def stack_op(fn: typing.Callable):
                 ),
                 **options,
             )
-        elif all(i.has_python_value() for i in inputs):
+        elif all(i.is_python_constant() for i in inputs):
             # constant fold
-            val = ConstantVariable(fn(*[i.python_value() for i in inputs]), **options)
+            val = ConstantVariable(
+                fn(*[i.as_python_constant() for i in inputs]), **options
+            )
         elif (
             isinstance(inputs[0], BaseListVariable)
             and fn is operator.getitem
-            and inputs[1].has_python_value()
+            and inputs[1].is_python_constant()
         ):
             base, item = inputs
             val = base.getitem_const(item)
@@ -479,7 +481,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 assert not kwargs and len(args) == 2
                 arg, isinstance_type = args
                 arg_type = arg.python_type()
-                isinstance_type = isinstance_type.python_value()
+                isinstance_type = isinstance_type.as_python_constant()
                 try:
                     val = issubclass(arg_type, isinstance_type)
                 except TypeError:
@@ -807,12 +809,16 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             )
         elif (
-            left.has_python_value() and right.has_python_value() and op in supported_any
+            left.is_python_constant()
+            and right.is_python_constant()
+            and op in supported_any
         ):
             # constant fold
             self.push(
                 ConstantVariable(
-                    supported_any[op](left.python_value(), right.python_value()),
+                    supported_any[op](
+                        left.as_python_constant(), right.as_python_constant()
+                    ),
                     **options,
                 )
             )
@@ -1162,7 +1168,7 @@ class InstructionTranslatorBase(fx.Tracer):
         if isinstance(rv, VariableTracker):
             self.guards.update(rv.guards)
 
-        if isinstance(rv, VariableTracker) and rv.can_proxy():
+        if isinstance(rv, VariableTracker) and rv.is_proxy():
             return rv.as_proxy()
         elif isinstance(rv, NNModuleVariable):
             return self.create_proxy("get_attr", rv.module_key, tuple(), {})

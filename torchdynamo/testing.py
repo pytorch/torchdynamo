@@ -25,7 +25,7 @@ def exc_bytecode_offset():
 
 def same(a, b):
     """Check correctness to see if a and b match"""
-    if isinstance(a, (list, tuple)):
+    if isinstance(a, (list, tuple, torch.nn.ParameterList)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return all(same(ai, bi) for ai, bi in zip(a, b))
     elif isinstance(a, dict):
@@ -35,7 +35,7 @@ def same(a, b):
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-    elif isinstance(a, (int, float, type(None), bool)):
+    elif isinstance(a, (int, float, type(None), bool, torch.device)):
         return a == b
     elif type(a).__name__ == "SquashedNormal":
         return same(a.mean, b.mean)

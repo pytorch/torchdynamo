@@ -5,6 +5,8 @@ import tempfile
 
 import torch
 
+log = logging.getLogger(__name__)
+
 
 def clone_inputs(example_inputs):
     res = list(example_inputs)
@@ -38,7 +40,7 @@ def optimize_for_inference(scripted, example_inputs, filename=None):
     except KeyboardInterrupt:
         raise
     except Exception:
-        logging.exception("optimize_for_inference error")
+        log.exception("optimize_for_inference error")
         return None
 
 
@@ -64,6 +66,7 @@ def static_runtime(scripted, example_inputs, filename=None):
 
         return _call
     except Exception:
+        log.exception("Error from static_runtime")
         return None
 
 
@@ -75,7 +78,7 @@ def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
             os.unlink(log_file)
         if isinstance(e, KeyboardInterrupt):
             raise
-        logging.exception("tvm error")
+        log.exception("tvm error")
         return None
 
 
@@ -157,14 +160,14 @@ def onnxrt(scripted, example_inputs, filename=None):
                 example_inputs,
                 filename,
                 input_names=[f"i{i}" for i in range(len(example_inputs))],
-                do_constant_folding=True,
+                # do_constant_folding=True,
                 opset_version=14,
             )
             return onnxrt_wrapper(filename, example_inputs)
     except KeyboardInterrupt:
         raise
     except Exception:
-        logging.exception("ONNX error")
+        log.exception("ONNX error")
         return None
 
 
@@ -210,5 +213,5 @@ def taso(example_inputs, onnx_filename, taso_filename):
     except KeyboardInterrupt:
         raise
     except Exception:
-        logging.exception("TASO error")
+        log.exception("TASO error")
         return None

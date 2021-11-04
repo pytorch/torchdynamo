@@ -96,15 +96,15 @@ class VariableTracker:
     def python_type(self):
         raise NotImplementedError("No known type")
 
-    def python_value(self):
+    def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(
             "Use of corresponding Python value is not supported yet"
         )
 
-    def has_python_value(self):
+    def is_python_constant(self):
         try:
-            self.python_value()
+            self.as_python_constant()
             return True
         except NotImplementedError:
             return False
@@ -134,12 +134,15 @@ class VariableTracker:
     def get_const_attr(self, tx, name):
         raise NotImplementedError()
 
-    def can_proxy(self):
+    def is_proxy(self):
         try:
             self.as_proxy()
             return True
-        except (NotImplementedError, AttributeError):
+        except NotImplementedError:
             return False
+
+    def as_proxy(self):
+        raise NotImplementedError()
 
     def __init__(
         self,
@@ -254,12 +257,13 @@ class ConstantVariable(VariableTracker):
     def python_type(self):
         return type(self.value)
 
-    def python_value(self):
+    def as_python_constant(self):
         return self.value
 
     def getitem_const(self, arg: VariableTracker):
         return ConstantVariable(
-            self.value[arg.python_value()], **VariableTracker.propagate([self, arg])
+            self.value[arg.as_python_constant()],
+            **VariableTracker.propagate([self, arg]),
         )
 
     @staticmethod
@@ -300,7 +304,7 @@ class BuiltinVariable(VariableTracker):
     def python_type(self):
         return type(self.fn)
 
-    def python_value(self):
+    def as_python_constant(self):
         return self.fn
 
 
@@ -371,14 +375,14 @@ class BaseListVariable(VariableTracker):
     def get_key(self):
         return self.__class__, tuple(v.get_key() for v in self.items)
 
-    def python_value(self):
-        return self.python_type()([x.python_value() for x in self.items])
+    def as_python_constant(self):
+        return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.python_value()
+        index = arg.as_python_constant()
         if isinstance(index, slice):
             return self.clone(items=self.items[index]).add_guards(arg.guards)
         else:
@@ -403,8 +407,8 @@ class SliceVariable(BaseListVariable):
     def python_type(self):
         return slice
 
-    def python_value(self):
-        return slice(*[x.python_value() for x in self.items])
+    def as_python_constant(self):
+        return slice(*[x.as_python_constant() for x in self.items])
 
 
 class ConstDictVariable(VariableTracker):
@@ -477,7 +481,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             return type(self.value)
         return super().python_type()
 
-    def python_value(self):
+    def as_python_constant(self):
         return self.value
 
     def is_basic_math(self):

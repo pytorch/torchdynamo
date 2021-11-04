@@ -20,6 +20,7 @@ import torch
 from scipy.stats import ttest_ind
 from tabulate import tabulate
 
+import torchdynamo.optimizations.backends
 from torchdynamo import config
 from torchdynamo.optimizations.backends import onnxrt
 from torchdynamo.optimizations.backends import optimize_for_inference
@@ -54,6 +55,8 @@ def main():
     )
     parser.add_argument("--threads", "-t", type=int, help="number of threads to use")
     parser.add_argument("--name")
+    parser.add_argument("--new", action="store_true")
+    parser.add_argument("--silent", "-q", action="store_true")
     parser.add_argument(
         "--limit",
         "-l",
@@ -63,6 +66,9 @@ def main():
 
     # defaults
     args.devices = args.devices or ["cpu"]
+
+    if args.silent:
+        torchdynamo.optimizations.backends.log.setLevel(logging.FATAL)
 
     if args.devices != ["cpu"] and torch.cuda.is_available():
         global synchronize
@@ -86,15 +92,22 @@ def main():
         sorted(os.listdir(os.path.join(config.base_dir, "subgraphs"))),
     ):
         if name.startswith("g"):
+            if args.new and os.path.exists(
+                os.path.join(config.base_dir, "subgraphs", name, "perf.json")
+            ):
+                continue
             print()
             print("BEGIN", name, i)
             res = run_subproc(args, name)
             if res is not None:
                 headers = list(res[0].keys())
                 rows.append(list(res[0].values()))
+            else:
+                print("No result")
 
-    print()
-    print(tabulate(rows, headers=headers))
+    if rows:
+        print()
+        print(tabulate(rows, headers=headers))
 
 
 def run_subproc(args, name):
@@ -130,10 +143,13 @@ def run_pipe(args, name: str, res: multiprocessing.Queue):
 
 def run(args, name):
     pymod = importlib.import_module(f"subgraphs.{name}")
+    # TODO(jansel): upstream these fixes to to_folder()
     pymod.module._operator_iadd = operator.iadd
     pymod.module._operator_imul = operator.imul
     pymod.module._operator_itruediv = operator.itruediv
     pymod.module.math_sqrt = math.sqrt
+    pymod.module.device = torch.device
+    pymod.module.inf = float("inf")
     model0 = pymod.FxModule()
     model_dir = os.path.join(config.base_dir, "subgraphs", name)
     example_inputs = torch.load(os.path.join(model_dir, "example_inputs.pt"))
@@ -166,10 +182,13 @@ def run(args, name):
         # interleave the runs to handle frequency scaling and load changes
         for i, (n, m) in enumerate(models):
             if is_corrects[i]:
-                result, timings[rep, i] = timed(m, example_inputs)
                 try:
+                    result, timings[rep, i] = timed(m, example_inputs)
                     assert same(result, correct)
                 except AssertionError:
+                    is_corrects[i] = False
+                except Exception:
+                    logging.exception(f"error while running {n}")
                     is_corrects[i] = False
 
     pvalues = [

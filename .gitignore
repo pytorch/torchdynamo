@@ -7,3 +7,4 @@ build
 subgraphs
 total_latency.tsv
 perf.db*
+speedups.csv

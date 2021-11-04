@@ -158,29 +158,27 @@ def speedup_experiment(speedups, args, model, example_inputs):
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     speedups.append(speedup)
-    result = format_speedup(speedup, pvalue)
-    return result
+    output_csv(
+        "speedups.csv",
+        ("dev", "name", "speedup"),
+    ).writerow([current_device, current_name, f"{speedup:.4f}"])
+    return format_speedup(speedup, pvalue)
 
 
 @functools.lru_cache(1)
-def get_output_csv(name, headers):
-    output_csv = csv.writer(
+def output_csv(name, headers):
+    output = csv.writer(
         io.TextIOWrapper(
             open(os.path.join(torchdynamo.config.base_dir, name), "wb", buffering=0),
             "utf-8",
             write_through=True,
         )
     )
-    output_csv.writerow(headers)
-    return output_csv
+    output.writerow(headers)
+    return output
 
 
 def speedup_experiment2(speedups, args, model, example_inputs):
-    output_csv = get_output_csv(
-        "baseline.csv",
-        ("dev", "name", "ts", "optimize_for_inference", "onnxrt", "torchdynamo"),
-    )
-
     try:
         ts = torch.jit.script(model)
     except Exception:
@@ -227,7 +225,10 @@ def speedup_experiment2(speedups, args, model, example_inputs):
             for s, p, m in zip(speedup, pvalue, [ts, ofi, ort, model])
         ]
     )
-    output_csv.writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
+    output_csv(
+        "baselines.csv",
+        ("dev", "name", "ts", "optimize_for_inference", "onnxrt", "torchdynamo"),
+    ).writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
     return result
 
 
