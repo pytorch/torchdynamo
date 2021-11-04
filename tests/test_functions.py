@@ -5,6 +5,7 @@ import math
 import torch
 from torch import sub
 from torch.nn import functional as F
+from torchdynamo._eval_frame import unsupported
 
 import torchdynamo.testing
 from torchdynamo import eval_frame
@@ -490,3 +491,32 @@ class FunctionTests(torchdynamo.testing.TestCase):
             self.assertEqual(fn(v, (10, 20))[0, 0], -10)
             self.assertEqual(fn(v, [10, 20])[0, 0], -10)
         self.assertTrue(cnts.op_count, 6)
+
+    def test_cell_output1(self):
+        out = None
+
+        def fn(a, b):
+            nonlocal out
+            out = a + b * 10
+
+        v = torch.Tensor([100])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertIsNone(fn(v, v))
+            self.assertEqual(out[0], 1100)
+        self.assertTrue(cnts.op_count, 2)
+
+    def test_cell_output2(self):
+        out = None
+
+        def fn(a, b):
+            nonlocal out
+            c = unsupported(a, b)
+            out = a + b * 10 + c
+
+        v = torch.Tensor([100])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnts)):
+            self.assertIsNone(fn(v, v))
+            self.assertEqual(out[0], 1200)
+        self.assertTrue(cnts.op_count, 3)

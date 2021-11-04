@@ -1,6 +1,7 @@
 import dis
 import functools
 import inspect
+import os
 import sys
 import traceback
 import types
@@ -62,6 +63,11 @@ def convert_frame_assert(compiler_fn: Callable):
         input_codes.add(code)
         if code.co_filename.startswith("<eval_with_key>") or code in output_codes:
             return None  # skip FX output
+        if (
+            os.environ.get("DEBUG_FUNCTION")
+            and os.environ.get("DEBUG_FUNCTION") != code.co_name
+        ):
+            return None
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:

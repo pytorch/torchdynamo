@@ -116,8 +116,6 @@ class GuardBuilder:
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         assert len(value) > 0
-        tensor_type = self.id_ref(type(value[0]))
-        assert all([id(type(v)) == tensor_type for v in value])
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
         for i, v in enumerate(value):

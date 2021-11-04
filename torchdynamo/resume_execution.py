@@ -1,4 +1,3 @@
-import types
 from typing import Any
 from typing import Dict
 from typing import List
@@ -25,19 +24,18 @@ class ContinueExecutionCache:
     cache = ExactWeakKeyDictionary()
 
     @classmethod
-    def lookup(cls, code, f_globals, *key):
+    def lookup(cls, code, *key):
         if code not in cls.cache:
             cls.cache[code] = dict()
         key = tuple(key)
         if key not in cls.cache[code]:
-            cls.cache[code][key] = cls.generate(code, f_globals, *key)
+            cls.cache[code][key] = cls.generate(code, *key)
         return cls.cache[code][key]
 
     @classmethod
     def generate(
         cls,
         code,
-        f_globals: Dict[str, Any],
         offset: int,
         nstack: int,
         argnames: List[str],
@@ -47,10 +45,14 @@ class ContinueExecutionCache:
             & (CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR)
         )
         assert code.co_flags & CO_OPTIMIZED
-        assert not code.co_cellvars
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
             args = [f"___stack{i}" for i in range(nstack)] + list(argnames)
+            freevars = tuple(code_options["co_cellvars"] or []) + tuple(
+                code_options["co_freevars"] or []
+            )
+            code_options["co_cellvars"] = tuple()
+            code_options["co_freevars"] = freevars
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
@@ -69,10 +71,4 @@ class ContinueExecutionCache:
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
-        return types.FunctionType(
-            transform_code_object(code, update),
-            f_globals,
-            f"resume_{code.co_name}",
-            None,  # argdefs
-            None,  # closure
-        )
+        return transform_code_object(code, update)

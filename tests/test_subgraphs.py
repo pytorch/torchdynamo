@@ -283,3 +283,14 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(r2, correct2))
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 4)
+
+    def test_resume_freevars(self):
+        c1 = torch.randn(10)
+        c2 = torch.randn(10)
+
+        def fn(a, b):
+            x = a + b + (c1 - c2)
+            x = unsupported(x, x)
+            return x + (c1 - c2)
+
+        self._common(fn, 2, 5)

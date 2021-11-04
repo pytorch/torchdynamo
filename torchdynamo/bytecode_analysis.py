@@ -11,6 +11,7 @@ TERMINAL_OPCODES = {
 }
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 HASLOCAL = set(dis.haslocal)
+HASFREE = set(dis.hasfree)
 
 
 def remove_dead_code(instructions):
@@ -62,7 +63,7 @@ def livevars_analysis(instructions, instruction):
 
         for i in range(start, len(instructions)):
             inst = instructions[i]
-            if inst.opcode in HASLOCAL:
+            if inst.opcode in HASLOCAL or inst.opcode in HASFREE:
                 if "LOAD" in inst.opname:
                     if inst.argval not in must.writes:
                         state.reads.add(inst.argval)
