@@ -6,6 +6,7 @@ import itertools
 import json
 import os
 import shutil
+import time
 from collections import defaultdict
 
 import torch
@@ -103,38 +104,42 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
                 fd.write(string_key(gm, example_inputs))
             with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
                 torch.save(example_inputs, fd)
+            open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
         except Exception:
             shutil.rmtree(path)
             raise
-    elif os.path.exists(os.path.join(path, "perf.json")):
-        ts = functools.partial(torchscript, gm, example_inputs)
-        backends = {
-            "eager": lambda: gm.forward,
-            "torchscript": ts,
-            "freezing": lambda: optimize_for_inference(ts(), example_inputs),
-            "static_runtime": lambda: static_runtime(ts(), example_inputs),
-            "onnxrt": lambda: onnxrt(ts(), example_inputs),
-            "tvm": lambda: tvm_compile(ts(), example_inputs),
-            "ansor128": lambda: tvm_compile(
-                ts(),
-                example_inputs,
-                os.path.join(path, "ansor128"),
-            ),
-        }
-        perf = json.loads(open(os.path.join(path, "perf.json")).read())
-        best = "eager"
-        best_sec = float("inf")
-        for name, sec in perf.items():
-            assert name in backends
-            if sec < best_sec and name in backends:
-                best = name
-                best_sec = sec
-        if best != "eager":
-            example_inputs = clone_inputs(example_inputs)
-            # for k, v in state.items():
-            #     if isinstance(v, torch.Tensor):
-            #       state[k] = v.detach()
-            # gm.load_state_dict(state)
-        return backends[best]()
+    else:
+        open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
+        if os.path.exists(os.path.join(path, "perf.json")):
+            ts = functools.partial(torchscript, gm, example_inputs)
+            backends = {
+                "eager": lambda: gm.forward,
+                "torchscript": ts,
+                "freezing": lambda: optimize_for_inference(ts(), example_inputs),
+                "static_runtime": lambda: static_runtime(ts(), example_inputs),
+                "onnxrt": lambda: onnxrt(ts(), example_inputs),
+                "tvm": lambda: tvm_compile(ts(), example_inputs),
+                "ansor20k": lambda: tvm_compile(
+                    ts(),
+                    example_inputs,
+                    os.path.join(path, "ansor20k"),
+                    trials=-1,
+                ),
+            }
+            perf = json.loads(open(os.path.join(path, "perf.json")).read())
+            best = "eager"
+            best_sec = float("inf")
+            for name, sec in perf.items():
+                assert name in backends
+                if sec < best_sec and name in backends:
+                    best = name
+                    best_sec = sec
+            if best != "eager":
+                example_inputs = clone_inputs(example_inputs)
+                # for k, v in state.items():
+                #     if isinstance(v, torch.Tensor):
+                #       state[k] = v.detach()
+                # gm.load_state_dict(state)
+            return backends[best]()
 
     return gm.forward

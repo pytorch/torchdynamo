@@ -238,9 +238,6 @@ def null_experiment(model, example_inputs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--baseline", "-b", default="eager", help="baseline to normalize to"
-    )
     parser.add_argument("--filter", "-k", action="append", help="filter benchmarks")
     parser.add_argument("--exclude", "-x", action="append", help="filter benchmarks")
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
@@ -248,9 +245,6 @@ def main():
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
     parser.add_argument("--threads", "-t", type=int, help="number of threads to use")
-    parser.add_argument(
-        "--cpu-fusion", action="store_true", help="enable can_fuse_on_cpu"
-    )
     parser.add_argument("--verbose", "-v", action="store_true", help="show errors")
     parser.add_argument(
         "--no-skip", action="store_true", help="run models that don't fx cleanly"
@@ -284,8 +278,7 @@ def main():
     if args.no_skip:
         SKIP.clear()
 
-    if args.cpu_fusion:
-        torch._C._jit_override_can_fuse_on_cpu(True)
+    torch._C._jit_override_can_fuse_on_cpu(True)
 
     if args.threads:
         torch.set_num_threads(args.threads)

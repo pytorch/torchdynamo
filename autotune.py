@@ -57,6 +57,8 @@ def main():
     parser.add_argument("--name")
     parser.add_argument("--new", action="store_true")
     parser.add_argument("--silent", "-q", action="store_true")
+    parser.add_argument("--ansor-sec", type=float)
+    parser.add_argument("--max-age", type=int, default=24)
     parser.add_argument(
         "--limit",
         "-l",
@@ -74,7 +76,6 @@ def main():
         global synchronize
         synchronize = torch.cuda.synchronize
 
-    # if args.cpu_fusion:
     torch._C._jit_override_can_fuse_on_cpu(True)
 
     if args.threads:
@@ -92,27 +93,37 @@ def main():
         sorted(os.listdir(os.path.join(config.base_dir, "subgraphs"))),
     ):
         if name.startswith("g"):
-            if args.new and os.path.exists(
-                os.path.join(config.base_dir, "subgraphs", name, "perf.json")
-            ):
+            path = os.path.join(config.base_dir, "subgraphs", name)
+            has_perf = os.path.exists(os.path.join(path, "perf.json"))
+            try:
+                age = time.time() - float(open(os.path.join(path, "timestamp")).read())
+            except OSError:
+                age = float("inf")
+            if has_perf and (args.new or age > args.max_age * 3600):
                 continue
+
             print()
             print("BEGIN", name, i)
-            res = run_subproc(args, name)
+            res = run_subproc(args, name, False)
             if res is not None:
-                headers = list(res[0].keys())
                 rows.append(list(res[0].values()))
             else:
-                print("No result")
+                print("No result, trying safe_mode")
+                res = run_subproc(args, name, True)
+                if res is not None:
+                    headers = list(res[0].keys())
+                    rows.append(list(res[0].values()))
+                else:
+                    print("Safe mode failed")
 
     if rows:
         print()
         print(tabulate(rows, headers=headers))
 
 
-def run_subproc(args, name):
+def run_subproc(args, name, safe_mode):
     q = multiprocessing.Queue(1)
-    p = multiprocessing.Process(target=run_pipe, args=(args, name, q))
+    p = multiprocessing.Process(target=run_pipe, args=(args, name, safe_mode, q))
     p.start()
     try:
         while True:
@@ -131,9 +142,9 @@ def run_subproc(args, name):
         p.join(timeout=1)
 
 
-def run_pipe(args, name: str, res: multiprocessing.Queue):
+def run_pipe(args, name: str, safe_mode, res: multiprocessing.Queue):
     try:
-        res.put(run(args, name))
+        res.put(run(args, name, safe_mode))
     except Exception:
         logging.exception(name)
         res.put(None)
@@ -141,7 +152,7 @@ def run_pipe(args, name: str, res: multiprocessing.Queue):
         res.close()
 
 
-def run(args, name):
+def run(args, name, safe_mode):
     pymod = importlib.import_module(f"subgraphs.{name}")
     # TODO(jansel): upstream these fixes to to_folder()
     pymod.module._operator_iadd = operator.iadd
@@ -161,19 +172,41 @@ def run(args, name):
         ("eager", model0),
         ("torchscript", model1),
         ("freezing", optimize_for_inference(model1, example_inputs)),
-        ("static_runtime", static_runtime(model1, example_inputs)),
         ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
         # ("taso", taso(example_inputs,
         #               os.path.join(model_dir, "onnx"),
         #               os.path.join(model_dir, "taso"))),
         ("tvm", tvm_compile(model1, example_inputs)),
-        # ("ansor10k", tvm_compile(
-        #     model1, example_inputs, os.path.join(model_dir, "ansor10k), trials=10000
-        # )),
-        # ("ansor20k", tvm_compile(
-        #     model1, example_inputs, os.path.join(model_dir, "ansor20k"), trials=20000
-        # )),
     ]
+    if safe_mode:
+        models.append(("static_runtime", None))
+    else:
+        models.append(("static_runtime", static_runtime(model1, example_inputs)))
+
+    run_ansor = False
+    if os.path.exists(os.path.join(model_dir, "perf.json")):
+        eager_perf = json.loads(open(os.path.join(model_dir, "perf.json")).read())[
+            "eager"
+        ]
+        if os.path.exists(os.path.join(model_dir, "ansor20k")) or (
+            args.ansor_sec and eager_perf > args.ansor_sec
+        ):
+            run_ansor = True
+
+    if run_ansor and not safe_mode:
+        models.append(
+            (
+                "ansor20k",
+                tvm_compile(
+                    model1,
+                    example_inputs,
+                    os.path.join(model_dir, "ansor20k"),
+                    trials=20000,
+                ),
+            )
+        )
+    else:
+        models.append(("ansor20k", None))
 
     is_corrects = [x is not None for _, x in models]
     timings = np.zeros((args.repeat, len(models)), np.float64)

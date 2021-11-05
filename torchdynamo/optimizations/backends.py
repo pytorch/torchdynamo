@@ -82,7 +82,7 @@ def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
         return None
 
 
-def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=256):
+def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000):
     # based on functorch version in eager_compile.py
     import tvm
     from tvm import relay, auto_scheduler
@@ -104,6 +104,7 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=256):
             if len(tasks) != 0:
                 tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
                 if not os.path.exists(log_file):
+                    assert trials > 0
                     tune_option = auto_scheduler.TuningOptions(
                         num_measure_trials=max(trials, 64 * len(tasks)),
                         # num_measure_trials=10000,  # change this to 20000 to achieve the best performance
@@ -111,7 +112,12 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=256):
                         early_stopping=1000,
                         # verbose=2,
                     )
-                    tuner.tune(tune_option)
+                    try:
+                        tuner.tune(tune_option)
+                    except Exception:
+                        if os.path.exists(log_file):
+                            os.unlink(log_file)
+                        raise
 
         with auto_scheduler.ApplyHistoryBest(log_file):
             with tvm.transform.PassContext(

@@ -35,22 +35,26 @@ from .resume_execution import ContinueExecutionCache
 from .utils import count_calls
 from .utils import istensor
 from .utils import istype
-from .variable_tracker import AllowedFunctionOrModuleVariable, typestr
+from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
+from .variable_tracker import BaseUserFunctionVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
+from .variable_tracker import ClosureVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
 from .variable_tracker import FunctionConstantWrapper
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
+from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import NNModuleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TracingSupported
 from .variable_tracker import TupleVariable
+from .variable_tracker import typestr
 from .variable_tracker import UnknownVariable
 from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
@@ -361,7 +365,7 @@ class InstructionTranslatorBase(fx.Tracer):
             )
 
     def add_submodule(self, mod: torch.nn.Module, *names):
-        assert isinstance(mod, torch.nn.Module)
+        assert isinstance(mod, (torch.nn.Module, torch.Tensor))
 
         for k, v in self.nn_modules.items():
             if v is mod:
@@ -521,13 +525,15 @@ class InstructionTranslatorBase(fx.Tracer):
             else:
                 forward = mod.__class__.forward
                 assert forward is not torch.nn.Module.forward
-                self.inline_user_function(fn.guards, forward, [fn] + args, kwargs)
-        elif isinstance(fn, UserFunctionVariable):
+                self.inline_user_function(
+                    UserFunctionVariable(fn=forward, **VariableTracker.propagate([fn])),
+                    [fn] + args,
+                    kwargs,
+                )
+        elif isinstance(fn, BaseUserFunctionVariable):
             self.guards.update(fn.guards)
             try:
-                self.inline_user_function(
-                    fn.guards, fn.fn, fn.self_args() + args, kwargs
-                )
+                self.inline_user_function(fn, fn.self_args() + args, kwargs)
             except Unsupported:
                 if not self.should_compile_partial_graph():
                     raise
@@ -661,11 +667,11 @@ class InstructionTranslatorBase(fx.Tracer):
             self.create_call_resume_at(self.next_instruction)
         )
 
-    def inline_user_function(self, guards, fn, args, kwargs):
+    def inline_user_function(self, fn, args, kwargs):
         """
         A call to some user defined function by inlining it.
         """
-        self.guards.update(guards)
+        self.guards.update(fn.guards)
         self.push(InliningInstructionTranslator.inline_call(self, fn, args, kwargs))
 
     def step(self):
@@ -758,8 +764,11 @@ class InstructionTranslatorBase(fx.Tracer):
 
     STORE_DEREF = STORE_FAST
 
+    def LOAD_CLOSURE(self, inst):
+        self.push(ClosureVariable(name=inst.argval))
+
     def LOAD_CONST(self, inst):
-        self.push(ConstantVariable(value=inst.argval, state=TracingSupported.UNKNOWN))
+        self.push(ConstantVariable(value=inst.argval))
 
     def LOAD_GLOBAL(self, inst):
         try:
@@ -1129,7 +1138,9 @@ class InstructionTranslatorBase(fx.Tracer):
             member = obj.value.__dict__[name]
             if is_allowed(member):
                 self.push(AllowedFunctionOrModuleVariable(member, **options))
-            elif callable(member):
+            elif callable(member) and not isinstance(
+                member, (types.BuiltinFunctionType, types.BuiltinMethodType)
+            ):
                 self.push(UserFunctionVariable(member, **options))
             else:
                 unimplemented("PythonModuleVariable attribute")
@@ -1185,16 +1196,35 @@ class InstructionTranslatorBase(fx.Tracer):
         self.push(ConstDictVariable(dict(zip(keys, values)), **options))
 
     def MAKE_FUNCTION(self, inst):
-        fn_name_var = self.stack.pop()
-        code_obj_var = self.stack.pop()
-        fn_name = fn_name_var.as_proxy()
-        code_obj = code_obj_var.as_proxy()
-        assert isinstance(fn_name, str)
-        assert isinstance(code_obj, types.CodeType)
-        options = VariableTracker.propagate([fn_name_var, code_obj_var])
+        flags = inst.arg
+        old_stack = list(self.stack)
+        fn_name = self.pop()
+        code = self.pop()
+        defaults = None
+        closure = None
+        annotations = None
+        kwdefaults = None
+
+        if flags & 0x08:
+            closure = self.pop()
+        if flags & 0x04:
+            annotations = self.pop()
+        if flags & 0x02:
+            kwdefaults = self.pop()
+        if flags & 0x01:
+            defaults = self.pop()
+
+        options = VariableTracker.propagate(old_stack[len(self.stack) :])
         self.push(
-            UserFunctionVariable(
-                types.FunctionType(code_obj, self.f_globals), **options
+            NestedUserFunctionVariable(
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                annotations,
+                closure,
+                **options,
             )
         )
 
@@ -1708,8 +1738,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.output_instructions.extend(
                 self.compile_subgraph(rv) + [create_instruction("RETURN_VALUE")]
             )
-            if self.fully_converted is None:
-                self.fully_converted = True
+            self.fully_converted = True
         else:
             unimplemented("not traceable")
 
@@ -1724,32 +1753,27 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
-        assert callable(func)
-        if getattr(func, "__closure__", None) is not None:
+        assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
+        if func.has_closure() and isinstance(func, UserFunctionVariable):
             unimplemented("inline with  __closure__")
-        if getattr(func, "__self__", None) is not None:
+        if func.has_self():
             unimplemented("inline with  __self__")
-        try:
-            bound = inspect.signature(func).bind(*args, **kwargs)
-            bound.apply_defaults()
-        except Exception as e:
-            raise unimplemented(f"signature issues {e}")
-        if skipfiles.check(func.__code__.co_filename):
+        if skipfiles.check(func.get_filename()):
             unimplemented("inline in skipfiles")
-        sub_locals = dict()
-        sub_globals = func.__globals__
-        for k, v in bound.arguments.items():
-            if isinstance(v, VariableTracker):
-                sub_locals[k] = v
-            elif isinstance(v, (bool, int, float, type(None))):
-                sub_locals[k] = ConstantVariable(v)
-            else:
-                unimplemented(f"inline_call unsupported default: {typestr(v)}")
+
+        sub_locals = func.bind_args(parent, args, kwargs)
+        for v in sub_locals.values():
+            if not isinstance(v, VariableTracker):
+                unimplemented(f"unconverted arg {v}")
+
         tracer = InliningInstructionTranslator(
-            parent, func.__code__, sub_locals, sub_globals
+            parent, func.get_code(), sub_locals, func.get_globals()
         )
         tracer.run()
         assert tracer.symbolic_result is not None
+        assert tracer.fully_converted
+
+        func.export_freevars(parent, tracer)
         return tracer.symbolic_result
 
     def __init__(
@@ -1783,6 +1807,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
+        self.fully_converted = True
 
 
 class FakeRootModule(torch.nn.Module):

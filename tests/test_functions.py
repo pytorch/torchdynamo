@@ -520,3 +520,17 @@ class FunctionTests(torchdynamo.testing.TestCase):
             self.assertIsNone(fn(v, v))
             self.assertEqual(out[0], 1200)
         self.assertTrue(cnts.op_count, 3)
+
+    @make_test
+    def test_funcdef_closure(x, y):
+        x = x + y + 1.0
+
+        def inner(z):
+            nonlocal x, y
+            y = x + z + 20.0
+            x = y + z + 10.0
+
+        inner(2.0)
+        inner(3.0)
+
+        return x, y

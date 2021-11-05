@@ -1,4 +1,4 @@
-.PHONY: default develop test torchbench format lint setup clean
+.PHONY: default develop test torchbench format lint setup clean autotune
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) $(wildcard tests/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
@@ -33,3 +33,9 @@ setup:
 clean:
 	python setup.py clean
 	rm -rf build torchdynamo.egg-info torchdynamo/*.so
+
+autotune: develop
+	python torchbench.py --speedup -n1 --minimum-call-count=2
+	python autotune.py --new
+	python autotune.py --ansor-sec 0.1
+	python torchbench.py --speedup --minimum-call-count=2

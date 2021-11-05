@@ -61,3 +61,14 @@ def istensor(obj):
 @functools.lru_cache(None)
 def print_once(msg):
     print(msg)
+
+
+def make_cell(val):
+    """Some black magic to create a cell object that usually only exists in a closure"""
+    x = val
+
+    def f():
+        return x
+
+    assert len(f.__closure__) == 1
+    return f.__closure__[0]

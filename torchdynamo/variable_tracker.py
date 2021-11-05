@@ -11,6 +11,7 @@ import torch.fx
 
 from torchdynamo.guards import Guard, GuardSource
 from torchdynamo import config
+from torchdynamo.utils import make_cell
 
 
 class TracingSupported(enum.Enum):
@@ -246,11 +247,22 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         base = tx.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
-        assert isinstance(base, torch.nn.ModuleList), typestr(base)
-        return [
-            NNModuleVariable(tx.add_submodule(submod, key, idx), **options)
-            for idx, submod in enumerate(base)
-        ]
+        if isinstance(base, torch.nn.ParameterList):
+            return [
+                TensorVariable(
+                    tx.create_proxy(
+                        "get_attr", tx.add_submodule(submod, key, idx), tuple(), {}
+                    ),
+                    **options,
+                )
+                for idx, submod in enumerate(base)
+            ]
+        else:
+            assert isinstance(base, torch.nn.ModuleList), typestr(base)
+            return [
+                NNModuleVariable(tx.add_submodule(submod, key, idx), **options)
+                for idx, submod in enumerate(base)
+            ]
 
 
 class ConstantVariable(VariableTracker):
@@ -438,21 +450,164 @@ class ConstDictVariable(VariableTracker):
         return dict
 
 
-class UserFunctionVariable(VariableTracker):
+class BaseUserFunctionVariable(VariableTracker):
+    def get_filename(self):
+        return self.get_code().co_filename
+
+
+class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
     def __init__(self, fn, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
-        self.fn = fn
+        assert isinstance(
+            fn, types.FunctionType
+        ), f"expected FunctionType {typestr(fn)} {fn}"
+        self.fn: types.FunctionType = fn
 
     def self_args(self):
         return []
+
+    def get_function(self):
+        return self.fn
+
+    def get_code(self):
+        return self.fn.__code__
 
     def get_key(self):
         return self.__class__, id(self.fn)
 
     def python_type(self):
         return types.FunctionType
+
+    def has_closure(self):
+        return getattr(self.fn, "__closure__", None) is not None
+
+    def has_self(self):
+        return getattr(self.fn, "__self__", None) is not None
+
+    def get_globals(self):
+        return self.fn.__globals__
+
+    def bind_args(self, parent, args, kwargs):
+        options = VariableTracker.propagate([self])
+
+        def wrap(val):
+            if ConstantVariable.is_literal(val):
+                return ConstantVariable(val, **options)
+            else:
+                return val
+
+        fn: types.FunctionType = self.fn
+        fake_func = types.FunctionType(
+            fn.__code__,
+            fn.__globals__,
+            fn.__name__,
+            tuple(map(wrap, fn.__defaults__ or [])),
+            fn.__closure__,
+        )
+        if fn.__kwdefaults__:
+            fake_func.__kwdefaults__ = {
+                k: wrap(v) for k, v in fn.__kwdefaults__.items()
+            }
+
+        bound = inspect.signature(fake_func).bind(*args, **kwargs)
+        bound.apply_defaults()
+        return dict(bound.arguments.items())
+
+    def export_freevars(self, parent, child):
+        pass
+
+
+class NestedUserFunctionVariable(BaseUserFunctionVariable):
+    def __init__(
+        self,
+        fn_name,
+        code,
+        f_globals,
+        defaults,
+        kwdefaults,
+        annotations,
+        closure,
+        **kwargs,
+    ):
+        super(NestedUserFunctionVariable, self).__init__(**kwargs)
+        assert isinstance(fn_name.as_python_constant(), str)
+        assert isinstance(code.as_python_constant(), types.CodeType)
+        assert isinstance(f_globals, dict)
+        self.fn_name = fn_name
+        self.code = code
+        self.f_globals = f_globals
+        self.defaults = defaults
+        self.kwdefaults = kwdefaults
+        self.annotations = annotations
+        self.closure = closure
+
+    def self_args(self):
+        return []
+
+    def get_code(self):
+        return self.code.as_python_constant()
+
+    def get_function(self):
+        if self.closure:
+            raise NotImplementedError()
+        func = types.FunctionType(
+            self.code.as_python_constant(),
+            self.f_globals,
+            self.fn_name.as_python_constant(),
+        )
+        if self.defaults:
+            func.__defaults__ = self.defaults.as_python_constant()
+        if self.kwdefaults:
+            func.__kwdefaults__ = self.kwdefaults.as_python_constant()
+        if self.annotations:
+            func.__annotations__ = self.annotations.as_python_constant()
+        return func
+
+    def has_closure(self):
+        return self.closure is not None
+
+    def has_self(self):
+        return False
+
+    def get_globals(self):
+        return self.f_globals
+
+    def bind_args(self, parent, args, kwargs):
+        closure_items = []
+        if self.closure:
+            closure_items = [
+                parent.symbolic_locals.get(c.name, None) for c in self.closure.items
+            ]
+
+        code = self.get_code()
+        func = types.FunctionType(
+            code,
+            self.f_globals,
+            self.fn_name.as_python_constant(),
+            self.defaults.items if self.defaults else None,
+            tuple(map(make_cell, closure_items)),
+        )
+        if self.kwdefaults:
+            func.__kwdefaults__ = self.kwdefaults.items
+
+        bound = inspect.signature(func).bind(*args, **kwargs)
+        bound.apply_defaults()
+        result = dict(bound.arguments.items())
+
+        for idx, var in enumerate(code.co_freevars):
+            assert self.closure.items[idx].name == var
+            assert var not in result
+            result[var] = closure_items[idx]
+
+        return result
+
+    def export_freevars(self, parent, child):
+        code = self.get_code()
+        for var in code.co_freevars:
+            if var in child.symbolic_locals:
+                parent.symbolic_locals[var] = child.symbolic_locals[var]
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -543,7 +698,11 @@ class UnknownVariable(VariableTracker):
     It could be anything!
     """
 
-    pass
+
+class ClosureVariable(UnknownVariable):
+    def __init__(self, name, **kwargs):
+        super(ClosureVariable, self).__init__(**kwargs)
+        self.name = name
 
 
 def typestr(*objs):
