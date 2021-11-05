@@ -150,15 +150,7 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {
     // NOLINTNEXTLINE
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "torchdynamo._guards.TensorGuards",
-    .tp_basicsize = sizeof(TensorGuards),
-    .tp_itemsize = 0,
-    .tp_dealloc = (destructor)TensorGuards_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Check properties of a torch.Tensor",
-    .tp_methods = TensorGuards_methods,
-    .tp_init = (initproc)TensorGuards_init,
-    .tp_new = TensorGuards_new,
+    PyVarObject_HEAD_INIT(NULL, 0)
 };
 
 static PyObject *check_type_id(PyObject *dummy, PyObject *args) {
@@ -201,6 +193,17 @@ static struct PyModuleDef _module = {PyModuleDef_HEAD_INIT, "_guards",
 } // namespace
 
 PyMODINIT_FUNC PyInit__guards(void) {
+  // initialize TensorGuardsType
+  TensorGuardsType.tp_name = "torchdynamo._guards.TensorGuards";
+  TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
+  TensorGuardsType.tp_itemsize = 0;
+  TensorGuardsType.tp_dealloc = (destructor)TensorGuards_dealloc;
+  TensorGuardsType.tp_flags = Py_TPFLAGS_DEFAULT;
+  TensorGuardsType.tp_doc = "Check properties of a torch.Tensor";
+  TensorGuardsType.tp_methods = TensorGuards_methods;
+  TensorGuardsType.tp_init = (initproc)TensorGuards_init;
+  TensorGuardsType.tp_new = TensorGuards_new;
+
   PyObject *m;
   if (PyType_Ready(&TensorGuardsType) < 0)
     return NULL;
