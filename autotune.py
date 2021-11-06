@@ -106,6 +106,7 @@ def main():
             print("BEGIN", name, i)
             res = run_subproc(args, name, False)
             if res is not None:
+                headers = list(res[0].keys())
                 rows.append(list(res[0].values()))
             else:
                 print("No result, trying safe_mode")

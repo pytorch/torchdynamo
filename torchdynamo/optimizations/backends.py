@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import functools
 
 import torch
 
@@ -54,7 +55,7 @@ def static_runtime(scripted, example_inputs, filename=None):
             static_module = torch._C._jit_to_static_module(scripted.graph)
 
         def _call(*args):
-            res = static_module(args)
+            res = static_module(args, {})
             # inference mode tensors can cause issues
             res = [x.clone() for x in res]
             if len(res) == 1:
@@ -82,6 +83,13 @@ def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
         return None
 
 
+@functools.lru_cache(1)
+def llvm_target():
+    if "avx512" in open("/proc/cpuinfo").read():
+        return "llvm -mcpu=skylake-avx512"
+    return "llvm -mcpu=core-avx2"
+
+
 def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000):
     # based on functorch version in eager_compile.py
     import tvm
@@ -91,7 +99,7 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000):
     shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
     mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
     dev = tvm.cpu(0)
-    target = tvm.target.Target("llvm -mcpu=core-avx2")
+    target = tvm.target.Target(llvm_target())
     if log_file is not None:
         if not os.path.exists(log_file):
             tasks, task_weights = auto_scheduler.extract_tasks(

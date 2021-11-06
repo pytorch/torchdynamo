@@ -150,8 +150,7 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {
     // NOLINTNEXTLINE
-    PyVarObject_HEAD_INIT(NULL, 0)
-};
+    PyVarObject_HEAD_INIT(NULL, 0)};
 
 static PyObject *check_type_id(PyObject *dummy, PyObject *args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
