@@ -124,9 +124,10 @@ def stack_op(fn: typing.Callable):
             assert len(inputs) == 2
             key = inputs[0].module_key
             mod = self.get_submodule(key)
-            assert type(mod).__getitem__ is torch.nn.ModuleList.__getitem__, typestr(
-                mod
-            )
+            assert type(mod).__getitem__ in (
+                torch.nn.ModuleList.__getitem__,
+                torch.nn.ParameterList.__getitem__,
+            ), typestr(mod)
             submod = mod[inputs[1].as_python_constant()]
             val = self.add_submodule(
                 submod,
@@ -185,7 +186,7 @@ def break_graph_if_unsupported(inner_fn):
             self.compile_partial_subgraph()
             # note, assuming inst pushes 1
             vars = self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
-            warning(f"breaking graph: {inner_fn.__name__} {vars[0]}")
+            warning(f"breaking graph: {vars[0]}")
             self.add_output_instructions([inst])
             self.push(UnknownVariable())
             self.add_output_instructions(
@@ -601,11 +602,27 @@ class InstructionTranslatorBase(fx.Tracer):
             elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
                 assert not kwargs and len(args) == 1
                 self.push(ListIteratorVariable(args[0].items, **options))
-            elif fn.fn is iter and args and isinstance(args[0], NNModuleVariable):
+            elif fn.fn is iter and args and args[0].has_unpack_var_sequence(self):
                 assert not kwargs and len(args) == 1
                 self.push(
-                    ListIteratorVariable(args[0].expand_module_list(self), **options)
+                    ListIteratorVariable(args[0].unpack_var_sequence(self), **options)
                 )
+            elif fn.fn is zip and all(x.has_unpack_var_sequence(self) for x in args):
+                assert not kwargs
+                items = [
+                    TupleVariable(list(item), **options)
+                    for item in zip(*[arg.unpack_var_sequence(self) for arg in args])
+                ]
+                self.push(TupleVariable(items, **options))
+            elif fn.fn is enumerate and all(
+                x.has_unpack_var_sequence(self) for x in args
+            ):
+                assert not kwargs and len(args) == 1
+                items = [
+                    TupleVariable([ConstantVariable(idx, **options), var], **options)
+                    for idx, var in enumerate(args[0].unpack_var_sequence(self))
+                ]
+                self.push(TupleVariable(items, **options))
             elif fn.fn is len:
                 assert not kwargs and len(args) == 1
                 arg = args[0]
@@ -630,6 +647,10 @@ class InstructionTranslatorBase(fx.Tracer):
                         ConstantVariable(
                             len(self.get_submodule(arg.module_key)), **options
                         )
+                    )
+                elif arg.has_unpack_var_sequence(self):
+                    self.push(
+                        ConstantVariable(len(arg.unpack_var_sequence(self)), **options)
                     )
                 else:
                     unimplemented(f"`len` with arg type {arg}")
@@ -1150,8 +1171,12 @@ class InstructionTranslatorBase(fx.Tracer):
             member = obj.value.__dict__[name]
             if is_allowed(member):
                 self.push(AllowedFunctionOrModuleVariable(member, **options))
-            elif callable(member) and not isinstance(
-                member, (types.BuiltinFunctionType, types.BuiltinMethodType)
+            elif (
+                callable(member)
+                and not isinstance(
+                    member, (types.BuiltinFunctionType, types.BuiltinMethodType)
+                )
+                and not getattr(member, "__self__", None)
             ):
                 self.push(UserFunctionVariable(member, **options))
             else:

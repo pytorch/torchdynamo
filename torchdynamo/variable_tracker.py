@@ -15,7 +15,6 @@ from torchdynamo.guards import GuardSource
 from torchdynamo import config
 from torchdynamo.utils import make_cell
 
-
 combine_guards = functools.partial(functools.reduce, set.union)
 
 
@@ -136,6 +135,16 @@ class VariableTracker:
             return self.reconstruct_fn(codegen)
         raise NotImplementedError()
 
+    def unpack_var_sequence(self, tx):
+        raise NotImplementedError()
+
+    def has_unpack_var_sequence(self, tx):
+        try:
+            self.unpack_var_sequence(tx)
+            return True
+        except Exception:
+            return False
+
     def __init__(
         self,
         guards: Optional[Set] = None,
@@ -232,7 +241,7 @@ class NNModuleVariable(VariableTracker):
     def python_type(self):
         return self.module_type
 
-    def expand_module_list(self, tx):
+    def unpack_var_sequence(self, tx):
         # implement list/iter/tuple/etc calls
         key = self.module_key
         base = tx.get_submodule(self.module_key)
@@ -273,6 +282,13 @@ class ConstantVariable(VariableTracker):
         if type(obj) in (list, tuple, set, frozenset):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
+
+    def unpack_var_sequence(self, tx):
+        try:
+            options = VariableTracker.propagate([self])
+            return [ConstantVariable(x, **options) for x in self.as_python_constant()]
+        except TypeError:
+            raise NotImplementedError()
 
 
 class FunctionConstantWrapper(VariableTracker):
@@ -411,6 +427,9 @@ class BaseListVariable(VariableTracker):
         else:
             assert isinstance(index, int)
             return self.items[index].add_guards(self.guards).add_guards(arg.guards)
+
+    def unpack_var_sequence(self, tx):
+        return list(self.items)
 
 
 class ListVariable(BaseListVariable):

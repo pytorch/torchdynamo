@@ -253,6 +253,15 @@ class ModuleList(torch.nn.Module):
         for layer in self.layers:
             x = layer(x)
 
+        for layer, val in zip(self.layers, (x, x, x, x)):
+            x = layer(x) + val
+
+        for layer, val in zip(self.layers, (1, 2, 3, 4)):
+            x = layer(x) + val
+
+        for idx, layer in enumerate(self.layers):
+            x = layer(x) * idx
+
         return x
 
 
