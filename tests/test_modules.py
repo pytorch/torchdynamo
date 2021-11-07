@@ -365,7 +365,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
-    # test_super1 = make_test(SuperModule())
+    test_super1 = make_test(SuperModule())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

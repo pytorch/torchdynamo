@@ -1,4 +1,3 @@
-import enum
 import functools
 import inspect
 import math
@@ -11,22 +10,12 @@ from typing import Set
 import torch.fx
 
 from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.guards import Guard, GuardSource
+from torchdynamo.guards import Guard
+from torchdynamo.guards import GuardSource
 from torchdynamo import config
 from torchdynamo.utils import make_cell
 
 
-class TracingSupported(enum.Enum):
-    UNKNOWN = 0
-    YES = 1
-    NO = 2
-
-    @staticmethod
-    def combine(a, b):
-        return TracingSupported(max(a.value, b.value))
-
-
-combine_states = functools.partial(functools.reduce, TracingSupported.combine)
 combine_guards = functools.partial(functools.reduce, set.union)
 
 
@@ -48,7 +37,6 @@ class VariableTracker:
             return {}
         assert all(isinstance(x, VariableTracker) for x in vars)
         return {
-            "state": combine_states(v.state for v in vars),
             "guards": combine_guards(v.guards for v in vars),
         }
 
@@ -74,7 +62,7 @@ class VariableTracker:
         elif isinstance(value, list):
             return [cls.apply(fn, v) for v in value]
         elif isinstance(value, dict):
-            return {k: cls.apply(fn, value[k]) for k in sorted(value.keys())}
+            return {k: cls.apply(fn, v) for k, v in value.items()}
         else:
             return value
 
@@ -150,14 +138,12 @@ class VariableTracker:
 
     def __init__(
         self,
-        state=TracingSupported.UNKNOWN,
         guards: Optional[Set] = None,
         initial_name: Optional[str] = None,
         global_name: Optional[str] = None,
         reconstruct_fn: Callable = None,
     ):
         super(VariableTracker, self).__init__()
-        self.state = state
         self.guards = guards or set()
         self.initial_name = initial_name
         self.global_name = global_name
@@ -238,34 +224,26 @@ class BasicTypeVariable(TensorVariable):
 
 
 class NNModuleVariable(VariableTracker):
-    def __init__(self, module_key: str, **kwargs):
+    def __init__(self, module_type: type, module_key: str, **kwargs):
         super(NNModuleVariable, self).__init__(**kwargs)
+        self.module_type = module_type
         self.module_key = module_key
 
     def python_type(self):
-        return torch.nn.Module
+        return self.module_type
 
     def expand_module_list(self, tx):
         # implement list/iter/tuple/etc calls
         key = self.module_key
         base = tx.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
-        if isinstance(base, torch.nn.ParameterList):
-            return [
-                TensorVariable(
-                    tx.create_proxy(
-                        "get_attr", tx.add_submodule(submod, key, idx), tuple(), {}
-                    ),
-                    **options,
-                )
-                for idx, submod in enumerate(base)
-            ]
-        else:
-            assert isinstance(base, torch.nn.ModuleList), typestr(base)
-            return [
-                NNModuleVariable(tx.add_submodule(submod, key, idx), **options)
-                for idx, submod in enumerate(base)
-            ]
+        assert isinstance(base, (torch.nn.ModuleList, torch.nn.ParameterList)), typestr(
+            base
+        )
+        return [
+            tx.add_submodule(submod, key, idx, **options)
+            for idx, submod in enumerate(base)
+        ]
 
 
 class ConstantVariable(VariableTracker):
@@ -352,6 +330,12 @@ class BuiltinVariable(VariableTracker):
             type,
             math.sqrt,
         )
+
+    def reconstruct(self, codegen):
+        name = self.fn.__name__
+        assert self.fn.__module__ == "builtins"
+        assert name not in codegen.tx.f_globals, "shadowed global"
+        return [codegen.create_load_global(name, add=True)]
 
 
 class ListIteratorVariable(VariableTracker):
@@ -675,6 +659,15 @@ class UserMethodVariable(UserFunctionVariable):
         return types.MethodType
 
 
+class UserDefinedClassVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(UserDefinedClassVariable, self).__init__(**kwargs)
+        self.value = value
+
+    def as_python_constant(self):
+        return self.value
+
+
 class AllowedFunctionOrModuleVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
@@ -730,6 +723,28 @@ class UnsupportedVariable(VariableTracker):
         if not ConstantVariable.is_literal(subobj):
             raise NotImplementedError()
         return subobj
+
+
+class SuperVariable(VariableTracker):
+    def __init__(self, typevar, objvar=None, **kwargs):
+        super(SuperVariable, self).__init__(**kwargs)
+        self.typevar = typevar
+        self.objvar = objvar
+
+    def reconstruct(self, codegen):
+        codegen(BuiltinVariable(super))
+        codegen(self.typevar)
+        if self.objvar is not None:
+            codegen(self.objvar)
+            return [create_instruction("CALL_FUNCTION", 2)]
+        else:
+            return [create_instruction("CALL_FUNCTION", 1)]
+
+    def get_const_attr(self, tx, name):
+        assert self.objvar, "1-arg super not implemented"
+        search_type = self.typevar.as_python_constant()
+        # TODO(jansel): there is a small chance this could trigger user code, prevent that
+        return getattr(super(search_type, self.objvar.python_type()), name)
 
 
 class UnknownVariable(VariableTracker):

@@ -35,7 +35,7 @@ from .resume_execution import ContinueExecutionCache
 from .utils import count_calls
 from .utils import istensor
 from .utils import istype
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, UserDefinedClassVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BaseUserFunctionVariable
 from .variable_tracker import BasicTypeVariable
@@ -51,8 +51,8 @@ from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import NNModuleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
+from .variable_tracker import SuperVariable
 from .variable_tracker import TensorVariable
-from .variable_tracker import TracingSupported
 from .variable_tracker import TupleVariable
 from .variable_tracker import typestr
 from .variable_tracker import UnknownVariable
@@ -128,8 +128,10 @@ def stack_op(fn: typing.Callable):
                 mod
             )
             submod = mod[inputs[1].as_python_constant()]
-            val = NNModuleVariable(
-                self.add_submodule(submod, key, inputs[1].as_python_constant()),
+            val = self.add_submodule(
+                submod,
+                key,
+                inputs[1].as_python_constant(),
                 **options,
             )
         else:
@@ -332,14 +334,13 @@ class InstructionTranslatorBase(fx.Tracer):
             self.graphargs.append(LocalArg(name, value))
             return TensorVariable(
                 proxy=self.create_graph_input(name, type(value)),
-                state=TracingSupported.YES,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TENSOR_MATCH)},
                 **TensorVariable.specialize(value),
             )
         elif isinstance(value, torch.nn.Module):
-            return NNModuleVariable(
-                module_key=self.add_submodule(value, name),
-                state=TracingSupported.YES,
+            return self.add_submodule(
+                value,
+                name,
                 guards={
                     Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
                     Guard(name, GuardSource.LOCAL, GuardBuilder.OBJECT_MUTATION),
@@ -368,7 +369,6 @@ class InstructionTranslatorBase(fx.Tracer):
             self.graphargs.append(LocalArg(name, value))
             return BasicTypeVariable(
                 proxy=self.create_graph_input(name, type(value)),
-                state=TracingSupported.UNKNOWN,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
         elif istype(value, (tuple, list)) and all(istensor(x) for x in value):
@@ -378,7 +378,6 @@ class InstructionTranslatorBase(fx.Tracer):
             items = [
                 TensorVariable(
                     proxy=self.create_graph_input(f"{name}_{idx}", type(v)),
-                    state=TracingSupported.YES,
                     guards=guards,
                     **TensorVariable.specialize(v),
                 )
@@ -389,7 +388,6 @@ class InstructionTranslatorBase(fx.Tracer):
         elif is_allowed(value):
             return AllowedFunctionOrModuleVariable(
                 value,
-                state=TracingSupported.YES,
                 guards={
                     Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
                 },
@@ -401,30 +399,43 @@ class InstructionTranslatorBase(fx.Tracer):
                     Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
                 },
             )
+
+        elif istype(value, type) and not skipfiles.check(inspect.getfile(value)):
+            return UserDefinedClassVariable(
+                value, guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)}
+            )
         else:
             warning(f"UnsupportedVariable {typestr(value)}")
             return UnsupportedVariable(
                 value,
-                state=TracingSupported.NO,
                 guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
             )
 
-    def add_submodule(self, mod: torch.nn.Module, *names):
+    def add_submodule(self, mod: torch.nn.Module, *names, **options):
         assert isinstance(mod, (torch.nn.Module, torch.Tensor))
+
+        def wrap_name(module_key):
+            if isinstance(mod, torch.Tensor):
+                return TensorVariable(
+                    self.create_proxy("get_attr", module_key, tuple(), {}), **options
+                )
+            else:
+                return NNModuleVariable(type(mod), module_key, **options)
 
         for k, v in self.nn_modules.items():
             if v is mod:
-                return k
+                # it already exists
+                return wrap_name(k)
 
+        # create a new unique name
         name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
         if not name or not name[0].isalpha():
             name = "sub" + name
-
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
                 self.nn_modules[name] = mod
-                return name
+                return wrap_name(name)
             name = f"{base}_{i}"
 
         assert False
@@ -432,7 +443,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def prune_dead_locals(self):
         reads = livevars_analysis(self.instructions, self.current_instruction)
         # implicit use by super()
-        reads = reads | {"__class__"}
+        # reads = reads | {"__class__"}
         # output variables?
         reads = reads | set(self.cell_and_freevars())
         self.symbolic_locals = collections.OrderedDict(
@@ -527,6 +538,15 @@ class InstructionTranslatorBase(fx.Tracer):
                     **options,
                 )
             )
+        elif isinstance(fn, GetAttrVariable) and isinstance(fn.obj, SuperVariable):
+            inner_fn = fn.obj.get_const_attr(self, fn.name)
+            if not isinstance(inner_fn, types.FunctionType):
+                unimplemented(f"non-function super: {typestr(inner_fn)}")
+            self.call_function(
+                UserFunctionVariable(inner_fn, **options),
+                [fn.obj.objvar] + args,
+                kwargs,
+            )
         elif isinstance(fn, NNModuleVariable):
             mod = self.get_submodule(fn.module_key)
             if isinstance(mod, torch.nn.Sequential):
@@ -541,10 +561,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 (arg,) = args
                 for idx, submod in enumerate(mod):
                     self.call_function(
-                        NNModuleVariable(
-                            self.add_submodule(submod, fn.module_key, idx),
-                            **options,
-                        ),
+                        self.add_submodule(submod, fn.module_key, idx, **options),
                         [arg],
                         {},
                     )
@@ -627,12 +644,9 @@ class InstructionTranslatorBase(fx.Tracer):
                     val = arg_type is isinstance_type
                 self.push(ConstantVariable(val, **options))
             elif fn.fn is super:
-                unimplemented("super")
                 assert not kwargs
-                if not args:
-                    assert False, f"{self.symbolic_locals['__class__']}"
-                assert len(args) == 2
-                assert False
+                assert len(args) in (1, 2)
+                self.push(SuperVariable(*args, **options))
             else:
                 unimplemented(f"builtin call {fn.fn}")
         elif isinstance(fn, FunctionConstantWrapper):
@@ -758,7 +772,6 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(
                 AllowedFunctionOrModuleVariable(
                     value=value,
-                    state=TracingSupported.YES,
                     guards={
                         Guard(
                             inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
@@ -773,7 +786,6 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(
                 TensorVariable(
                     proxy=self.create_graph_input(inst.argval),
-                    state=TracingSupported.YES,
                     guards={
                         Guard(
                             inst.argval, GuardSource.GLOBAL, GuardBuilder.TENSOR_MATCH
@@ -799,7 +811,6 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(
                 ConstantVariable(
                     value=self.f_globals[inst.argval],
-                    state=TracingSupported.UNKNOWN,
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
                     },
@@ -820,8 +831,19 @@ class InstructionTranslatorBase(fx.Tracer):
             )
         elif isinstance(value, torch.nn.Module):
             self.push(
-                NNModuleVariable(
-                    self.add_submodule(value, inst.argval),
+                self.add_submodule(
+                    value,
+                    inst.argval,
+                    guards={
+                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
+                    },
+                    global_name=inst.argval,
+                )
+            )
+        elif istype(value, type) and not skipfiles.check(inspect.getfile(value)):
+            self.push(
+                UserDefinedClassVariable(
+                    value,
                     guards={
                         Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
                     },
@@ -842,9 +864,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def IMPORT_NAME(self, inst):
         value = importlib.import_module(inst.argval)
         if is_allowed(value):
-            self.push(
-                AllowedFunctionOrModuleVariable(value=value, state=TracingSupported.YES)
-            )
+            self.push(AllowedFunctionOrModuleVariable(value))
         elif istype(value, types.ModuleType):
             self.push(
                 PythonModuleVariable(
@@ -1048,7 +1068,7 @@ class InstructionTranslatorBase(fx.Tracer):
                     )
                 )
             elif isinstance(subobj, torch.nn.Module):
-                self.push(NNModuleVariable(key, **options))
+                self.push(self.add_submodule(subobj, key, **options))
             elif ConstantVariable.is_literal(subobj):
                 # Assumes module attributes are constant
                 # TODO(jansel): add guards?
@@ -1086,10 +1106,11 @@ class InstructionTranslatorBase(fx.Tracer):
                 for i, item in enumerate(subobj):
                     if isinstance(item, torch.nn.Module):
                         output.append(
-                            NNModuleVariable(
-                                module_key=self.add_submodule(
-                                    item, obj.module_key, name, i
-                                ),
+                            self.add_submodule(
+                                item,
+                                obj.module_key,
+                                name,
+                                i,
                                 **options,
                             )
                         )
@@ -1147,7 +1168,7 @@ class InstructionTranslatorBase(fx.Tracer):
             except AttributeError:
                 unimplemented("dynamic attr UnsupportedVariable")
         else:
-            unimplemented(f"LOAD_ATTR {obj}")
+            self.push(GetAttrVariable(obj, name, **options))
 
     IMPORT_FROM = LOAD_ATTR
 
