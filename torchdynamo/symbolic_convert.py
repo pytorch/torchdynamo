@@ -270,14 +270,12 @@ class InstructionTranslatorBase(fx.Tracer):
             if is_safe(v):
                 output.append(self._create_load_const(v))
             elif isinstance(v, (list, tuple, set)):
-                self.grow_stack_to(len(v) + len(self.stack))
                 for item in v:
                     visit(item)
                 output.append(
                     create_instruction(f"BUILD_{type(v).__name__.upper()}", len(v))
                 )
             elif isinstance(v, dict):
-                self.grow_stack_to(len(v) + len(self.stack) + 1)
                 keys = tuple(sorted(v.keys()))
                 for k in keys:
                     visit(v[k])
@@ -652,12 +650,10 @@ class InstructionTranslatorBase(fx.Tracer):
         self.compile_partial_subgraph()
         self.popn(len(args_and_kwargs) + 1)
         if not kwargs:
-            self.grow_stack_to(len(self.stack) + len(args_and_kwargs) + 2)
             self.output_instructions.append(
                 create_instruction("CALL_FUNCTION", len(args_and_kwargs))
             )
         else:
-            self.grow_stack_to(len(self.stack) + len(args_and_kwargs) + 3)
             self.output_instructions.extend(self.create_load_const(tuple(keys)))
             self.output_instructions.append(
                 create_instruction("CALL_FUNCTION_KW", len(args_and_kwargs))
@@ -711,6 +707,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.output_instructions.append(
                     create_instruction("JUMP_ABSOLUTE", target=continue_inst)
                 )
+                self.output_instructions.extend(self.instructions)
             else:
                 raise
 
@@ -733,7 +730,6 @@ class InstructionTranslatorBase(fx.Tracer):
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)
-        self.grow_stack_to(len(self.stack))
 
     def push_many(self, vals):
         for val in vals:
@@ -1372,17 +1368,8 @@ class InstructionTranslatorBase(fx.Tracer):
             result.extend(arg.get_examples())
         return result
 
-    def grow_stack_to(self, size):
-        """Ensure co_stacksize is at least size"""
-        self.code_options["co_stacksize"] = max(self.code_options["co_stacksize"], size)
-
     def create_call_generated_code(self, fn_name: str, nargs: int) -> List[Instruction]:
         """Call the generated code function stored in fn_name"""
-        self.grow_stack_to(
-            # +1 for function name, +1 for scratch space (restore vars)
-            2
-            + nargs
-        )
         output = self.load_function_name(fn_name)
 
         for arg in self.graphargs:
@@ -1402,8 +1389,6 @@ class InstructionTranslatorBase(fx.Tracer):
     ):
         freevars = code.co_freevars
         assert freevars
-        self.grow_stack_to(num_on_stack + 3)
-        self.grow_stack_to(num_on_stack + len(freevars))
         output = []
         for var in freevars:
             assert var in self.cell_and_freevars()
@@ -1460,7 +1445,6 @@ class InstructionTranslatorBase(fx.Tracer):
         Automatically restore live variables.
         """
         stack_values = list(self.stack)
-        self.grow_stack_to(len(stack_values) + 1)
         var_names = []
         constant_locals = []
         clobbered = set()
@@ -1488,8 +1472,6 @@ class InstructionTranslatorBase(fx.Tracer):
                 break
             const_stack_suffix.extend(self.load_const_var(stack_values.pop()))
         const_stack_suffix = list(reversed(const_stack_suffix))
-
-        self.grow_stack_to(len(const_stack_prefix) + len(var_names) + 1)
 
         if len(var_names) == 0 and len(stack_values) == 0:
             self.add_output_instructions(
@@ -1555,7 +1537,6 @@ class InstructionTranslatorBase(fx.Tracer):
         Later we should extend this to continue the analysis
         """
         self.output_instructions.extend(prefix)
-        self.fully_converted = False
 
         # TODO(jansel): resume the analysis instead of exiting
         self.instruction_pointer = None  # exit
@@ -1646,7 +1627,6 @@ class InstructionTranslatorBase(fx.Tracer):
         self.f_builtins = f_builtins
         self.code_options = code_options
         self.output_instructions = []
-        self.fully_converted = None
         self.compiler_fn = compiler_fn
         self.f_code = f_code
 
@@ -1697,7 +1677,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None
-        self.fully_converted = False
 
         reads = livevars_analysis(self.instructions, inst)
         argnames = tuple(
@@ -1708,7 +1687,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         nargs = len(self.stack) + len(argnames)
 
         name = unique_id(f"__resume_at_{self.next_instruction.offset}")
-        self.grow_stack_to(1 + nargs)
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code, inst.offset, len(self.stack), argnames
@@ -1738,7 +1716,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.output_instructions.extend(
                 self.compile_subgraph(rv) + [create_instruction("RETURN_VALUE")]
             )
-            self.fully_converted = True
         else:
             unimplemented("not traceable")
 
@@ -1771,7 +1748,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         tracer.run()
         assert tracer.symbolic_result is not None
-        assert tracer.fully_converted
 
         func.export_freevars(parent, tracer)
         return tracer.symbolic_result
@@ -1807,7 +1783,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
-        self.fully_converted = True
 
 
 class FakeRootModule(torch.nn.Module):

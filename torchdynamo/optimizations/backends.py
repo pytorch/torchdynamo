@@ -72,6 +72,8 @@ def static_runtime(scripted, example_inputs, filename=None):
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
+    if jit_mod is None:
+        return None
     try:
         return tvm_compile_inner(jit_mod, example_inputs, log_file, **kwargs)
     except Exception as e:
@@ -144,7 +146,7 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000):
             if arg.dim() != 0:
                 m.set_input(
                     f"inp_{idx}",
-                    tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg)),
+                    tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg.contiguous())),
                 )
         m.run()
         outs = [
@@ -169,14 +171,26 @@ def onnxrt(scripted, example_inputs, filename=None):
         with tempfile.NamedTemporaryFile() as tmp:
             if filename is None:
                 filename = tmp.name
-            torch.onnx.export(
-                scripted,
-                example_inputs,
-                filename,
-                input_names=[f"i{i}" for i in range(len(example_inputs))],
-                # do_constant_folding=True,
-                opset_version=14,
-            )
+            try:
+                torch.onnx.export(
+                    scripted,
+                    example_inputs,
+                    filename,
+                    input_names=[f"i{i}" for i in range(len(example_inputs))],
+                    # do_constant_folding=True,
+                    opset_version=14,
+                )
+            except IndexError:
+                # work around bug in constant folding pass
+                torch.onnx.export(
+                    scripted,
+                    example_inputs,
+                    filename,
+                    input_names=[f"i{i}" for i in range(len(example_inputs))],
+                    do_constant_folding=False,
+                    opset_version=14,
+                )
+
             return onnxrt_wrapper(filename, example_inputs)
     except KeyboardInterrupt:
         raise

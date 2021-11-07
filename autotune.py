@@ -30,6 +30,10 @@ from torchdynamo.optimizations.backends import tvm_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 
+ANSOR = False
+TASO = False
+STATIC_RUNTIME = True
+
 
 def synchronize():
     pass
@@ -83,9 +87,8 @@ def main():
 
     if args.name:
         name = re.sub(r"^[./]*subgraphs[./]*", "", args.name)
-        return run(args, name)
+        return run(args, name, False)
 
-    headers = None
     rows = []
 
     for i, name in zip(
@@ -106,19 +109,22 @@ def main():
             print("BEGIN", name, i)
             res = run_subproc(args, name, False)
             if res is not None:
-                headers = list(res[0].keys())
-                rows.append(list(res[0].values()))
+                rows.append(res)
             else:
                 print("No result, trying safe_mode")
+                # often static runtime segfaults, so run without it
                 res = run_subproc(args, name, True)
                 if res is not None:
-                    headers = list(res[0].keys())
-                    rows.append(list(res[0].values()))
+                    rows.append(res)
                 else:
                     print("Safe mode failed")
 
     if rows:
-        print()
+        headers = OrderedDict()
+        for row in rows:
+            headers.update(row)
+        headers = list(headers.keys())
+        rows = [[row.get(k, "") for k in headers] for row in rows]
         print(tabulate(rows, headers=headers))
 
 
@@ -153,8 +159,32 @@ def run_pipe(args, name: str, safe_mode, res: multiprocessing.Queue):
         res.close()
 
 
+def autotune_ansor(model1, example_inputs, model_dir, args):
+    run_ansor = False
+    if os.path.exists(os.path.join(model_dir, "perf.json")):
+        perf = json.loads(open(os.path.join(model_dir, "perf.json")).read())
+        if os.path.exists(os.path.join(model_dir, "ansor20k")) or (
+            args.ansor_sec and perf.get("eager", 0) > args.ansor_sec
+        ):
+            run_ansor = True
+
+    if run_ansor:
+        return (
+            "ansor20k",
+            tvm_compile(
+                model1,
+                example_inputs,
+                os.path.join(model_dir, "ansor20k"),
+                trials=20000,
+            ),
+        )
+    else:
+        return ("ansor20k", None)
+
+
 def run(args, name, safe_mode):
     pymod = importlib.import_module(f"subgraphs.{name}")
+
     # TODO(jansel): upstream these fixes to to_folder()
     pymod.module._operator_iadd = operator.iadd
     pymod.module._operator_imul = operator.imul
@@ -162,6 +192,7 @@ def run(args, name, safe_mode):
     pymod.module.math_sqrt = math.sqrt
     pymod.module.device = torch.device
     pymod.module.inf = float("inf")
+
     model0 = pymod.FxModule()
     model_dir = os.path.join(config.base_dir, "subgraphs", name)
     example_inputs = torch.load(os.path.join(model_dir, "example_inputs.pt"))
@@ -174,40 +205,26 @@ def run(args, name, safe_mode):
         ("torchscript", model1),
         ("freezing", optimize_for_inference(model1, example_inputs)),
         ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
-        # ("taso", taso(example_inputs,
-        #               os.path.join(model_dir, "onnx"),
-        #               os.path.join(model_dir, "taso"))),
         ("tvm", tvm_compile(model1, example_inputs)),
     ]
-    if safe_mode:
-        models.append(("static_runtime", None))
-    else:
+    if STATIC_RUNTIME and not safe_mode:
+        # Static runtime is crashy, don't run it in safe mode
         models.append(("static_runtime", static_runtime(model1, example_inputs)))
 
-    run_ansor = False
-    if os.path.exists(os.path.join(model_dir, "perf.json")):
-        eager_perf = json.loads(open(os.path.join(model_dir, "perf.json")).read())[
-            "eager"
-        ]
-        if os.path.exists(os.path.join(model_dir, "ansor20k")) or (
-            args.ansor_sec and eager_perf > args.ansor_sec
-        ):
-            run_ansor = True
+    if ANSOR and not safe_mode:
+        models.append(autotune_ansor(model1, example_inputs, model_dir, args))
 
-    if run_ansor and not safe_mode:
-        models.append(
-            (
-                "ansor20k",
-                tvm_compile(
-                    model1,
-                    example_inputs,
-                    os.path.join(model_dir, "ansor20k"),
-                    trials=20000,
-                ),
-            )
-        )
-    else:
-        models.append(("ansor20k", None))
+    # if TASO and not safe_mode:
+    #     models.append(
+    #         (
+    #             "taso",
+    #             taso(
+    #                 example_inputs,
+    #                 os.path.join(model_dir, "onnx"),
+    #                 os.path.join(model_dir, "taso"),
+    #             ),
+    #         )
+    #     )
 
     is_corrects = [x is not None for _, x in models]
     timings = np.zeros((args.repeat, len(models)), np.float64)
@@ -240,8 +257,7 @@ def run(args, name, safe_mode):
     perf = {k: float(v) for k, v, c in zip(names, median, is_corrects) if c}
     with open(os.path.join(model_dir, "perf.json"), "w") as fd:
         json.dump(perf, fd)
-    print({k: v for k, v, c in zip(names, median, is_corrects) if c})
-    return OrderedDict(zip(headers, row)), perf
+    return OrderedDict(zip(headers, row))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 import inspect
 import math
+import unittest
 
 import torch
 from torch import sub
@@ -534,3 +535,28 @@ class FunctionTests(torchdynamo.testing.TestCase):
         inner(3.0)
 
         return x, y
+
+    @unittest.skip("todo")
+    def test_return_nested_function(self):
+        out = None
+
+        def fn(a, b):
+            nonlocal out
+            c = a + b
+            d = a + 1.0
+
+            def fn2(f: int = 7, g: float = 9.0):
+                nonlocal out
+                out = a + b * 10
+                return c * f - d * g
+
+            return fn2
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertIsNone(fn(v1, v2)(1.5))
+            self.assertEqual(out[0], 1100)
+        self.assertTrue(cnts.frame_count, 2)
+        self.assertTrue(cnts.op_count, 2)

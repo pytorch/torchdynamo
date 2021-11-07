@@ -5,6 +5,8 @@ import sys
 import types
 from typing import Any, Optional, List
 
+from torchdynamo.bytecode_analysis import stacksize_analysis
+
 
 @dataclasses.dataclass
 class Instruction:
@@ -19,6 +21,12 @@ class Instruction:
     is_jump_target: bool = False
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
+
+    def __hash__(self):
+        return id(self)
+
+    def __eq__(self, other):
+        return id(self) == id(other)
 
 
 def convert_instruction(i: dis.Instruction):
@@ -246,6 +254,7 @@ def transform_code_object(code, transformations):
     code_options["co_code"] = bytecode
     code_options["co_lnotab"] = lnotab
     code_options["co_nlocals"] = len(code_options["co_varnames"])
+    code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) == set(code_options.keys())
     return types.CodeType(*[code_options[k] for k in keys])
 

@@ -89,12 +89,8 @@ def convert_frame_assert(compiler_fn: Callable):
                 compiler_fn,
             )
             tracer.run()
-            if tracer.output_instructions and tracer.fully_converted:
-                instructions[:] = tracer.output_instructions
-            elif tracer.output_instructions:
-                instructions[:] = tracer.output_instructions + instructions
-            else:
-                unimplemented("did not convert frame")
+            assert tracer.output_instructions
+            instructions[:] = tracer.output_instructions
 
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))

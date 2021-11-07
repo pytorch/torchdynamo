@@ -82,6 +82,11 @@ def short_name(name, limit=20):
 
 
 def iter_models(args):
+    # Disable auto-scripting in demucs
+    torch.jit.ScriptModule = torch.nn.Module
+    from fastNLP.core import logger
+
+    logger.setLevel(logging.WARNING)
     from torchbenchmark import list_models  # noqa
 
     for benchmark_cls in list_models():
@@ -201,7 +206,7 @@ def speedup_experiment2(speedups, args, model, example_inputs):
         _, timings[rep, 0] = timed(model, example_inputs)
         if ts is not None:
             _, timings[rep, 1] = timed(ts, example_inputs)
-        if ort is not None:
+        if ofi is not None:
             _, timings[rep, 2] = timed(ofi, example_inputs)
         if ort is not None:
             _, timings[rep, 3] = timed(ort, example_inputs)
