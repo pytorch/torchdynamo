@@ -1,6 +1,7 @@
 import enum
 import functools
 import inspect
+import math
 import types
 from typing import Callable
 from typing import List
@@ -9,6 +10,7 @@ from typing import Set
 
 import torch.fx
 
+from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.guards import Guard, GuardSource
 from torchdynamo import config
 from torchdynamo.utils import make_cell
@@ -83,9 +85,6 @@ class VariableTracker:
         assert isinstance(guards, set)
         return self.clone(guards=set.union(self.guards, guards))
 
-    def get_key(self):
-        return self.__class__
-
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
@@ -144,18 +143,25 @@ class VariableTracker:
     def as_proxy(self):
         raise NotImplementedError()
 
+    def reconstruct(self, codegen):
+        if self.reconstruct_fn is not None:
+            return self.reconstruct_fn(codegen)
+        raise NotImplementedError()
+
     def __init__(
         self,
         state=TracingSupported.UNKNOWN,
         guards: Optional[Set] = None,
         initial_name: Optional[str] = None,
         global_name: Optional[str] = None,
+        reconstruct_fn: Callable = None,
     ):
         super(VariableTracker, self).__init__()
         self.state = state
         self.guards = guards or set()
         self.initial_name = initial_name
         self.global_name = global_name
+        self.reconstruct_fn = reconstruct_fn
 
 
 class TensorVariable(VariableTracker):
@@ -236,9 +242,6 @@ class NNModuleVariable(VariableTracker):
         super(NNModuleVariable, self).__init__(**kwargs)
         self.module_key = module_key
 
-    def get_key(self):
-        return self.__class__, self.module_key
-
     def python_type(self):
         return torch.nn.Module
 
@@ -273,9 +276,6 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def get_key(self):
-        return self.__class__, self.value
-
     def python_type(self):
         return type(self.value)
 
@@ -302,9 +302,6 @@ class FunctionConstantWrapper(VariableTracker):
         super(FunctionConstantWrapper, self).__init__(**kwargs)
         self.value = value
 
-    def get_key(self):
-        return self.__class__, self.value
-
     def call_const(self, args, kwargs):
         # this is used to implement Tensor.size(1)
         assert not kwargs
@@ -320,14 +317,41 @@ class BuiltinVariable(VariableTracker):
         super(BuiltinVariable, self).__init__(**kwargs)
         self.fn = fn
 
-    def get_key(self):
-        return self.__class__, id(self.fn)
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.fn.__name__})"
 
     def python_type(self):
         return type(self.fn)
 
     def as_python_constant(self):
         return self.fn
+
+    def can_constant_fold_through(self):
+        return self.fn in (
+            abs,
+            all,
+            any,
+            bool,
+            chr,
+            callable,
+            dict,
+            divmod,
+            float,
+            int,
+            len,
+            list,
+            max,
+            min,
+            ord,
+            pow,
+            repr,
+            round,
+            str,
+            sum,
+            tuple,
+            type,
+            math.sqrt,
+        )
 
 
 class ListIteratorVariable(VariableTracker):
@@ -347,9 +371,6 @@ class ListIteratorVariable(VariableTracker):
         self.initial_name = None
         return item, self
 
-    def get_key(self):
-        return self.__class__, id(self.index), tuple(v.get_key() for v in self.items)
-
 
 class GetAttrVariable(VariableTracker):
     def __init__(self, obj, name, **kwargs):
@@ -361,9 +382,6 @@ class GetAttrVariable(VariableTracker):
 
     def as_proxy(self):
         return getattr(self.obj.as_proxy(), self.name)
-
-    def get_key(self):
-        return self.__class__, self.name, self.obj.get_key()
 
     def get_const_attr(self, tx, name):
         if not isinstance(self.obj, NNModuleVariable):
@@ -377,10 +395,13 @@ class GetAttrVariable(VariableTracker):
         return inspect.getattr_static(step2, name)
 
     def create_guard(self, fn):
-
         if self.obj.initial_name:
             return Guard(f"{self.obj.initial_name}.{self.name}", GuardSource.LOCAL, fn)
         raise NotImplementedError()
+
+    def reconstruct(self, codegen):
+        codegen(self.obj)
+        return [codegen.create_load_attr(self.name)]
 
 
 class BaseListVariable(VariableTracker):
@@ -392,9 +413,6 @@ class BaseListVariable(VariableTracker):
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
-
-    def get_key(self):
-        return self.__class__, tuple(v.get_key() for v in self.items)
 
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
@@ -415,10 +433,18 @@ class ListVariable(BaseListVariable):
     def python_type(self):
         return list
 
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_LIST", len(self.items))]
+
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
+
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_TUPLE", len(self.items))]
 
 
 class SliceVariable(BaseListVariable):
@@ -431,6 +457,10 @@ class SliceVariable(BaseListVariable):
     def as_python_constant(self):
         return slice(*[x.as_python_constant() for x in self.items])
 
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_SLICE", len(self.items))]
+
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, **kwargs):
@@ -438,16 +468,22 @@ class ConstDictVariable(VariableTracker):
         assert isinstance(items, dict)
         self.items = items
 
-    def get_key(self):
-        return self.__class__, tuple(
-            (k, self.items[k].get_key()) for k in sorted(self.items.keys())
-        )
-
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
     def python_type(self):
         return dict
+
+    def reconstruct(self, codegen):
+        if len(self.items) == 0:
+            return [create_instruction("BUILD_MAP", 0)]
+        keys = tuple(sorted(self.items.keys()))
+        for key in keys:
+            codegen(self.items[key])
+        return [
+            codegen.create_load_const(keys),
+            create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
+        ]
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -473,9 +509,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self):
         return self.fn.__code__
-
-    def get_key(self):
-        return self.__class__, id(self.fn)
 
     def python_type(self):
         return types.FunctionType
@@ -609,6 +642,24 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             if var in child.symbolic_locals:
                 parent.symbolic_locals[var] = child.symbolic_locals[var]
 
+    def reconstruct(self, codegen):
+        flags = 0x00
+        if self.defaults:
+            flags |= 0x01
+            codegen(self.defaults)
+        if self.kwdefaults:
+            flags |= 0x02
+            codegen(self.kwdefaults)
+        if self.annotations:
+            flags |= 0x04
+            codegen(self.annotations)
+        if self.closure:
+            flags |= 0x08
+            codegen(self.closure)
+        codegen(self.code)
+        codegen(self.fn_name)
+        return [create_instruction("MAKE_FUNCTION", flags)]
+
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
@@ -619,9 +670,6 @@ class UserMethodVariable(UserFunctionVariable):
 
     def self_args(self):
         return [self.obj]
-
-    def get_key(self):
-        return self.__class__, id(self.fn), self.obj.get_key()
 
     def python_type(self):
         return types.MethodType
@@ -637,9 +685,6 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def get_key(self):
-        return self.__class__, id(self.value)
-
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
             return type(self.value)
@@ -648,7 +693,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def is_basic_math(self):
+    def can_constant_fold_through(self):
         return getattr(self.value, "__module__", None) == "math"
 
 
@@ -656,9 +701,6 @@ class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
         super(PythonModuleVariable, self).__init__(**kwargs)
         self.value = value
-
-    def get_key(self):
-        return self.__class__, id(self.value)
 
     def python_type(self):
         return types.ModuleType
@@ -676,9 +718,6 @@ class UnsupportedVariable(VariableTracker):
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def get_key(self):
-        return self.__class__, id(self.value_type)
 
     def python_type(self):
         return self.value_type
@@ -703,6 +742,9 @@ class ClosureVariable(UnknownVariable):
     def __init__(self, name, **kwargs):
         super(ClosureVariable, self).__init__(**kwargs)
         self.name = name
+
+    def reconstruct(self, codegen):
+        return [codegen.create_load_closure(self.name)]
 
 
 def typestr(*objs):

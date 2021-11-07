@@ -1,3 +1,4 @@
+import builtins
 import math
 import types
 import warnings
@@ -67,3 +68,16 @@ def _allowed_function_ids():
 def is_allowed(obj):
     """Is this safe to trace like torch.add ?"""
     return id(obj) in _allowed_function_ids()
+
+
+@lru_cache(None)
+def _builtin_function_ids():
+    return {
+        id(v): f"builtins.{k}"
+        for k, v in builtins.__dict__.items()
+        if not k.startswith("_") and callable(v)
+    }
+
+
+def is_builtin(obj):
+    return id(obj) in _builtin_function_ids()

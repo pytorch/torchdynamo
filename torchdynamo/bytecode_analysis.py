@@ -107,6 +107,7 @@ class StackSize:
 
 
 def stacksize_analysis(instructions):
+    assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {
         inst: StackSize(float("inf"), float("-inf"), fixed_point)
@@ -130,6 +131,11 @@ def stacksize_analysis(instructions):
                 stack_sizes[inst.target].offset_of(
                     stack_size, dis.stack_effect(inst.opcode, inst.arg, jump=True)
                 )
+
+    if False:
+        for inst in instructions:
+            stack_size = stack_sizes[inst]
+            print(stack_size.low, stack_size.high, inst)
 
     assert fixed_point.value, "failed to reach fixed point"
     low = min([x.low for x in stack_sizes.values()])

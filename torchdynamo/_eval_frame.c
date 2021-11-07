@@ -139,24 +139,13 @@ inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
   _PyCode_SetExtra((PyObject *)code, extra_index, extra);
 }
 
-/*
-inline static PyObject *eval_custom_code_inplace(PyFrameObject *frame,
-                                                 PyCodeObject *code,
-                                                 int throw_flag) {
-  PyCodeObject *prior_code = frame->f_code;
-  frame->f_code = code;
-  PyObject *result = _PyEval_EvalFrameDefault(frame, throw_flag);
-  frame->f_code = prior_code;
-  return result;
-} */
-
-inline static PyObject *eval_custom_code_shadow_frame(PyThreadState *tstate,
-                                                      PyFrameObject *frame,
-                                                      PyCodeObject *code,
-                                                      int throw_flag) {
+inline static PyObject *eval_custom_code(PyThreadState *tstate,
+                                         PyFrameObject *frame,
+                                         PyCodeObject *code, int throw_flag) {
   Py_ssize_t ncells = 0;
   Py_ssize_t nfrees = 0;
-  Py_ssize_t nlocals = code->co_nlocals;
+  Py_ssize_t nlocals_new = code->co_nlocals;
+  Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
 
   if ((code->co_flags & CO_NOFREE) == 0) {
     ncells = PyTuple_GET_SIZE(code->co_cellvars);
@@ -168,7 +157,7 @@ inline static PyObject *eval_custom_code_shadow_frame(PyThreadState *tstate,
   DEBUG_NULL_CHECK(code);
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
-  DEBUG_CHECK(nlocals == frame->f_code->co_nlocals);
+  DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject *shadow =
       _PyFrame_New_NoTrack(tstate, code, frame->f_globals, NULL);
@@ -179,9 +168,14 @@ inline static PyObject *eval_custom_code_shadow_frame(PyThreadState *tstate,
   PyObject **fastlocals_old = frame->f_localsplus;
   PyObject **fastlocals_new = shadow->f_localsplus;
 
-  for (Py_ssize_t i = 0; i < ncells + nfrees + nlocals; i++) {
+  for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[i] = fastlocals_old[i];
+  }
+
+  for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
+    Py_XINCREF(fastlocals_old[nlocals_old + i]);
+    fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
 
   PyObject *result = _PyEval_EvalFrameDefault(shadow, throw_flag);
@@ -196,17 +190,6 @@ inline static PyObject *eval_custom_code_shadow_frame(PyThreadState *tstate,
     --tstate->recursion_depth;
   }
   return result;
-}
-
-inline static PyObject *eval_custom_code(PyThreadState *tstate,
-                                         PyFrameObject *frame,
-                                         PyCodeObject *code, int throw_flag) {
-  // if (code->co_stacksize <= frame->f_code->co_stacksize) {
-  //   return eval_custom_code_inplace(frame, code, throw_flag);
-  // } else {
-  // need to create a new frame object in order to have a bigger stack
-  return eval_custom_code_shadow_frame(tstate, frame, code, throw_flag);
-  // }
 }
 
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {

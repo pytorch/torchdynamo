@@ -130,6 +130,46 @@ def strip_extended_args(instructions: List[Instruction]):
     instructions[:] = [i for i in instructions if i.opcode != dis.EXTENDED_ARG]
 
 
+def remove_load_call_method(instructions: List[Instruction]):
+    """LOAD_METHOD puts a NULL on the stack which causes issues, so remove it"""
+    rewrites = {"LOAD_METHOD": "LOAD_ATTR", "CALL_METHOD": "CALL_FUNCTION"}
+    for inst in instructions:
+        if inst.opname in rewrites:
+            inst.opname = rewrites[inst.opname]
+            inst.opcode = dis.opmap[inst.opname]
+    return instructions
+
+
+def explicit_super(code: types.CodeType, instructions: List[Instruction]):
+    """convert super() with no args into explict arg form"""
+    cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
+    output = []
+    for idx, inst in enumerate(instructions):
+        output.append(inst)
+        if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
+            nexti = instructions[idx + 1]
+            if nexti.opname == "CALL_FUNCTION" and nexti.arg == 0:
+                assert "__class__" in cell_and_free
+                output.append(
+                    create_instruction(
+                        "LOAD_DEREF", cell_and_free.index("__class__"), "__class__"
+                    )
+                )
+                first_var = code.co_varnames[0]
+                if first_var in cell_and_free:
+                    output.append(
+                        create_instruction(
+                            "LOAD_DEREF", cell_and_free.index(first_var), first_var
+                        )
+                    )
+                else:
+                    output.append(create_instruction("LOAD_FAST", 0, first_var))
+                nexti.arg = 2
+                nexti.argval = 2
+
+    instructions[:] = output
+
+
 def fix_extended_args(instructions: List[Instruction]):
     """Fill in correct argvals for EXTENDED_ARG ops"""
     output = []
@@ -194,7 +234,7 @@ def debug_bytes(*args):
 
 def debug_checks(code):
     """Make sure our assembler produces same bytes as we start with"""
-    dode = transform_code_object(code, lambda x, y: None)
+    dode = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == code.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
@@ -213,7 +253,7 @@ def fix_vars(instructions: List[Instruction], code_options):
             instructions[i].arg = names[instructions[i].argval]
 
 
-def transform_code_object(code, transformations):
+def transform_code_object(code, transformations, safe=False):
     keys = [
         "co_argcount",
         "co_posonlyargcount",  # python 3.8+
@@ -237,7 +277,7 @@ def transform_code_object(code, transformations):
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
-    instructions = cleaned_instructions(code)
+    instructions = cleaned_instructions(code, safe)
 
     transformations(instructions, code_options)
 
@@ -259,11 +299,14 @@ def transform_code_object(code, transformations):
     return types.CodeType(*[code_options[k] for k in keys])
 
 
-def cleaned_instructions(code):
+def cleaned_instructions(code, safe=False):
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     virtualize_jumps(instructions)
     strip_extended_args(instructions)
+    if not safe:
+        remove_load_call_method(instructions)
+        explicit_super(code, instructions)
     return instructions
 
 

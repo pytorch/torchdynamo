@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 import inspect
 import math
-import unittest
 
 import torch
 from torch import sub
@@ -467,7 +466,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
             cfg2.val = 2.0
             v = fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertTrue(cnts.op_count, 8)
+        self.assertEqual(cnts.op_count, 8)
 
     @make_test
     def test_import1(x, y):
@@ -478,7 +477,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
 
     @make_test
     def test_return_dict(x, y):
-        return {"x": x, "z": x + y}
+        z = [x + y, y, False]
+        return {"x": x, "z": z, "a": x, "b": z, "c": x}
 
     def test_size_input(self):
         def fn(x, s):
@@ -491,7 +491,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
             self.assertEqual(fn(v, v.size())[0, 0], -10)
             self.assertEqual(fn(v, (10, 20))[0, 0], -10)
             self.assertEqual(fn(v, [10, 20])[0, 0], -10)
-        self.assertTrue(cnts.op_count, 6)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_cell_output1(self):
         out = None
@@ -505,7 +505,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
         with eval_frame.optimize(convert_frame_assert(cnts)):
             self.assertIsNone(fn(v, v))
             self.assertEqual(out[0], 1100)
-        self.assertTrue(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_cell_output2(self):
         out = None
@@ -520,7 +520,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
         with eval_frame.optimize(convert_frame(cnts)):
             self.assertIsNone(fn(v, v))
             self.assertEqual(out[0], 1200)
-        self.assertTrue(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 3)
 
     @make_test
     def test_funcdef_closure(x, y):
@@ -536,7 +536,6 @@ class FunctionTests(torchdynamo.testing.TestCase):
 
         return x, y
 
-    @unittest.skip("todo")
     def test_return_nested_function(self):
         out = None
 
@@ -556,7 +555,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
         with eval_frame.optimize(convert_frame_assert(cnts)):
-            self.assertIsNone(fn(v1, v2)(1.5))
-            self.assertEqual(out[0], 1100)
-        self.assertTrue(cnts.frame_count, 2)
-        self.assertTrue(cnts.op_count, 2)
+            self.assertEqual(fn(v1, v2)(1.5)[0], -459)
+            self.assertEqual(out[0], 2100)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 7)

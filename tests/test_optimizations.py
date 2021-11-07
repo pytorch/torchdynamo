@@ -39,7 +39,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
 
         def compiler_fn(graph, example_inputs):
             nonlocal r1
-            r1 = graph(*example_inputs)
+            r1 = graph(*example_inputs)[0]
             return graph.forward
 
         a = torch.empty(2).fill_(1)

@@ -6,6 +6,8 @@ from torch.nn import functional as F
 import torchdynamo.testing
 from . import test_functions
 
+from torchdynamo._eval_frame import unsupported
+
 
 class BasicModule(torch.nn.Module):
     def __init__(self):
@@ -94,6 +96,42 @@ class ModuleMethodCall(torch.nn.Module):
         x1 = self.call_and_scale(self.layer1, x)
         x2 = self.call_and_scale(self.layer2, x)
         return x1 + x2
+
+
+class UnsupportedMethodCall(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.scale = torch.randn(1, 10)
+
+    def call_and_scale(self, mod, x):
+        x = mod(x)
+        x = x * self.scale
+        return unsupported(x, x)
+
+    def forward(self, x):
+        x1 = self.call_and_scale(self.layer1, x)
+        return x + x1
+
+
+class UnsupportedModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.scale = torch.randn(1, 10)
+
+    def forward(self, x):
+        x = self.layer1(x) * self.scale
+        return unsupported(x, x)
+
+
+class UnsupportedModuleCall(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mod = UnsupportedModule()
+
+    def forward(self, x):
+        return 1 + self.mod(x * 1.5)
 
 
 class ModuleStaticMethodCall(torch.nn.Module):
@@ -296,6 +334,12 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
+class SuperModule(BasicModule):
+    def forward(self, x):
+        x = super().forward(x)
+        return x + 10.0
+
+
 class NNModuleTests(torchdynamo.testing.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
@@ -321,6 +365,25 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    # test_super1 = make_test(SuperModule())
+
+    def test_unsupportedmethod(self):
+        m = UnsupportedMethodCall()
+        i = torch.randn(10)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            r = m(i)
+        self.assertTrue(torchdynamo.testing.same(r, m(i)))
+        self.assertEqual(cnt.op_count, 5)
+
+    def test_unsupportedmodule(self):
+        m = UnsupportedModuleCall()
+        i = torch.randn(10)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            r = m(i)
+        self.assertTrue(torchdynamo.testing.same(r, m(i)))
+        self.assertEqual(cnt.op_count, 6)
 
     # not implemented yet:
     # test_module_class_method = make_test(ModuleClassMethodCall())

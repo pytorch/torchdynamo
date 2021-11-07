@@ -13,7 +13,6 @@ from torch import fx
 
 from torchdynamo import config
 from torchdynamo.bytecode_analysis import remove_dead_code, remove_pointless_jumps
-from torchdynamo.bytecode_transformation import debug_checks
 from torchdynamo.bytecode_transformation import is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
@@ -72,7 +71,6 @@ def convert_frame_assert(compiler_fn: Callable):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:
             unimplemented("cache_size_limit reached")
-        debug_checks(code)
         tracer = None
 
         # from .utils import print_once;  print_once(code.co_filename)
@@ -95,26 +93,39 @@ def convert_frame_assert(compiler_fn: Callable):
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        code = transform_code_object(frame.f_code, transform)
-        output_codes.add(code)
-        if config.debug:
-            print(
-                "\nORIGINAL BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-            )
-            # print(dis.Bytecode(frame.f_code).info())
-            print(dis.Bytecode(frame.f_code).dis())
-            print("MODIFIED BYTECODE")
-            # print(dis.Bytecode(code).info())
-            print(dis.Bytecode(code).dis())
-            print("\nGUARDS:")
-            for guard in sorted(tracer.guards):
-                print(" -", str(guard))
-            print()
-        assert tracer.guards is not None
-        return GuardedCode(code, tracer.guards, frame.f_locals, frame.f_globals)
+        try:
+            code = transform_code_object(frame.f_code, transform)
+            output_codes.add(code)
+            if config.debug:
+                print(
+                    "\nORIGINAL BYTECODE",
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                )
+                # print(dis.Bytecode(frame.f_code).info())
+                print(dis.Bytecode(frame.f_code).dis())
+                print("MODIFIED BYTECODE")
+                # print(dis.Bytecode(code).info())
+                print(dis.Bytecode(code).dis())
+                print("\nGUARDS:")
+                for guard in sorted(tracer.guards):
+                    print(" -", str(guard))
+                print()
+            assert tracer.guards is not None
+            return GuardedCode(code, tracer.guards, frame.f_locals, frame.f_globals)
+        except Exception as e:
+            if config.debug:
+                print(
+                    "\nWONT CONVERT",
+                    e,
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                )
+                # print(dis.Bytecode(frame.f_code).info())
+                print(dis.Bytecode(frame.f_code).dis())
+            raise
 
     return _convert_frame_assert
 

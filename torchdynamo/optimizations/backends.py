@@ -57,9 +57,8 @@ def static_runtime(scripted, example_inputs, filename=None):
         def _call(*args):
             res = static_module(args, {})
             # inference mode tensors can cause issues
+            # res = [torch.from_numpy(x.numpy()) for x in res]
             res = [x.clone() for x in res]
-            if len(res) == 1:
-                return res[0]
             return res
 
         # shake out any errors
@@ -153,10 +152,7 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000):
             torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack())
             for i in range(m.get_num_outputs())
         ]
-        if len(outs) == 1:
-            return outs[0]
-        else:
-            return outs
+        return outs
 
     # shake out any errors
     exec_tvm(*example_inputs)
@@ -215,8 +211,6 @@ def onnxrt_wrapper(filename, example_inputs):
             None, {f"i{i}": to_numpy(arg) for i, arg in enumerate(args)}
         )
         res = [torch.from_numpy(x) for x in res]
-        if len(res) == 1:
-            return res[0]
         return res
 
     # shake out any errors
