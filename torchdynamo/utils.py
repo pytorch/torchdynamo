@@ -1,8 +1,12 @@
+import collections
 import functools
+import os
 import weakref
 
 import torch
 from torch import fx
+
+counters = collections.defaultdict(collections.Counter)
 
 
 def count_calls(g: fx.Graph):
@@ -72,3 +76,17 @@ def make_cell(val):
 
     assert len(f.__closure__) == 1
     return f.__closure__[0]
+
+
+class Unsupported(RuntimeError):
+    pass
+
+
+def unimplemented(msg: str):
+    counters["unimplemented"][msg] += 1
+    assert msg != os.environ.get("BREAK", False)
+    raise Unsupported(msg)
+
+
+def warning(msg: str):
+    counters["warnings"][msg] += 1

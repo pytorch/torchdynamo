@@ -1,3 +1,4 @@
+import _weakrefset
 import enum
 import importlib
 import inspect
@@ -10,7 +11,6 @@ import selectors
 import threading
 import types
 import typing
-import _weakrefset
 import unittest
 
 import torch

@@ -1,13 +1,11 @@
 import collections
 import copy
-import dataclasses
 import dis
 import functools
 import importlib
 import inspect
 import itertools
 import operator
-import os
 import re
 import sys
 import types
@@ -21,8 +19,9 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import config, skipfiles
-from .allowed_functions import is_allowed, is_builtin
+from . import config
+from . import skipfiles
+from .allowed_functions import is_allowed
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
@@ -30,38 +29,40 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
-from .guards import GuardSource
 from .resume_execution import ContinueExecutionCache
+from .utils import Unsupported
 from .utils import count_calls
+from .utils import counters
 from .utils import istensor
 from .utils import istype
-from .variable_tracker import AllowedFunctionOrModuleVariable, UserDefinedClassVariable
+from .utils import unimplemented
+from .utils import warning
+from .variable_builder import GlobalVariableBuilder
+from .variable_builder import LocalVariableBuilder
+from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BaseUserFunctionVariable
 from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
-from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
+from .variable_tracker import ConstantVariable
 from .variable_tracker import FunctionConstantWrapper
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
-from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import NNModuleVariable
+from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import SuperVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
-from .variable_tracker import typestr
 from .variable_tracker import UnknownVariable
-from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
-
-counters = collections.defaultdict(collections.Counter)
+from .variable_tracker import typestr
 
 
 def proxy_args_kwargs(args, kwargs):
@@ -73,20 +74,6 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         )
-
-
-class Unsupported(RuntimeError):
-    pass
-
-
-def unimplemented(msg: str):
-    counters["unimplemented"][msg] += 1
-    assert msg != os.environ.get("BREAK", False)
-    raise Unsupported(msg)
-
-
-def warning(msg: str):
-    counters["warnings"][msg] += 1
 
 
 def stack_op(fn: typing.Callable):
@@ -196,47 +183,6 @@ def break_graph_if_unsupported(inner_fn):
     return wrapper
 
 
-@dataclasses.dataclass
-class Arg:
-    name: str
-    example: Any
-
-    def get_examples(self):
-        return [self.example]
-
-    def __len__(self):
-        return 1
-
-
-@dataclasses.dataclass
-class LocalArg(Arg):
-    def load(self, tracer):
-        return [tracer.create_load(self.name)]
-
-
-@dataclasses.dataclass
-class GlobalArg(Arg):
-    def load(self, tracer):
-        return [tracer.create_load_global(self.name)]
-
-
-@dataclasses.dataclass
-class LocalListArg(Arg):
-    length: int
-
-    def load(self, tracer):
-        return [
-            tracer.create_load(self.name),
-            create_instruction("UNPACK_SEQUENCE", self.length),
-        ]
-
-    def get_examples(self):
-        return list(reversed(self.example))
-
-    def __len__(self):
-        return self.length
-
-
 class InstructionTranslatorBase(fx.Tracer):
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
@@ -326,91 +272,6 @@ class InstructionTranslatorBase(fx.Tracer):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] = self.code_options["co_names"] + (name,)
         return create_instruction("LOAD_ATTR", self.code_options["co_names"], name)
-
-    def wrap_local(self, name, value):
-        """
-        Turn an arg/input to the frame into a VariableTracker instance
-        """
-        if istensor(value):
-            self.graphargs.append(LocalArg(name, value))
-            return TensorVariable(
-                proxy=self.create_graph_input(name, type(value)),
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TENSOR_MATCH)},
-                **TensorVariable.specialize(value),
-            )
-        elif isinstance(value, torch.nn.Module):
-            return self.add_submodule(
-                value,
-                name,
-                guards={
-                    Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
-                    Guard(name, GuardSource.LOCAL, GuardBuilder.OBJECT_MUTATION),
-                },
-            )
-        elif value is None or istype(value, bool):
-            # For these, just specialize on exact value
-            return ConstantVariable(
-                value=value,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)},
-            )
-        elif (
-            istype(value, int)
-            or (istype(value, float) and value in (-1.0, 0.0, 0.25, 0.5, 1.0, 2.0))
-            or (
-                istype(value, (tuple, list, torch.Size))
-                and all(istype(x, int) for x in value)
-            )
-        ):
-            # For these, just specialize on exact value
-            return ConstantVariable(
-                value=value,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.EQUALS_MATCH)},
-            )
-        elif istype(value, float):
-            self.graphargs.append(LocalArg(name, value))
-            return BasicTypeVariable(
-                proxy=self.create_graph_input(name, type(value)),
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
-            )
-        elif istype(value, (tuple, list)) and all(istensor(x) for x in value):
-            guards = {Guard(name, GuardSource.LOCAL, GuardBuilder.FIXED_TENSOR_LIST)}
-            self.graphargs.append(LocalListArg(name, value, len(value)))
-            # LocalListArg uses UNPACK_SEQUENCE, which reverses the order
-            items = [
-                TensorVariable(
-                    proxy=self.create_graph_input(f"{name}_{idx}", type(v)),
-                    guards=guards,
-                    **TensorVariable.specialize(v),
-                )
-                for idx, v in reversed(list(enumerate(value)))
-            ]
-            cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
-            return cls(list(reversed(items)), guards=guards)
-        elif is_allowed(value):
-            return AllowedFunctionOrModuleVariable(
-                value,
-                guards={
-                    Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
-                },
-            )
-        elif is_builtin(value):
-            return BuiltinVariable(
-                value,
-                guards={
-                    Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH),
-                },
-            )
-
-        elif istype(value, type) and not skipfiles.check(inspect.getfile(value)):
-            return UserDefinedClassVariable(
-                value, guards={Guard(name, GuardSource.LOCAL, GuardBuilder.ID_MATCH)}
-            )
-        else:
-            warning(f"UnsupportedVariable {typestr(value)}")
-            return UnsupportedVariable(
-                value,
-                guards={Guard(name, GuardSource.LOCAL, GuardBuilder.TYPE_MATCH)},
-            )
 
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
         assert isinstance(mod, (torch.nn.Module, torch.Tensor))
@@ -789,98 +650,7 @@ class InstructionTranslatorBase(fx.Tracer):
             value = self.f_globals[inst.argval]
         except KeyError:
             return self.load_builtin(inst)
-        if is_allowed(value):
-            self.push(
-                AllowedFunctionOrModuleVariable(
-                    value=value,
-                    guards={
-                        Guard(
-                            inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
-                        )
-                    },
-                    global_name=inst.argval,
-                )
-            )
-        elif istensor(value):
-            # turn a load of a global tensor into an arg for the graph
-            self.graphargs.append(GlobalArg(inst.argval, value))
-            self.push(
-                TensorVariable(
-                    proxy=self.create_graph_input(inst.argval),
-                    guards={
-                        Guard(
-                            inst.argval, GuardSource.GLOBAL, GuardBuilder.TENSOR_MATCH
-                        )
-                    },
-                    global_name=inst.argval,
-                    **TensorVariable.specialize(value),
-                )
-            )
-        elif istype(value, types.FunctionType):
-            self.push(
-                UserFunctionVariable(
-                    value,
-                    guards={
-                        Guard(
-                            inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
-                        )
-                    },
-                    global_name=inst.argval,
-                )
-            )
-        elif isinstance(value, bool) or value is None:
-            self.push(
-                ConstantVariable(
-                    value=self.f_globals[inst.argval],
-                    guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
-                    },
-                    global_name=inst.argval,
-                )
-            )
-        elif istype(value, types.ModuleType):
-            self.push(
-                PythonModuleVariable(
-                    value,
-                    guards={
-                        Guard(
-                            inst.argval, GuardSource.GLOBAL, GuardBuilder.FUNCTION_MATCH
-                        )
-                    },
-                    global_name=inst.argval,
-                )
-            )
-        elif isinstance(value, torch.nn.Module):
-            self.push(
-                self.add_submodule(
-                    value,
-                    inst.argval,
-                    guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
-                    },
-                    global_name=inst.argval,
-                )
-            )
-        elif istype(value, type) and not skipfiles.check(inspect.getfile(value)):
-            self.push(
-                UserDefinedClassVariable(
-                    value,
-                    guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.ID_MATCH)
-                    },
-                    global_name=inst.argval,
-                )
-            )
-        else:
-            self.push(
-                UnsupportedVariable(
-                    value,
-                    guards={
-                        Guard(inst.argval, GuardSource.GLOBAL, GuardBuilder.TYPE_MATCH)
-                    },
-                    global_name=inst.argval,
-                )
-            )
+        self.push(GlobalVariableBuilder(self, inst.argval)(value))
 
     def IMPORT_NAME(self, inst):
         value = importlib.import_module(inst.argval)
@@ -1367,18 +1137,68 @@ class InstructionTranslatorBase(fx.Tracer):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
-    def output_proxy(self, rv):
-        if isinstance(rv, VariableTracker):
-            self.guards.update(rv.guards)
+    def compile_partial_subgraph(self):
+        """
+        Generate a subgraph to continue execution on user code.
+        Automatically restore live variables.
+        """
+        self.prune_dead_locals()
+        stack_values = list(self.stack)
+        root = FakeRootModule(self.nn_modules)
 
-        if isinstance(rv, VariableTracker) and rv.is_proxy():
-            return rv.as_proxy()
-        elif isinstance(rv, NNModuleVariable):
-            return self.create_proxy("get_attr", rv.module_key, tuple(), {})
-        elif isinstance(rv, (list, tuple)):
-            return tuple(map(self.output_proxy, rv))
+        # Add all the local vars to the "stack" so restore at the end
+        restore_vars = []
+        val_to_names = collections.OrderedDict()
+        if stack_values:
+            val_to_names[stack_values[-1]] = list()
+        for k, v in self.symbolic_locals.items():
+            if v.initial_name == k:
+                continue  # no need to restore initial state
+            if v not in val_to_names:
+                val_to_names[v] = list()
+            val_to_names[v].append(k)
+        for v in val_to_names.keys():
+            restore_vars.extend(val_to_names[v])
+            stack_values.extend([v] * len(val_to_names[v]))
 
-        raise unimplemented(f"RETURN_VALUE {type(rv).__name__}")
+        if (
+            stack_values
+            and all(isinstance(x, TensorVariable) for x in stack_values)
+            and len(set(stack_values)) == len(stack_values)
+        ):
+            # optimization to generate better code in a common case
+            self.add_output_instructions(
+                self.compile_subgraph(list(reversed(stack_values)), root)
+                + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
+            )
+        else:
+            graph_output_var = self.new_var("graph_out")
+            pass1 = PyCodegen(self, root, graph_output_var)
+            pass1.foreach(stack_values)
+            # one more time now that we have established tempvars
+            pass2 = PyCodegen(
+                self,
+                root,
+                graph_output_var,
+                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+            )
+            pass2.foreach(stack_values)
+            output = []
+            if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
+                output.extend(
+                    self.compile_subgraph(list(pass2.graph_outputs.keys()), root)
+                )
+                if len(pass2.graph_outputs) != 0:
+                    output.append(self.create_store(graph_output_var))
+                else:
+                    output.append(create_instruction("POP_TOP"))
+            self.add_output_instructions(output + pass2.output)
+
+        # restore all the live local vars
+        self.add_output_instructions(
+            [self.create_store(var) for var in reversed(restore_vars)]
+        )
+        self.instruction_pointer = None  # exit
 
     def compile_subgraph(self, rv, root):
         """
@@ -1387,9 +1207,11 @@ class InstructionTranslatorBase(fx.Tracer):
         """
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
+        for output in rv:
+            self.guards.update(output.guards)
 
         self.create_node(
-            "output", "output", (self.create_arg(self.output_proxy(rv)),), {}
+            "output", "output", (self.create_arg([x.as_proxy() for x in rv]),), {}
         )
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
@@ -1482,69 +1304,6 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.graph.erase_node(node)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
-
-    def compile_partial_subgraph(self):
-        """
-        Generate a subgraph to continue execution on user code.
-        Automatically restore live variables.
-        """
-        self.prune_dead_locals()
-        stack_values = list(self.stack)
-        root = FakeRootModule(self.nn_modules)
-
-        # Add all the local vars to the "stack" so restore at the end
-        restore_vars = []
-        val_to_names = collections.OrderedDict()
-        if stack_values:
-            val_to_names[stack_values[-1]] = list()
-        for k, v in self.symbolic_locals.items():
-            if v.initial_name == k:
-                continue  # no need to restore initial state
-            if v not in val_to_names:
-                val_to_names[v] = list()
-            val_to_names[v].append(k)
-        for v in val_to_names.keys():
-            restore_vars.extend(val_to_names[v])
-            stack_values.extend([v] * len(val_to_names[v]))
-
-        if (
-            stack_values
-            and all(isinstance(x, TensorVariable) for x in stack_values)
-            and len(set(stack_values)) == len(stack_values)
-        ):
-            # optimization to generate better code in a common case
-            self.add_output_instructions(
-                self.compile_subgraph(list(reversed(stack_values)), root)
-                + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
-            )
-        else:
-            graph_output_var = self.new_var("graph_out")
-            pass1 = PyCodegen(self, root, graph_output_var)
-            pass1.foreach(stack_values)
-            # one more time now that we have established tempvars
-            pass2 = PyCodegen(
-                self,
-                root,
-                graph_output_var,
-                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
-            )
-            pass2.foreach(stack_values)
-            output = []
-            if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                output.extend(
-                    self.compile_subgraph(list(pass2.graph_outputs.keys()), root)
-                )
-                if len(pass2.graph_outputs) != 0:
-                    output.append(self.create_store(graph_output_var))
-                else:
-                    output.append(create_instruction("POP_TOP"))
-            self.add_output_instructions(output + pass2.output)
-
-        # restore all the live local vars
-        self.add_output_instructions(
-            [self.create_store(var) for var in reversed(restore_vars)]
-        )
-        self.instruction_pointer = None  # exit
 
     def is_constant_or_input(self, value: VariableTracker):
         result = value.initial_name is not None or value.global_name is not None
@@ -1687,17 +1446,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(
-            (k, self.wrap_local(k, f_locals[k]).with_initial_name(k))
+            (k, LocalVariableBuilder(self, k)(f_locals[k]))
             for k in vars
             if k in f_locals
         )
 
     def should_compile_partial_graph(self):
         return True
-        # if count_calls(self.graph) >= config.minimum_call_count:
-        #     self.should_compile_partial_graph = lambda: True
-        #     return True
-        # return False
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None

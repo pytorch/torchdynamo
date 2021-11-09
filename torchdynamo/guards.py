@@ -13,11 +13,11 @@ from typing import Set
 
 import torch
 
+from . import mutation_guard
+from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
-from ._guards import TensorGuards
 from .utils import istype
-from . import mutation_guard
 
 
 class GuardSource(enum.Enum):
@@ -40,12 +40,11 @@ class Guard:
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
 
+    def sort_key(self):
+        return self.source.value, self.create_fn.__code__.co_firstlineno, self.name
+
     def __lt__(self, other):
-        return (self.source.value, self.name, self.create_fn.__name__) < (
-            other.source.value,
-            other.name,
-            other.create_fn.__name__,
-        )
+        return self.sort_key() < other.sort_key()
 
     def __str__(self):
         return f"{self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
@@ -92,6 +91,10 @@ class GuardBuilder:
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
 
+    def FUNCTION_MATCH(self, guard: Guard):
+        """things like torch.add and user defined functions"""
+        return self.ID_MATCH(guard)
+
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
         assert istype(
@@ -100,10 +103,6 @@ class GuardBuilder:
         if istype(val, torch.Size):
             val = tuple(val)
         self.code.append(f"{self.arg_ref(guard)} == {val!r}")
-
-    def FUNCTION_MATCH(self, guard: Guard):
-        """things like torch.add and user defined functions"""
-        pass  # should we add more checks here?
 
     def TENSOR_MATCH(self, guard: Guard):
         self.tensor_check_names.append(self.arg_ref(guard))
@@ -138,7 +137,7 @@ class GuardedCode:
 
         local_builder = GuardBuilder(self.id_ref, f_locals, self)
         global_builder = GuardBuilder(self.id_ref, f_globals, self)
-        for guard in guards or []:
+        for guard in sorted(guards or [], key=Guard.sort_key):
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()

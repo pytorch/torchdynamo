@@ -22,7 +22,7 @@ import torch
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
 
-from torchdynamo import symbolic_convert
+import torchdynamo.utils
 from torchdynamo.optimizations.backends import optimize_for_inference, onnxrt
 from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.profiler import fx_insert_profiling
@@ -62,6 +62,7 @@ current_device = ""
 if getpass.getuser() == "jansel":
     # jansel applied this fix https://github.com/pytorch/benchmark/pull/479
     SKIP.clear()
+    SKIP.add("maml")
 
 
 class NullContext:
@@ -82,8 +83,6 @@ def short_name(name, limit=20):
 
 
 def iter_models(args):
-    # Disable auto-scripting in demucs
-    torch.jit.ScriptModule = torch.nn.Module
     from fastNLP.core import logger
 
     logger.setLevel(logging.WARNING)
@@ -129,11 +128,11 @@ class Stats:
 
     @classmethod
     def reset_counters(cls):
-        for k, v in symbolic_convert.counters.items():
+        for k, v in torchdynamo.utils.counters.items():
             cls.totals[k].update(v)
-        ok = symbolic_convert.counters["frames"]["ok"]
-        total = symbolic_convert.counters["frames"]["total"]
-        symbolic_convert.counters.clear()
+        ok = torchdynamo.utils.counters["frames"]["ok"]
+        total = torchdynamo.utils.counters["frames"]["total"]
+        torchdynamo.utils.counters.clear()
         return ok, total
 
     @classmethod
@@ -199,7 +198,7 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     except Exception:
         ort = None
 
-    timings = np.zeros((args.repeat, 5), np.float64)
+    timings = np.zeros((args.repeat, 4), np.float64)
     timings.fill(1.0e10)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
@@ -210,8 +209,6 @@ def speedup_experiment2(speedups, args, model, example_inputs):
             _, timings[rep, 2] = timed(ofi, example_inputs)
         if ort is not None:
             _, timings[rep, 3] = timed(ort, example_inputs)
-        with torchdynamo.run():
-            _, timings[rep, 4] = timed(model, example_inputs)
 
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
@@ -227,7 +224,7 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     result = " ".join(
         [
             format_speedup(s, p, m is not None)
-            for s, p, m in zip(speedup, pvalue, [ts, ofi, ort, model])
+            for s, p, m in zip(speedup, pvalue, [ts, ofi, ort])
         ]
     )
     output_csv(

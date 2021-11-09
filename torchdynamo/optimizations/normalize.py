@@ -7,7 +7,7 @@ import operator
 import torch
 from torch.fx.operator_schemas import get_signature_for_torch_op
 
-from torchdynamo import symbolic_convert
+import torchdynamo.utils
 from torchdynamo.allowed_functions import _allowed_function_ids
 
 VIEW_OPS = {
@@ -201,12 +201,12 @@ class Inplacifier:
                         continue
                     elif node.target in INPLACE_OPS:
                         kwargs["inplace"] = True
-                        symbolic_convert.counters["optimizations"]["inplace"] += 1
+                        torchdynamo.utils.counters["optimizations"]["inplace"] += 1
                     elif " out: torch.Tensor" in repr(
                         get_signature_for_torch_op(node.target)
                     ):
                         kwargs["out"] = arg
-                        symbolic_convert.counters["optimizations"]["out"] += 1
+                        torchdynamo.utils.counters["optimizations"]["out"] += 1
                     else:
                         continue
                     with self.gm.graph.inserting_before(node):

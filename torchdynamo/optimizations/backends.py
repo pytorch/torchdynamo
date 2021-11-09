@@ -1,8 +1,8 @@
+import functools
 import logging
 import os
 import subprocess
 import tempfile
-import functools
 
 import torch
 
@@ -21,6 +21,7 @@ def torchscript(model0, example_inputs, filename=None):
     try:
         model1 = torch.jit.trace(model0, example_inputs)
     except Exception:
+        log.exception("jit trace error")
         try:
             model1 = torch.jit.script(model0)
         except Exception:
@@ -173,7 +174,7 @@ def onnxrt(scripted, example_inputs, filename=None):
                     example_inputs,
                     filename,
                     input_names=[f"i{i}" for i in range(len(example_inputs))],
-                    # do_constant_folding=True,
+                    do_constant_folding=True,
                     opset_version=14,
                 )
             except IndexError:

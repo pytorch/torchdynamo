@@ -9,10 +9,10 @@ from typing import Set
 
 import torch.fx
 
+from torchdynamo import config
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.guards import Guard
 from torchdynamo.guards import GuardSource
-from torchdynamo import config
 from torchdynamo.utils import make_cell
 
 combine_guards = functools.partial(functools.reduce, set.union)

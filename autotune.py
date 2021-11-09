@@ -32,7 +32,7 @@ from torchdynamo.testing import same
 
 ANSOR = False
 TASO = False
-STATIC_RUNTIME = True
+STATIC_RUNTIME = False
 
 
 def synchronize():

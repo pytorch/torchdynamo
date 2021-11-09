@@ -20,7 +20,7 @@ from torchdynamo.optimizations.backends import torchscript
 from torchdynamo.optimizations.backends import tvm_compile
 from torchdynamo.optimizations.normalize import long_name
 from torchdynamo.optimizations.normalize import normalize
-from torchdynamo.symbolic_convert import counters
+from torchdynamo.utils import counters
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):

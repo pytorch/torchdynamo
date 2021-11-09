@@ -16,9 +16,8 @@ from torchdynamo.bytecode_analysis import remove_dead_code, remove_pointless_jum
 from torchdynamo.bytecode_transformation import is_generator
 from torchdynamo.bytecode_transformation import transform_code_object
 from torchdynamo.guards import GuardedCode
-from torchdynamo.symbolic_convert import InstructionTranslator, Unsupported
-from torchdynamo.symbolic_convert import counters
-from torchdynamo.symbolic_convert import unimplemented
+from torchdynamo.symbolic_convert import InstructionTranslator
+from torchdynamo.utils import counters, Unsupported, unimplemented
 
 
 class Tracker:

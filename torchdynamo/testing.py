@@ -8,6 +8,7 @@ import torch
 from torch import fx
 
 import torchdynamo
+import torchdynamo.utils
 from torchdynamo import eval_frame
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.bytecode_transformation import debug_checks
@@ -138,12 +139,12 @@ class TestCase(unittest.TestCase):
         torchdynamo.config.debug = True
 
     def setUp(self):
-        torchdynamo.symbolic_convert.counters.clear()
+        torchdynamo.utils.counters.clear()
 
     def tearDown(self):
-        for k, v in torchdynamo.symbolic_convert.counters.items():
+        for k, v in torchdynamo.utils.counters.items():
             print(k, v.most_common())
-        torchdynamo.symbolic_convert.counters.clear()
+        torchdynamo.utils.counters.clear()
 
 
 def dummy_fx_compile(gm: fx.GraphModule):
