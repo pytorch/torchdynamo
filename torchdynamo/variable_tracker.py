@@ -11,15 +11,11 @@ import torch.fx
 
 from torchdynamo import config
 from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.guards import Guard
-from torchdynamo.guards import GuardSource
 from torchdynamo.utils import make_cell
+from torchdynamo.utils import identity
+from torchdynamo.variable_source import Source
 
 combine_guards = functools.partial(functools.reduce, set.union)
-
-
-def identity(x):
-    return x
 
 
 class VariableTracker:
@@ -77,10 +73,6 @@ class VariableTracker:
 
     __repr__ = __str__
 
-    def with_initial_name(self, name: str):
-        """Shallow copy with a different value for self.initial_name"""
-        return self.clone(initial_name=name)
-
     def python_type(self):
         raise NotImplementedError(f"{self} has no type")
 
@@ -103,13 +95,15 @@ class VariableTracker:
             return False
 
     def create_guard(self, fn):
-        from torchdynamo.guards import Guard, GuardSource
-
-        if self.initial_name:
-            return Guard(self.initial_name, GuardSource.LOCAL, fn)
-        if self.global_name:
-            return Guard(self.global_name, GuardSource.GLOBAL, fn)
+        if self.source:
+            return self.source.create_guard(fn)
         raise NotImplementedError()
+
+    def replace_guards(self, guards, *fns):
+        name = self.source.name()
+        new_guards = {g for g in (guards or []) if g.name != name}
+        new_guards.update(self.source.create_guard(fn) for fn in fns)
+        return new_guards
 
     def has_const_attr(self, tx, name):
         try:
@@ -131,8 +125,6 @@ class VariableTracker:
         raise NotImplementedError()
 
     def reconstruct(self, codegen):
-        if self.reconstruct_fn is not None:
-            return self.reconstruct_fn(codegen)
         raise NotImplementedError()
 
     def unpack_var_sequence(self, tx):
@@ -148,15 +140,11 @@ class VariableTracker:
     def __init__(
         self,
         guards: Optional[Set] = None,
-        initial_name: Optional[str] = None,
-        global_name: Optional[str] = None,
-        reconstruct_fn: Callable = None,
+        source: Source = None,
     ):
         super(VariableTracker, self).__init__()
         self.guards = guards or set()
-        self.initial_name = initial_name
-        self.global_name = global_name
-        self.reconstruct_fn = reconstruct_fn
+        self.source = source
 
 
 class TensorVariable(VariableTracker):
@@ -368,7 +356,7 @@ class ListIteratorVariable(VariableTracker):
         # Note this is the only mutation in VariableTracker so far
         item = self.items[self.index]
         self.index += 1
-        self.initial_name = None
+        self.source = None
         return item, self
 
 
@@ -393,11 +381,6 @@ class GetAttrVariable(VariableTracker):
         if name not in step2.__dict__:
             raise NotImplementedError()
         return inspect.getattr_static(step2, name)
-
-    def create_guard(self, fn):
-        if self.obj.initial_name:
-            return Guard(f"{self.obj.initial_name}.{self.name}", GuardSource.LOCAL, fn)
-        raise NotImplementedError()
 
     def reconstruct(self, codegen):
         codegen(self.obj)

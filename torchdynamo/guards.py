@@ -108,9 +108,6 @@ class GuardBuilder:
         self.tensor_check_names.append(self.arg_ref(guard))
         self.tensor_check_examples.append(self.get(guard.name))
 
-    def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.guarded_code)
-
     def FIXED_TENSOR_LIST(self, guard: Guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -120,6 +117,9 @@ class GuardBuilder:
         for i, v in enumerate(value):
             self.tensor_check_names.append(f"{ref}[{i}]")
             self.tensor_check_examples.append(v)
+
+    def OBJECT_MUTATION(self, guard: Guard):
+        mutation_guard.watch(self.get(guard.name), self.guarded_code)
 
 
 class GuardedCode:

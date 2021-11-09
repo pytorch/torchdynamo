@@ -21,7 +21,7 @@ from torch import fx
 
 from . import config
 from . import skipfiles
-from .allowed_functions import is_allowed
+from .allowed_functions import is_allowed, is_builtin
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
@@ -38,6 +38,7 @@ from .utils import istype
 from .utils import unimplemented
 from .utils import warning
 from .variable_builder import GlobalVariableBuilder
+from .variable_source import LocalSource, AttrSource
 from .variable_builder import LocalVariableBuilder
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
@@ -183,6 +184,12 @@ def break_graph_if_unsupported(inner_fn):
     return wrapper
 
 
+def is_safe_constant(v):
+    if istype(v, (tuple, frozenset)):
+        return all(map(is_safe_constant, v))
+    return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None)))
+
+
 class InstructionTranslatorBase(fx.Tracer):
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
@@ -238,18 +245,7 @@ class InstructionTranslatorBase(fx.Tracer):
         )
 
     def create_load_const(self, value):
-        def is_safe(v):
-            if istype(v, (tuple, frozenset)):
-                return all(map(is_safe, v))
-            if istype(v, (list, dict, set)):
-                # These could mutate
-                return False
-            assert istype(
-                v, (types.CodeType, int, float, bool, str, bytes, type(None))
-            ), f"unsupported constant type {typestr(v)}"
-            return True
-
-        assert is_safe(value), f"unsafe constant {value}"
+        assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
     def _create_load_const(self, value):
@@ -667,9 +663,9 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
-        self.push(
-            BuiltinVariable(self.f_builtins[inst.argval], global_name=inst.argval)
-        )
+        val = self.f_builtins[inst.argval]
+        assert is_builtin(val)
+        self.push(GlobalVariableBuilder(self, inst.argval)(val))
 
     def jump(self, inst):
         self.instruction_pointer = self.indexof[id(inst.target)]
@@ -821,8 +817,7 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
-        # there might be a NULL on the stack which we cant reconstruct
-        self.push(self.pop().clone(reconstruct_fn=None))
+        self.push(self.pop())
         self.push(None)
 
     def CALL_METHOD(self, inst):
@@ -836,12 +831,8 @@ class InstructionTranslatorBase(fx.Tracer):
         obj = self.pop()
         name = inst.argval
         options = VariableTracker.propagate([obj])
-
-        def reconstruct(codegen):
-            codegen(obj)
-            return [codegen.create_load_attr(name)]
-
-        options["reconstruct_fn"] = reconstruct
+        if obj.source:
+            options["source"] = AttrSource(obj.source, name)
 
         if isinstance(obj, NNModuleVariable):
             base = self.get_submodule(obj.module_key)
@@ -953,12 +944,11 @@ class InstructionTranslatorBase(fx.Tracer):
                 unimplemented("PythonModuleVariable attribute")
         elif obj.has_const_attr(self, name) and obj.can_create_guard():
             try:
-                options["guards"] = {
-                    g for g in options["guards"] if g.name != obj.initial_name
-                }
-                if obj.initial_name:
-                    options["guards"].add(obj.create_guard(GuardBuilder.ID_MATCH))
-                options["guards"].add(obj.create_guard(GuardBuilder.OBJECT_MUTATION))
+                options["guards"] = obj.replace_guards(
+                    options.get("guards"),
+                    GuardBuilder.ID_MATCH,
+                    GuardBuilder.OBJECT_MUTATION,
+                )
                 self.push(ConstantVariable(obj.get_const_attr(self, name), **options))
             except AttributeError:
                 unimplemented("dynamic attr UnsupportedVariable")
@@ -1152,7 +1142,7 @@ class InstructionTranslatorBase(fx.Tracer):
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in self.symbolic_locals.items():
-            if v.initial_name == k:
+            if isinstance(v.source, LocalSource) and v.source.name() == k:
                 continue  # no need to restore initial state
             if v not in val_to_names:
                 val_to_names[v] = list()
@@ -1306,27 +1296,11 @@ class InstructionTranslatorBase(fx.Tracer):
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
     def is_constant_or_input(self, value: VariableTracker):
-        result = value.initial_name is not None or value.global_name is not None
-        if not result and value.is_python_constant():
-            try:
-                self.create_load_const(value.as_python_constant())
-                return True
-            except AssertionError:
-                return False
-        return result
-
-    def load_const_var(self, value: VariableTracker):
-        if value.initial_name is not None:
-            # guards to should not be needed for a copy?
-            return [self.create_load(value.initial_name)]
-        elif value.global_name is not None:
-            return [self.create_load_global(value.global_name)]
-        elif value.is_python_constant():
-            # no need to get a constant from the compiled graph
-            self.guards.update(value.guards)
-            return [self.create_load_const(value.as_python_constant())]
-        else:
-            assert False
+        if value.source is not None:
+            return True
+        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+            return True
+        return False
 
     def add_output_instructions(self, prefix: List[Instruction]):
         """
@@ -1605,8 +1579,12 @@ class PyCodegen(object):
             return
 
         self.guards.update(value.guards)
-        if self.is_constant_or_input(value):
-            output.extend(self.load_const_var(value))
+        if value.source is not None:
+            output.extend(value.source.reconstruct(self))
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
+            output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorVariable):
             if value not in graph_outputs:
                 graph_outputs[value] = len(graph_outputs)

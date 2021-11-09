@@ -89,4 +89,5 @@ def unimplemented(msg: str):
 
 
 def warning(msg: str):
+    assert msg != os.environ.get("BREAK", False)
     counters["warnings"][msg] += 1

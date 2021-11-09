@@ -15,6 +15,7 @@ from .guards import GuardSource
 from .utils import istensor
 from .utils import istype
 from .utils import warning
+from .variable_source import LocalSource, GlobalSource
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstantVariable
@@ -101,6 +102,28 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.TENSOR_MATCH),
                 **TensorVariable.specialize(value),
             )
+        elif istype(value, (tuple, list)) and value and all(istensor(x) for x in value):
+            self.add_list_arg(value)
+            items = [
+                TensorVariable(
+                    proxy=self.tx.create_graph_input(f"{self.name}_{idx}", type(v)),
+                    guards=make_guards(GuardBuilder.FIXED_TENSOR_LIST),
+                    **TensorVariable.specialize(v),
+                )
+                for idx, v in reversed(list(enumerate(value)))
+            ]
+            cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
+            return cls(
+                list(reversed(items)),
+                guards=make_guards(GuardBuilder.FIXED_TENSOR_LIST),
+            )
+        # This would would pass floats into the graph as a input
+        # elif istype(value, float):
+        #     self.add_arg(name, value)
+        #     return BasicTypeVariable(
+        #         proxy=self.create_graph_input(name, type(value)),
+        #         guards=make_guards(GuardBuilder.TYPE_MATCH),
+        #     )
         elif isinstance(value, torch.nn.Module):
             return self.tx.add_submodule(
                 value,
@@ -116,13 +139,6 @@ class VariableBuilder:
                 value=value,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        # This would would pass floats into the graph as a input
-        # elif istype(value, float):
-        #     self.add_arg(name, value)
-        #     return BasicTypeVariable(
-        #         proxy=self.create_graph_input(name, type(value)),
-        #         guards=make_guards(GuardBuilder.TYPE_MATCH),
-        #     )
         elif istype(value, (int, float)) or (
             istype(value, (tuple, list, torch.Size))
             and all(istype(x, int) for x in value)
@@ -132,25 +148,11 @@ class VariableBuilder:
                 value=value,
                 guards=make_guards(GuardBuilder.EQUALS_MATCH),
             )
-        elif istype(value, (tuple, list)) and all(istensor(x) for x in value):
-            self.add_list_arg(value)
-            items = [
-                TensorVariable(
-                    proxy=self.tx.create_graph_input(f"{self.name}_{idx}", type(v)),
-                    guards=make_guards(GuardBuilder.FIXED_TENSOR_LIST),
-                    **TensorVariable.specialize(v),
-                )
-                for idx, v in reversed(list(enumerate(value)))
-            ]
-            cls = {tuple: TupleVariable, list: ListVariable}[type(value)]
-            return cls(
-                list(reversed(items)),
-                guards=make_guards(GuardBuilder.FIXED_TENSOR_LIST),
-            )
+
         elif is_builtin(value):
             return BuiltinVariable(
                 value,
-                guards=make_guards(GuardBuilder.ID_MATCH),
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif is_allowed(value):
             return AllowedFunctionOrModuleVariable(
@@ -180,6 +182,18 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.TYPE_MATCH),
             )
 
+    def add_arg(self, value):
+        raise NotImplementedError()
+
+    def add_list_arg(self, value):
+        raise NotImplementedError()
+
+    def make_guards(self, *guards):
+        raise NotImplementedError()
+
+    def options(self):
+        raise NotImplementedError()
+
 
 class GlobalVariableBuilder(VariableBuilder):
     def add_arg(self, value):
@@ -197,7 +211,7 @@ class GlobalVariableBuilder(VariableBuilder):
         }
 
     def options(self):
-        return {"global_name": self.name}
+        return {"source": GlobalSource(self.name)}
 
 
 class LocalVariableBuilder(VariableBuilder):
@@ -211,4 +225,4 @@ class LocalVariableBuilder(VariableBuilder):
         return {Guard(self.name, GuardSource.LOCAL, guard) for guard in guards}
 
     def options(self):
-        return {"initial_name": self.name}
+        return {"source": LocalSource(self.name)}
