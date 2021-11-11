@@ -5,7 +5,6 @@ import copy
 import csv
 import functools
 import gc
-import getpass
 import io
 import logging
 import os
@@ -41,28 +40,9 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {
-    # torchbench `get_model()` is broken these:
-    "albert",
-    "demucs",
-    "hf_T5",
-    "hf_Reformer",
-    "hf_Longformer",
-    "hf_GPT2",
-    "hf_DistilBert",
-    "hf_BigBird",
-    "hf_Bert",
-    "hf_Bart",
-    "nvidia_deeprecommender",
-    "hf_Albert",
-}
+SKIP = {}
 current_name = ""
 current_device = ""
-
-if getpass.getuser() == "jansel":
-    # jansel applied this fix https://github.com/pytorch/benchmark/pull/479
-    SKIP.clear()
-    SKIP.add("maml")
 
 
 class NullContext:
@@ -321,8 +301,12 @@ def main():
         correct_result = copy.deepcopy(model)(*example_inputs)
         torch.manual_seed(1337)
         torchdynamo.reset()
-        with optimize_ctx:
-            new_result = model(*example_inputs)
+        try:
+            with optimize_ctx:
+                new_result = model(*example_inputs)
+        except Exception:
+            logging.exception("unhandled error")
+            print("ERROR")
         if not same(correct_result, new_result):
             print("INCORRECT")
             continue

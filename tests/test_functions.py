@@ -559,3 +559,15 @@ class FunctionTests(torchdynamo.testing.TestCase):
             self.assertEqual(out[0], 2100)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 7)
+
+    def test_tensor_dict(self):
+        def fn(inputs):
+            return inputs["a"] - inputs["b"] * 1.5
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn({"a": v1, "b": v2})[0], -200)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)

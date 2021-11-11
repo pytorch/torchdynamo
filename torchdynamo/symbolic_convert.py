@@ -33,12 +33,11 @@ from .resume_execution import ContinueExecutionCache
 from .utils import Unsupported
 from .utils import count_calls
 from .utils import counters
-from .utils import istensor
 from .utils import istype
 from .utils import unimplemented
 from .utils import warning
-from .variable_builder import GlobalVariableBuilder
-from .variable_source import LocalSource, AttrSource
+from .variable_builder import GlobalVariableBuilder, AttributeVariableBuilder
+from .variable_source import LocalSource, AttrSource, GetItemSource
 from .variable_builder import LocalVariableBuilder
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
@@ -98,12 +97,21 @@ def stack_op(fn: typing.Callable):
                 fn(*[i.as_python_constant() for i in inputs]), **options
             )
         elif (
-            isinstance(inputs[0], BaseListVariable)
+            isinstance(inputs[0], (BaseListVariable, ConstDictVariable))
             and fn is operator.getitem
             and inputs[1].is_python_constant()
         ):
             base, item = inputs
             val = base.getitem_const(item)
+
+        elif (
+            isinstance(inputs[0], BaseListVariable)
+            and isinstance(inputs[1], BaseListVariable)
+            and fn is operator.add
+        ):
+            a, b = inputs
+            assert type(a) is type(b)
+            val = type(a)(a.items + b.items, **options)
         elif (
             isinstance(inputs[0], NNModuleVariable)
             and fn is operator.getitem
@@ -116,12 +124,14 @@ def stack_op(fn: typing.Callable):
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
             ), typestr(mod)
-            submod = mod[inputs[1].as_python_constant()]
+            assert inputs[0].source
+            key = inputs[1].as_python_constant()
+            submod = mod[key]
             val = self.add_submodule(
                 submod,
                 key,
                 inputs[1].as_python_constant(),
-                **options,
+                source=GetItemSource(inputs[0].source, key) ** options,
             )
         else:
             unimplemented(f"stack_op {typestr(*inputs)}")
@@ -417,9 +427,16 @@ class InstructionTranslatorBase(fx.Tracer):
                 # unroll Sequential()
                 options = VariableTracker.propagate([fn])
                 (arg,) = args
+                assert fn.source
                 for idx, submod in enumerate(mod):
                     self.call_function(
-                        self.add_submodule(submod, fn.module_key, idx, **options),
+                        self.add_submodule(
+                            submod,
+                            fn.module_key,
+                            idx,
+                            source=GetItemSource(fn.source, idx),
+                            **options,
+                        ),
                         [arg],
                         {},
                     )
@@ -444,6 +461,25 @@ class InstructionTranslatorBase(fx.Tracer):
                     [fn] + args,
                     kwargs,
                 )
+        elif (
+            isinstance(fn, UserMethodVariable)
+            and isinstance(fn.obj, NNModuleVariable)
+            and fn.fn is torch.nn.Module.children
+        ):
+            result = []
+            key = fn.obj.module_key
+            assert fn.obj.source
+            for name, submod in self.get_submodule(key).named_children():
+                result.append(
+                    self.add_submodule(
+                        submod,
+                        key,
+                        name,
+                        source=AttrSource(fn.obj.source, name),
+                        **options,
+                    )
+                )
+            self.push(TupleVariable(result, **options))
         elif isinstance(fn, BaseUserFunctionVariable):
             self.inline_user_function(fn, fn.self_args() + args, kwargs)
         elif isinstance(fn, BuiltinVariable):
@@ -526,7 +562,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 assert len(args) in (1, 2)
                 self.push(SuperVariable(*args, **options))
             else:
-                unimplemented(f"builtin call {fn.fn}")
+                unimplemented(f"builtin call {fn.fn} {args}")
         elif isinstance(fn, FunctionConstantWrapper):
             self.push(fn.call_const(args, kwargs))
         else:
@@ -836,86 +872,42 @@ class InstructionTranslatorBase(fx.Tracer):
 
         if isinstance(obj, NNModuleVariable):
             base = self.get_submodule(obj.module_key)
-            key = f"{obj.module_key}.{name}"
-            try:
-                subobj = inspect.getattr_static(base, name)
-            except AttributeError:
-                # TODO(jansel): figure out how to remove this
-                subobj = self.get_submodule(key)
-            if istensor(subobj):
-                options.update(TensorVariable.specialize(subobj))
-                self.push(
-                    TensorVariable(
-                        proxy=self.create_proxy("get_attr", key, tuple(), {}), **options
-                    )
-                )
-            elif isinstance(subobj, torch.nn.Module):
-                self.push(self.add_submodule(subobj, key, **options))
-            elif ConstantVariable.is_literal(subobj):
-                # Assumes module attributes are constant
-                # TODO(jansel): add guards?
-                self.push(
-                    ConstantVariable(
-                        subobj,
-                        **options,
-                    )
-                )
-            elif is_allowed(subobj):
-                self.push(AllowedFunctionOrModuleVariable(subobj, **options))
-            elif istype(subobj, property):
-                unimplemented("property")
-            elif istype(subobj, classmethod):
-                unimplemented("classmethod")
-            elif istype(subobj, staticmethod):
-                self.push(UserFunctionVariable(subobj.__get__(base), **options))
-            elif istype(subobj, types.FunctionType) and name not in base.__dict__:
-                self.push(UserMethodVariable(subobj, obj, **options))
-            elif istype(subobj, types.FunctionType) and name in base.__dict__:
-                self.push(UserFunctionVariable(subobj, **options))
-            elif callable(subobj):
-                base = self.get_submodule(obj.module_key)
-                method = getattr(base.__class__, name, None)
-                if isinstance(method, types.FunctionType):
-                    self.push(UserMethodVariable(method, obj, **options))
-                else:
-                    unimplemented("nn.Module callable")
-            elif isinstance(subobj, (list, tuple)):
-                subobj_proxy = self.create_proxy("get_attr", key, tuple(), {})
-                # If the container has exclusively nn.Modules, transform
-                # each module into a torchdynamo.NNModuleVariable;
-                # similarly for Tensors/torchdynamo.TensorVariable
-                output = []
-                for i, item in enumerate(subobj):
-                    if isinstance(item, torch.nn.Module):
-                        output.append(
-                            self.add_submodule(
-                                item,
-                                obj.module_key,
-                                name,
-                                i,
-                                **options,
-                            )
-                        )
-                    elif istensor(item):
-                        output.append(
-                            TensorVariable(
-                                proxy=self.create_proxy(
-                                    "call_function",
-                                    operator.getitem,
-                                    (subobj_proxy, i),
-                                    {},
-                                ),
-                                **options,
-                            )
-                        )
-                if len(output) != len(subobj):
-                    unimplemented("non-nn.Module items in list")
-                tracker_type = (
-                    ListVariable if isinstance(subobj, list) else TupleVariable
-                )
-                self.push(tracker_type(output, **options))
+            base_dict = object.__getattribute__(base, "__dict__")
+            class_member = True
+
+            if not obj.source:
+                unimplemented("GETATTR with no source")
+
+            if name in base_dict:
+                subobj = base_dict[name]
+            elif name in base_dict["_modules"]:
+                subobj = base_dict["_modules"][name]
+            elif name in base_dict["_parameters"]:
+                subobj = base_dict["_parameters"][name]
+            elif name in base_dict["_buffers"]:
+                subobj = base_dict["_buffers"][name]
             else:
-                self.push(GetAttrVariable(obj, name, **options))
+                subobj = inspect.getattr_static(base, name)
+                class_member = False
+
+            if class_member:
+                self.push(
+                    AttributeVariableBuilder(self, obj, name, options.get("guards"))(
+                        subobj
+                    )
+                )
+            else:
+                if istype(subobj, property):
+                    unimplemented("property")
+                elif istype(subobj, classmethod):
+                    unimplemented("classmethod")
+                elif istype(subobj, staticmethod):
+                    self.push(UserFunctionVariable(subobj.__get__(base), **options))
+                elif istype(subobj, types.FunctionType):
+                    self.push(UserMethodVariable(subobj, obj, **options))
+                else:
+                    unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+
         elif isinstance(obj, TensorVariable):
             const_result = obj.const_attr(name)
             if const_result is not None:
@@ -956,6 +948,22 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(GetAttrVariable(obj, name, **options))
 
     IMPORT_FROM = LOAD_ATTR
+
+    def STORE_SUBSCR(self, inst):
+        val, obj, key = self.popn(3)
+        if isinstance(obj, TensorVariable) and val.is_proxy() and key.is_proxy():
+            self.create_proxy(
+                "call_function",
+                operator.setitem,
+                (obj.as_proxy(), key.as_proxy(), val.as_proxy()),
+                {},
+            ),
+            # no result is pushed, so need to lift the guards to global
+            self.guards.update(
+                VariableTracker.propagate([val, obj, key]).get("guards", set())
+            )
+        else:
+            unimplemented(f"STORE_SUBSCR {obj}[{key}] = {val}")
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -1201,7 +1209,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.guards.update(output.guards)
 
         self.create_node(
-            "output", "output", (self.create_arg([x.as_proxy() for x in rv]),), {}
+            "output", "output", (self.create_arg(tuple(x.as_proxy() for x in rv)),), {}
         )
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
@@ -1280,6 +1288,13 @@ class InstructionTranslatorBase(fx.Tracer):
             #   UNPACK_SEQUENCE num_on_stack
 
     def remove_unused_graphargs(self):
+        for node in reversed(list(self.graph.nodes)):
+            if len(list(node.users)) == 0:
+                if node.op == "get_attr":
+                    self.graph.erase_node(node)
+                elif node.op == "call_function" and node.target is operator.getitem:
+                    self.graph.erase_node(node)
+
         expanded_graphargs = []
         for arg in self.graphargs:
             expanded_graphargs.extend([arg] * len(arg))
@@ -1487,7 +1502,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.has_self():
             unimplemented("inline with  __self__")
         if skipfiles.check(func.get_filename()):
-            unimplemented("inline in skipfiles")
+            unimplemented(
+                f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
+            )
 
         sub_locals = func.bind_args(parent, args, kwargs)
         for v in sub_locals.values():

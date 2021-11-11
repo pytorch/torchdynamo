@@ -1,4 +1,4 @@
-import _weakrefset
+import abc
 import enum
 import importlib
 import inspect
@@ -12,6 +12,7 @@ import threading
 import types
 import typing
 import unittest
+import _weakrefset
 
 import torch
 
@@ -25,6 +26,7 @@ SKIP_DIRS = [
     # skip some standard libs
     re.sub(r"__init__.py$", "", m.__file__)
     for m in (
+        abc,
         enum,
         importlib,
         inspect,

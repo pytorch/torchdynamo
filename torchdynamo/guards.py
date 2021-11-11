@@ -1,6 +1,6 @@
 import dataclasses
 import enum
-import inspect
+import re
 import textwrap
 import types
 import weakref
@@ -65,16 +65,11 @@ class GuardBuilder:
         self.guarded_code = guarded_code
 
     def get(self, name: str):
-        if "." in name:
-            parts = name.split(".")
-            return inspect.getattr_static(self.get(".".join(parts[:-1])), parts[-1])
-        return self.scope[name]
+        return eval(name, self.scope)
 
     def arg_ref(self, guard: Guard):
         name = guard.name
-        base = name
-        if "." in name:
-            base, attr = name.split(".", 2)
+        base = re.split(r"[.\[]", name)[0]
         if base not in self.argnames:
             self.argnames.append(base)
         return name
@@ -98,7 +93,7 @@ class GuardBuilder:
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
         assert istype(
-            val, (int, float, bool, type(None), type, list, tuple, torch.Size)
+            val, (int, float, bool, type(None), str, type, list, tuple, torch.Size)
         )
         if istype(val, torch.Size):
             val = tuple(val)
@@ -116,6 +111,15 @@ class GuardBuilder:
         self.code.append(f"len({ref}) == {len(value)}")
         for i, v in enumerate(value):
             self.tensor_check_names.append(f"{ref}[{i}]")
+            self.tensor_check_examples.append(v)
+
+    def FIXED_TENSOR_DICT(self, guard: Guard):
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
+        self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
+        for k, v in value.items():
+            self.tensor_check_names.append(f"{ref}[{k!r}]")
             self.tensor_check_examples.append(v)
 
     def OBJECT_MUTATION(self, guard: Guard):

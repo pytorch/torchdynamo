@@ -13,7 +13,7 @@ from torchdynamo import config
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.utils import make_cell
 from torchdynamo.utils import identity
-from torchdynamo.variable_source import Source
+from torchdynamo.variable_source import Source, GetItemSource
 
 combine_guards = functools.partial(functools.reduce, set.union)
 
@@ -225,6 +225,7 @@ class NNModuleVariable(VariableTracker):
         super(NNModuleVariable, self).__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
+        assert self.source
 
     def python_type(self):
         return self.module_type
@@ -234,11 +235,14 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         base = tx.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
-        assert isinstance(base, (torch.nn.ModuleList, torch.nn.ParameterList)), typestr(
-            base
-        )
+        assert isinstance(
+            base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
+        ), typestr(base)
+        assert self.source
         return [
-            tx.add_submodule(submod, key, idx, **options)
+            tx.add_submodule(
+                submod, key, idx, source=GetItemSource(self.source, idx), **options
+            )
             for idx, submod in enumerate(base)
         ]
 
@@ -471,10 +475,17 @@ class ConstDictVariable(VariableTracker):
             create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
         ]
 
+    def getitem_const(self, arg: VariableTracker):
+        index = arg.as_python_constant()
+        return self.items[index].add_guards(self.guards).add_guards(arg.guards)
+
 
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self):
         return self.get_code().co_filename
+
+    def get_name(self):
+        return self.get_code().co_name
 
 
 class UserFunctionVariable(BaseUserFunctionVariable):

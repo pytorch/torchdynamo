@@ -35,6 +35,6 @@ clean:
 	rm -rf build torchdynamo.egg-info torchdynamo/*.so
 
 autotune: develop
-	python torchbench.py --speedup -n1
+	python torchbench.py --speedup -n1 --minimum-call-count=2
 	python autotune.py
-	python torchbench.py --speedup
+	python torchbench.py --speedup --minimum-call-count=2

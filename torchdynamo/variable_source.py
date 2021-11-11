@@ -1,5 +1,7 @@
 import dataclasses
+from typing import Any
 
+from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.guards import Guard
 from torchdynamo.guards import GuardSource
 
@@ -60,3 +62,21 @@ class AttrSource(Source):
 
     def name(self):
         return f"{self.base.name()}.{self.member}"
+
+
+@dataclasses.dataclass
+class GetItemSource(Source):
+    base: Source
+    index: Any
+
+    def reconstruct(self, codegen):
+        return self.base.reconstruct(codegen) + [
+            codegen.create_load_const(self.index),
+            create_instruction("BINARY_SUBSCR"),
+        ]
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}[{self.index}]"

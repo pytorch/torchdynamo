@@ -19,8 +19,7 @@ from torchdynamo.optimizations.backends import static_runtime
 from torchdynamo.optimizations.backends import torchscript
 from torchdynamo.optimizations.backends import tvm_compile
 from torchdynamo.optimizations.normalize import long_name
-from torchdynamo.optimizations.normalize import normalize
-from torchdynamo.utils import counters
+from torchdynamo.utils import counters, count_calls
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -82,7 +81,7 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
         ):
             return gm.forward
 
-    normalize(gm)
+    # normalize(gm)
     # gm = NormalizeOperators(gm).transform()
     # Inplacifier(gm).inplacify()
 
@@ -98,16 +97,17 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
 
     path = folder_name(gm, example_inputs)
     if not os.path.exists(path):
-        try:
-            gm.to_folder(path)
-            with open(os.path.join(path, "key"), "w") as fd:
-                fd.write(string_key(gm, example_inputs))
-            with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
-                torch.save(example_inputs, fd)
-            open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
-        except Exception:
-            shutil.rmtree(path)
-            raise
+        if count_calls(gm.graph) >= config.minimum_call_count:
+            try:
+                gm.to_folder(path)
+                with open(os.path.join(path, "key"), "w") as fd:
+                    fd.write(string_key(gm, example_inputs))
+                with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
+                    torch.save(example_inputs, fd)
+                open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
+            except Exception:
+                shutil.rmtree(path)
+                raise
     else:
         open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
         if os.path.exists(os.path.join(path, "perf.json")):
@@ -123,7 +123,6 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
                     ts(),
                     example_inputs,
                     os.path.join(path, "ansor20k"),
-                    trials=-1,
                 ),
             }
             perf = json.loads(open(os.path.join(path, "perf.json")).read())
