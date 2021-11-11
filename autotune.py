@@ -23,6 +23,7 @@ from tabulate import tabulate
 import torchdynamo.optimizations.backends
 from torchdynamo import config
 from torchdynamo.optimizations.backends import onnxrt
+from torchdynamo.optimizations.backends import ipex
 from torchdynamo.optimizations.backends import optimize_for_inference
 from torchdynamo.optimizations.backends import static_runtime
 from torchdynamo.optimizations.backends import torchscript
@@ -206,6 +207,7 @@ def run(args, name, safe_mode):
         ("freezing", optimize_for_inference(model1, example_inputs)),
         ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
         ("tvm", tvm_compile(model1, example_inputs)),
+        # ("ipex", ipex(model1, example_inputs)),
     ]
     if STATIC_RUNTIME and not safe_mode:
         # Static runtime is crashy, don't run it in safe mode

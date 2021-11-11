@@ -14,6 +14,7 @@ import torch
 from torchdynamo import config
 from torchdynamo.optimizations.backends import clone_inputs
 from torchdynamo.optimizations.backends import onnxrt
+from torchdynamo.optimizations.backends import ipex
 from torchdynamo.optimizations.backends import optimize_for_inference
 from torchdynamo.optimizations.backends import static_runtime
 from torchdynamo.optimizations.backends import torchscript
@@ -119,6 +120,7 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
                 "static_runtime": lambda: static_runtime(ts(), example_inputs),
                 "onnxrt": lambda: onnxrt(ts(), example_inputs),
                 "tvm": lambda: tvm_compile(ts(), example_inputs),
+                "ipex": lambda: ipex(ts(), example_inputs),
                 "ansor20k": lambda: tvm_compile(
                     ts(),
                     example_inputs,

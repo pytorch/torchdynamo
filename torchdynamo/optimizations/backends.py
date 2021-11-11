@@ -238,3 +238,17 @@ def taso(example_inputs, onnx_filename, taso_filename):
     except Exception:
         log.exception("TASO error")
         return None
+
+
+def ipex(scripted, example_inputs, filename=None):
+    if scripted is None:
+        return None
+    try:
+        import intel_extension_for_pytorch
+
+        return intel_extension_for_pytorch.optimize(scripted)
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        log.exception("IPEX error")
+        return None
