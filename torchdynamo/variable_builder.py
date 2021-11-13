@@ -116,7 +116,7 @@ class VariableBuilder:
         elif is_builtin(value):
             return BuiltinVariable(
                 value,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
         elif is_allowed(value):
             return AllowedFunctionOrModuleVariable(
@@ -137,7 +137,7 @@ class VariableBuilder:
         elif istype(value, types.ModuleType):
             return PythonModuleVariable(
                 value,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
 
         else:

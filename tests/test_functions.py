@@ -5,12 +5,12 @@ import math
 import torch
 from torch import sub
 from torch.nn import functional as F
-from torchdynamo._eval_frame import unsupported
 
 import torchdynamo.testing
 from torchdynamo import eval_frame
 from torchdynamo.convert_frame import convert_frame
 from torchdynamo.convert_frame import convert_frame_assert
+from torchdynamo.testing import unsupported
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
 
@@ -571,3 +571,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
             self.assertEqual(fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    @make_test
+    def test_module_constant(x, y):
+        r = x + y
+        for i in range(torchdynamo.testing.three):
+            r = r / y
+        return r

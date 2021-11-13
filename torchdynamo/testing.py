@@ -18,6 +18,7 @@ from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.guards import GuardedCode
 
 unsupported = torchdynamo._eval_frame.unsupported
+three = 3
 
 
 def exc_bytecode_offset():

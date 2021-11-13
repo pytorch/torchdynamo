@@ -138,6 +138,12 @@ class GuardBuilder:
         if guard.is_local():
             return self.ID_MATCH(guard)
 
+    def BUILTIN_MATCH(self, guard: Guard):
+        return self.FUNCTION_MATCH(guard)
+
+    def PYMODULE_MATCH(self, guard: Guard):
+        return self.FUNCTION_MATCH(guard)
+
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)

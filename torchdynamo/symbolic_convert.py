@@ -17,7 +17,6 @@ from typing import List
 from typing import Set
 from unittest.mock import patch
 
-import numpy
 import torch
 from torch import fx
 
@@ -872,8 +871,12 @@ class InstructionTranslatorBase(fx.Tracer):
         obj = self.pop()
         name = inst.argval
         options = VariableTracker.propagate([obj])
+        guards = options.get("guards", set())
         if obj.source:
-            options["source"] = AttrSource(obj.source, name)
+            source = AttrSource(obj.source, name)
+            options["source"] = source
+        else:
+            source = None
 
         if isinstance(obj, NNModuleVariable):
             base = self.get_submodule(obj.module_key)
@@ -897,9 +900,9 @@ class InstructionTranslatorBase(fx.Tracer):
 
             if class_member:
                 self.push(
-                    VariableBuilder(self, NNModuleSource(AttrSource(obj.source, name)))(
-                        subobj
-                    ).add_guards(options.get("guards", set()))
+                    VariableBuilder(self, NNModuleSource(source))(subobj).add_guards(
+                        guards
+                    )
                 )
             else:
                 if istype(subobj, property):
@@ -927,20 +930,7 @@ class InstructionTranslatorBase(fx.Tracer):
             )
         elif isinstance(obj, PythonModuleVariable):
             member = obj.value.__dict__[name]
-            if is_allowed(member):
-                self.push(AllowedFunctionOrModuleVariable(member, **options))
-            elif (
-                callable(member)
-                and not isinstance(
-                    member,
-                    (types.BuiltinFunctionType, types.BuiltinMethodType, numpy.ufunc),
-                )
-                and not getattr(member, "__self__", None)
-                and not skipfiles.check(inspect.getfile(member))
-            ):
-                self.push(UserFunctionVariable(member, **options))
-            else:
-                unimplemented("PythonModuleVariable attribute")
+            self.push(VariableBuilder(self, source)(member).add_guards(guards))
         elif obj.has_const_attr(self, name) and obj.can_create_guard():
             try:
                 options["guards"] = obj.replace_guards(
