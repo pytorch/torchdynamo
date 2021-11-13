@@ -422,7 +422,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_modulelist = make_test(ModuleList())
     test_super1 = make_test(SuperModule())
     test_children = make_test(Children())
-    # test_densnet = make_test(DenseNetBlocks())
+    test_densenet = make_test(DenseNetBlocks())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

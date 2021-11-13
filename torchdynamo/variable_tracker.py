@@ -1,5 +1,6 @@
 import functools
 import inspect
+import itertools
 import math
 import types
 from typing import Callable
@@ -13,9 +14,20 @@ from torchdynamo import config
 from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.utils import make_cell
 from torchdynamo.utils import identity
-from torchdynamo.variable_source import Source, GetItemSource
+from torchdynamo.variable_source import Source
+from torchdynamo.variable_source import GetItemSource
 
 combine_guards = functools.partial(functools.reduce, set.union)
+
+
+class MutableLocal:
+    """
+    Marker used to indicate this (list, iter, etc) was constructed
+    in local scope and can be mutated safely in analysis without leaking
+    state.
+    """
+
+    pass
 
 
 class VariableTracker:
@@ -71,7 +83,8 @@ class VariableTracker:
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
-    __repr__ = __str__
+    def __repr__(self):
+        return str(self)
 
     def python_type(self):
         raise NotImplementedError(f"{self} has no type")
@@ -141,10 +154,12 @@ class VariableTracker:
         self,
         guards: Optional[Set] = None,
         source: Source = None,
+        mutable_local: MutableLocal = None,
     ):
         super(VariableTracker, self).__init__()
         self.guards = guards or set()
         self.source = source
+        self.mutable_local = mutable_local
 
 
 class TensorVariable(VariableTracker):
@@ -345,13 +360,15 @@ class ListIteratorVariable(VariableTracker):
         self.index = index
 
     def next_variables(self):
+        assert self.mutable_local
         if self.index >= len(self.items):
             raise StopIteration()
-        # Note this is the only mutation in VariableTracker so far
-        item = self.items[self.index]
-        self.index += 1
-        self.source = None
-        return item, self
+        return self.items[self.index], ListIteratorVariable(
+            self.items,
+            self.index + 1,
+            mutable_local=MutableLocal(),
+            **VariableTracker.propagate([self]),
+        )
 
 
 class GetAttrVariable(VariableTracker):
@@ -361,6 +378,9 @@ class GetAttrVariable(VariableTracker):
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     def as_proxy(self):
         return getattr(self.obj.as_proxy(), self.name)
@@ -654,6 +674,9 @@ class UserMethodVariable(UserFunctionVariable):
     def __init__(self, fn, obj, **kwargs):
         super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
         self.obj = obj
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.fn}, {self.obj})"
 
     def self_args(self):
         return [self.obj]

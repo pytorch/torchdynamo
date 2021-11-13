@@ -43,7 +43,7 @@ from .variable_source import GetItemSource
 from .variable_source import GlobalSource
 from .variable_source import LocalSource
 from .variable_source import NNModuleSource
-from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AllowedFunctionOrModuleVariable, MutableLocal
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BaseUserFunctionVariable
 from .variable_tracker import BuiltinVariable
@@ -346,6 +346,9 @@ class InstructionTranslatorBase(fx.Tracer):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ):
+        if config.trace:
+            print("CALL", fn, args, kwargs)
+
         assert isinstance(fn, VariableTracker)
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
@@ -484,6 +487,48 @@ class InstructionTranslatorBase(fx.Tracer):
                     )
                 )
             self.push(TupleVariable(result, **options))
+        elif (
+            isinstance(fn, UserMethodVariable)
+            and isinstance(fn.obj, NNModuleVariable)
+            and fn.fn is torch.nn.ModuleDict.items
+        ):
+            result = []
+            key = fn.obj.module_key
+            assert fn.obj.source
+            for name, submod in self.get_submodule(key).items():
+                result.append(
+                    TupleVariable(
+                        [
+                            ConstantVariable(name, **options),
+                            self.add_submodule(
+                                submod,
+                                key,
+                                name,
+                                source=NNModuleSource(
+                                    GetItemSource(fn.obj.source, name)
+                                ),
+                                **options,
+                            ),
+                        ]
+                    )
+                )
+            self.push(TupleVariable(result, **options))
+
+        elif (
+            isinstance(fn, GetAttrVariable)
+            and isinstance(fn.obj, ListVariable)
+            and fn.name == "append"
+            and fn.obj.mutable_local
+        ):
+            assert not kwargs
+            (arg,) = args
+            self.replace_all(
+                fn.obj,
+                ListVariable(
+                    fn.obj.items + [arg], mutable_local=MutableLocal(), **options
+                ),
+            )
+            self.push(ConstantVariable(None, **options))
         elif isinstance(fn, BaseUserFunctionVariable):
             self.inline_user_function(fn, fn.self_args() + args, kwargs)
         elif isinstance(fn, BuiltinVariable):
@@ -498,11 +543,19 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.push(ListVariable(items, **options))
             elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
                 assert not kwargs and len(args) == 1
-                self.push(ListIteratorVariable(args[0].items, **options))
+                self.push(
+                    ListIteratorVariable(
+                        args[0].items, mutable_local=MutableLocal(), **options
+                    )
+                )
             elif fn.fn is iter and args and args[0].has_unpack_var_sequence(self):
                 assert not kwargs and len(args) == 1
                 self.push(
-                    ListIteratorVariable(args[0].unpack_var_sequence(self), **options)
+                    ListIteratorVariable(
+                        args[0].unpack_var_sequence(self),
+                        mutable_local=MutableLocal(),
+                        **options,
+                    )
                 )
             elif fn.fn is zip and all(x.has_unpack_var_sequence(self) for x in args):
                 assert not kwargs
@@ -571,6 +624,19 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(fn.call_const(args, kwargs))
         else:
             unimplemented(f"call({fn})")
+
+    def replace_all(self, oldvar, newvar):
+        assert oldvar.mutable_local
+        assert newvar.mutable_local
+
+        def repl(v: VariableTracker):
+            if v.mutable_local is oldvar.mutable_local:
+                return newvar
+            return v
+
+        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
+        for k, x in self.symbolic_locals.items():
+            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
 
     def inline_user_function(self, fn, args, kwargs):
         """
@@ -730,6 +796,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.guards.update(it.guards)
             try:
                 val, next_iter = it.next_variables()
+                self.replace_all(it, next_iter)
                 self.push(next_iter)
                 self.push(val)
             except StopIteration:
@@ -975,7 +1042,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        self.push(ListVariable(items, **options))
+        self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
@@ -985,7 +1052,7 @@ class InstructionTranslatorBase(fx.Tracer):
             assert isinstance(k, ConstantVariable)
             result[k.value] = v
         assert len(result) == len(items) / 2
-        self.push(ConstDictVariable(result, **options))
+        self.push(ConstDictVariable(result, mutable_local=MutableLocal(), **options))
 
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
@@ -995,7 +1062,11 @@ class InstructionTranslatorBase(fx.Tracer):
         keys = keys.value
         assert istype(keys, tuple)
         assert len(keys) == len(values)
-        self.push(ConstDictVariable(dict(zip(keys, values)), **options))
+        self.push(
+            ConstDictVariable(
+                dict(zip(keys, values)), mutable_local=MutableLocal(), **options
+            )
+        )
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
