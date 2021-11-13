@@ -2,11 +2,10 @@
 
 import torch
 from torch.nn import functional as F
+from torchdynamo._eval_frame import unsupported
 
 import torchdynamo.testing
 from . import test_functions
-
-from torchdynamo._eval_frame import unsupported
 
 
 class BasicModule(torch.nn.Module):
@@ -348,6 +347,39 @@ class StringMember(torch.nn.Module):
             return F.relu(self.linear1(x))
 
 
+class _Block(torch.nn.Module):
+    def forward(self, x):
+        return 1.5 * torch.cat(x, 1)
+
+
+class _DenseBlock(torch.nn.ModuleDict):
+    _version = 2
+
+    def __init__(
+        self,
+        num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        for i in range(num_layers):
+            self.add_module("denselayer%d" % (i + 1), _Block())
+
+    def forward(self, init_features):
+        features = [init_features]
+        for name, layer in self.items():
+            new_features = layer(features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
+
+class DenseNetBlocks(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = _DenseBlock()
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -390,6 +422,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_modulelist = make_test(ModuleList())
     test_super1 = make_test(SuperModule())
     test_children = make_test(Children())
+    # test_densnet = make_test(DenseNetBlocks())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

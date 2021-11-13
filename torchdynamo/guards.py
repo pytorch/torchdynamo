@@ -23,12 +23,21 @@ from .utils import istype
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
+    LOCAL_NN_MODULE = 2
+    GLOBAL_NN_MODULE = 3
 
     def select(self, locals_, globals_):
-        if self == GuardSource.LOCAL:
+        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
             return locals_
-        if self == GuardSource.GLOBAL:
+        if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
+        raise NotImplementedError()
+
+    def is_nn_module(self):
+        return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
+
+    def is_local(self):
+        return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
 
 @dataclasses.dataclass
@@ -41,7 +50,7 @@ class Guard:
         return hash((self.name, self.source, id(self.create_fn)))
 
     def sort_key(self):
-        return self.source.value, self.create_fn.__code__.co_firstlineno, self.name
+        return self.source.value, self.name, self.create_fn.__code__.co_firstlineno
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
@@ -51,6 +60,12 @@ class Guard:
 
     def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
+
+    def is_nn_module(self):
+        return self.source.is_nn_module()
+
+    def is_local(self):
+        return self.source.is_local()
 
 
 class GuardBuilder:
@@ -86,41 +101,48 @@ class GuardBuilder:
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
 
-    def FUNCTION_MATCH(self, guard: Guard):
-        """things like torch.add and user defined functions"""
-        return self.ID_MATCH(guard)
-
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
         assert istype(
-            val, (int, float, bool, type(None), str, type, list, tuple, torch.Size)
-        )
+            val, (int, float, bool, type(None), str, type, list, tuple, set, frozenset, torch.Size)
+        ), type(val).__name__
         if istype(val, torch.Size):
             val = tuple(val)
         self.code.append(f"{self.arg_ref(guard)} == {val!r}")
 
-    def TENSOR_MATCH(self, guard: Guard):
-        self.tensor_check_names.append(self.arg_ref(guard))
-        self.tensor_check_examples.append(self.get(guard.name))
+    def CONSTANT_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if istype(val, (bool, type(None))):
+            self.ID_MATCH(guard)
+        else:
+            self.EQUALS_MATCH(guard)
 
-    def FIXED_TENSOR_LIST(self, guard: Guard):
+    def NN_MODULE(self, guard: Guard):
+        self.ID_MATCH(guard)
+
+    def FUNCTION_MATCH(self, guard: Guard):
+        """things like torch.add and user defined functions"""
+        if guard.is_local():
+            return self.ID_MATCH(guard)
+
+    def TENSOR_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            self.ID_MATCH(guard)
+        else:
+            self.tensor_check_names.append(self.arg_ref(guard))
+            self.tensor_check_examples.append(self.get(guard.name))
+
+    def LIST_LENGTH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        assert len(value) > 0
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
-        for i, v in enumerate(value):
-            self.tensor_check_names.append(f"{ref}[{i}]")
-            self.tensor_check_examples.append(v)
 
-    def FIXED_TENSOR_DICT(self, guard: Guard):
+    def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
-        for k, v in value.items():
-            self.tensor_check_names.append(f"{ref}[{k!r}]")
-            self.tensor_check_examples.append(v)
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
@@ -172,6 +194,7 @@ class GuardedCode:
                 return lambda {args}: {code}
             """
         )
+        # print("GUARDS", code)
         out = dict()
         exec(py_code, global_builder.scope, out)
         return out["___make_guard_fn"](

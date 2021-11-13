@@ -34,6 +34,7 @@ from torchdynamo.testing import same
 ANSOR = False
 TASO = False
 STATIC_RUNTIME = False
+IPEX = False
 
 
 def synchronize():
@@ -190,6 +191,7 @@ def run(args, name, safe_mode):
     pymod.module._operator_iadd = operator.iadd
     pymod.module._operator_imul = operator.imul
     pymod.module._operator_itruediv = operator.itruediv
+    pymod.module._operator_setitem = operator.setitem
     pymod.module.math_sqrt = math.sqrt
     pymod.module.device = torch.device
     pymod.module.inf = float("inf")
@@ -207,15 +209,14 @@ def run(args, name, safe_mode):
         ("freezing", optimize_for_inference(model1, example_inputs)),
         ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
         ("tvm", tvm_compile(model1, example_inputs)),
-        # ("ipex", ipex(model1, example_inputs)),
     ]
+    if IPEX:
+        models.append(("ipex", ipex(model1, example_inputs)))
     if STATIC_RUNTIME and not safe_mode:
         # Static runtime is crashy, don't run it in safe mode
         models.append(("static_runtime", static_runtime(model1, example_inputs)))
-
     if ANSOR and not safe_mode:
         models.append(autotune_ansor(model1, example_inputs, model_dir, args))
-
     # if TASO and not safe_mode:
     #     models.append(
     #         (

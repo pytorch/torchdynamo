@@ -31,7 +31,9 @@ def same(a, b):
         return all(same(ai, bi) for ai, bi in zip(a, b))
     elif isinstance(a, dict):
         assert isinstance(b, dict)
-        assert set(a.keys()) == set(b.keys())
+        assert set(a.keys()) == set(
+            b.keys()
+        ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         return all(same(a[k], b[k]) for k in a.keys())
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)

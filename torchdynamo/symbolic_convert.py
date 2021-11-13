@@ -16,6 +16,7 @@ from typing import List
 from typing import Set
 from unittest.mock import patch
 
+import numpy
 import torch
 from torch import fx
 
@@ -36,33 +37,35 @@ from .utils import counters
 from .utils import istype
 from .utils import unimplemented
 from .utils import warning
-from .variable_builder import GlobalVariableBuilder, AttributeVariableBuilder
-from .variable_source import LocalSource, AttrSource, GetItemSource
-from .variable_builder import LocalVariableBuilder
+from .variable_builder import VariableBuilder
+from .variable_source import AttrSource
+from .variable_source import GetItemSource
+from .variable_source import GlobalSource
+from .variable_source import LocalSource
+from .variable_source import NNModuleSource
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BaseUserFunctionVariable
-from .variable_tracker import BasicTypeVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import FunctionConstantWrapper
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
-from .variable_tracker import NNModuleVariable
 from .variable_tracker import NestedUserFunctionVariable
+from .variable_tracker import NNModuleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import SuperVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
+from .variable_tracker import typestr
 from .variable_tracker import UnknownVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
-from .variable_tracker import typestr
 
 
 def proxy_args_kwargs(args, kwargs):
@@ -131,7 +134,8 @@ def stack_op(fn: typing.Callable):
                 submod,
                 key,
                 inputs[1].as_python_constant(),
-                source=GetItemSource(inputs[0].source, key) ** options,
+                source=NNModuleSource(GetItemSource(inputs[0].source, key)),
+                **options,
             )
         else:
             unimplemented(f"stack_op {typestr(*inputs)}")
@@ -434,7 +438,7 @@ class InstructionTranslatorBase(fx.Tracer):
                             submod,
                             fn.module_key,
                             idx,
-                            source=GetItemSource(fn.source, idx),
+                            source=NNModuleSource(GetItemSource(fn.source, idx)),
                             **options,
                         ),
                         [arg],
@@ -475,7 +479,7 @@ class InstructionTranslatorBase(fx.Tracer):
                         submod,
                         key,
                         name,
-                        source=AttrSource(fn.obj.source, name),
+                        source=NNModuleSource(AttrSource(fn.obj.source, name)),
                         **options,
                     )
                 )
@@ -525,7 +529,7 @@ class InstructionTranslatorBase(fx.Tracer):
                         self.push(ConstantVariable(arg.size[0], **options))
                     else:
                         self.push(
-                            BasicTypeVariable(
+                            TensorVariable(
                                 self.create_proxy(
                                     "call_function", len, (arg.as_proxy(),), {}
                                 ),
@@ -682,7 +686,7 @@ class InstructionTranslatorBase(fx.Tracer):
             value = self.f_globals[inst.argval]
         except KeyError:
             return self.load_builtin(inst)
-        self.push(GlobalVariableBuilder(self, inst.argval)(value))
+        self.push(VariableBuilder(self, GlobalSource(inst.argval))(value))
 
     def IMPORT_NAME(self, inst):
         value = importlib.import_module(inst.argval)
@@ -701,7 +705,7 @@ class InstructionTranslatorBase(fx.Tracer):
         assert inst.argval in self.f_builtins
         val = self.f_builtins[inst.argval]
         assert is_builtin(val)
-        self.push(GlobalVariableBuilder(self, inst.argval)(val))
+        self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
 
     def jump(self, inst):
         self.instruction_pointer = self.indexof[id(inst.target)]
@@ -892,9 +896,9 @@ class InstructionTranslatorBase(fx.Tracer):
 
             if class_member:
                 self.push(
-                    AttributeVariableBuilder(self, obj, name, options.get("guards"))(
+                    VariableBuilder(self, NNModuleSource(AttrSource(obj.source, name)))(
                         subobj
-                    )
+                    ).add_guards(options.get("guards", set()))
                 )
             else:
                 if istype(subobj, property):
@@ -927,9 +931,10 @@ class InstructionTranslatorBase(fx.Tracer):
             elif (
                 callable(member)
                 and not isinstance(
-                    member, (types.BuiltinFunctionType, types.BuiltinMethodType)
+                    member, (types.BuiltinFunctionType, types.BuiltinMethodType, numpy.ufunc)
                 )
                 and not getattr(member, "__self__", None)
+                and not skipfiles.check(inspect.getfile(member))
             ):
                 self.push(UserFunctionVariable(member, **options))
             else:
@@ -1435,7 +1440,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(
-            (k, LocalVariableBuilder(self, k)(f_locals[k]))
+            (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
             for k in vars
             if k in f_locals
         )

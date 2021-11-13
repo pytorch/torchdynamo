@@ -40,7 +40,9 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {}
+SKIP = {
+    "hf_T5",  # TODO(jansel): debug an issue in this one
+}
 current_name = ""
 current_device = ""
 
@@ -307,6 +309,7 @@ def main():
         except Exception:
             logging.exception("unhandled error")
             print("ERROR")
+            continue
         if not same(correct_result, new_result):
             print("INCORRECT")
             continue

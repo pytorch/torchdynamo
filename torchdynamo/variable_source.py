@@ -5,6 +5,13 @@ from torchdynamo.bytecode_transformation import create_instruction
 from torchdynamo.guards import Guard
 from torchdynamo.guards import GuardSource
 
+_GUARD_SOURCE_NN_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
+    GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
+    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
+    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
+}
+
 
 @dataclasses.dataclass
 class Source:
@@ -63,6 +70,9 @@ class AttrSource(Source):
     def name(self):
         return f"{self.base.name()}.{self.member}"
 
+    def from_module(self):
+        return self.base.from_module()
+
 
 @dataclasses.dataclass
 class GetItemSource(Source):
@@ -79,4 +89,21 @@ class GetItemSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        return f"{self.base.name()}[{self.index}]"
+        return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass
+class NNModuleSource(Source):
+    inner: Source
+
+    def create_guard(self, fn):
+        return self.inner.create_guard(fn)
+
+    def reconstruct(self, codegen):
+        return self.inner.reconstruct(codegen)
+
+    def guard_source(self):
+        return _GUARD_SOURCE_NN_MODULE[self.inner.guard_source()]
+
+    def name(self):
+        return self.inner.name()
