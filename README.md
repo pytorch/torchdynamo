@@ -3,17 +3,29 @@
 This is an early experiment into using [PEP 523] to expose fusion opportunities in PyTorch. It dynamically rewrites
 Python bytecode in order to extract sequences of PyTorch operations into an [FX Graph]
 which is just in time compiled with a user-defined compiler. It creates this FX Graph through bytecode analysis, and is
-designed to generating smaller graph fragments that can be mixed with Python execution.
+designed to generating smaller graph fragments that can be mixed with Python execution.   The name is a reference/homage to [DynamoRIO], which dynamically translates machine code.
 
-The name is a reference/homage to [DynamoRIO], which dynamically translates machine code.
+For more information see progress updates posted on dev-discuss.pytorch.org:
+- [TorchDynamo: An Experiment in Dynamic Python Bytecode Transformation](https://dev-discuss.pytorch.org/t/torchdynamo-an-experiment-in-dynamic-python-bytecode-transformation/361)
+- [TorchDynamo Update: 1.48x geomean speedup on TorchBench CPU Inference](https://dev-discuss.pytorch.org/t/torchdynamo-update-1-48x-geomean-speedup-on-torchbench-cpu-inference/397)
+
+
 
 ![](TorchDynamo.png)
 
 [PEP 523]: https://www.python.org/dev/peps/pep-0523/
-
 [FX Graph]: https://pytorch.org/docs/stable/fx.html
-
 [DynamoRIO]: https://dynamorio.org/
+
+## Requirements
+
+Python 3.8 is highly recommended.  Python 3.7 works, but is only
+sporadically tested and has lower coverage.  Other python versions
+are untested.
+
+For running TorchBench, use the latest version and apply [this
+patch](https://github.com/pytorch/benchmark/pull/564) if it has not yet
+been merged upstream.
 
 ## Initial Development Setup
 
@@ -26,6 +38,7 @@ cd ..
 git clone git@github.com:jansel/torchdynamo.git
 cd torchdynamo
 conda activate torchbenchmark
+make setup
 python setup.py develop  # compiles C/C++ extension
 pytest  # run tests
 ```

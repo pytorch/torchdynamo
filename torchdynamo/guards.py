@@ -104,7 +104,20 @@ class GuardBuilder:
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
         assert istype(
-            val, (int, float, bool, type(None), str, type, list, tuple, set, frozenset, torch.Size)
+            val,
+            (
+                int,
+                float,
+                bool,
+                type(None),
+                str,
+                type,
+                list,
+                tuple,
+                set,
+                frozenset,
+                torch.Size,
+            ),
         ), type(val).__name__
         if istype(val, torch.Size):
             val = tuple(val)

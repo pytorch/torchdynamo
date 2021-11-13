@@ -28,7 +28,7 @@ lint:
 		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
 
 setup:
-	pip install flake8 black pytest
+	pip install flake8 black pytest onnxruntime
 
 clean:
 	python setup.py clean

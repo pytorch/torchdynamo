@@ -295,7 +295,9 @@ def transform_code_object(code, transformations, safe=False):
     code_options["co_lnotab"] = lnotab
     code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
-    assert set(keys) == set(code_options.keys())
+    assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
+        "co_posonlyargcount"
+    }
     return types.CodeType(*[code_options[k] for k in keys])
 
 

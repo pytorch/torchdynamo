@@ -10,6 +10,7 @@ import re
 import sys
 import types
 import typing
+from functools import lru_cache
 from typing import Any
 from typing import Dict
 from typing import List
@@ -718,6 +719,12 @@ class InstructionTranslatorBase(fx.Tracer):
     JUMP_IF_FALSE_OR_POP = generic_jump(operator.not_, True)
     JUMP_IF_TRUE_OR_POP = generic_jump(operator.truth, True)
 
+    def SETUP_LOOP(self, inst):
+        self.block_depth += 1
+
+    def POP_BLOCK(self, inst):
+        self.block_depth -= 1
+
     def FOR_ITER(self, inst):
         it = self.pop()
         if isinstance(it, ListIteratorVariable):
@@ -730,12 +737,6 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.jump(inst)
         else:
             unimplemented(f"FOR_ITER {typestr(it)}")
-
-    def SETUP_LOOP(self, inst):
-        pass  # TODO(jansel): support blocks
-
-    def POP_BLOCK(self, inst):
-        pass  # TODO(jansel): support blocks
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
@@ -931,7 +932,8 @@ class InstructionTranslatorBase(fx.Tracer):
             elif (
                 callable(member)
                 and not isinstance(
-                    member, (types.BuiltinFunctionType, types.BuiltinMethodType, numpy.ufunc)
+                    member,
+                    (types.BuiltinFunctionType, types.BuiltinMethodType, numpy.ufunc),
                 )
                 and not getattr(member, "__self__", None)
                 and not skipfiles.check(inspect.getfile(member))
@@ -1145,6 +1147,9 @@ class InstructionTranslatorBase(fx.Tracer):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        if self.block_depth != 0:
+            unimplemented("compile_partial_subgraph with block_depth != 0")
+
         self.prune_dead_locals()
         stack_values = list(self.stack)
         root = FakeRootModule(self.nn_modules)
@@ -1280,17 +1285,16 @@ class InstructionTranslatorBase(fx.Tracer):
             return [create_instruction("ROT_TWO")]
         elif n == 3:
             return [create_instruction("ROT_THREE")]
-        elif n == 4:
+        elif n == 4 and sys.version_info >= (3, 8):
             return [create_instruction("ROT_FOUR")]
         else:
-            raise unimplemented("4+ stack args")
-            # not tested, but should be something like:
-            #   BUILD_TUPLE num_on_stack
-            #   LOAD_GLOBAL reversed  (should assert this is not a local/global, etc)
-            #   CALL_FUNCTION 1
-            #   LOAD_GLOBAL fn_name
-            #   ROT_TWO
-            #   UNPACK_SEQUENCE num_on_stack
+            return [
+                create_instruction("BUILD_TUPLE", n),
+                self._create_load_const(rot_n_helper(n)),
+                create_instruction("ROT_TWO"),
+                create_instruction("CALL_FUNCTION_EX", 0),
+                create_instruction("UNPACK_SEQUENCE", n),
+            ]
 
     def remove_unused_graphargs(self):
         for node in reversed(list(self.graph.nodes)):
@@ -1350,6 +1354,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.instruction_pointer,
             self.current_instruction,
             self.next_instruction,
+            self.block_depth,
         )
 
     def restore_graphstate(self, state):
@@ -1364,6 +1369,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.instruction_pointer,
             self.current_instruction,
             self.next_instruction,
+            self.block_depth,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
@@ -1396,6 +1402,7 @@ class InstructionTranslatorBase(fx.Tracer):
         self.instruction_pointer = 0
         self.next_instruction = None
         self.current_instruction = create_instruction("NOP")
+        self.block_depth = 0
 
         # Properties of the input/output code
         self.instructions = instructions
@@ -1641,3 +1648,13 @@ class PyCodegen(object):
 
     def __getattr__(self, item):
         return getattr(self.tx, item)
+
+
+@lru_cache(32)
+def rot_n_helper(n):
+    assert n > 1
+    vars = [f"v{i}" for i in range(n)]
+    rotated = reversed(vars[-1:] + vars[:-1])
+    fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
+    fn.__name__ = f"rot_{n}_helper"
+    return fn

@@ -1,4 +1,7 @@
 #!/usr/bin/env pytest
+import importlib
+import unittest
+
 import torch
 
 import torchdynamo
@@ -6,6 +9,14 @@ from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
 from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.testing import same
+
+
+def has_onnxruntime():
+    try:
+        importlib.import_module("onnxruntime")
+        return True
+    except ImportError:
+        return False
 
 
 class Seq(torch.nn.Module):
@@ -55,6 +66,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
+    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_export(self):
         s = Seq()
         i = torch.randn(10)
