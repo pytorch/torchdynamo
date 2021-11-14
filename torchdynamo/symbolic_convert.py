@@ -45,12 +45,10 @@ from .variable_source import LocalSource
 from .variable_source import NNModuleSource
 from .variable_tracker import AllowedFunctionOrModuleVariable, MutableLocal
 from .variable_tracker import BaseListVariable
-from .variable_tracker import BaseUserFunctionVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
-from .variable_tracker import LambdaVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
@@ -58,7 +56,6 @@ from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import NNModuleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
-from .variable_tracker import SuperVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
 from .variable_tracker import typestr
@@ -66,17 +63,6 @@ from .variable_tracker import UnknownVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
-
-
-def proxy_args_kwargs(args, kwargs):
-    try:
-        proxy_args = tuple(arg.as_proxy() for arg in args)
-        proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-        return proxy_args, proxy_kwargs
-    except NotImplementedError:
-        raise unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        )
 
 
 def stack_op(fn: typing.Callable):
@@ -346,340 +332,14 @@ class InstructionTranslatorBase(fx.Tracer):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ):
-        if config.trace:
-            print("CALL", fn, args, kwargs)
-
         assert isinstance(fn, VariableTracker)
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
-        constant_args = all(
-            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+        assert all(
+            isinstance(x, VariableTracker)
+            for x in itertools.chain(args, kwargs.values())
         )
-        options = VariableTracker.propagate(
-            [
-                fn,
-            ]
-            + list(args)
-            + list(kwargs.values())
-        )
-
-        if (
-            isinstance(fn, AllowedFunctionOrModuleVariable)
-            and fn.value in config.constant_functions
-        ):
-            assert not args and not kwargs
-            self.push(ConstantVariable(config.constant_functions[fn.value], **options))
-        elif (
-            isinstance(fn, (AllowedFunctionOrModuleVariable, BuiltinVariable))
-            and fn.can_constant_fold_through()
-            and constant_args
-        ):
-            # constant fold
-            self.push(
-                ConstantVariable(
-                    fn.as_python_constant()(
-                        *[x.as_python_constant() for x in args],
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
-                    ),
-                    **options,
-                )
-            )
-        elif isinstance(fn, AllowedFunctionOrModuleVariable):
-            self_should_be_none = getattr(fn.value, "__self__", None)
-            if self_should_be_none is not None:
-                # weird ones like torch.nn.functional.avg_pool2d have __self__
-                assert isinstance(
-                    self_should_be_none, types.ModuleType
-                ) and self_should_be_none.__name__ == getattr(
-                    fn.value, "__module__", None
-                )
-            if istype(fn.value, type) and issubclass(fn.value, torch.nn.Module):
-                if fn.value is torch.nn.Softmax:
-                    # rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)
-                    dim = args[0] if args else kwargs.get("dim", ConstantVariable(None))
-
-                    def fake_softmax(input):
-                        return TensorVariable(
-                            proxy=self.create_proxy(
-                                "call_function",
-                                torch.nn.functional.softmax,
-                                *proxy_args_kwargs([input, dim], {}),
-                            ),
-                            **VariableTracker.propagate([fn, dim, input]),
-                        )
-
-                    self.push(LambdaVariable(fake_softmax, **options))
-                else:
-                    unimplemented(f"construct nn.Module: {fn.value.__name__}")
-            else:
-                self.push(
-                    TensorVariable(
-                        proxy=self.create_proxy(
-                            "call_function", fn.value, *proxy_args_kwargs(args, kwargs)
-                        ),
-                        **options,
-                    )
-                )
-        elif isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
-            name = fn.name
-            obj = fn.obj
-            args = [obj] + list(args)
-            self.push(
-                TensorVariable(
-                    proxy=self.create_proxy(
-                        "call_method", name, *proxy_args_kwargs(args, kwargs)
-                    ),
-                    **options,
-                )
-            )
-        elif isinstance(fn, GetAttrVariable) and isinstance(fn.obj, SuperVariable):
-            inner_fn = fn.obj.get_const_attr(self, fn.name)
-            if not isinstance(inner_fn, types.FunctionType):
-                unimplemented(f"non-function super: {typestr(inner_fn)}")
-            self.call_function(
-                UserFunctionVariable(inner_fn, **options),
-                [fn.obj.objvar] + args,
-                kwargs,
-            )
-        elif isinstance(fn, NNModuleVariable):
-            mod = self.get_submodule(fn.module_key)
-            if isinstance(mod, torch.nn.Sequential):
-                if (
-                    len(args) != 1
-                    or len(kwargs) != 0
-                    or mod.__class__.forward is not torch.nn.Sequential.forward
-                ):
-                    unimplemented("custom Sequential")
-                # unroll Sequential()
-                options = VariableTracker.propagate([fn])
-                (arg,) = args
-                assert fn.source
-                for idx, submod in enumerate(mod):
-                    self.call_function(
-                        self.add_submodule(
-                            submod,
-                            fn.module_key,
-                            idx,
-                            source=NNModuleSource(GetItemSource(fn.source, idx)),
-                            **options,
-                        ),
-                        [arg],
-                        {},
-                    )
-                    arg = self.pop()
-                self.push(arg)
-            elif is_allowed(mod.__class__):
-                self.push(
-                    TensorVariable(
-                        proxy=self.create_proxy(
-                            "call_module",
-                            fn.module_key,
-                            *proxy_args_kwargs(args, kwargs),
-                        ),
-                        **options,
-                    )
-                )
-            else:
-                forward = mod.__class__.forward
-                assert forward is not torch.nn.Module.forward
-                self.inline_user_function(
-                    UserFunctionVariable(fn=forward, **VariableTracker.propagate([fn])),
-                    [fn] + args,
-                    kwargs,
-                )
-        elif (
-            isinstance(fn, UserMethodVariable)
-            and isinstance(fn.obj, NNModuleVariable)
-            and fn.fn is torch.nn.Module.children
-        ):
-            result = []
-            key = fn.obj.module_key
-            assert fn.obj.source
-            for name, submod in self.get_submodule(key).named_children():
-                result.append(
-                    self.add_submodule(
-                        submod,
-                        key,
-                        name,
-                        source=NNModuleSource(AttrSource(fn.obj.source, name)),
-                        **options,
-                    )
-                )
-            self.push(TupleVariable(result, **options))
-        elif (
-            isinstance(fn, UserMethodVariable)
-            and isinstance(fn.obj, NNModuleVariable)
-            and fn.fn is torch.nn.ModuleDict.items
-        ):
-            result = []
-            key = fn.obj.module_key
-            assert fn.obj.source
-            for name, submod in self.get_submodule(key).items():
-                result.append(
-                    TupleVariable(
-                        [
-                            ConstantVariable(name, **options),
-                            self.add_submodule(
-                                submod,
-                                key,
-                                name,
-                                source=NNModuleSource(
-                                    GetItemSource(fn.obj.source, name)
-                                ),
-                                **options,
-                            ),
-                        ]
-                    )
-                )
-            self.push(TupleVariable(result, **options))
-        elif (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, ListVariable)
-            and fn.name == "append"
-            and fn.obj.mutable_local
-        ):
-            assert not kwargs
-            (arg,) = args
-            self.replace_all(
-                fn.obj,
-                ListVariable(
-                    fn.obj.items + [arg], mutable_local=MutableLocal(), **options
-                ),
-            )
-            self.push(ConstantVariable(None, **options))
-
-        elif (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, ConstDictVariable)
-            and fn.name == "items"
-        ):
-            assert not (args or kwargs)
-            val = fn.obj.items
-            self.push(
-                TupleVariable(
-                    [
-                        TupleVariable([ConstantVariable(k, **options), v], **options)
-                        for k, v in val.items()
-                    ],
-                    **options,
-                )
-            )
-        elif (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, ConstDictVariable)
-            and fn.name == "keys"
-        ):
-            assert not (args or kwargs)
-            val = fn.obj.items
-            self.push(
-                TupleVariable(
-                    [ConstantVariable(k, **options) for k in val.keys()],
-                    **options,
-                )
-            )
-        elif (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, ConstDictVariable)
-            and fn.name == "values"
-        ):
-            assert not (args or kwargs)
-            val = fn.obj.items
-            self.push(TupleVariable(list(val.values()), **options))
-        elif isinstance(fn, BaseUserFunctionVariable):
-            self.inline_user_function(fn, fn.self_args() + args, kwargs)
-        elif isinstance(fn, BuiltinVariable):
-            if fn.fn is range and constant_args:
-                items = [
-                    ConstantVariable(x, **options)
-                    for x in range(
-                        *[x.value for x in args],
-                        **{k: v.value for k, v in kwargs.items()},
-                    )
-                ]
-                self.push(ListVariable(items, **options))
-            elif fn.fn is iter and args and isinstance(args[0], BaseListVariable):
-                assert not kwargs and len(args) == 1
-                self.push(
-                    ListIteratorVariable(
-                        args[0].items, mutable_local=MutableLocal(), **options
-                    )
-                )
-            elif fn.fn is iter and args and args[0].has_unpack_var_sequence(self):
-                assert not kwargs and len(args) == 1
-                self.push(
-                    ListIteratorVariable(
-                        args[0].unpack_var_sequence(self),
-                        mutable_local=MutableLocal(),
-                        **options,
-                    )
-                )
-            elif fn.fn is zip and all(x.has_unpack_var_sequence(self) for x in args):
-                assert not kwargs
-                items = [
-                    TupleVariable(list(item), **options)
-                    for item in zip(*[arg.unpack_var_sequence(self) for arg in args])
-                ]
-                self.push(TupleVariable(items, **options))
-            elif fn.fn is enumerate and all(
-                x.has_unpack_var_sequence(self) for x in args
-            ):
-                assert not kwargs and len(args) == 1
-                items = [
-                    TupleVariable([ConstantVariable(idx, **options), var], **options)
-                    for idx, var in enumerate(args[0].unpack_var_sequence(self))
-                ]
-                self.push(TupleVariable(items, **options))
-            elif fn.fn is len:
-                assert not kwargs and len(args) == 1
-                arg = args[0]
-                if isinstance(arg, TensorVariable):
-                    if arg.size:
-                        assert not config.dynamic_shapes
-                        self.push(ConstantVariable(arg.size[0], **options))
-                    else:
-                        self.push(
-                            TensorVariable(
-                                self.create_proxy(
-                                    "call_function", len, (arg.as_proxy(),), {}
-                                ),
-                                **options,
-                            )
-                        )
-                elif isinstance(arg, (BaseListVariable, ConstDictVariable)):
-                    self.push(ConstantVariable(len(arg.items), **options))
-                elif isinstance(arg, NNModuleVariable):
-                    # assuming constant length of nn.ModuleList, etc
-                    self.push(
-                        ConstantVariable(
-                            len(self.get_submodule(arg.module_key)), **options
-                        )
-                    )
-                elif arg.has_unpack_var_sequence(self):
-                    self.push(
-                        ConstantVariable(len(arg.unpack_var_sequence(self)), **options)
-                    )
-                else:
-                    unimplemented(f"`len` with arg type {arg}")
-            elif fn.fn is isinstance:
-                assert not kwargs and len(args) == 2
-                arg, isinstance_type = args
-                arg_type = arg.python_type()
-                isinstance_type = isinstance_type.as_python_constant()
-                try:
-                    val = issubclass(arg_type, isinstance_type)
-                except TypeError:
-                    val = arg_type is isinstance_type
-                self.push(ConstantVariable(val, **options))
-            elif fn.fn is super:
-                assert not kwargs
-                assert len(args) in (1, 2)
-                self.push(SuperVariable(*args, **options))
-            else:
-                unimplemented(f"builtin call {fn.fn} {args}")
-        elif isinstance(fn, LambdaVariable):
-            self.push(fn.fn(*args, **kwargs))
-        else:
-            unimplemented(f"call({fn})")
+        self.push(fn.call_function(self, args, kwargs))
 
     def replace_all(self, oldvar, newvar):
         assert oldvar.mutable_local
@@ -694,14 +354,22 @@ class InstructionTranslatorBase(fx.Tracer):
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(repl, x)
 
+    # TODO(jansel): remove this older version
     def inline_user_function(self, fn, args, kwargs):
+        """
+        A call to some user defined function by inlining it.
+        """
+        self.push(self.inline_user_function_return(fn, args, kwargs))
+
+    def inline_user_function_return(self, fn, args, kwargs):
         """
         A call to some user defined function by inlining it.
         """
         state = self.copy_graphstate()
         try:
-            self.push(InliningInstructionTranslator.inline_call(self, fn, args, kwargs))
+            result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
             self.guards.update(fn.guards)
+            return result
         except Exception:
             self.restore_graphstate(state)
             raise

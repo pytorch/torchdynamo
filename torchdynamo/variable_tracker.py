@@ -1,23 +1,30 @@
 import collections
-import functools
 import inspect
+import itertools
 import math
 import types
 from typing import Callable
 from typing import List
+from typing import Dict
 from typing import Optional
 from typing import Set
 
 import torch.fx
 
 from torchdynamo import config
+from torchdynamo.allowed_functions import is_allowed
 from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.utils import make_cell
+from torchdynamo.utils import make_cell, unimplemented, istype, proxy_args_kwargs
 from torchdynamo.utils import identity
-from torchdynamo.variable_source import Source
+from torchdynamo.variable_source import Source, NNModuleSource, AttrSource
 from torchdynamo.variable_source import GetItemSource
 
-combine_guards = functools.partial(functools.reduce, set.union)
+dict_values = type(dict().values())
+odict_values = type(collections.OrderedDict().values())
+
+
+def check_constant_args(args, kwargs):
+    return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
 
 class MutableLocal:
@@ -39,12 +46,20 @@ class VariableTracker:
     """
 
     @staticmethod
-    def propagate(vars: List["VariableTracker"]):
-        if len(vars) == 0:
-            return {}
-        assert all(isinstance(x, VariableTracker) for x in vars)
+    def propagate(*vars: List[List["VariableTracker"]]):
+        guards = set()
+
+        def visit(var):
+            if type(var) in (list, tuple, dict_values, odict_values):
+                for i in var:
+                    visit(i)
+            else:
+                assert isinstance(var, VariableTracker)
+                guards.update(var.guards)
+
+        visit(vars)
         return {
-            "guards": combine_guards(v.guards for v in vars),
+            "guards": guards,
         }
 
     def clone(self, **kwargs):
@@ -150,6 +165,20 @@ class VariableTracker:
         except Exception:
             return False
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        raise unimplemented(f"call_function {self} {args} {kwargs}")
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
+
     def __init__(
         self,
         guards: Optional[Set] = None,
@@ -203,10 +232,8 @@ class TensorVariable(VariableTracker):
 
     def const_attr(self, name):
         result = None
-        wrapped = False
-        options = VariableTracker.propagate([self])
-        if name in ("ndim", "ndimension", "dim") and self.ndim is not None:
-            wrapped = name != "ndim"
+        options = VariableTracker.propagate(self)
+        if name == "ndim" and self.ndim is not None:
             result = ConstantVariable(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
             result = AllowedFunctionOrModuleVariable(self.dtype, **options)
@@ -214,26 +241,44 @@ class TensorVariable(VariableTracker):
             result = AllowedFunctionOrModuleVariable(self.device, **options)
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable(self.device.type == "cuda", **options)
-        elif name in ("size", "shape") and self.size is not None:
-            wrapped = name == "size"
+        elif name == "shape" and self.size is not None:
             result = ConstantVariable(self.size, **options)
-        elif name == "stride" and self.stride is not None:
-            wrapped = True
-            result = ConstantVariable(self.stride, **options)
-        if wrapped:
+        return result
 
-            def wrapper(*args):
-                if len(args) == 1:
-                    return result.getitem_const(args[0])
-                elif args:
-                    return TupleVariable(
-                        [result.getitem_const(a) for a in args], **options
-                    )
-                return result
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
 
-            return LambdaVariable(wrapper, **options)
+        if name == "stride" and self.stride is not None:
+            constant_result = ConstantVariable(self.stride, **options)
+        elif name == "size" and self.size is not None:
+            constant_result = ConstantVariable(self.size, **options)
+        elif name in ("ndimension", "dim") and self.ndim is not None:
+            constant_result = ConstantVariable(self.ndim, **options)
         else:
-            return result
+            constant_result = None
+
+        if constant_result:
+            assert not kwargs
+            if len(args) == 1:
+                return constant_result.getitem_const(args[0])
+            elif args:
+                return TupleVariable(
+                    [constant_result.getitem_const(a) for a in args], **options
+                )
+            return constant_result
+
+        return TensorVariable(
+            tx.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            ),
+            **options,
+        )
 
 
 class NNModuleVariable(VariableTracker):
@@ -261,6 +306,93 @@ class NNModuleVariable(VariableTracker):
             )
             for idx, submod in enumerate(base)
         ]
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        mod = tx.get_submodule(self.module_key)
+        if (
+            isinstance(mod, torch.nn.Sequential)
+            and mod.__class__.forward is torch.nn.Sequential.forward
+        ):
+            # unroll Sequential()
+            assert not kwargs
+            (arg,) = args
+            for idx, submod in enumerate(mod):
+                tx.call_function(
+                    tx.add_submodule(
+                        submod,
+                        self.module_key,
+                        idx,
+                        source=NNModuleSource(GetItemSource(self.source, idx)),
+                        **options,
+                    ),
+                    [arg],
+                    {},
+                )
+                arg = tx.pop()
+            return arg
+        elif is_allowed(mod.__class__):
+            return TensorVariable(
+                proxy=tx.create_proxy(
+                    "call_module",
+                    self.module_key,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                **options,
+            )
+        else:
+            forward = mod.__class__.forward
+            assert forward is not torch.nn.Module.forward
+            return tx.inline_user_function_return(
+                UserFunctionVariable(forward, **options),
+                [self] + args,
+                kwargs,
+            )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        key = self.module_key
+        if name == "children":
+            result = []
+            for name, submod in tx.get_submodule(key).named_children():
+                result.append(
+                    tx.add_submodule(
+                        submod,
+                        key,
+                        name,
+                        source=NNModuleSource(AttrSource(self.source, name)),
+                        **options,
+                    )
+                )
+            return TupleVariable(result, **options)
+        elif name == "items":
+            result = []
+            for name, submod in tx.get_submodule(key).items():
+                result.append(
+                    TupleVariable(
+                        [
+                            ConstantVariable(name, **options),
+                            tx.add_submodule(
+                                submod,
+                                key,
+                                name,
+                                source=NNModuleSource(GetItemSource(self.source, name)),
+                                **options,
+                            ),
+                        ]
+                    )
+                )
+            return TupleVariable(result, **options)
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
 
 class ConstantVariable(VariableTracker):
@@ -303,6 +435,11 @@ class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
         super(LambdaVariable, self).__init__(**kwargs)
         self.fn = fn
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return self.fn(*args, **kwargs)
 
 
 class BuiltinVariable(VariableTracker):
@@ -351,6 +488,96 @@ class BuiltinVariable(VariableTracker):
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
         return [codegen.create_load_global(name, add=True)]
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        constant_args = check_constant_args(args, kwargs)
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return ConstantVariable(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+                **options,
+            )
+        elif self.fn is range and constant_args:
+            items = [
+                ConstantVariable(x, **options)
+                for x in range(
+                    *[x.value for x in args],
+                    **{k: v.value for k, v in kwargs.items()},
+                )
+            ]
+            return ListVariable(items, **options)
+        elif self.fn is iter and args and isinstance(args[0], BaseListVariable):
+            assert not kwargs and len(args) == 1
+            return ListIteratorVariable(
+                args[0].items, mutable_local=MutableLocal(), **options
+            )
+        elif self.fn is iter and args and args[0].has_unpack_var_sequence(tx):
+            assert not kwargs and len(args) == 1
+            return ListIteratorVariable(
+                args[0].unpack_var_sequence(tx),
+                mutable_local=MutableLocal(),
+                **options,
+            )
+        elif self.fn is zip and all(x.has_unpack_var_sequence(tx) for x in args):
+            assert not kwargs
+            items = [
+                TupleVariable(list(item), **options)
+                for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
+            ]
+            return TupleVariable(items, **options)
+        elif self.fn is enumerate and all(x.has_unpack_var_sequence(tx) for x in args):
+            assert not kwargs and len(args) == 1
+            items = [
+                TupleVariable([ConstantVariable(idx, **options), var], **options)
+                for idx, var in enumerate(args[0].unpack_var_sequence(tx))
+            ]
+            return TupleVariable(items, **options)
+        elif self.fn is len:
+            assert not kwargs and len(args) == 1
+            arg = args[0]
+            if isinstance(arg, TensorVariable):
+                if arg.size:
+                    assert not config.dynamic_shapes
+                    return ConstantVariable(arg.size[0], **options)
+                else:
+                    return TensorVariable(
+                        tx.create_proxy("call_function", len, (arg.as_proxy(),), {}),
+                        **options,
+                    )
+            elif isinstance(arg, (BaseListVariable, ConstDictVariable)):
+                return ConstantVariable(len(arg.items), **options)
+            elif isinstance(arg, NNModuleVariable):
+                # assuming constant length of nn.ModuleList, etc
+                return ConstantVariable(
+                    len(tx.get_submodule(arg.module_key)), **options
+                )
+            elif arg.has_unpack_var_sequence(tx):
+                return ConstantVariable(len(arg.unpack_var_sequence(tx)), **options)
+            else:
+                unimplemented(f"`len` with arg type {arg}")
+        elif self.fn is isinstance:
+            assert not kwargs and len(args) == 2
+            arg, isinstance_type = args
+            arg_type = arg.python_type()
+            isinstance_type = isinstance_type.as_python_constant()
+            try:
+                val = issubclass(arg_type, isinstance_type)
+            except TypeError:
+                val = arg_type is isinstance_type
+            return ConstantVariable(val, **options)
+        elif self.fn is super:
+            assert not kwargs
+            assert len(args) in (1, 2)
+            return SuperVariable(*args, **options)
+        else:
+            raise super().call_function(tx, args, kwargs)
 
 
 class ListIteratorVariable(VariableTracker):
@@ -402,6 +629,11 @@ class GetAttrVariable(VariableTracker):
         codegen(self.obj)
         return [codegen.create_load_attr(self.name)]
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return self.obj.call_method(tx, self.name, args, kwargs).add_guards(self.guards)
+
 
 class BaseListVariable(VariableTracker):
     def __init__(self, items, **kwargs):
@@ -438,6 +670,27 @@ class ListVariable(BaseListVariable):
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         return [create_instruction("BUILD_LIST", len(self.items))]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "append" and self.mutable_local:
+            assert not kwargs
+            (arg,) = args
+            tx.replace_all(
+                self,
+                ListVariable(
+                    self.items + [arg], mutable_local=MutableLocal(), **options
+                ),
+            )
+            return ConstantVariable(None, **options)
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
 
 class TupleVariable(BaseListVariable):
@@ -493,6 +746,37 @@ class ConstDictVariable(VariableTracker):
         index = arg.as_python_constant()
         return self.items[index].add_guards(self.guards).add_guards(arg.guards)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        val = self.items
+        if name == "items":
+            assert not (args or kwargs)
+            return TupleVariable(
+                [
+                    TupleVariable([ConstantVariable(k, **options), v], **options)
+                    for k, v in val.items()
+                ],
+                **options,
+            )
+        elif name == "keys":
+            assert not (args or kwargs)
+            return TupleVariable(
+                [ConstantVariable(k, **options) for k in val.keys()],
+                **options,
+            )
+
+        elif name == "values":
+            assert not (args or kwargs)
+            return TupleVariable(list(val.values()), **options)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
 
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self):
@@ -500,6 +784,11 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_name(self):
         return self.get_code().co_name
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return tx.inline_user_function_return(self, self.self_args() + args, kwargs)
 
 
 class UserFunctionVariable(BaseUserFunctionVariable):
@@ -561,6 +850,34 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def export_freevars(self, parent, child):
         pass
+
+
+class UserMethodVariable(UserFunctionVariable):
+    """Some unsupported user-defined method"""
+
+    def __init__(self, fn, obj, **kwargs):
+        super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
+        self.obj = obj
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.fn}, {self.obj})"
+
+    def self_args(self):
+        return [self.obj]
+
+    def python_type(self):
+        return types.MethodType
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if isinstance(self.obj, NNModuleVariable) and getattr(
+            self.fn, "__module__", ""
+        ).startswith("torch.nn."):
+            return self.obj.call_method(tx, self.fn.__name__, args, kwargs).add_guards(
+                self.guards
+            )
+        return super().call_function(tx, args, kwargs)
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
@@ -672,23 +989,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return [create_instruction("MAKE_FUNCTION", flags)]
 
 
-class UserMethodVariable(UserFunctionVariable):
-    """Some unsupported user-defined method"""
-
-    def __init__(self, fn, obj, **kwargs):
-        super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
-        self.obj = obj
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.fn}, {self.obj})"
-
-    def self_args(self):
-        return [self.obj]
-
-    def python_type(self):
-        return types.MethodType
-
-
 class UserDefinedClassVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(UserDefinedClassVariable, self).__init__(**kwargs)
@@ -705,6 +1005,15 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
         super(AllowedFunctionOrModuleVariable, self).__init__(**kwargs)
         self.value = value
 
+        self_should_be_none = getattr(self.value, "__self__", None)
+        if self_should_be_none is not None:
+            # weird ones like torch.nn.functional.avg_pool2d have __self__
+            assert isinstance(
+                self_should_be_none, types.ModuleType
+            ) and self_should_be_none.__name__ == getattr(
+                self.value, "__module__", None
+            )
+
     def as_proxy(self):
         return self.value
 
@@ -718,6 +1027,50 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
 
     def can_constant_fold_through(self):
         return getattr(self.value, "__module__", None) == "math"
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        constant_args = check_constant_args(args, kwargs)
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if self.value in config.constant_functions:
+            assert not args and not kwargs
+            return ConstantVariable(config.constant_functions[self.value], **options)
+        elif self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return ConstantVariable(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+                **options,
+            )
+        elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
+            if self.value is torch.nn.Softmax:
+                # rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)
+                dim = args[0] if args else kwargs.get("dim", ConstantVariable(None))
+
+                def fake_softmax(input):
+                    return TensorVariable(
+                        proxy=tx.create_proxy(
+                            "call_function",
+                            torch.nn.functional.softmax,
+                            *proxy_args_kwargs([input, dim], {}),
+                        ),
+                        **VariableTracker.propagate([self, dim, input]),
+                    )
+
+                return LambdaVariable(fake_softmax, **options)
+            else:
+                unimplemented(f"construct nn.Module: {self.value.__name__}")
+        else:
+            return TensorVariable(
+                proxy=tx.create_proxy(
+                    "call_function", self.value, *proxy_args_kwargs(args, kwargs)
+                ),
+                **options,
+            )
 
 
 class PythonModuleVariable(VariableTracker):
@@ -775,6 +1128,23 @@ class SuperVariable(VariableTracker):
         search_type = self.typevar.as_python_constant()
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
         return getattr(super(search_type, self.objvar.python_type()), name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(
+            self, args, kwargs.values(), self.objvar, self.typevar
+        )
+        inner_fn = self.get_const_attr(self, name)
+        if not isinstance(inner_fn, types.FunctionType):
+            unimplemented(f"non-function super: {typestr(inner_fn)}")
+        return UserFunctionVariable(inner_fn, **options).call_function(
+            tx, [self.objvar] + args, kwargs
+        )
 
 
 class UnknownVariable(VariableTracker):

@@ -637,3 +637,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_inline_softmax(x, y):
         # This is common in sme huggingface models
         return torch.nn.Softmax(dim=-1)(x + y * 2)
+
+    @make_test
+    def test_dtype_compare(a, b):
+        if a.dtype == torch.float16:
+            return a + 10
+        if a.dtype == torch.float32:
+            return a - b * 32

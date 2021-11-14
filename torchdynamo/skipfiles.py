@@ -1,5 +1,6 @@
 import abc
 import enum
+import copy
 import importlib
 import inspect
 import multiprocessing
@@ -27,6 +28,7 @@ SKIP_DIRS = [
     re.sub(r"__init__.py$", "", m.__file__)
     for m in (
         abc,
+        copy,
         enum,
         importlib,
         inspect,

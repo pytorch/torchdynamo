@@ -91,3 +91,16 @@ def unimplemented(msg: str):
 def warning(msg: str):
     assert msg != os.environ.get("BREAK", False)
     counters["warnings"][msg] += 1
+
+
+def proxy_args_kwargs(args, kwargs):
+    try:
+        proxy_args = tuple(arg.as_proxy() for arg in args)
+        proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return proxy_args, proxy_kwargs
+    except NotImplementedError:
+        from .variable_tracker import typestr
+
+        raise unimplemented(
+            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
+        )
