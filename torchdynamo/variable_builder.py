@@ -1,3 +1,5 @@
+import collections
+
 import dataclasses
 import inspect
 import re
@@ -88,19 +90,26 @@ class VariableBuilder:
                 for i, item in enumerate(value)
             ]
             return self.list_type(value)(output, guards=guards)
-        elif istype(value, dict) and all(
+        elif istype(value, (dict, collections.OrderedDict)) and all(
             map(ConstantVariable.is_literal, value.keys())
         ):
             guards = self.make_guards(GuardBuilder.DICT_KEYS)
-            result = {
-                k: VariableBuilder(self.tx, GetItemSource(self.get_source(), k))(
-                    value[k]
-                ).add_guards(guards)
-                for k in sorted(value.keys())
-            }
+            keys = (
+                value.keys()
+                if istype(value, collections.OrderedDict)
+                else sorted(value.keys())
+            )
+            result = collections.OrderedDict(
+                (
+                    k,
+                    VariableBuilder(self.tx, GetItemSource(self.get_source(), k))(
+                        value[k]
+                    ).add_guards(guards),
+                )
+                for k in keys
+            )
             return ConstDictVariable(result, guards=guards)
         elif isinstance(value, torch.nn.Module):
-            # TODO(jansel): add a module guard type to check for training
             return self.tx.add_submodule(
                 value,
                 self.name,

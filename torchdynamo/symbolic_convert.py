@@ -50,7 +50,7 @@ from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
-from .variable_tracker import FunctionConstantWrapper
+from .variable_tracker import LambdaVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
@@ -393,14 +393,33 @@ class InstructionTranslatorBase(fx.Tracer):
                 ) and self_should_be_none.__name__ == getattr(
                     fn.value, "__module__", None
                 )
-            self.push(
-                TensorVariable(
-                    proxy=self.create_proxy(
-                        "call_function", fn.value, *proxy_args_kwargs(args, kwargs)
-                    ),
-                    **options,
+            if istype(fn.value, type) and issubclass(fn.value, torch.nn.Module):
+                if fn.value is torch.nn.Softmax:
+                    # rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)
+                    dim = args[0] if args else kwargs.get("dim", ConstantVariable(None))
+
+                    def fake_softmax(input):
+                        return TensorVariable(
+                            proxy=self.create_proxy(
+                                "call_function",
+                                torch.nn.functional.softmax,
+                                *proxy_args_kwargs([input, dim], {}),
+                            ),
+                            **VariableTracker.propagate([fn, dim, input]),
+                        )
+
+                    self.push(LambdaVariable(fake_softmax, **options))
+                else:
+                    unimplemented(f"construct nn.Module: {fn.value.__name__}")
+            else:
+                self.push(
+                    TensorVariable(
+                        proxy=self.create_proxy(
+                            "call_function", fn.value, *proxy_args_kwargs(args, kwargs)
+                        ),
+                        **options,
+                    )
                 )
-            )
         elif isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
             name = fn.name
             obj = fn.obj
@@ -539,10 +558,8 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(
                 TupleVariable(
                     [
-                        TupleVariable(
-                            [ConstantVariable(k, **options), val[k]], **options
-                        )
-                        for k in sorted(val.keys())
+                        TupleVariable([ConstantVariable(k, **options), v], **options)
+                        for k, v in val.items()
                     ],
                     **options,
                 )
@@ -556,7 +573,7 @@ class InstructionTranslatorBase(fx.Tracer):
             val = fn.obj.items
             self.push(
                 TupleVariable(
-                    [ConstantVariable(k, **options) for k in sorted(val.keys())],
+                    [ConstantVariable(k, **options) for k in val.keys()],
                     **options,
                 )
             )
@@ -567,7 +584,7 @@ class InstructionTranslatorBase(fx.Tracer):
         ):
             assert not (args or kwargs)
             val = fn.obj.items
-            self.push(TupleVariable([val[k] for k in sorted(val.keys())], **options))
+            self.push(TupleVariable(list(val.values()), **options))
         elif isinstance(fn, BaseUserFunctionVariable):
             self.inline_user_function(fn, fn.self_args() + args, kwargs)
         elif isinstance(fn, BuiltinVariable):
@@ -659,8 +676,8 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.push(SuperVariable(*args, **options))
             else:
                 unimplemented(f"builtin call {fn.fn} {args}")
-        elif isinstance(fn, FunctionConstantWrapper):
-            self.push(fn.call_const(args, kwargs))
+        elif isinstance(fn, LambdaVariable):
+            self.push(fn.fn(*args, **kwargs))
         else:
             unimplemented(f"call({fn})")
 
@@ -831,7 +848,13 @@ class InstructionTranslatorBase(fx.Tracer):
         self.block_depth += 1
 
     def POP_BLOCK(self, inst):
+        assert self.block_depth > 0
         self.block_depth -= 1
+
+    # def SETUP_WITH(self, inst):
+    #     # with is handled in resume_execution.py
+    #     self.compile_partial_subgraph()
+    #     self.add_output_instructions(self.create_call_resume_at(inst))
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1090,7 +1113,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         options = VariableTracker.propagate(items)
-        result = dict()
+        result = collections.OrderedDict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable)
             result[k.value] = v
@@ -1107,7 +1130,9 @@ class InstructionTranslatorBase(fx.Tracer):
         assert len(keys) == len(values)
         self.push(
             ConstDictVariable(
-                dict(zip(keys, values)), mutable_local=MutableLocal(), **options
+                collections.OrderedDict(zip(keys, values)),
+                mutable_local=MutableLocal(),
+                **options,
             )
         )
 
@@ -1121,7 +1146,7 @@ class InstructionTranslatorBase(fx.Tracer):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
-        items = dict(obj.items)
+        items = collections.OrderedDict(obj.items)
         items[k.as_python_constant()] = v
         self.replace_all(
             obj,

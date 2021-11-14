@@ -339,11 +339,25 @@ static PyObject *unsupported(PyObject *dummy, PyObject *args) {
   return obj2;
 }
 
+static PyObject *skip_code(PyObject *dummy, PyObject *args) {
+  PyObject *obj = NULL;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return NULL;
+  }
+  if (!PyCode_Check(obj)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object");
+    return NULL;
+  }
+  set_extra((PyCodeObject *)obj, SKIP_CODE);
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
+    {"skip_code", skip_code, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

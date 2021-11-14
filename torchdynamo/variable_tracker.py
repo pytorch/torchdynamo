@@ -1,3 +1,4 @@
+import collections
 import functools
 import inspect
 import math
@@ -220,8 +221,19 @@ class TensorVariable(VariableTracker):
             wrapped = True
             result = ConstantVariable(self.stride, **options)
         if wrapped:
-            result = FunctionConstantWrapper(result, **options)
-        return result
+
+            def wrapper(*args):
+                if len(args) == 1:
+                    return result.getitem_const(args[0])
+                elif args:
+                    return TupleVariable(
+                        [result.getitem_const(a) for a in args], **options
+                    )
+                return result
+
+            return LambdaVariable(wrapper, **options)
+        else:
+            return result
 
 
 class NNModuleVariable(VariableTracker):
@@ -287,19 +299,10 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError()
 
 
-class FunctionConstantWrapper(VariableTracker):
-    def __init__(self, value, **kwargs):
-        super(FunctionConstantWrapper, self).__init__(**kwargs)
-        self.value = value
-
-    def call_const(self, args, kwargs):
-        # this is used to implement Tensor.size(1)
-        assert not kwargs
-        if len(args) == 1:
-            return self.value.getitem_const(args[0])
-        elif args:
-            return tuple(self.value.getitem_const(a) for a in args)
-        return self.value
+class LambdaVariable(VariableTracker):
+    def __init__(self, fn, **kwargs):
+        super(LambdaVariable, self).__init__(**kwargs)
+        self.fn = fn
 
 
 class BuiltinVariable(VariableTracker):
@@ -464,7 +467,9 @@ class SliceVariable(BaseListVariable):
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, **kwargs):
         super(ConstDictVariable, self).__init__(**kwargs)
-        assert isinstance(items, dict)
+        if not isinstance(items, collections.OrderedDict):
+            assert isinstance(items, dict)
+            items = collections.OrderedDict((k, items[k]) for k in sorted(items.keys()))
         self.items = items
 
     def as_proxy(self):

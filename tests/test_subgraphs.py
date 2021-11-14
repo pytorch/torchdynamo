@@ -1,4 +1,6 @@
 #!/usr/bin/env pytest
+import unittest
+
 import torch
 
 import torchdynamo.testing
@@ -303,3 +305,13 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return a * x + len_(b)
 
         self._common(fn, 2, 4)
+
+    @unittest.skip("todo")
+    def test_nograd(self):
+        def fn(a, b):
+            x = a + b - 3
+            with torch.no_grad():
+                x = x + a + b - 4
+            return x + a + b - 5
+
+        self._common(fn, 3, 8)

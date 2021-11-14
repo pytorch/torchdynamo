@@ -132,6 +132,13 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert istype(val.training, bool)
+        if val.training:
+            self.code.append(f"{ref}.training")
+        else:
+            self.code.append(f"not {ref}.training")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
