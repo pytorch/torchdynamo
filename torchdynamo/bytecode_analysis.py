@@ -1,7 +1,7 @@
-from numbers import Real
 import dataclasses
 import dis
 import sys
+from numbers import Real
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],

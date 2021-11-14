@@ -2,8 +2,8 @@ from typing import Any
 from typing import Dict
 from typing import List
 
-from .bytecode_transformation import create_instruction
 from .bytecode_transformation import Instruction
+from .bytecode_transformation import create_instruction
 from .bytecode_transformation import transform_code_object
 from .utils import ExactWeakKeyDictionary
 

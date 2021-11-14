@@ -24,7 +24,7 @@ from . import config
 from . import skipfiles
 from .allowed_functions import is_allowed, is_builtin
 from .bytecode_analysis import livevars_analysis
-from .bytecode_transformation import Instruction
+from .bytecode_transformation import Instruction, is_generator
 from .bytecode_transformation import cleaned_instructions
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import unique_id
@@ -38,7 +38,7 @@ from .utils import istype
 from .utils import unimplemented
 from .utils import warning
 from .variable_builder import VariableBuilder
-from .variable_source import AttrSource
+from .variable_source import AttrSource, Source
 from .variable_source import GetItemSource
 from .variable_source import GlobalSource
 from .variable_source import LocalSource
@@ -47,22 +47,22 @@ from .variable_tracker import AllowedFunctionOrModuleVariable, MutableLocal
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
-from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
+from .variable_tracker import ConstantVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
-from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import NNModuleVariable
+from .variable_tracker import NestedUserFunctionVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
-from .variable_tracker import typestr
 from .variable_tracker import UnknownVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
+from .variable_tracker import typestr
 
 
 def stack_op(fn: typing.Callable):
@@ -270,14 +270,23 @@ class InstructionTranslatorBase(fx.Tracer):
         return create_instruction("LOAD_ATTR", self.code_options["co_names"], name)
 
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
-        assert isinstance(mod, (torch.nn.Module, torch.Tensor))
+        options = dict(options)
+        options["guards"] = set(options.get("guards", []))
+        source: Source = options["source"]
+        if isinstance(mod, torch.Tensor):
+            options.update(TensorVariable.specialize(mod))
+            options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
 
-        def wrap_name(module_key):
-            if isinstance(mod, torch.Tensor):
+            def wrap_name(module_key):
                 return TensorVariable(
                     self.create_proxy("get_attr", module_key, tuple(), {}), **options
                 )
-            else:
+
+        else:
+            assert isinstance(mod, torch.nn.Module)
+            options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
+
+            def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
 
         for k, v in self.nn_modules.items():
@@ -353,13 +362,6 @@ class InstructionTranslatorBase(fx.Tracer):
         self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(repl, x)
-
-    # TODO(jansel): remove this older version
-    def inline_user_function(self, fn, args, kwargs):
-        """
-        A call to some user defined function by inlining it.
-        """
-        self.push(self.inline_user_function_return(fn, args, kwargs))
 
     def inline_user_function_return(self, fn, args, kwargs):
         """
@@ -777,6 +779,20 @@ class InstructionTranslatorBase(fx.Tracer):
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
+
+    def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
+        seqs = self.popn(inst.argval)
+        options = VariableTracker.propagate(seqs)
+        items = list()
+        for seq in seqs:
+            try:
+                items.extend(seq.unpack_var_sequence(self))
+            except NotImplementedError:
+                unimplemented(f"BUILD_LIST_UNPACK {seq}")
+        self.push(cls(items, mutable_local=MutableLocal(), **options))
+
+    def BUILD_TUPLE_UNPACK(self, inst):
+        self.BUILD_LIST_UNPACK(inst, cls=TupleVariable)
 
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
@@ -1356,14 +1372,38 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")
 
-        tracer = InliningInstructionTranslator(
-            parent, func.get_code(), sub_locals, func.get_globals()
-        )
+        code = func.get_code()
+
+        if config.trace:
+            print("INLINING ", code)
+            print(dis.dis(code))
+            print()
+
+        if is_generator(code):
+            tracer = InliningGeneratorInstructionTranslator(
+                parent, code, sub_locals, func.get_globals()
+            )
+        else:
+            tracer = InliningInstructionTranslator(
+                parent, code, sub_locals, func.get_globals()
+            )
+
         tracer.run()
         assert tracer.symbolic_result is not None
-
         func.export_freevars(parent, tracer)
-        return tracer.symbolic_result
+        parent.guards.update(tracer.guards)
+
+        if config.trace:
+            print("DONE INLINING", code)
+
+        if is_generator(code):
+            assert tracer.symbolic_result.as_python_constant() is None
+            return ListIteratorVariable(
+                tracer.generated_items,
+                **VariableTracker.propagate(tracer.symbolic_result),
+            )
+        else:
+            return tracer.symbolic_result
 
     def __init__(
         self,
@@ -1396,6 +1436,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
+
+
+class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
+    def __init__(self, *args, **kwargs):
+        super(InliningGeneratorInstructionTranslator, self).__init__(*args, **kwargs)
+        self.generated_items = []
+
+    def YIELD_VALUE(self, inst: Instruction):
+        self.generated_items.append(self.pop())
+        # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
+        self.push(ConstantVariable(None))
 
 
 class FakeRootModule(torch.nn.Module):

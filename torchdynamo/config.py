@@ -6,7 +6,7 @@ import torch
 # print out lots of stuff
 debug = False
 
-# even more debugging
+# an unreasonable amount of debug printouts
 trace = False
 
 # need this many ops to create an FX graph

@@ -2,22 +2,29 @@ import collections
 import inspect
 import itertools
 import math
+import re
 import types
 from typing import Callable
-from typing import List
 from typing import Dict
+from typing import List
 from typing import Optional
 from typing import Set
 
 import torch.fx
 
-from torchdynamo import config
-from torchdynamo.allowed_functions import is_allowed
-from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.utils import make_cell, unimplemented, istype, proxy_args_kwargs
-from torchdynamo.utils import identity
-from torchdynamo.variable_source import Source, NNModuleSource, AttrSource
-from torchdynamo.variable_source import GetItemSource
+from . import config
+from .allowed_functions import is_allowed
+from .bytecode_transformation import create_instruction
+from .guards import GuardBuilder
+from .utils import identity
+from .utils import istype
+from .utils import make_cell
+from .utils import proxy_args_kwargs
+from .utils import unimplemented
+from .variable_source import AttrSource
+from .variable_source import GetItemSource
+from .variable_source import NNModuleSource
+from .variable_source import Source
 
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
@@ -202,6 +209,7 @@ class TensorVariable(VariableTracker):
         ndim=None,
         size=None,
         stride=None,
+        requires_grad=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -211,6 +219,7 @@ class TensorVariable(VariableTracker):
         self.ndim = ndim
         self.size = size
         self.stride = stride
+        self.requires_grad = requires_grad
 
     def as_proxy(self):
         return self.proxy
@@ -224,6 +233,7 @@ class TensorVariable(VariableTracker):
             "dtype": value.dtype,
             "device": value.device,
             "ndim": int(value.ndim),
+            "requires_grad": value.requires_grad,
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
@@ -243,6 +253,8 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             result = ConstantVariable(self.size, **options)
+        elif name == "requires_grad" and self.requires_grad is not None:
+            result = ConstantVariable(self.requires_grad, **options)
         return result
 
     def call_method(
@@ -360,22 +372,49 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
-        if name == "children":
+        module = tx.get_submodule(key)
+        if not all(x.is_python_constant() for x in itertools.chain(args, kwargs)):
+            raise unimplemented(f"non-const NNModule method {name}")
+
+        def get_kwargs(*names):
+            fn = getattr(module, name)
+            bound_args = inspect.signature(fn).bind(
+                *([x.as_python_constant() for x in args]),
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            bound_args.apply_defaults()
+            bound_args = bound_args.arguments
+            return {k: bound_args[k] for k in names}
+
+        def wrap_values(items, getsource=AttrSource):
             result = []
-            for name, submod in tx.get_submodule(key).named_children():
+            for name, submod in items:
+                # layer.0.foo => layer[0].foo
+                name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
+                src = NNModuleSource(getsource(self.source, name))
                 result.append(
                     tx.add_submodule(
                         submod,
                         key,
                         name,
-                        source=NNModuleSource(AttrSource(self.source, name)),
+                        source=src,
                         **options,
                     )
                 )
-            return TupleVariable(result, **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+
+        if name == "children":
+            assert not (args or kwargs)
+            return wrap_values(module.named_children())
+        elif name == "parameters":
+            return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "values":
+            assert not (args or kwargs)
+            return wrap_values(module.items(), GetItemSource)
         elif name == "items":
+            assert not (args or kwargs)
             result = []
-            for name, submod in tx.get_submodule(key).items():
+            for name, submod in module.items():
                 result.append(
                     TupleVariable(
                         [
@@ -390,7 +429,7 @@ class NNModuleVariable(VariableTracker):
                         ]
                     )
                 )
-            return TupleVariable(result, **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -494,6 +533,8 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
+        assert isinstance(args, list)
+        assert isinstance(kwargs, dict)
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
@@ -576,6 +617,20 @@ class BuiltinVariable(VariableTracker):
             assert not kwargs
             assert len(args) in (1, 2)
             return SuperVariable(*args, **options)
+        elif self.fn is next and args and isinstance(args[0], ListIteratorVariable):
+            val, next_iter = args[0].next_variables()
+            tx.replace_all(args[0], next_iter)
+            return val.add_guards(self.guards)
+        elif self.fn is hasattr and args and isinstance(args[0], NNModuleVariable):
+            obj, attr = args
+            mod = tx.get_submodule(obj.module_key)
+            name = attr.as_python_constant()
+            result = hasattr(mod, name)
+            return ConstantVariable(result, **options).add_guard(
+                NNModuleSource(AttrSource(obj.source, name)).create_guard(
+                    GuardBuilder.HASATTR
+                )
+            )
         else:
             raise super().call_function(tx, args, kwargs)
 
@@ -592,12 +647,20 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         if self.index >= len(self.items):
             raise StopIteration()
-        return self.items[self.index], ListIteratorVariable(
+        return self.items[self.index].add_guards(self.guards), ListIteratorVariable(
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
             **VariableTracker.propagate([self]),
         )
+
+    def as_python_constant(self):
+        if self.index > 0:
+            raise NotImplementedError()
+        return iter([x.as_python_constant() for x in self.items])
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_guards(self.guards) for x in self.items[self.index :]]
 
 
 class GetAttrVariable(VariableTracker):
@@ -687,6 +750,16 @@ class ListVariable(BaseListVariable):
                 ListVariable(
                     self.items + [arg], mutable_local=MutableLocal(), **options
                 ),
+            )
+            return ConstantVariable(None, **options)
+        if name == "insert" and self.mutable_local:
+            assert not kwargs
+            idx, value = args
+            items = list(self.items)
+            items.insert(idx.as_python_constant(), value)
+            tx.replace_all(
+                self,
+                ListVariable(items, mutable_local=MutableLocal(), **options),
             )
             return ConstantVariable(None, **options)
         else:

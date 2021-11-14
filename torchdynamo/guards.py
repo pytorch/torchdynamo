@@ -89,6 +89,10 @@ class GuardBuilder:
             self.argnames.append(base)
         return name
 
+    def HASATTR(self, guard: Guard):
+        assert guard.is_nn_module(), str(guard)
+        pass  # TODO(jansel): add a guard for this
+
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
         self.code.append(

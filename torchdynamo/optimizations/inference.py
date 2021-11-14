@@ -11,16 +11,16 @@ from collections import defaultdict
 
 import torch
 
+from .backends import clone_inputs
+from .backends import ipex
+from .backends import onnxrt
+from .backends import optimize_for_inference
+from .backends import static_runtime
+from .backends import torchscript
+from .backends import tvm_compile
+from .normalize import long_name
 from torchdynamo import config
-from torchdynamo.optimizations.backends import clone_inputs
-from torchdynamo.optimizations.backends import onnxrt
-from torchdynamo.optimizations.backends import ipex
-from torchdynamo.optimizations.backends import optimize_for_inference
-from torchdynamo.optimizations.backends import static_runtime
-from torchdynamo.optimizations.backends import torchscript
-from torchdynamo.optimizations.backends import tvm_compile
-from torchdynamo.optimizations.normalize import long_name
-from torchdynamo.utils import counters, count_calls
+from torchdynamo.utils import counters, count_calls, warning
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -74,12 +74,12 @@ def folder_name(gm: torch.fx.GraphModule, example_inputs):
 
 
 def user_compiler(gm: torch.fx.GraphModule, example_inputs):
-    state = gm.state_dict()
     if torch.is_grad_enabled():
         if any(
             getattr(x, "requires_grad", False)
-            for x in itertools.chain(example_inputs, state.values())
+            for x in itertools.chain(example_inputs, gm.parameters(True))
         ):
+            warning("not optimizing requires_grad=True")
             return gm.forward
 
     # normalize(gm)
@@ -137,10 +137,6 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
                     best_sec = sec
             if best != "eager":
                 example_inputs = clone_inputs(example_inputs)
-                # for k, v in state.items():
-                #     if isinstance(v, torch.Tensor):
-                #       state[k] = v.detach()
-                # gm.load_state_dict(state)
             return backends[best]()
 
     return gm.forward

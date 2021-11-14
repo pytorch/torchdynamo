@@ -644,3 +644,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
             return a + 10
         if a.dtype == torch.float32:
             return a - b * 32
+
+    @make_test
+    def test_build_list_unpack(a, b):
+        it1 = (x + 1 for x in (a, b))
+        it2 = (x - 1 for x in (a, b))
+        return torch.cat([*it1, *it2], dim=-1)

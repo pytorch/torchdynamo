@@ -1,5 +1,4 @@
 import collections
-
 import dataclasses
 import inspect
 import re
@@ -19,16 +18,16 @@ from .variable_source import GetItemSource
 from .variable_source import Source
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
+from .variable_tracker import ConstantVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
-from .variable_tracker import typestr
 from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserDefinedClassVariable
 from .variable_tracker import UserFunctionVariable
+from .variable_tracker import typestr
 
 
 @dataclasses.dataclass
@@ -114,7 +113,7 @@ class VariableBuilder:
                 value,
                 self.name,
                 source=self.get_source(),
-                guards=make_guards(GuardBuilder.NN_MODULE),
+                # Guards are added inside add_submodule
             )
         elif ConstantVariable.is_literal(value) or istype(value, torch.Size):
             # For these, just specialize on exact value
@@ -165,9 +164,10 @@ class VariableBuilder:
             return self.tx.add_submodule(
                 value,
                 self.name,
-                guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                 source=self.get_source(),
-                **TensorVariable.specialize(value),
+                # These are done inside add_submodule
+                # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                # **TensorVariable.specialize(value),
             )
         else:
             self.tx.graphargs.append(GraphArg(self.get_source(), value))

@@ -380,19 +380,88 @@ class DenseNetBlocks(torch.nn.Module):
         return self.layers(x)
 
 
-def make_test(fn, expected_ops=None):
-    def test_fn(self):
-        return torchdynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=expected_ops
-        )
+def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
+    requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
+    return requires_grad
 
-    return test_fn
+
+def requires_grad2(module: torch.nn.Module, recurse: bool = False) -> bool:
+    requires_grad = any(p.requires_grad for p in module.parameters(recurse))
+    return requires_grad
+
+
+class ParametersModule1(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.scale = torch.nn.Parameter(torch.randn(1, 10))
+
+    def forward(self, x):
+        if not requires_grad1(self):
+            return F.relu(self.linear1(x)) * self.scale
+        else:
+            return x + 1
+
+
+class ParametersModule2(ParametersModule1):
+    def forward(self, x):
+        if not requires_grad2(self):
+            return F.relu(self.linear1(x)) * self.scale
+        else:
+            return x + 1
+
+
+class ParametersModule3(ParametersModule1):
+    def forward(self, x):
+        ones = torch.ones(10, dtype=next(self.parameters()).dtype)
+        return F.relu(self.linear1(x)) * self.scale + ones
 
 
 class SuperModule(BasicModule):
     def forward(self, x):
         x = super().forward(x)
         return x + 10.0
+
+
+class HasAttrModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scale = torch.nn.Parameter(torch.randn(1, 10))
+
+    def forward(self, x):
+        x = F.relu(x)
+        if hasattr(self, "scale"):
+            x *= self.scale
+        if hasattr(self, "scale2"):
+            x *= self.scale2
+        return x
+
+
+class EnumValues(torch.nn.ModuleDict):
+    def __init__(
+            self,
+            num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        for i in range(num_layers):
+            self.add_module("denselayer%d" % (i + 1), _Block())
+
+    def forward(self, init_features):
+        features = [init_features]
+        for idx, layer in enumerate(self.values()):
+            new_features = layer(features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
+
+def make_test(fn, expected_ops=None):
+    def test_fn(self):
+        return torchdynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=expected_ops
+        )
+
+    fn.eval()
+    return test_fn
 
 
 class NNModuleTests(torchdynamo.testing.TestCase):
@@ -423,6 +492,11 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_super1 = make_test(SuperModule())
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks())
+    test_parameters1 = make_test(ParametersModule1())
+    test_parameters2 = make_test(ParametersModule2())
+    test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
+    test_hasattr = make_test(HasAttrModule())
+    test_enumvalues = make_test(EnumValues())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

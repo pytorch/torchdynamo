@@ -1,6 +1,7 @@
+import _weakrefset
 import abc
-import enum
 import copy
+import enum
 import importlib
 import inspect
 import multiprocessing
@@ -13,7 +14,6 @@ import threading
 import types
 import typing
 import unittest
-import _weakrefset
 
 import torch
 

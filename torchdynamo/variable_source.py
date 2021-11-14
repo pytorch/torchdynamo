@@ -96,9 +96,6 @@ class GetItemSource(Source):
 class NNModuleSource(Source):
     inner: Source
 
-    def create_guard(self, fn):
-        return self.inner.create_guard(fn)
-
     def reconstruct(self, codegen):
         return self.inner.reconstruct(codegen)
 
