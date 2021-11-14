@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 import inspect
 import math
-import unittest
 
 import torch
 from torch import sub
@@ -573,18 +572,59 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    @unittest.skip("TODO")
     def test_tensor_dict2(self):
-        def fn(inputs):
-            return {k: v + 1.0 for k, v in inputs.items()}
+        def fn1(inputs):
+            total = torch.zeros(1)
+            for k, v in inputs.items():
+                total += v
+            return total
+
+        def fn2(inputs):
+            total = torch.zeros(1)
+            for v in inputs.values():
+                total += v
+            return total
+
+        def fn3(inputs):
+            total = torch.zeros(1)
+            for k in inputs.keys():
+                total += inputs[k]
+            return total
 
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
         with eval_frame.optimize(convert_frame_assert(cnts)):
-            self.assertEqual(fn({"a": v1, "b": v2})["a"], 101)
+            self.assertEqual(fn1({"a": v1, "b": v2})[0], 300)
+            self.assertEqual(fn2({"a": v1, "b": v2})[0], 300)
+            self.assertEqual(fn3({"a": v1, "b": v2})[0], 300)
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.op_count, 9)
+
+    def test_dictcomp(self):
+        def fn1(inputs):
+            return {k: v + 1 for k, v in inputs.items()}
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn1({"a": v1, "b": v2})["a"], 101)
+            self.assertEqual(fn1({"a": v1, "b": v2})["b"], 201)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_listcomp(self):
+        def fn2(inputs):
+            return torch.sum(torch.cat([v + 1 for k, v in inputs.items()], 0))
+
+        v1 = torch.Tensor([100])
+        v2 = torch.Tensor([200])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn2({"a": v1, "b": v2}), 302)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 4)
 
     @make_test
     def test_module_constant(x, y):

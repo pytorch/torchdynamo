@@ -1,6 +1,5 @@
 import functools
 import inspect
-import itertools
 import math
 import types
 from typing import Callable

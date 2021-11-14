@@ -513,7 +513,6 @@ class InstructionTranslatorBase(fx.Tracer):
                     )
                 )
             self.push(TupleVariable(result, **options))
-
         elif (
             isinstance(fn, GetAttrVariable)
             and isinstance(fn.obj, ListVariable)
@@ -529,6 +528,46 @@ class InstructionTranslatorBase(fx.Tracer):
                 ),
             )
             self.push(ConstantVariable(None, **options))
+
+        elif (
+            isinstance(fn, GetAttrVariable)
+            and isinstance(fn.obj, ConstDictVariable)
+            and fn.name == "items"
+        ):
+            assert not (args or kwargs)
+            val = fn.obj.items
+            self.push(
+                TupleVariable(
+                    [
+                        TupleVariable(
+                            [ConstantVariable(k, **options), val[k]], **options
+                        )
+                        for k in sorted(val.keys())
+                    ],
+                    **options,
+                )
+            )
+        elif (
+            isinstance(fn, GetAttrVariable)
+            and isinstance(fn.obj, ConstDictVariable)
+            and fn.name == "keys"
+        ):
+            assert not (args or kwargs)
+            val = fn.obj.items
+            self.push(
+                TupleVariable(
+                    [ConstantVariable(k, **options) for k in sorted(val.keys())],
+                    **options,
+                )
+            )
+        elif (
+            isinstance(fn, GetAttrVariable)
+            and isinstance(fn.obj, ConstDictVariable)
+            and fn.name == "values"
+        ):
+            assert not (args or kwargs)
+            val = fn.obj.items
+            self.push(TupleVariable([val[k] for k in sorted(val.keys())], **options))
         elif isinstance(fn, BaseUserFunctionVariable):
             self.inline_user_function(fn, fn.self_args() + args, kwargs)
         elif isinstance(fn, BuiltinVariable):
@@ -723,12 +762,16 @@ class InstructionTranslatorBase(fx.Tracer):
         return list(reversed([self.pop() for _ in range(n)]))
 
     def LOAD_FAST(self, inst):
-        assert inst.argval not in self.cell_and_freevars()
-        if inst.argval not in self.symbolic_locals:
+        name = inst.argval
+        if name.startswith(".") and name not in self.symbolic_locals:
+            # This happens in dict/list comprehensions
+            name = name.replace(".", "implicit")
+        assert name not in self.cell_and_freevars()
+        if name not in self.symbolic_locals:
             unimplemented("undefined LOAD_FAST")
-        self.push(self.symbolic_locals[inst.argval])
-        if inst.argval.startswith("___stack"):
-            self.symbolic_locals.pop(inst.argval)
+        self.push(self.symbolic_locals[name])
+        if name.startswith("___stack"):
+            self.symbolic_locals.pop(name)
 
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
@@ -1066,6 +1109,42 @@ class InstructionTranslatorBase(fx.Tracer):
             ConstDictVariable(
                 dict(zip(keys, values)), mutable_local=MutableLocal(), **options
             )
+        )
+
+    def MAP_ADD(self, inst):
+        if sys.version_info < (3, 8):
+            v, k = self.popn(2)
+        else:
+            k, v = self.popn(2)
+
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ConstDictVariable)
+        assert obj.mutable_local
+        items = dict(obj.items)
+        items[k.as_python_constant()] = v
+        self.replace_all(
+            obj,
+            ConstDictVariable(
+                items,
+                mutable_local=MutableLocal(),
+                **VariableTracker.propagate([obj, k, v]),
+            ),
+        )
+
+    def LIST_APPEND(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ListVariable)
+        assert obj.mutable_local
+        self.replace_all(
+            obj,
+            ListVariable(
+                obj.items + [v],
+                mutable_local=MutableLocal(),
+                **VariableTracker.propagate([obj, v]),
+            ),
         )
 
     def MAKE_FUNCTION(self, inst):
