@@ -439,8 +439,8 @@ class HasAttrModule(torch.nn.Module):
 
 class EnumValues(torch.nn.ModuleDict):
     def __init__(
-            self,
-            num_layers: int = 3,
+        self,
+        num_layers: int = 3,
     ) -> None:
         super().__init__()
         for i in range(num_layers):

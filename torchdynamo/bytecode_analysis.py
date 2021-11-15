@@ -79,10 +79,10 @@ def livevars_analysis(instructions, instruction):
         for i in range(start, len(instructions)):
             inst = instructions[i]
             if inst.opcode in HASLOCAL or inst.opcode in HASFREE:
-                if "LOAD" in inst.opname:
+                if "LOAD" in inst.opname or "DELETE" in inst.opname:
                     if inst.argval not in must.writes:
                         state.reads.add(inst.argval)
-                elif "STORE" in inst.opname or "DELETE" in inst.opname:
+                elif "STORE" in inst.opname:
                     state.writes.add(inst.argval)
                 else:
                     assert False, f"unhandled {inst.opname}"

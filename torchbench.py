@@ -219,6 +219,12 @@ def speedup_experiment2(speedups, args, model, example_inputs):
 def null_experiment(model, example_inputs):
     return []
 
+def pick_grad(name):
+    if name in ("maml", ):
+        return torch.enable_grad()
+    else:
+        return torch.no_grad()
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -297,33 +303,34 @@ def main():
         torchdynamo.config.minimum_call_count = args.minimum_call_count
 
     for device, name, model, example_inputs in iter_models(args):
-        sys.stdout.write(f"{current_device:4} {current_name:20} ")
-        sys.stdout.flush()
-        torch.manual_seed(1337)
-        correct_result = copy.deepcopy(model)(*example_inputs)
-        torch.manual_seed(1337)
-        torchdynamo.reset()
-        try:
+        with pick_grad(name):
+            sys.stdout.write(f"{current_device:4} {current_name:20} ")
+            sys.stdout.flush()
+            torch.manual_seed(1337)
+            correct_result = copy.deepcopy(model)(*example_inputs)
+            torch.manual_seed(1337)
+            torchdynamo.reset()
+            try:
+                with optimize_ctx:
+                    new_result = model(*example_inputs)
+            except Exception:
+                logging.exception("unhandled error")
+                print("ERROR")
+                continue
+            if not same(correct_result, new_result):
+                print("INCORRECT")
+                continue
+            ok, total = Stats.reset_counters()
+            results = []
+
+            # run one more time to see if we reached a fixed point
             with optimize_ctx:
-                new_result = model(*example_inputs)
-        except Exception:
-            logging.exception("unhandled error")
-            print("ERROR")
-            continue
-        if not same(correct_result, new_result):
-            print("INCORRECT")
-            continue
-        ok, total = Stats.reset_counters()
-        results = []
+                model(*example_inputs)
+            _, frames_second_pass = Stats.reset_counters()  # should be 0
+            results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
 
-        # run one more time to see if we reached a fixed point
-        with optimize_ctx:
-            model(*example_inputs)
-        _, frames_second_pass = Stats.reset_counters()  # should be 0
-        results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
-
-        results.append(experiment(model, example_inputs))
-        print(" ".join(map(str, results)))
+            results.append(experiment(model, example_inputs))
+            print(" ".join(map(str, results)))
 
     Stats.print_summary()
     if coverage_results:

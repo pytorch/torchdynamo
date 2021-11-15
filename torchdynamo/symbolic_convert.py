@@ -720,10 +720,9 @@ class InstructionTranslatorBase(fx.Tracer):
                     unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
 
         elif isinstance(obj, TensorVariable):
-            const_result = obj.const_attr(name)
-            if const_result is not None:
-                self.push(const_result)
-            else:
+            try:
+                self.push(obj.get_var_attr(self, name))
+            except NotImplementedError:
                 self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, AllowedFunctionOrModuleVariable):
             self.push(

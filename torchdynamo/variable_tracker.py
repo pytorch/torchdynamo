@@ -149,6 +149,12 @@ class VariableTracker:
     def get_const_attr(self, tx, name):
         raise NotImplementedError()
 
+    def get_var_attr(self, tx, name):
+        options = VariableTracker.propagate(self)
+        if self.source:
+            options["source"] = AttrSource(self.source, name)
+        return ConstantVariable(self.get_const_attr(tx, name), **options)
+
     def is_proxy(self):
         try:
             self.as_proxy()
@@ -240,7 +246,7 @@ class TensorVariable(VariableTracker):
             props["stride"] = tuple(value.stride())
         return props
 
-    def const_attr(self, name):
+    def get_var_attr(self, tx, name):
         result = None
         options = VariableTracker.propagate(self)
         if name == "ndim" and self.ndim is not None:
@@ -255,6 +261,14 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.size, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
+        elif name == "shape" and self.size is None:
+            result = self.call_method(tx, "size", [], {})
+        elif name == "ndim" and self.ndim is None:
+            result = self.call_method(tx, "dim", [], {})
+
+        if result is None:
+            raise NotImplementedError()
+
         return result
 
     def call_method(
