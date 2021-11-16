@@ -56,6 +56,7 @@ for _name in (
     "pandas",
     "sklearn",
     "intel_extension_for_pytorch",
+    "transformers.file_utils",
 ):
     try:
         SKIP_DIRS.append(os.path.dirname(importlib.import_module(_name).__file__) + "/")

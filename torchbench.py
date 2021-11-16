@@ -40,9 +40,7 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {
-    "hf_T5",  # TODO(jansel): debug an issue in this one
-}
+SKIP = {}
 current_name = ""
 current_device = ""
 
@@ -219,8 +217,9 @@ def speedup_experiment2(speedups, args, model, example_inputs):
 def null_experiment(model, example_inputs):
     return []
 
+
 def pick_grad(name):
-    if name in ("maml", ):
+    if name in ("maml",):
         return torch.enable_grad()
     else:
         return torch.no_grad()
