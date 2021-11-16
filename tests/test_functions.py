@@ -480,6 +480,14 @@ class FunctionTests(torchdynamo.testing.TestCase):
         z = [x + y, y, False]
         return {"x": x, "z": z, "a": x, "b": z, "c": x}
 
+    @make_test
+    def test_return_dict2(x, y):
+        tmp = {"x": x}
+        tmp["z"] = [x + y, y]
+        tmp["y"] = y
+        tmp["z"].append(False)
+        return tmp
+
     def test_size_input(self):
         def fn(x, s):
             a, b = s

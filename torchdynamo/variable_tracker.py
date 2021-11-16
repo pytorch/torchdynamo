@@ -861,6 +861,18 @@ class ConstDictVariable(VariableTracker):
         elif name == "values":
             assert not (args or kwargs)
             return TupleVariable(list(val.values()), **options)
+        elif (
+            name == "__setattr__"
+            and args
+            and args[0].is_python_constant()
+            and self.mutable_local
+        ):
+            assert not kwargs and len(args) == 2
+            newval = collections.OrderedDict(val)
+            newval[args[0].as_python_constant()] = args[1]
+            tx.replace_all(
+                self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 

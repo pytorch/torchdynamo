@@ -778,6 +778,8 @@ class InstructionTranslatorBase(fx.Tracer):
             self.guards.update(
                 VariableTracker.propagate([val, obj, key]).get("guards", set())
             )
+        elif isinstance(obj, ConstDictVariable):
+            obj.call_method(self, "__setattr__", [key, val], {})
         else:
             unimplemented(f"STORE_SUBSCR {obj}[{key}] = {val}")
 
