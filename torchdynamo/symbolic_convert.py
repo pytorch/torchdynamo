@@ -24,45 +24,49 @@ from . import config
 from . import skipfiles
 from .allowed_functions import is_allowed, is_builtin
 from .bytecode_analysis import livevars_analysis
-from .bytecode_transformation import Instruction, is_generator
 from .bytecode_transformation import cleaned_instructions
 from .bytecode_transformation import create_instruction
+from .bytecode_transformation import Instruction
+from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .resume_execution import ContinueExecutionCache
-from .utils import Unsupported
 from .utils import count_calls
 from .utils import counters
 from .utils import istype
 from .utils import unimplemented
+from .utils import Unsupported
 from .utils import warning
 from .variable_builder import VariableBuilder
-from .variable_source import AttrSource, Source
+from .variable_source import AttrSource
 from .variable_source import GetItemSource
 from .variable_source import GlobalSource
 from .variable_source import LocalSource
 from .variable_source import NNModuleSource
-from .variable_tracker import AllowedFunctionOrModuleVariable, MutableLocal
+from .variable_source import Source
+from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
-from .variable_tracker import NNModuleVariable
+from .variable_tracker import MutableLocal
 from .variable_tracker import NestedUserFunctionVariable
+from .variable_tracker import NNModuleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
+from .variable_tracker import typestr
 from .variable_tracker import UnknownVariable
+from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserFunctionVariable
 from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
-from .variable_tracker import typestr
 
 
 def stack_op(fn: typing.Callable):
@@ -709,9 +713,17 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
             else:
                 if istype(subobj, property):
-                    unimplemented("property")
+                    self.call_function(
+                        UserFunctionVariable(subobj.fget, guards=guards), [obj], {}
+                    )
                 elif istype(subobj, classmethod):
-                    unimplemented("classmethod")
+                    self.push(
+                        UserMethodVariable(
+                            subobj.__func__,
+                            UnsupportedVariable(type(base), guards=guards),
+                            **options,
+                        )
+                    )
                 elif istype(subobj, staticmethod):
                     self.push(UserFunctionVariable(subobj.__get__(base), **options))
                 elif istype(subobj, types.FunctionType):
@@ -745,6 +757,11 @@ class InstructionTranslatorBase(fx.Tracer):
                 unimplemented("dynamic attr UnsupportedVariable")
         else:
             self.push(GetAttrVariable(obj, name, **options))
+
+    def STORE_ATTR(self, inst):
+        obj = self.pop()
+        val = self.pop()
+        unimplemented(f"STORE_ATTR {obj} {val}")
 
     IMPORT_FROM = LOAD_ATTR
 

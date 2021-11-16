@@ -12,14 +12,11 @@ trace = False
 # need this many ops to create an FX graph
 minimum_call_count = 1
 
-# max graphs to create per frame
-max_blocks = 64
-
 # turn on/off DCE pass
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
-cache_size_limit = 128
+cache_size_limit = 64
 
 # Assume these functions return constants
 constant_functions = {
@@ -32,3 +29,6 @@ base_dir = dirname(dirname(abspath(__file__)))
 
 # Also need to remove SPECIALIZE_SHAPES_AND_STRIDES from _guards.cpp
 dynamic_shapes = False
+
+# Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
+guard_nn_modules = True

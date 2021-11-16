@@ -13,10 +13,11 @@ from typing import Set
 
 import torch
 
+from . import config
 from . import mutation_guard
-from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
+from ._guards import TensorGuards
 from .utils import istype
 
 
@@ -194,6 +195,8 @@ class GuardedCode:
         local_builder = GuardBuilder(self.id_ref, f_locals, self)
         global_builder = GuardBuilder(self.id_ref, f_globals, self)
         for guard in sorted(guards or [], key=Guard.sort_key):
+            if not config.guard_nn_modules and guard.is_nn_module():
+                continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()

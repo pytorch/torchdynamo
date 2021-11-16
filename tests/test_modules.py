@@ -497,6 +497,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
+    test_module_class_method = make_test(ModuleClassMethodCall())
+    test_module_property = make_test(ModuleProperty())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
@@ -515,7 +517,3 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             r = m(i)
         self.assertTrue(torchdynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
-
-    # not implemented yet:
-    # test_module_class_method = make_test(ModuleClassMethodCall())
-    # test_module_property = make_test(ModuleProperty()))
