@@ -35,6 +35,7 @@ ANSOR = False
 TASO = False
 STATIC_RUNTIME = False
 IPEX = False
+TVM = False
 
 
 def synchronize():
@@ -208,8 +209,9 @@ def run(args, name, safe_mode):
         ("torchscript", model1),
         ("freezing", optimize_for_inference(model1, example_inputs)),
         ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
-        ("tvm", tvm_compile(model1, example_inputs)),
     ]
+    if TVM:
+        models.append(("tvm", tvm_compile(model1, example_inputs)))
     if IPEX:
         models.append(("ipex", ipex(model1, example_inputs)))
     if STATIC_RUNTIME and not safe_mode:

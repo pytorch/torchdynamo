@@ -198,8 +198,10 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     speedup = median[0] / median[1:]
     if ts is None:
         speedup[0] = 0.0
-    if ort is None:
+    if ofi is None:
         speedup[1] = 0.0
+    if ort is None:
+        speedup[2] = 0.0
     speedups.append(speedup)
     result = " ".join(
         [

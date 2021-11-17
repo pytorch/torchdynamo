@@ -759,9 +759,11 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(GetAttrVariable(obj, name, **options))
 
     def STORE_ATTR(self, inst):
-        obj = self.pop()
-        val = self.pop()
-        unimplemented(f"STORE_ATTR {obj} {val}")
+        warning(f"breaking graph: STORE_ATTR")
+        self.compile_partial_subgraph()
+        self.add_output_instructions([inst])
+        self.popn(2)
+        self.add_output_instructions(self.create_call_resume_at(self.next_instruction))
 
     IMPORT_FROM = LOAD_ATTR
 
