@@ -32,6 +32,7 @@ from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .resume_execution import ContinueExecutionCache
+from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
 from .utils import istype
@@ -1097,7 +1098,7 @@ class InstructionTranslatorBase(fx.Tracer):
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")
-        self.f_globals[name] = self.compiler_fn(gm, self.example_inputs())
+        self.install_global(name, self.compiler_fn(gm, self.example_inputs()))
         assert callable(self.f_globals[name]), "compiler_fn did not return callable"
         nargs = sum(map(len, self.graphargs))
         if config.debug:
@@ -1245,6 +1246,9 @@ class InstructionTranslatorBase(fx.Tracer):
             if node not in graph_nodes:
                 self.graph.erase_node(node)
 
+    def install_global(self, name, value):
+        self.cleanups.append(CleanupHook.create(self.f_globals, name, value))
+
     def __init__(
         self,
         cnt: typing.Iterable,
@@ -1256,6 +1260,7 @@ class InstructionTranslatorBase(fx.Tracer):
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
+        cleanups,
         compiler_fn=None,
         symbolic_locals=None,
         f_code=None,
@@ -1287,6 +1292,7 @@ class InstructionTranslatorBase(fx.Tracer):
         self.checkpoint = None
         self.cnt = cnt
         self.lineno = code_options.get("co_firstlineno")
+        self.cleanups = cleanups or []
 
 
 class InstructionTranslator(InstructionTranslatorBase):
@@ -1312,6 +1318,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             code_options=code_options,
             compiler_fn=compiler_fn,
             f_code=f_code,
+            cleanups=dict(),
         )
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
@@ -1347,7 +1354,9 @@ class InstructionTranslator(InstructionTranslatorBase):
         if new_code.co_freevars:
             load_fn = self.make_function_with_closure(name, new_code, len(self.stack))
         else:
-            self.f_globals[name] = types.FunctionType(new_code, self.f_globals, name)
+            self.install_global(
+                name, types.FunctionType(new_code, self.f_globals, name)
+            )
             load_fn = self.load_function_name(name, len(self.stack))
 
         return (
@@ -1444,6 +1453,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
             compiler_fn=parent.compiler_fn,
+            cleanups=parent.cleanups,
         )
         self.symbolic_result = None
 

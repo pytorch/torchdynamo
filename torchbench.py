@@ -162,6 +162,36 @@ def output_csv(name, headers):
     return output
 
 
+def baselines(models, example_inputs, args, speedups):
+    timings = np.zeros((args.repeat, len(models)), np.float64)
+    timings.fill(1.0e10)
+    for rep in range(args.repeat):
+        for idx, (name, model) in enumerate(models):
+            if model is not None:
+                _, timings[rep, idx] = timed(model, example_inputs)
+    pvalue = [
+        ttest_ind(timings[:, 0], timings[:, i]).pvalue
+        for i in range(1, timings.shape[1])
+    ]
+    median = np.median(timings, axis=0)
+    speedup = median[0] / median[1:]
+    for idx, (name, model) in enumerate(models[1:]):
+        if model is None:
+            speedup[idx] = 0.0
+    speedups.append(speedup)
+    result = " ".join(
+        [
+            format_speedup(s, p, m is not None)
+            for s, p, m in zip(speedup, pvalue, [m for n, m in models[1:]])
+        ]
+    )
+    output_csv(
+        "baselines.csv",
+        ("dev", "name") + tuple(n for n, m in models[1:]),
+    ).writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
+    return result
+
+
 def speedup_experiment2(speedups, args, model, example_inputs):
     try:
         ts = torch.jit.script(model)
@@ -178,42 +208,40 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     except Exception:
         ort = None
 
-    timings = np.zeros((args.repeat, 4), np.float64)
-    timings.fill(1.0e10)
-    for rep in range(args.repeat):
-        # interleave the runs to handle frequency scaling and load changes
-        _, timings[rep, 0] = timed(model, example_inputs)
-        if ts is not None:
-            _, timings[rep, 1] = timed(ts, example_inputs)
-        if ofi is not None:
-            _, timings[rep, 2] = timed(ofi, example_inputs)
-        if ort is not None:
-            _, timings[rep, 3] = timed(ort, example_inputs)
-
-    pvalue = [
-        ttest_ind(timings[:, 0], timings[:, i]).pvalue
-        for i in range(1, timings.shape[1])
-    ]
-    median = np.median(timings, axis=0)
-    speedup = median[0] / median[1:]
-    if ts is None:
-        speedup[0] = 0.0
-    if ofi is None:
-        speedup[1] = 0.0
-    if ort is None:
-        speedup[2] = 0.0
-    speedups.append(speedup)
-    result = " ".join(
+    return baselines(
         [
-            format_speedup(s, p, m is not None)
-            for s, p, m in zip(speedup, pvalue, [ts, ofi, ort])
-        ]
+            ("eager", model),
+            ("torchscript", ts),
+            ("optimize for inference", ofi),
+            ("onnxrt", ort),
+        ],
+        example_inputs,
+        args,
+        speedups,
     )
-    output_csv(
-        "baselines.csv",
-        ("dev", "name", "ts", "optimize_for_inference", "onnxrt", "torchdynamo"),
-    ).writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
-    return result
+
+
+def speedup_experiment3(speedups, args, model, example_inputs):
+    try:
+        ts = torch.jit.script(model)
+    except Exception:
+        ts = None
+
+    try:
+        ofi = optimize_for_inference(torch.jit.script(model), example_inputs)
+    except Exception:
+        ofi = None
+
+    return baselines(
+        [
+            ("eager", model),
+            ("torchscript", ts),
+            ("optimize for inference", ofi),
+        ],
+        example_inputs,
+        args,
+        speedups,
+    )
 
 
 def null_experiment(model, example_inputs):
@@ -246,6 +274,10 @@ def main():
     )
     parser.add_argument(
         "--speedup2",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--speedup3",
         action="store_true",
     )
     parser.add_argument(
@@ -290,6 +322,9 @@ def main():
     elif args.speedup2:
         optimize_ctx = torchdynamo.optimize(user_compiler)
         experiment = functools.partial(speedup_experiment2, speedups, args)
+    elif args.speedup3:
+        optimize_ctx = torchdynamo.optimize(user_compiler)
+        experiment = functools.partial(speedup_experiment3, speedups, args)
     elif args.nothing:
         optimize_ctx = NullContext()
     elif args.nops:
@@ -332,6 +367,9 @@ def main():
 
             results.append(experiment(model, example_inputs))
             print(" ".join(map(str, results)))
+            del model, example_inputs, correct_result, new_result
+            torchdynamo.reset()
+            gc.collect()
 
     Stats.print_summary()
     if coverage_results:

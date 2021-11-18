@@ -11,13 +11,17 @@ from typing import List
 
 from torch import fx
 
-from torchdynamo import config
-from torchdynamo.bytecode_analysis import remove_dead_code, remove_pointless_jumps
-from torchdynamo.bytecode_transformation import is_generator
-from torchdynamo.bytecode_transformation import transform_code_object
-from torchdynamo.guards import GuardedCode
-from torchdynamo.symbolic_convert import InstructionTranslator
-from torchdynamo.utils import counters, Unsupported, unimplemented
+from . import config
+from .bytecode_analysis import remove_dead_code
+from .bytecode_analysis import remove_pointless_jumps
+from .bytecode_transformation import is_generator
+from .bytecode_transformation import transform_code_object
+from .guards import GuardedCode
+from .symbolic_convert import InstructionTranslator
+from .utils import CleanupManager
+from .utils import counters
+from .utils import unimplemented
+from .utils import Unsupported
 
 
 class Tracker:
@@ -112,6 +116,7 @@ def convert_frame_assert(compiler_fn: Callable):
                     print(" -", str(guard))
                 print()
             assert tracer.guards is not None
+            CleanupManager.instance[code] = tracer.cleanups
             return GuardedCode(code, tracer.guards, frame.f_locals, frame.f_globals)
         except Exception as e:
             if config.debug:

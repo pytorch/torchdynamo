@@ -3,6 +3,9 @@ import functools
 import os
 import weakref
 
+import dataclasses
+from typing import Dict, Any
+
 import torch
 from torch import fx
 
@@ -89,8 +92,8 @@ def unimplemented(msg: str):
 
 
 def warning(msg: str):
-    assert msg != os.environ.get("BREAK", False)
     counters["warnings"][msg] += 1
+    assert msg != os.environ.get("BREAK", False)
 
 
 def proxy_args_kwargs(args, kwargs):
@@ -104,3 +107,34 @@ def proxy_args_kwargs(args, kwargs):
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
         )
+
+
+@dataclasses.dataclass
+class CleanupHook:
+    """Remove a global variable when hook is called"""
+
+    scope: Dict[str, Any]
+    name: str
+
+    def __call__(self, *args):
+        CleanupManager.count -= 1
+        del self.scope[self.name]
+
+    @staticmethod
+    def create(scope, name, val):
+        assert name not in scope
+        CleanupManager.count += 1
+        scope[name] = val
+        return CleanupHook(scope, name)
+
+
+class CleanupManager(ExactWeakKeyDictionary):
+    count = 0
+
+    def _remove_id(self, idx):
+        for hook in self.values[idx]:
+            hook()
+        super()._remove_id(idx)
+
+
+CleanupManager.instance = CleanupManager()
