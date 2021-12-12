@@ -22,7 +22,12 @@ from scipy.stats import gmean
 from scipy.stats import ttest_ind
 
 import torchdynamo.utils
-from torchdynamo.optimizations.backends import optimize_for_inference, onnxrt
+from torchdynamo.optimizations.backends import fx2trt
+from torchdynamo.optimizations.backends import cudagraphs
+from torchdynamo.optimizations.backends import onnx2trt
+from torchdynamo.optimizations.backends import torch2trt
+from torchdynamo.optimizations.backends import onnxrt
+from torchdynamo.optimizations.backends import optimize_for_inference
 from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.profiler import ProfileMetrics
@@ -162,7 +167,20 @@ def output_csv(name, headers):
     return output
 
 
-def baselines(models, example_inputs, args, speedups):
+def baselines(models, example_inputs, args, speedups, filaname="baselines"):
+    models = list(models)
+    for idx, (name, model) in enumerate(models):
+        if idx == 0:
+            result0, _ = timed(model, example_inputs)
+        elif model is not None:
+            try:
+                result, _ = timed(model, example_inputs)
+                if same(result0, result):
+                    continue
+                print(name, "is INCORRECT")
+            except Exception:
+                log.exception("error checking %s", name)
+            models[idx] = (name, None)
     timings = np.zeros((args.repeat, len(models)), np.float64)
     timings.fill(1.0e10)
     for rep in range(args.repeat):
@@ -186,13 +204,13 @@ def baselines(models, example_inputs, args, speedups):
         ]
     )
     output_csv(
-        "baselines.csv",
+        f"{filaname}.csv",
         ("dev", "name") + tuple(n for n, m in models[1:]),
     ).writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
     return result
 
 
-def speedup_experiment2(speedups, args, model, example_inputs):
+def speedup_experiment_ts(speedups, args, model, example_inputs):
     try:
         ts = torch.jit.script(model)
     except Exception:
@@ -203,6 +221,20 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     except Exception:
         ofi = None
 
+    return baselines(
+        [
+            ("eager", model),
+            ("ts", ts),
+            ("ofi", ofi),
+        ],
+        example_inputs,
+        args,
+        speedups,
+        "baseline_ts",
+    )
+
+
+def speedup_experiment_onnx(speedups, args, model, example_inputs):
     try:
         ort = onnxrt(torch.jit.script(model), example_inputs)
     except Exception:
@@ -211,36 +243,52 @@ def speedup_experiment2(speedups, args, model, example_inputs):
     return baselines(
         [
             ("eager", model),
-            ("torchscript", ts),
-            ("optimize for inference", ofi),
             ("onnxrt", ort),
         ],
         example_inputs,
         args,
         speedups,
+        "baseline_onnx",
     )
 
 
-def speedup_experiment3(speedups, args, model, example_inputs):
+def speedup_experiment_trt(speedups, args, model, example_inputs):
     try:
-        ts = torch.jit.script(model)
+        m_fx2trt = fx2trt(model, example_inputs)
     except Exception:
-        ts = None
+        log.exception("fx2trt")
+        m_fx2trt = None
 
     try:
-        ofi = optimize_for_inference(torch.jit.script(model), example_inputs)
+        m_torch2trt = torch2trt(model, example_inputs)
     except Exception:
-        ofi = None
+        log.exception("torch2trt")
+        m_torch2trt = None
+
+    try:
+        m_onnx2trt = onnx2trt(torch.jit.script(model), example_inputs)
+    except Exception:
+        log.exception("onnx2trt")
+        m_onnx2trt = None
+
+    try:
+        cg = cudagraphs(model, example_inputs)
+    except Exception:
+        log.exception("cg")
+        cg = None
 
     return baselines(
         [
             ("eager", model),
-            ("torchscript", ts),
-            ("optimize for inference", ofi),
+            ("fx2trt", m_fx2trt),
+            ("torch2trt", m_torch2trt),
+            ("onnx2trt", m_onnx2trt),
+            ("cudagraphs", cg),
         ],
         example_inputs,
         args,
         speedups,
+        "baseline_trt",
     )
 
 
@@ -273,11 +321,19 @@ def main():
         "--speedup", action="store_true", help="measure speedup with default passes"
     )
     parser.add_argument(
-        "--speedup2",
+        "--speedup-ts",
         action="store_true",
     )
     parser.add_argument(
-        "--speedup3",
+        "--speedup-onnx",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--speedup-trt",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--nvfuser",
         action="store_true",
     )
     parser.add_argument(
@@ -293,7 +349,8 @@ def main():
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
-
+    with torch.jit.fuser("fuser2"):
+        pass
     if args.devices != ["cpu"] and torch.cuda.is_available():
         global synchronize
         synchronize = torch.cuda.synchronize
@@ -301,7 +358,16 @@ def main():
     if args.no_skip:
         SKIP.clear()
 
-    torch._C._jit_override_can_fuse_on_cpu(True)
+    if args.nvfuser:
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(True)
+    else:
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_set_nvfuser_enabled(False)
 
     if args.threads:
         torch.set_num_threads(args.threads)
@@ -312,6 +378,7 @@ def main():
     coverage_results = []
     speedups = []
     experiment = null_experiment
+    optimize_ctx = NullContext()
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile)
@@ -319,14 +386,14 @@ def main():
     elif args.speedup:
         optimize_ctx = torchdynamo.optimize(user_compiler)
         experiment = functools.partial(speedup_experiment, speedups, args)
-    elif args.speedup2:
-        optimize_ctx = torchdynamo.optimize(user_compiler)
-        experiment = functools.partial(speedup_experiment2, speedups, args)
-    elif args.speedup3:
-        optimize_ctx = torchdynamo.optimize(user_compiler)
-        experiment = functools.partial(speedup_experiment3, speedups, args)
+    elif args.speedup_ts:
+        experiment = functools.partial(speedup_experiment_ts, speedups, args)
+    elif args.speedup_onnx:
+        experiment = functools.partial(speedup_experiment_onnx, speedups, args)
+    elif args.speedup_trt:
+        experiment = functools.partial(speedup_experiment_trt, speedups, args)
     elif args.nothing:
-        optimize_ctx = NullContext()
+        pass
     elif args.nops:
         optimize_ctx = torchdynamo.eval_frame.optimize(
             torchdynamo.testing.debug_insert_nops

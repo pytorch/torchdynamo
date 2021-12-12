@@ -22,10 +22,15 @@ from tabulate import tabulate
 
 import torchdynamo.optimizations.backends
 from torchdynamo import config
-from torchdynamo.optimizations.backends import onnxrt
+from torchdynamo.optimizations.backends import cudagraphs
+from torchdynamo.optimizations.backends import fx2trt
 from torchdynamo.optimizations.backends import ipex
+from torchdynamo.optimizations.backends import onnx2trt
+from torchdynamo.optimizations.backends import taso
+from torchdynamo.optimizations.backends import onnxrt
 from torchdynamo.optimizations.backends import optimize_for_inference
 from torchdynamo.optimizations.backends import static_runtime
+from torchdynamo.optimizations.backends import torch2trt
 from torchdynamo.optimizations.backends import torchscript
 from torchdynamo.optimizations.backends import tvm_compile
 from torchdynamo.testing import format_speedup
@@ -36,6 +41,7 @@ TASO = False
 STATIC_RUNTIME = False
 IPEX = False
 TVM = False
+CUDA = False
 
 
 def synchronize():
@@ -185,9 +191,8 @@ def autotune_ansor(model1, example_inputs, model_dir, args):
         return ("ansor20k", None)
 
 
-def run(args, name, safe_mode):
+def load_module(name):
     pymod = importlib.import_module(f"subgraphs.{name}")
-
     # TODO(jansel): upstream these fixes to to_folder()
     pymod.module._operator_iadd = operator.iadd
     pymod.module._operator_imul = operator.imul
@@ -196,40 +201,63 @@ def run(args, name, safe_mode):
     pymod.module.math_sqrt = math.sqrt
     pymod.module.device = torch.device
     pymod.module.inf = float("inf")
+    return pymod.FxModule()
 
-    model0 = pymod.FxModule()
+
+def get_options_cpu(model0, example_inputs, model_dir, safe_mode):
+    models = [
+        ("eager", model0),
+        ("torchscript", torchscript(model0, example_inputs)),
+        ("freezing", optimize_for_inference(model0, example_inputs)),
+        ("onnxrt", onnxrt(model0, example_inputs, os.path.join(model_dir, "onnx"))),
+    ]
+    if TVM:
+        models.append(("tvm", tvm_compile(model0, example_inputs)))
+    if IPEX:
+        models.append(("ipex", ipex(model0, example_inputs)))
+    if STATIC_RUNTIME and not safe_mode:
+        # Static runtime is crashy, don't run it in safe mode
+        models.append(("static_runtime", static_runtime(model0, example_inputs)))
+    if ANSOR and not safe_mode:
+        models.append(autotune_ansor(model0, example_inputs, model_dir))
+    if TASO and not safe_mode:
+        models.append(
+            (
+                "taso",
+                taso(
+                    example_inputs,
+                    os.path.join(model_dir, "onnx"),
+                    os.path.join(model_dir, "taso"),
+                ),
+            )
+        )
+    return models
+
+
+def get_options_gpu(model0, example_inputs, model_dir, safe_model):
+    models = [
+        ("eager", model0),
+        ("torchscript", torchscript(model0, example_inputs)),
+        ("freezing", optimize_for_inference(model0, example_inputs)),
+        ("fx2trt", fx2trt(model0, example_inputs)),
+        ("torch2trt", torch2trt(model0, example_inputs)),
+        ("onnx2trt", onnx2trt(model0, example_inputs)),
+        ("cudagraphs", cudagraphs(model0, example_inputs)),
+    ]
+    return models
+
+
+def run(args, name, safe_mode):
+    model0 = load_module(name)
+    if CUDA:
+        model0 = model0.cuda()
     model_dir = os.path.join(config.base_dir, "subgraphs", name)
     example_inputs = torch.load(os.path.join(model_dir, "example_inputs.pt"))
     correct, sec = timed(model0, example_inputs, 1)
-
-    model1 = torchscript(model0, example_inputs)
-
-    models = [
-        ("eager", model0),
-        ("torchscript", model1),
-        ("freezing", optimize_for_inference(model1, example_inputs)),
-        ("onnxrt", onnxrt(model1, example_inputs, os.path.join(model_dir, "onnx"))),
-    ]
-    if TVM:
-        models.append(("tvm", tvm_compile(model1, example_inputs)))
-    if IPEX:
-        models.append(("ipex", ipex(model1, example_inputs)))
-    if STATIC_RUNTIME and not safe_mode:
-        # Static runtime is crashy, don't run it in safe mode
-        models.append(("static_runtime", static_runtime(model1, example_inputs)))
-    if ANSOR and not safe_mode:
-        models.append(autotune_ansor(model1, example_inputs, model_dir, args))
-    # if TASO and not safe_mode:
-    #     models.append(
-    #         (
-    #             "taso",
-    #             taso(
-    #                 example_inputs,
-    #                 os.path.join(model_dir, "onnx"),
-    #                 os.path.join(model_dir, "taso"),
-    #             ),
-    #         )
-    #     )
+    if CUDA:
+        models = get_options_gpu(model0, example_inputs, model_dir, safe_mode)
+    else:
+        models = get_options_cpu(model0, example_inputs, model_dir, safe_mode)
 
     is_corrects = [x is not None for _, x in models]
     timings = np.zeros((args.repeat, len(models)), np.float64)
@@ -242,6 +270,7 @@ def run(args, name, safe_mode):
                     result, timings[rep, i] = timed(m, example_inputs)
                     assert same(result, correct)
                 except AssertionError:
+                    logging.exception(f"incorrect while running {n}")
                     is_corrects[i] = False
                 except Exception:
                     logging.exception(f"error while running {n}")

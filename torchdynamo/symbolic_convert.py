@@ -760,7 +760,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(GetAttrVariable(obj, name, **options))
 
     def STORE_ATTR(self, inst):
-        warning(f"breaking graph: STORE_ATTR")
+        warning("breaking graph: STORE_ATTR")
         self.compile_partial_subgraph()
         self.add_output_instructions([inst])
         self.popn(2)
