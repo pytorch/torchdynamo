@@ -34,20 +34,25 @@ def clone_inputs(example_inputs):
     return res
 
 
-def torchscript(model0, example_inputs):
-    if isinstance(
+def is_jit_model(model0):
+    return isinstance(
         model0,
         (
             torch.jit._trace.TopLevelTracedModule,
             torch.jit._script.RecursiveScriptModule,
             torch.jit.ScriptFunction,
         ),
-    ):
+    )
+
+
+def torchscript(model0, example_inputs, verbose=True):
+    if is_jit_model(model0):
         return model0
     try:
         model1 = torch.jit.trace(model0, example_inputs)
     except Exception:
-        log.exception("jit trace error")
+        if verbose:
+            log.exception("jit trace error")
         try:
             model1 = torch.jit.script(model0)
         except Exception:
@@ -170,7 +175,7 @@ def fx2trt(model, inputs):
     interp = TRTInterpreter(model, input_specs, explicit_precision=True)
     result = interp.run(fp16_mode=False, max_batch_size=len(inputs[0]))
     trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
-    outputs = model(inputs)
+    outputs = model(*inputs)
     if isinstance(outputs, (tuple, list)) and len(outputs) == 1:
         return lambda *args: (trt_mod(*args),)
     return trt_mod
@@ -183,7 +188,7 @@ def torch2trt(model, inputs):
     trt_mod = torch2trt(
         model, inputs, max_batch_size=len(inputs[0]), strict_type_constraints=True
     )
-    outputs = model(inputs)
+    outputs = model(*inputs)
     if isinstance(outputs, (tuple, list)) and len(outputs) == 1:
         return lambda *args: (trt_mod(*args),)
     return trt_mod
@@ -233,7 +238,7 @@ def onnx2trt(model, inputs):
     assert engine
 
     trt_mod = TRTModule(engine, input_names, output_names)
-    outputs = model(inputs)
+    outputs = model(*inputs)
     if isinstance(outputs, (tuple, list)) and len(outputs) == 1:
         return lambda *args: (trt_mod(*args),)
     return trt_mod

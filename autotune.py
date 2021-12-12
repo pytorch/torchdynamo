@@ -25,11 +25,12 @@ from torchdynamo import config
 from torchdynamo.optimizations.backends import cudagraphs
 from torchdynamo.optimizations.backends import fx2trt
 from torchdynamo.optimizations.backends import ipex
+from torchdynamo.optimizations.backends import is_jit_model
 from torchdynamo.optimizations.backends import onnx2trt
-from torchdynamo.optimizations.backends import taso
 from torchdynamo.optimizations.backends import onnxrt
 from torchdynamo.optimizations.backends import optimize_for_inference
 from torchdynamo.optimizations.backends import static_runtime
+from torchdynamo.optimizations.backends import taso
 from torchdynamo.optimizations.backends import torch2trt
 from torchdynamo.optimizations.backends import torchscript
 from torchdynamo.optimizations.backends import tvm_compile
@@ -41,7 +42,6 @@ TASO = False
 STATIC_RUNTIME = False
 IPEX = False
 TVM = False
-CUDA = False
 
 
 def synchronize():
@@ -191,7 +191,7 @@ def autotune_ansor(model1, example_inputs, model_dir, args):
         return ("ansor20k", None)
 
 
-def load_module(name):
+def load_module_fx(name):
     pymod = importlib.import_module(f"subgraphs.{name}")
     # TODO(jansel): upstream these fixes to to_folder()
     pymod.module._operator_iadd = operator.iadd
@@ -204,23 +204,34 @@ def load_module(name):
     return pymod.FxModule()
 
 
-def get_options_cpu(model0, example_inputs, model_dir, safe_mode):
+def load_module_jit(name):
+    filename = os.path.join(config.base_dir, "subgraphs", name, "model.ts")
+    if not os.path.exists(filename):
+        return None
+    model = torch.jit.load(filename)
+    assert is_jit_model(model)
+    return model
+
+
+def get_options_cpu(model_fx, model_jit, example_inputs, model_dir, safe_mode):
     models = [
-        ("eager", model0),
-        ("torchscript", torchscript(model0, example_inputs)),
-        ("freezing", optimize_for_inference(model0, example_inputs)),
-        ("onnxrt", onnxrt(model0, example_inputs, os.path.join(model_dir, "onnx"))),
+        ("eager", model_fx),
+        ("torchscript", model_jit),
+        ("onnxrt", onnxrt(model_jit, example_inputs, os.path.join(model_dir, "onnx"))),
+        ("freezing", optimize_for_inference(model_jit, example_inputs)),
     ]
+    if safe_mode:
+        return models
     if TVM:
-        models.append(("tvm", tvm_compile(model0, example_inputs)))
+        models.append(("tvm", tvm_compile(model_jit, example_inputs)))
     if IPEX:
-        models.append(("ipex", ipex(model0, example_inputs)))
-    if STATIC_RUNTIME and not safe_mode:
+        models.append(("ipex", ipex(model_jit, example_inputs)))
+    if STATIC_RUNTIME:
         # Static runtime is crashy, don't run it in safe mode
-        models.append(("static_runtime", static_runtime(model0, example_inputs)))
-    if ANSOR and not safe_mode:
-        models.append(autotune_ansor(model0, example_inputs, model_dir))
-    if TASO and not safe_mode:
+        models.append(("static_runtime", static_runtime(model_jit, example_inputs)))
+    if ANSOR:
+        models.append(autotune_ansor(model_jit, example_inputs, model_dir))
+    if TASO:
         models.append(
             (
                 "taso",
@@ -234,30 +245,41 @@ def get_options_cpu(model0, example_inputs, model_dir, safe_mode):
     return models
 
 
-def get_options_gpu(model0, example_inputs, model_dir, safe_model):
+def get_options_gpu(model_fx, model_jit, example_inputs, model_dir, safe_model):
     models = [
-        ("eager", model0),
-        ("torchscript", torchscript(model0, example_inputs)),
-        ("freezing", optimize_for_inference(model0, example_inputs)),
-        ("fx2trt", fx2trt(model0, example_inputs)),
-        ("torch2trt", torch2trt(model0, example_inputs)),
-        ("onnx2trt", onnx2trt(model0, example_inputs)),
-        ("cudagraphs", cudagraphs(model0, example_inputs)),
+        ("eager", model_fx),
+        ("torchscript", model_jit),
+        ("freezing", optimize_for_inference(model_jit, example_inputs)),
+        ("fx2trt", fx2trt(model_fx, example_inputs)),
+        ("torch2trt", torch2trt(model_fx, example_inputs)),
+        ("onnx2trt", onnx2trt(model_jit, example_inputs)),
+        ("cudagraphs", cudagraphs(model_fx, example_inputs)),
     ]
     return models
 
 
 def run(args, name, safe_mode):
-    model0 = load_module(name)
-    if CUDA:
-        model0 = model0.cuda()
     model_dir = os.path.join(config.base_dir, "subgraphs", name)
     example_inputs = torch.load(os.path.join(model_dir, "example_inputs.pt"))
-    correct, sec = timed(model0, example_inputs, 1)
-    if CUDA:
-        models = get_options_gpu(model0, example_inputs, model_dir, safe_mode)
+    example_outputs = torch.load(os.path.join(model_dir, "example_outputs.pt"))
+    metadata = json.loads(open(os.path.join(model_dir, "metadata.json")).read())
+    model_fx = load_module_fx(name)
+    model_jit = load_module_jit(name)
+    if metadata["is_cuda"]:
+        model_fx = model_fx.cuda()
+        model_jit = model_jit.cuda()
+        get_options = get_options_gpu
     else:
-        models = get_options_cpu(model0, example_inputs, model_dir, safe_mode)
+        get_options = get_options_cpu
+
+    if model_jit is None:
+        model_jit = torchscript(model_fx, example_inputs)
+    if not same(example_outputs, model_fx(*example_inputs)):
+        logging.warning("FX graph is incorrect")
+        assert model_jit and same(example_outputs, model_jit(*example_inputs))
+        model_fx = model_jit
+
+    models = get_options(model_fx, model_jit, example_inputs, model_dir, safe_mode)
 
     is_corrects = [x is not None for _, x in models]
     timings = np.zeros((args.repeat, len(models)), np.float64)
@@ -268,13 +290,15 @@ def run(args, name, safe_mode):
             if is_corrects[i]:
                 try:
                     result, timings[rep, i] = timed(m, example_inputs)
-                    assert same(result, correct)
+                    assert same(result, example_outputs)
                 except AssertionError:
                     logging.exception(f"incorrect while running {n}")
                     is_corrects[i] = False
                 except Exception:
                     logging.exception(f"error while running {n}")
                     is_corrects[i] = False
+
+    assert is_corrects[0]
 
     pvalues = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue for i in range(1, len(models))
@@ -284,6 +308,7 @@ def run(args, name, safe_mode):
     results = [
         format_speedup(s, p, c) for s, p, c in zip(speedups, pvalues, is_corrects[1:])
     ]
+    sec = float(np.mean(timings[:, 0]))
     row = [name, f"{sec:.4f}"] + results
     names = [k for k, v in models]
     headers = ["name", "sec"] + names[1:]

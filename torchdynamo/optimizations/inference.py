@@ -73,6 +73,16 @@ def folder_name(gm: torch.fx.GraphModule, example_inputs):
     return os.path.join(base, graph_hash(gm, example_inputs))
 
 
+def record_graph_stats(gm):
+    for node in gm.graph.nodes:
+        if node.op in ("call_function", "call_method", "call_module"):
+            counters[node.op][long_name(gm, node)] += 1
+        elif node.op in ("placeholder", "output", "get_attr"):
+            pass
+        else:
+            assert False, node.op
+
+
 def user_compiler(gm: torch.fx.GraphModule, example_inputs):
     if torch.is_grad_enabled():
         if any(
@@ -82,18 +92,21 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
             warning("not optimizing requires_grad=True")
             return gm.forward
 
+    any_cuda = any(
+        x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True))
+    )
+    if any_cuda:
+        assert all(
+            x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True))
+        )
+
+    example_inputs = clone_inputs(example_inputs)
+
     # normalize(gm)
     # gm = NormalizeOperators(gm).transform()
     # Inplacifier(gm).inplacify()
 
-    for node in gm.graph.nodes:
-        if node.op in ("call_function", "call_method", "call_module"):
-            counters[node.op][long_name(gm, node)] += 1
-        elif node.op in ("placeholder", "output", "get_attr"):
-            pass
-        else:
-            assert False, node.op
-
+    record_graph_stats(gm)
     gm.recompile()
 
     path = folder_name(gm, example_inputs)
@@ -101,11 +114,23 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
         if count_calls(gm.graph) >= config.minimum_call_count:
             try:
                 gm.to_folder(path)
+                jit_model = torchscript(gm, example_inputs, verbose=False)
+                if jit_model is not None:
+                    torch.jit.save(jit_model, os.path.join(path, "model.ts"))
                 with open(os.path.join(path, "key"), "w") as fd:
                     fd.write(string_key(gm, example_inputs))
                 with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
                     torch.save(example_inputs, fd)
+                with open(os.path.join(path, "example_outputs.pt"), "wb") as fd:
+                    torch.save(gm(*example_inputs), fd)
                 open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
+                with open(os.path.join(path, "metadata.json"), "w") as fd:
+                    json.dump(
+                        {
+                            "is_cuda": any_cuda,
+                        },
+                        fd,
+                    )
             except Exception:
                 shutil.rmtree(path)
                 raise
@@ -135,8 +160,6 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
                 if sec < best_sec and name in backends:
                     best = name
                     best_sec = sec
-            if best != "eager":
-                example_inputs = clone_inputs(example_inputs)
             return backends[best]()
 
     return gm.forward
