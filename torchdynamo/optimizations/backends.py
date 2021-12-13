@@ -165,7 +165,7 @@ def ipex(scripted, example_inputs):
 def fx2trt(model, inputs):
     from torch.fx.experimental.fx2trt.fx2trt import InputTensorSpec
     from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter
-    from torch.fx.experimental.fx2trt.fx2trt import TRTModule
+    from torch.fx.experimental.fx2trt.trt_module import TRTModule
     import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 
     logging.getLogger("torch.fx.experimental.fx_acc.acc_tracer").setLevel(logging.ERROR)
@@ -197,7 +197,7 @@ def torch2trt(model, inputs):
 @catch_errors
 def onnx2trt(model, inputs):
     import tensorrt as trt
-    from torch.fx.experimental.fx2trt.fx2trt import TRTModule
+    from torch.fx.experimental.fx2trt.trt_module import TRTModule
 
     logger = trt.Logger(trt.Logger.ERROR)
     builder = trt.Builder(logger)

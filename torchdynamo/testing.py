@@ -41,13 +41,16 @@ def same(a, b):
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
     elif isinstance(a, (int, float, type(None), bool, torch.device)):
         return a == b
-    elif type(a).__name__ == "SquashedNormal":
-        return same(a.mean, b.mean)
     elif type(a).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
         "CausalLMOutputWithCrossAttentions",
         "LongformerMaskedLMOutput",
+        "Instances",
+        "SquashedNormal",
+        "Boxes",
+        "Normal",
+        "TanhTransform",
     ):
         assert type(a) is type(b)
         return all(same(getattr(a, key), getattr(b, key)) for key in a.__dict__.keys())
