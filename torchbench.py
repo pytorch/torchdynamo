@@ -45,7 +45,7 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {}
+SKIP = {"vision_maskrcnn"}
 current_name = ""
 current_device = ""
 
@@ -253,37 +253,35 @@ def speedup_experiment_onnx(speedups, args, model, example_inputs):
 
 
 def speedup_experiment_trt(speedups, args, model, example_inputs):
+    m_onnx2trt = None
     try:
-        m_fx2trt = fx2trt(model, example_inputs)
+        # onnx2trt segfaults on one model
+        if current_name != "pyhpc_isoneutral...":
+            m_onnx2trt = onnx2trt(torch.jit.script(model), example_inputs)
     except Exception:
-        log.exception("fx2trt")
-        m_fx2trt = None
+        log.exception("onnx2trt")
 
+    m_torch2trt = None
     try:
         m_torch2trt = torch2trt(model, example_inputs)
     except Exception:
         log.exception("torch2trt")
-        m_torch2trt = None
 
+    m_fx2trt = None
     try:
-        m_onnx2trt = onnx2trt(torch.jit.script(model), example_inputs)
+        # fx2trt infinite loops on one model
+        if current_name != "opacus_cifar10":
+            pass
+            m_fx2trt = fx2trt(model, example_inputs)
     except Exception:
-        log.exception("onnx2trt")
-        m_onnx2trt = None
-
-    try:
-        cg = cudagraphs(model, example_inputs)
-    except Exception:
-        log.exception("cg")
-        cg = None
+        log.exception("fx2trt")
 
     return baselines(
         [
             ("eager", model),
-            ("fx2trt", m_fx2trt),
-            ("torch2trt", m_torch2trt),
             ("onnx2trt", m_onnx2trt),
-            ("cudagraphs", cg),
+            ("torch2trt", m_torch2trt),
+            ("fx2trt", m_fx2trt),
         ],
         example_inputs,
         args,
