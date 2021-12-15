@@ -182,6 +182,21 @@ def fx2trt(model, inputs):
 
 
 @catch_errors
+def fx2trt_lower(model, inputs):
+    from torch.fx.experimental.fx2trt.lower import Lowerer
+    from torch.fx.experimental.fx2trt import LowerSetting
+
+    lower_setting = LowerSetting()
+    lower = Lowerer.create(lower_setting=lower_setting)
+    output = lower(model, inputs)
+    model = acc_tracer.trace(model, inputs)
+    
+    if isinstance(outputs, (tuple, list)) and len(outputs) == 1:
+        return lambda *args: (trt_mod(*args),)
+    return trt_mod
+
+
+@catch_errors
 def torch2trt(model, inputs):
     from torch2trt import torch2trt
 

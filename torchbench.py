@@ -275,6 +275,12 @@ def speedup_experiment_trt(speedups, args, model, example_inputs):
             m_fx2trt = fx2trt(model, example_inputs)
     except Exception:
         log.exception("fx2trt")
+    
+    m_fx2trt_lower = None
+    try:
+        m_fx2trt_lower = fx2trt_lower(model, example_inputs)
+    except Exception:
+        log.exception("fx2trt_lower")
 
     return baselines(
         [
@@ -282,6 +288,7 @@ def speedup_experiment_trt(speedups, args, model, example_inputs):
             ("onnx2trt", m_onnx2trt),
             ("torch2trt", m_torch2trt),
             ("fx2trt", m_fx2trt),
+            ("fx2trt_lower", m_fx2trt_lower),	
         ],
         example_inputs,
         args,
