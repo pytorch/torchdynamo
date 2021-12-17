@@ -266,8 +266,10 @@ def run(args, name, safe_mode):
     model_fx = load_module_fx(name)
     model_jit = load_module_jit(name)
     if metadata["is_cuda"]:
-        model_fx = model_fx.cuda()
-        model_jit = model_jit.cuda()
+        if model_fx is not None:
+            model_fx = model_fx.cuda()
+        if model_jit is not None:
+            model_jit = model_jit.cuda()
         get_options = get_options_gpu
     else:
         get_options = get_options_cpu

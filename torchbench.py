@@ -45,7 +45,7 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {"vision_maskrcnn"}
+SKIP = {"vision_maskrcnn", "detectron2_maskrcnn"}
 current_name = ""
 current_device = ""
 
@@ -271,7 +271,6 @@ def speedup_experiment_trt(speedups, args, model, example_inputs):
     try:
         # fx2trt infinite loops on one model
         if current_name != "opacus_cifar10":
-            pass
             m_fx2trt = fx2trt(model, example_inputs)
     except Exception:
         log.exception("fx2trt")

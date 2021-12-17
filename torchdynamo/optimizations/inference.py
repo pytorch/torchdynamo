@@ -12,10 +12,14 @@ from collections import defaultdict
 import torch
 
 from .backends import clone_inputs
+from .backends import cudagraphs
+from .backends import fx2trt
 from .backends import ipex
+from .backends import onnx2trt
 from .backends import onnxrt
 from .backends import optimize_for_inference
 from .backends import static_runtime
+from .backends import torch2trt
 from .backends import torchscript
 from .backends import tvm_compile
 from .normalize import long_name
@@ -151,12 +155,16 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
                     example_inputs,
                     os.path.join(path, "ansor20k"),
                 ),
+                "fx2trt": lambda: fx2trt(gm, example_inputs),
+                "torch2trt": lambda: torch2trt(gm, example_inputs),
+                "onnx2trt": lambda: onnx2trt(ts(), example_inputs),
+                "cudagraphs": lambda: cudagraphs(gm, example_inputs),
             }
             perf = json.loads(open(os.path.join(path, "perf.json")).read())
             best = "eager"
             best_sec = float("inf")
             for name, sec in perf.items():
-                assert name in backends
+                assert name in backends, f"{name} is missing"
                 if sec < best_sec and name in backends:
                     best = name
                     best_sec = sec
