@@ -1,14 +1,17 @@
 import collections
 import functools
+import logging
 import os
 import weakref
-
 import dataclasses
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
 
 import torch
 from torch import fx
 
+
+log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
 
 
@@ -138,3 +141,37 @@ class CleanupManager(ExactWeakKeyDictionary):
 
 
 CleanupManager.instance = CleanupManager()
+
+
+def clone_inputs(example_inputs):
+    res = list(example_inputs)
+    for i in range(len(res)):
+        if isinstance(res[i], torch.Tensor):
+            res[i] = res[i].clone().detach()
+    return res
+
+
+def is_jit_model(model0):
+    return isinstance(
+        model0,
+        (
+            torch.jit._trace.TopLevelTracedModule,
+            torch.jit._script.RecursiveScriptModule,
+            torch.jit.ScriptFunction,
+        ),
+    )
+
+
+def torchscript(model0, example_inputs, verbose=True):
+    if is_jit_model(model0):
+        return model0
+    try:
+        model1 = torch.jit.trace(model0, example_inputs)
+    except Exception:
+        if verbose:
+            log.exception("jit trace error")
+        try:
+            model1 = torch.jit.script(model0)
+        except Exception:
+            model1 = None
+    return model1

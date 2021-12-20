@@ -1,5 +1,4 @@
 import base64
-import functools
 import hashlib
 import io
 import itertools
@@ -11,20 +10,14 @@ from collections import defaultdict
 
 import torch
 
-from .backends import clone_inputs
-from .backends import cudagraphs
-from .backends import fx2trt
-from .backends import ipex
-from .backends import onnx2trt
-from .backends import onnxrt
-from .backends import optimize_for_inference
-from .backends import static_runtime
-from .backends import torch2trt
-from .backends import torchscript
-from .backends import tvm_compile
+from .backends import BACKENDS
 from .normalize import long_name
 from torchdynamo import config
-from torchdynamo.utils import counters, count_calls, warning
+from torchdynamo.utils import counters
+from torchdynamo.utils import count_calls
+from torchdynamo.utils import warning
+from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import torchscript
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -141,33 +134,18 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
     else:
         open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
         if os.path.exists(os.path.join(path, "perf.json")):
-            ts = functools.partial(torchscript, gm, example_inputs)
-            backends = {
-                "eager": lambda: gm.forward,
-                "torchscript": ts,
-                "freezing": lambda: optimize_for_inference(ts(), example_inputs),
-                "static_runtime": lambda: static_runtime(ts(), example_inputs),
-                "onnxrt": lambda: onnxrt(ts(), example_inputs),
-                "tvm": lambda: tvm_compile(ts(), example_inputs),
-                "ipex": lambda: ipex(ts(), example_inputs),
-                "ansor20k": lambda: tvm_compile(
-                    ts(),
-                    example_inputs,
-                    os.path.join(path, "ansor20k"),
-                ),
-                "fx2trt": lambda: fx2trt(gm, example_inputs),
-                "torch2trt": lambda: torch2trt(gm, example_inputs),
-                "onnx2trt": lambda: onnx2trt(ts(), example_inputs),
-                "cudagraphs": lambda: cudagraphs(gm, example_inputs),
-            }
-            perf = json.loads(open(os.path.join(path, "perf.json")).read())
-            best = "eager"
-            best_sec = float("inf")
-            for name, sec in perf.items():
-                assert name in backends, f"{name} is missing"
-                if sec < best_sec and name in backends:
-                    best = name
-                    best_sec = sec
-            return backends[best]()
+            best = argmin(json.loads(open(os.path.join(path, "perf.json")).read()))
+            counters["backend"][best] += 1
+            return BACKENDS[best](gm, example_inputs)
 
     return gm.forward
+
+
+def argmin(perf):
+    best = "eager"
+    best_sec = float("inf")
+    for name, sec in perf.items():
+        if sec < best_sec:
+            best = name
+            best_sec = sec
+    return best

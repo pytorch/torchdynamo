@@ -73,7 +73,8 @@ private:
 typedef std::vector<TensorCheck> ChecksList;
 
 typedef struct {
-  PyObject_HEAD ChecksList *checks;
+  PyObject_HEAD;
+  ChecksList *checks;
 } TensorGuards;
 
 static void TensorGuards_dealloc(TensorGuards *self) {

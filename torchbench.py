@@ -22,12 +22,7 @@ from scipy.stats import gmean
 from scipy.stats import ttest_ind
 
 import torchdynamo.utils
-from torchdynamo.optimizations.backends import fx2trt
-from torchdynamo.optimizations.backends import cudagraphs
-from torchdynamo.optimizations.backends import onnx2trt
-from torchdynamo.optimizations.backends import torch2trt
-from torchdynamo.optimizations.backends import onnxrt
-from torchdynamo.optimizations.backends import optimize_for_inference
+from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.profiler import ProfileMetrics
@@ -210,22 +205,24 @@ def baselines(models, example_inputs, args, speedups, filaname="baselines"):
     return result
 
 
+def try_script(model, example_inputs):
+    try:
+        return torch.jit.script(model)
+    except Exception:
+        return None
+
+
 def speedup_experiment_ts(speedups, args, model, example_inputs):
-    try:
-        ts = torch.jit.script(model)
-    except Exception:
-        ts = None
-
-    try:
-        ofi = optimize_for_inference(torch.jit.script(model), example_inputs)
-    except Exception:
-        ofi = None
-
     return baselines(
         [
             ("eager", model),
-            ("ts", ts),
-            ("ofi", ofi),
+            ("ts", try_script(model, example_inputs)),
+            (
+                "ofi",
+                backends.ofi(try_script(model, example_inputs), example_inputs),
+            ),
+            # ("nnc", backends.nnc(try_script(model, example_inputs), example_inputs)),
+            # ("nvfuser", backends.nvfuser(try_script(model, example_inputs), example_inputs)),
         ],
         example_inputs,
         args,
@@ -235,15 +232,17 @@ def speedup_experiment_ts(speedups, args, model, example_inputs):
 
 
 def speedup_experiment_onnx(speedups, args, model, example_inputs):
-    try:
-        ort = onnxrt(torch.jit.script(model), example_inputs)
-    except Exception:
-        ort = None
-
     return baselines(
         [
             ("eager", model),
-            ("onnxrt", ort),
+            (
+                "onnxrt",
+                backends.onnxrt(try_script(model, example_inputs), example_inputs),
+            ),
+            (
+                "onnx2tf",
+                backends.onnx2tf(try_script(model, example_inputs), example_inputs),
+            ),
         ],
         example_inputs,
         args,
@@ -253,27 +252,25 @@ def speedup_experiment_onnx(speedups, args, model, example_inputs):
 
 
 def speedup_experiment_trt(speedups, args, model, example_inputs):
-    m_onnx2trt = None
-    try:
+    if current_name != "pyhpc_isoneutral...":
+        m_onnx2trt = backends.onnx2trt(
+            try_script(model, example_inputs), example_inputs
+        )
+    else:
         # onnx2trt segfaults on one model
-        if current_name != "pyhpc_isoneutral...":
-            m_onnx2trt = onnx2trt(torch.jit.script(model), example_inputs)
-    except Exception:
-        log.exception("onnx2trt")
+        m_onnx2trt = None
 
-    m_torch2trt = None
-    try:
-        m_torch2trt = torch2trt(model, example_inputs)
-    except Exception:
-        log.exception("torch2trt")
+    m_onnxrt_tensorrt = backends.onnxrt_tensorrt(
+        try_script(model, example_inputs), example_inputs
+    )
 
-    m_fx2trt = None
-    try:
+    m_torch2trt = backends.torch2trt(model, example_inputs)
+
+    if current_name != "opacus_cifar10":
+        m_fx2trt = backends.fx2trt(model, example_inputs)
+    else:
         # fx2trt infinite loops on one model
-        if current_name != "opacus_cifar10":
-            m_fx2trt = fx2trt(model, example_inputs)
-    except Exception:
-        log.exception("fx2trt")
+        m_fx2trt = None
 
     return baselines(
         [
@@ -281,6 +278,7 @@ def speedup_experiment_trt(speedups, args, model, example_inputs):
             ("onnx2trt", m_onnx2trt),
             ("torch2trt", m_torch2trt),
             ("fx2trt", m_fx2trt),
+            ("onnxrt_trt", m_onnxrt_tensorrt),
         ],
         example_inputs,
         args,
