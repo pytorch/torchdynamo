@@ -1,12 +1,12 @@
 import functools
+import io
 import logging
-import numpy as np
 import os
 import signal
 import subprocess
 import tempfile
-import io
 
+import numpy as np
 import torch
 
 from torchdynamo.optimizations.subgraph import SubGraph

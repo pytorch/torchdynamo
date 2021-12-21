@@ -157,7 +157,7 @@ def output_csv(name, headers):
             "utf-8",
             write_through=True,
         ),
-        lineterminator="\n"
+        lineterminator="\n",
     )
     output.writerow(headers)
     return output

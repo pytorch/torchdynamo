@@ -38,13 +38,7 @@ autotune-cpu: develop
 	rm -rf subgraphs
 	python torchbench.py --speedup -n1
 	python autotune.py
-	python torchbench.py --speedup -n100
-
-autotune-gpu: develop
-	rm -rf subgraphs
-	python torchbench.py --speedup -dcuda --nvfuser -n1
-	python autotune.py --nvfuser
-	python torchbench.py --speedup -dcuda --nvfuser -n100
+	python torchbench.py --speedup -n50
 
 baseline-cpu: develop
 	 rm -f baseline_*.csv
@@ -53,6 +47,12 @@ baseline-cpu: develop
 	 python torchbench.py --no-skip -n50 --speedup-onnx
 	 paste -d, baseline_ts.csv baseline_sr.csv baseline_onnx.csv > baseline_all.csv
 
+autotune-gpu: develop
+	rm -rf subgraphs
+	python torchbench.py --speedup -dcuda --nvfuser -n1
+	python autotune.py --nvfuser
+	python torchbench.py --speedup -dcuda --nvfuser -n100
+
 baseline-gpu: develop
 	 rm -f baseline_*.csv
 	 python torchbench.py --no-skip -dcuda -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
@@ -60,4 +60,3 @@ baseline-gpu: develop
 	 python torchbench.py --no-skip -dcuda -n100 --speedup-trt
 	 python torchbench.py --no-skip -dcuda -n100 --speedup-onnx
 	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
-

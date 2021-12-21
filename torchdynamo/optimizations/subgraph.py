@@ -1,16 +1,17 @@
 import functools
 import importlib
-import itertools
+import json
+import logging
 import math
 import operator
 import os
-import json
-import logging
+
 import torch
 
-from torchdynamo.utils import torchscript, is_jit_model
-from torchdynamo.testing import same
 from torchdynamo import config
+from torchdynamo.testing import same
+from torchdynamo.utils import is_jit_model
+from torchdynamo.utils import torchscript
 
 log = logging.getLogger(__name__)
 

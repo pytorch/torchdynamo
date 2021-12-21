@@ -1,15 +1,14 @@
 import collections
+import dataclasses
 import functools
 import logging
 import os
 import weakref
-import dataclasses
 from typing import Any
 from typing import Dict
 
 import torch
 from torch import fx
-
 
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)

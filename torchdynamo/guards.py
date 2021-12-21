@@ -15,9 +15,9 @@ import torch
 
 from . import config
 from . import mutation_guard
+from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
-from ._guards import TensorGuards
 from .utils import istype
 
 

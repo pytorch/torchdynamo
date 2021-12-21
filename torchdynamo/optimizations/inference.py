@@ -10,14 +10,14 @@ from collections import defaultdict
 
 import torch
 
+from torchdynamo import config
+from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import count_calls
+from torchdynamo.utils import counters
+from torchdynamo.utils import torchscript
+from torchdynamo.utils import warning
 from .backends import BACKENDS
 from .normalize import long_name
-from torchdynamo import config
-from torchdynamo.utils import counters
-from torchdynamo.utils import count_calls
-from torchdynamo.utils import warning
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import torchscript
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):

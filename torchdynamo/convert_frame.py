@@ -19,9 +19,9 @@ from .bytecode_transformation import transform_code_object
 from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
+from .utils import Unsupported
 from .utils import counters
 from .utils import unimplemented
-from .utils import Unsupported
 
 
 class Tracker:
