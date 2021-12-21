@@ -232,17 +232,26 @@ def speedup_experiment_ts(speedups, args, model, example_inputs):
 
 
 def speedup_experiment_onnx(speedups, args, model, example_inputs):
+    if current_device == "cpu":
+        m_onnxrt = backends.onnxrt_cpu(
+            try_script(model, example_inputs), example_inputs
+        )
+    else:
+        m_onnxrt = backends.onnxrt_cuda(
+            try_script(model, example_inputs), example_inputs
+        )
+
+    if current_name != "timm_resnest":
+        m_onnx2tf = backends.onnx2tf(try_script(model, example_inputs), example_inputs)
+    else:
+        # this one takes 8+ hours to finish
+        m_onnx2tf = None
+
     return baselines(
         [
             ("eager", model),
-            (
-                "onnxrt",
-                backends.onnxrt(try_script(model, example_inputs), example_inputs),
-            ),
-            (
-                "onnx2tf",
-                backends.onnx2tf(try_script(model, example_inputs), example_inputs),
-            ),
+            ("onnxrt", m_onnxrt),
+            ("onnx2tf", m_onnx2tf),
         ],
         example_inputs,
         args,

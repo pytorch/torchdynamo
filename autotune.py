@@ -58,6 +58,7 @@ def main():
     parser.add_argument("--silent", "-q", action="store_true")
     parser.add_argument("--max-age", type=int, default=48)
     parser.add_argument("--stats", action="store_true")
+    parser.add_argument("--skip", action="append", help="dont use a backend")
     parser.add_argument(
         "--nvfuser",
         action="store_true",
@@ -115,7 +116,18 @@ def main():
 
             print()
             print("BEGIN", name, i)
-            subprocess.check_call([sys.executable] + list(sys.argv) + ["--name", name])
+            cmd = [sys.executable] + list(sys.argv) + ["--name", name]
+
+            try:
+                subprocess.check_call(cmd)
+            except Exception:
+                try:
+                    skip = open(os.path.join(path, "running")).read().strip()
+                    print("ERROR skipping", skip)
+                    cmd += ["--skip", skip]
+                    subprocess.check_call(cmd)
+                except Exception:
+                    logging.exception("failure from %s", name)
 
 
 def list_subgraphs(args):
@@ -136,16 +148,19 @@ def run(args, name):
     if subgraph.is_cuda:
         backend_names = [
             "eager",
-            # "nnc",
+            "nnc",
             "nvfuser",
             "ofi",
             "cudagraphs",
-            # "onnx2tf",
-            # "onnxrt_cuda",
-            # "tensorrt",
+            "onnxrt_cuda",
+            "tensorrt",
+            "onnx2tf",
         ]
     else:
         backend_names = ["eager", "ts", "ofi", "onnxrt_cpu_numpy", "onnx2tf"]
+
+    skip = set(args.skip or [])
+    backend_names = [x for x in backend_names if x not in skip]
 
     models = []
     for name in backend_names:

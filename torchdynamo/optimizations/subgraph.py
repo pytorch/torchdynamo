@@ -66,9 +66,9 @@ class SubGraph(object):
                 model_fx = model_fx.cuda()
             if model_jit is not None:
                 model_jit = model_jit.cuda()
-            assert all(
-                x.is_cuda for x in itertools.chain(example_inputs, example_outputs)
-            )
+            # assert all(
+            #    x.is_cuda for x in itertools.chain(example_inputs, example_outputs)
+            # )
 
         if model_jit is None:
             model_jit = torchscript(model_fx, example_inputs)

@@ -34,7 +34,23 @@ clean:
 	python setup.py clean
 	rm -rf build torchdynamo.egg-info torchdynamo/*.so
 
-autotune: develop
-	python torchbench.py --speedup -n1 --minimum-call-count=2
+autotune-cpu: develop
+	rm -rf subgraphs
+	python torchbench.py --speedup -n1
 	python autotune.py
-	python torchbench.py --speedup --minimum-call-count=2
+	python torchbench.py --speedup -n100
+
+autotune-gpu: develop
+	rm -rf subgraphs
+	python torchbench.py --speedup -n1 -dcuda --nvfuser
+	python autotune.py --nvfuser
+	python torchbench.py --speedup -dcuda --nvfuser -n100
+
+baseline-gpu: develop
+	 rm -f baseline_*.csv
+	 python torchbench.py --no-skip -dcuda -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
+	 python torchbench.py --no-skip -dcuda -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
+	 python torchbench.py --no-skip -dcuda -n100 --speedup-trt
+	 python torchbench.py --no-skip -dcuda -n100 --speedup-onnx
+	 paste -d, baseline_{nnc,nvfuser,trt,onnx}.csv > baseline_all.csv
+

@@ -230,11 +230,7 @@ def onnx2tf(subgraph):
         if not os.path.exists(filename):
             prepare(onnx.load(subgraph.onnx_filename)).export_graph(filename)
         tf_module = tf.saved_model.load(filename)
-        try:
-            # does this help at all?
-            tf_module = tf.function(tf_module)
-        except Exception:
-            pass
+        tf_module = tf.function(tf_module, jit_compile=True)
 
     def run(*args):
         args = [a.contiguous() for a in args]
