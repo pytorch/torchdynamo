@@ -28,7 +28,7 @@ lint:
 		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
 
 setup:
-	pip install flake8 black pytest onnxruntime onnx-tf onnxruntime-gpu tensorflow-gpu
+	pip install flake8 black pytest onnxruntime-gpu tensorflow-gpu onnx-tf
 
 clean:
 	python setup.py clean
@@ -42,9 +42,16 @@ autotune-cpu: develop
 
 autotune-gpu: develop
 	rm -rf subgraphs
-	python torchbench.py --speedup -n1 -dcuda --nvfuser
+	python torchbench.py --speedup -dcuda --nvfuser -n1
 	python autotune.py --nvfuser
 	python torchbench.py --speedup -dcuda --nvfuser -n100
+
+baseline-cpu: develop
+	 rm -f baseline_*.csv
+	 python torchbench.py --no-skip -n50 --speedup-ts
+	 python torchbench.py --no-skip -n50 --speedup-sr
+	 python torchbench.py --no-skip -n50 --speedup-onnx
+	 paste -d, baseline_ts.csv baseline_sr.csv baseline_onnx.csv > baseline_all.csv
 
 baseline-gpu: develop
 	 rm -f baseline_*.csv
@@ -52,5 +59,5 @@ baseline-gpu: develop
 	 python torchbench.py --no-skip -dcuda -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
 	 python torchbench.py --no-skip -dcuda -n100 --speedup-trt
 	 python torchbench.py --no-skip -dcuda -n100 --speedup-onnx
-	 paste -d, baseline_{nnc,nvfuser,trt,onnx}.csv > baseline_all.csv
+	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
 

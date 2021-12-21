@@ -156,7 +156,8 @@ def output_csv(name, headers):
             open(os.path.join(torchdynamo.config.base_dir, name), "wb", buffering=0),
             "utf-8",
             write_through=True,
-        )
+        ),
+        lineterminator="\n"
     )
     output.writerow(headers)
     return output
@@ -228,6 +229,24 @@ def speedup_experiment_ts(speedups, args, model, example_inputs):
         args,
         speedups,
         "baseline_ts",
+    )
+
+
+def speedup_experiment_sr(speedups, args, model, example_inputs):
+    return baselines(
+        [
+            ("eager", model),
+            (
+                "sr",
+                backends.static_runtime(
+                    try_script(model, example_inputs), example_inputs
+                ),
+            ),
+        ],
+        example_inputs,
+        args,
+        speedups,
+        "baseline_sr",
     )
 
 
@@ -329,6 +348,10 @@ def main():
         action="store_true",
     )
     parser.add_argument(
+        "--speedup-sr",
+        action="store_true",
+    )
+    parser.add_argument(
         "--speedup-onnx",
         action="store_true",
     )
@@ -392,6 +415,8 @@ def main():
         experiment = functools.partial(speedup_experiment, speedups, args)
     elif args.speedup_ts:
         experiment = functools.partial(speedup_experiment_ts, speedups, args)
+    elif args.speedup_sr:
+        experiment = functools.partial(speedup_experiment_sr, speedups, args)
     elif args.speedup_onnx:
         experiment = functools.partial(speedup_experiment_onnx, speedups, args)
     elif args.speedup_trt:

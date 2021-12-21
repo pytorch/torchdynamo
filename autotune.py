@@ -157,7 +157,7 @@ def run(args, name):
             "onnx2tf",
         ]
     else:
-        backend_names = ["eager", "ts", "ofi", "onnxrt_cpu_numpy", "onnx2tf"]
+        backend_names = ["eager", "ts", "ofi", "onnxrt_cpu", "onnx2tf"]
 
     skip = set(args.skip or [])
     backend_names = [x for x in backend_names if x not in skip]

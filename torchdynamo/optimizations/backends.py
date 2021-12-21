@@ -95,15 +95,8 @@ def static_runtime(subgraph):
     else:
         static_module = torch._C._jit_to_static_module(scripted.graph)
 
-    def _call(*args):
-        res = static_module(args, {})
-        # inference mode tensors can cause issues
-        # res = [torch.from_numpy(x.numpy()) for x in res]
-        res = [x.clone() for x in res]
-        return res
-
-    _call(*subgraph.example_inputs)  # shake out any errors
-    return _call
+    static_module(*subgraph.example_inputs)  # shake out any errors
+    return subgraph.wrap_returns_list(static_module)
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
@@ -125,8 +118,8 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             dev = value.device
             binding.bind_input(
                 name,
-                dev.type,
-                dev.index,
+                dev,
+                dev.index or 0,
                 _NP_DTYPE[value.dtype],
                 value.size(),
                 value.data_ptr(),
@@ -136,8 +129,8 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             dev = value.device
             binding.bind_output(
                 name,
-                dev.type,
-                dev.index,
+                dev,
+                dev.index or 0,
                 _NP_DTYPE[value.dtype],
                 value.size(),
                 value.data_ptr(),
