@@ -49,6 +49,12 @@ baseline-cpu: develop
 
 autotune-gpu: develop
 	rm -rf subgraphs
+	python torchbench.py --speedup -dcuda -n1
+	python autotune.py
+	python torchbench.py --speedup -dcuda -n100
+
+autotune-gpu-nvfuser: develop
+	rm -rf subgraphs
 	python torchbench.py --speedup -dcuda --nvfuser -n1
 	python autotune.py --nvfuser
 	python torchbench.py --speedup -dcuda --nvfuser -n100

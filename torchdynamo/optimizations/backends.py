@@ -94,9 +94,7 @@ def static_runtime(subgraph):
         static_module = torch._C._jit_to_static_module(scripted._c)
     else:
         static_module = torch._C._jit_to_static_module(scripted.graph)
-
-    static_module(*subgraph.example_inputs)  # shake out any errors
-    return subgraph.wrap_returns_list(static_module)
+    return subgraph.wrap_returns(static_module)
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
@@ -140,10 +138,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             binding.copy_outputs_to_cpu()
         return outputs
 
-    # shake out any errors
-    _call(*subgraph.example_inputs)
-
-    return subgraph.wrap_returns_list(_call)
+    return subgraph.wrap_returns(_call)
 
 
 @create_backend
@@ -184,10 +179,7 @@ def onnxrt_cpu_numpy(subgraph, provider="CPUExecutionProvider"):
         res = [torch.from_numpy(x) for x in res]
         return res
 
-    # shake out any errors
-    _call(*subgraph.example_inputs)
-
-    return subgraph.wrap_returns_list(_call)
+    return subgraph.wrap_returns(_call)
 
 
 @create_backend
@@ -243,10 +235,7 @@ def onnx2tf(subgraph):
                 for name in output_names
             ]
 
-    # shake out any errors
-    run(*subgraph.example_inputs)
-
-    return subgraph.wrap_returns_list(run)
+    return subgraph.wrap_returns(run)
 
 
 @create_backend
@@ -298,7 +287,7 @@ def fx2trt(subgraph):
         interp = TRTInterpreter(model, input_specs, explicit_precision=True)
         result = interp.run(fp16_mode=False, max_batch_size=len(inputs[0]))
         trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
-        return subgraph.wrap_returns_tensor(trt_mod)
+        return subgraph.wrap_returns(trt_mod)
     finally:
         signal.alarm(0)
 
@@ -314,7 +303,7 @@ def torch2trt(subgraph):
         max_batch_size=len(inputs[0]),
         strict_type_constraints=True,
     )
-    return subgraph.wrap_returns_tensor(trt_mod)
+    return subgraph.wrap_returns(trt_mod)
 
 
 @create_backend
@@ -356,7 +345,7 @@ def onnx2trt(subgraph):
     assert engine
 
     trt_mod = TRTModule(engine, input_names, output_names)
-    return subgraph.wrap_returns_tensor(trt_mod)
+    return subgraph.wrap_returns(trt_mod)
 
 
 @create_backend
@@ -382,6 +371,8 @@ def cudagraphs(subgraph):
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream):
         static_outputs = model(*static_inputs)
+    if not isinstance(static_outputs, (list, tuple)):
+        static_outputs = (static_outputs,)
 
     def run(*new_inputs):
         assert len(static_inputs) == len(new_inputs)
@@ -390,9 +381,7 @@ def cudagraphs(subgraph):
         graph.replay()
         return [x.clone() for x in static_outputs]
 
-    if subgraph.is_tensor_output:
-        static_outputs = (static_outputs,)
-    return subgraph.wrap_returns_list(run)
+    return subgraph.wrap_returns(run)
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
@@ -411,8 +400,10 @@ def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
 
 @create_backend
 def tvm(subgraph):
-    return tvm_compile_inner(
-        subgraph.scripted, subgraph.example_inputs, None, cuda=subgraph.is_cuda
+    return subgraph.wrap_returns(
+        tvm_compile_inner(
+            subgraph.scripted, subgraph.example_inputs, None, cuda=subgraph.is_cuda
+        )
     )
 
 
@@ -422,11 +413,13 @@ def ansor(subgraph):
     WARNING: this backend takes hours or days to train and
     often produces a slower result than the default schedule.
     """
-    return tvm_compile_inner(
-        subgraph.scripted,
-        subgraph.example_inputs,
-        subgraph.filename("ansor"),
-        cuda=subgraph.is_cuda,
+    return subgraph.wrap_returns(
+        tvm_compile_inner(
+            subgraph.scripted,
+            subgraph.example_inputs,
+            subgraph.filename("ansor"),
+            cuda=subgraph.is_cuda,
+        )
     )
 
 
@@ -497,13 +490,9 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
                     tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg)),
                 )
         m.run()
-        outs = [
+        return [
             torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack())
             for i in range(m.get_num_outputs())
         ]
-        return outs
-
-    # shake out any errors
-    exec_tvm(*example_inputs)
 
     return exec_tvm

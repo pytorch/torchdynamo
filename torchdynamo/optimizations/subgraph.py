@@ -16,6 +16,17 @@ from torchdynamo.utils import torchscript
 log = logging.getLogger(__name__)
 
 
+def _find_cuda(x):
+    if hasattr(x, "is_cuda"):
+        return x.is_cuda
+    elif isinstance(x, (list, tuple)):
+        return any(_find_cuda(y) for y in x)
+    elif isinstance(x, dict):
+        return any(_find_cuda(y) for y in x.values())
+    else:
+        return _find_cuda(x.__dict__)
+
+
 def cached(fn):
     cached_name = f"_{fn.__name__}"
 
@@ -137,39 +148,28 @@ class SubGraph(object):
         if os.path.exists(filename):
             return filename
 
-        scripted = self.scripted
-        example_inputs = self.example_inputs
-        input_names = self.input_names
-        output_names = self.output_names
         try:
             torch.onnx.export(
-                scripted,
-                example_inputs,
+                self.scripted,
+                self.example_inputs,
                 filename,
-                input_names=input_names,
-                output_names=output_names,
+                input_names=self.input_names,
+                output_names=self.output_names,
                 do_constant_folding=True,
                 opset_version=14,
             )
         except IndexError:
             # work around bug in constant folding pass
             torch.onnx.export(
-                scripted,
-                example_inputs,
+                self.scripted,
+                self.example_inputs,
                 filename,
-                input_names=input_names,
-                output_names=output_names,
+                input_names=self.input_names,
+                output_names=self.output_names,
                 do_constant_folding=False,
                 opset_version=14,
             )
         return filename
-
-    @property
-    def output_specs(self):
-        return [
-            (o.shape, o.dtype, o.layout, o.device, o.requires_grad)
-            for o in self.example_outputs_list
-        ]
 
     @property
     def is_cpu(self):
@@ -178,7 +178,14 @@ class SubGraph(object):
     @property
     @cached
     def is_cuda(self):
-        return self.example_inputs[0].device.type == "cuda"
+        return _find_cuda(self.example_inputs)
+
+    @property
+    def output_specs(self):
+        return [
+            (o.shape, o.dtype, o.layout, o.device, o.requires_grad)
+            for o in self.example_outputs_list
+        ]
 
     def empty_outputs_factory(self):
         specs = self.output_specs
@@ -197,14 +204,25 @@ class SubGraph(object):
 
         return create
 
-    def wrap_returns_list(self, fn):
-        """Most backends return a list, but sometimes we want to return a tensor"""
-        if self.is_tensor_output:
+    def wrap_returns(self, fn):
+        """Fix [Tensor()] vs Tensor() return type issues"""
+        expected = self.example_outputs
+        actual = fn(*self.example_inputs)
+        if isinstance(expected, (list, tuple)) and not isinstance(
+            actual, (list, tuple)
+        ):
+            assert len(expected) == 1
+            if isinstance(expected, tuple):
+                return lambda *args: (fn(*args),)
+            else:
+                return lambda *args: [fn(*args)]
+        elif not isinstance(expected, (list, tuple)) and isinstance(
+            actual, (list, tuple)
+        ):
+            assert len(actual) == 1
             return lambda *args: fn(*args)[0]
-        return fn
-
-    def wrap_returns_tensor(self, fn):
-        """TRT backends auto-unpack len==1 lists, undo that"""
-        if len(self.example_outputs_list) != 1 and self.is_tensor_output:
-            return lambda *args: (fn(*args),)
-        return fn
+        elif isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
+            assert len(actual) == len(expected)
+            return fn
+        else:
+            return fn
