@@ -23,14 +23,15 @@ Python 3.8 is highly recommended.  Python 3.7 works, but is only
 sporadically tested and has lower coverage.  Other python versions
 are untested.
 
-For running TorchBench, use the latest version and apply [this
-patch](https://github.com/pytorch/benchmark/pull/564) if it has not yet
-been merged upstream.
+For running TorchBench, use the [fork found here].  This contains a few
+minor fixes that have not yet been merged upstream.
+
+[fork found here]: https://github.com/jansel/benchmark
 
 ## Initial Development Setup
 
 ```
-git clone git@github.com:pytorch/benchmark.git torchbenchmark
+git clone git@github.com:jansel/benchmark.git torchbenchmark
 cd torchbenchmark
 env PYTHON_VERSION=3.8 ./scripts/recreate_conda_environment.sh
 cd ..

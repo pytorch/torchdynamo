@@ -6,6 +6,7 @@ import csv
 import functools
 import gc
 import io
+import itertools
 import logging
 import os
 import re
@@ -40,7 +41,10 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {"vision_maskrcnn", "detectron2_maskrcnn"}
+SKIP = {
+    "vision_maskrcnn",
+    "detectron2_maskrcnn",
+}
 current_name = ""
 current_device = ""
 
@@ -438,6 +442,8 @@ def main():
         with pick_grad(name):
             sys.stdout.write(f"{current_device:4} {current_name:20} ")
             sys.stdout.flush()
+            for submod in itertools.chain([model], model.modules()):
+                assert not torchdynamo.utils.is_jit_model(submod)
             torch.manual_seed(1337)
             correct_result = copy.deepcopy(model)(*example_inputs)
             torch.manual_seed(1337)
@@ -449,7 +455,12 @@ def main():
                 logging.exception("unhandled error")
                 print("ERROR")
                 continue
-            if not same(correct_result, new_result):
+            if current_name == "pyhpc_turbulent_k...":
+                # This model has non-deterministic output so we cant
+                # check correctness.
+                # TODO(jansel): submit upstream fix for this
+                pass
+            elif not same(correct_result, new_result):
                 print("INCORRECT")
                 continue
             ok, total = Stats.reset_counters()
