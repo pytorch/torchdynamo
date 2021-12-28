@@ -163,7 +163,7 @@ class VariableTracker:
             return False
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError(str(self))
 
     def reconstruct(self, codegen):
         raise NotImplementedError()
@@ -1104,14 +1104,28 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
         super(AllowedFunctionOrModuleVariable, self).__init__(**kwargs)
         self.value = value
 
-        self_should_be_none = getattr(self.value, "__self__", None)
-        if self_should_be_none is not None:
+        # the remainder of this is just optional debug checks
+        try:
+            self_should_be_none = getattr(self.value, "__self__", None)
+        except RuntimeError as e:
+            assert "No such operator" in str(e), str(e)
+            self_should_be_none = None
+
+        # assert "_ntuple.<locals>.parse" not in str(value)
+
+        if self_should_be_none is None:
+            pass
+        elif isinstance(self_should_be_none, types.ModuleType):
             # weird ones like torch.nn.functional.avg_pool2d have __self__
-            assert isinstance(
-                self_should_be_none, types.ModuleType
-            ) and self_should_be_none.__name__ == getattr(
-                self.value, "__module__", None
-            )
+            name = self_should_be_none.__name__
+            assert re.match(r"^(torch|math)([.]|$)", name), f"__self__ set to {name}"
+        elif isinstance(
+            self_should_be_none, type(torch._C._get_tracing_state.__self__)
+        ):
+            # some _C functions have __self__ as a null capsule
+            pass
+        else:
+            assert False, f"{value} found with __self__ set"
 
     def as_proxy(self):
         return self.value

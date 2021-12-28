@@ -48,15 +48,16 @@ SKIP_DIRS = [
 
 # skip common third party libs
 for _name in (
+    "intel_extension_for_pytorch",
     "numpy",
+    "omegaconf",
     "onnx",
-    "tvm",
     "onnxruntime",
-    "tqdm",
     "pandas",
     "sklearn",
-    "intel_extension_for_pytorch",
+    "tqdm",
     "transformers.file_utils",
+    "tvm",
 ):
     try:
         SKIP_DIRS.append(os.path.dirname(importlib.import_module(_name).__file__) + "/")

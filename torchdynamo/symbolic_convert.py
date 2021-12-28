@@ -79,12 +79,15 @@ def stack_op(fn: typing.Callable):
         options = VariableTracker.propagate(inputs)
 
         if any(isinstance(i, TensorVariable) for i in inputs):
-            val = TensorVariable(
-                self.create_proxy(
-                    "call_function", fn, tuple(i.as_proxy() for i in inputs), {}
-                ),
-                **options,
-            )
+            try:
+                val = TensorVariable(
+                    self.create_proxy(
+                        "call_function", fn, tuple(i.as_proxy() for i in inputs), {}
+                    ),
+                    **options,
+                )
+            except NotImplementedError:
+                unimplemented(f"partial tensor op: {inputs}")
         elif all(i.is_python_constant() for i in inputs):
             # constant fold
             val = ConstantVariable(
@@ -487,18 +490,32 @@ class InstructionTranslatorBase(fx.Tracer):
             value = self.f_globals[inst.argval]
         except KeyError:
             return self.load_builtin(inst)
-        self.push(VariableBuilder(self, GlobalSource(inst.argval))(value))
+        if self.root.f_globals is self.f_globals:
+            source = GlobalSource(inst.argval)
+        else:
+            source = AttrSource(
+                self.import_source(self.f_globals["__name__"]), inst.argval
+            )
+        self.push(VariableBuilder(self, source)(value))
+
+    def import_source(self, module_name):
+        """Create an alias to a module for use in guards"""
+        value = importlib.import_module(module_name)
+        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        f_globals = self.root.f_globals
+        assert alias not in f_globals or f_globals[alias] is value
+        f_globals[alias] = value
+        self.create_load_global(alias, add=True)
+        return GlobalSource(alias)
 
     def IMPORT_NAME(self, inst):
         value = importlib.import_module(inst.argval)
+        source = self.import_source(inst.argval)
+
         if is_allowed(value):
-            self.push(AllowedFunctionOrModuleVariable(value))
+            self.push(AllowedFunctionOrModuleVariable(value, source=source))
         elif istype(value, types.ModuleType):
-            self.push(
-                PythonModuleVariable(
-                    value,
-                )
-            )
+            self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")
 
@@ -1098,11 +1115,12 @@ class InstructionTranslatorBase(fx.Tracer):
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")
-        self.install_global(name, self.compiler_fn(gm, self.example_inputs()))
-        assert callable(self.f_globals[name]), "compiler_fn did not return callable"
+        compiled_fn = self.compiler_fn(gm, self.example_inputs())
+        assert callable(compiled_fn), "compiler_fn did not return callable"
+        self.install_global(name, compiled_fn)
         nargs = sum(map(len, self.graphargs))
         if config.debug:
-            print(f"\n{name}")
+            print(f"\n{name} {gm.forward.__code__.co_filename}")
             self.graph.print_tabular()
         return self.create_call_generated_code(name, nargs)
 
@@ -1261,6 +1279,7 @@ class InstructionTranslatorBase(fx.Tracer):
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
         cleanups,
+        root,
         compiler_fn=None,
         symbolic_locals=None,
         f_code=None,
@@ -1287,6 +1306,7 @@ class InstructionTranslatorBase(fx.Tracer):
         self.output_instructions = []
         self.compiler_fn = compiler_fn
         self.f_code = f_code
+        self.root = root
 
         # Dynamic state not checkpointed
         self.checkpoint = None
@@ -1319,6 +1339,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             compiler_fn=compiler_fn,
             f_code=f_code,
             cleanups=dict(),
+            root=self,
         )
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
@@ -1454,6 +1475,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             code_options={k: getattr(code, k) for k in dir(code)},
             compiler_fn=parent.compiler_fn,
             cleanups=parent.cleanups,
+            root=parent.root,
         )
         self.symbolic_result = None
 

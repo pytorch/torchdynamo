@@ -20,8 +20,9 @@ cache_size_limit = 64
 
 # Assume these functions return constants
 constant_functions = {
-    torch.jit.is_scripting: True,
+    torch.jit.is_scripting: False,
     torch.jit.is_tracing: False,
+    torch._C._get_tracing_state: None,
 }
 
 # root folder of the project

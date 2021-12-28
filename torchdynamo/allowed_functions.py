@@ -46,6 +46,7 @@ def _allowed_function_ids():
         torch.autocast_decrement_nesting,
         torch.set_autocast_cache_enabled,
         torch.set_anomaly_enabled,
+        warnings.warn,
     ]
 
     if not config.dynamic_shapes:

@@ -41,10 +41,7 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {
-    "vision_maskrcnn",
-    "detectron2_maskrcnn",
-}
+SKIP = {}
 current_name = ""
 current_device = ""
 
@@ -57,6 +54,10 @@ class NullContext:
         pass
 
 
+def null_print(*args):
+    pass
+
+
 def synchronize():
     pass
 
@@ -66,11 +67,22 @@ def short_name(name, limit=20):
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
 
 
-def iter_models(args):
+def global_fixes():
     from fastNLP.core import logger
+    from pycocotools import coco
 
+    # silence some spam
+    coco.print = null_print
     logger.setLevel(logging.WARNING)
+
+    # TODO(jansel): remove when https://github.com/pytorch/pytorch/pull/70459 lands
+    torch.nn.modules.utils._pair.__name__ = "_pair"
+
+
+def iter_models(args):
     from torchbenchmark import list_models  # noqa
+
+    global_fixes()
 
     for benchmark_cls in list_models():
         if (
