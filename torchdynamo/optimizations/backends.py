@@ -152,7 +152,7 @@ def onnxrt_cuda(subgraph):
 
 
 @create_backend
-def onnxrt_tensorrt(subgraph):
+def onnx2tensorrt(subgraph):
     return onnxrt_common(subgraph, provider="TensorrtExecutionProvider")
 
 
@@ -308,14 +308,14 @@ def torch2trt(subgraph):
 
 @create_backend
 def tensorrt(subgraph):
-    model = onnx2trt(subgraph)
+    model = onnx2tensorrt(subgraph)
     if model is None:
         model = torch2trt(subgraph)
     return model
 
 
 @create_backend
-def onnx2trt(subgraph):
+def onnx2tensorrt_alt(subgraph):
     import tensorrt as trt
     from torch.fx.experimental.fx2trt.trt_module import TRTModule
 

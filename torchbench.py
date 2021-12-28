@@ -299,15 +299,7 @@ def speedup_experiment_onnx(speedups, args, model, example_inputs):
 
 
 def speedup_experiment_trt(speedups, args, model, example_inputs):
-    if current_name != "pyhpc_isoneutral...":
-        m_onnx2trt = backends.onnx2trt(
-            try_script(model, example_inputs), example_inputs
-        )
-    else:
-        # onnx2trt segfaults on one model
-        m_onnx2trt = None
-
-    m_onnxrt_tensorrt = backends.onnxrt_tensorrt(
+    m_onnx2trt = backends.onnx2tensorrt(
         try_script(model, example_inputs), example_inputs
     )
 
@@ -325,7 +317,6 @@ def speedup_experiment_trt(speedups, args, model, example_inputs):
             ("onnx2trt", m_onnx2trt),
             ("torch2trt", m_torch2trt),
             ("fx2trt", m_fx2trt),
-            ("onnxrt_trt", m_onnxrt_tensorrt),
         ],
         example_inputs,
         args,
