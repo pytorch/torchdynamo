@@ -237,14 +237,17 @@ def speedup_experiment_ts(speedups, args, model, example_inputs):
 
 
 def speedup_experiment_sr(speedups, args, model, example_inputs):
+    if current_name not in ("opacus_cifar10", "timm_nfnet", "hf_T5"):
+        sr = backends.static_runtime(try_script(model, example_inputs), example_inputs)
+    else:
+        # segfaults on these models
+        sr = None
     return baselines(
         [
             ("eager", model),
             (
                 "sr",
-                backends.static_runtime(
-                    try_script(model, example_inputs), example_inputs
-                ),
+                sr,
             ),
         ],
         example_inputs,
