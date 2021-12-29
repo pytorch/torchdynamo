@@ -41,7 +41,10 @@ assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
-SKIP = {}
+SKIP = {
+    # non-deterministic output / cant check correctness
+    "pyhpc_turbulent_kinetic_energy",
+}
 current_name = ""
 current_device = ""
 
