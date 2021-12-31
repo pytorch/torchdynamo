@@ -14,6 +14,7 @@ import threading
 import types
 import typing
 import unittest
+import weakref
 
 import torch
 
@@ -42,9 +43,26 @@ SKIP_DIRS = [
         types,
         typing,
         unittest,
+        weakref,
         _weakrefset,
     )
 ]
+SKIP_DIRS_RE = None  # set in add() below
+
+
+def add(module: types.ModuleType):
+    assert isinstance(module, types.ModuleType)
+    global SKIP_DIRS_RE
+    SKIP_DIRS.append(os.path.dirname(module.__file__) + "/")
+    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+
+
+def check(filename):
+    """Should skip this file?"""
+    if filename is None:
+        return True
+    return bool(SKIP_DIRS_RE.match(filename))
+
 
 # skip common third party libs
 for _name in (
@@ -64,13 +82,6 @@ for _name in (
     "tvm",
 ):
     try:
-        SKIP_DIRS.append(os.path.dirname(importlib.import_module(_name).__file__) + "/")
+        add(importlib.import_module(_name))
     except ImportError:
         pass
-
-SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
-
-
-def check(filename):
-    """Should skip this file?"""
-    return bool(SKIP_DIRS_RE.match(filename))

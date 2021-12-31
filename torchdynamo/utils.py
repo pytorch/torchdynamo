@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import inspect
 import logging
 import os
 import weakref
@@ -175,3 +176,10 @@ def torchscript(model0, example_inputs, verbose=True):
         except Exception:
             model1 = None
     return model1
+
+
+def getfile(obj):
+    try:
+        return inspect.getfile(obj)
+    except TypeError:
+        return None

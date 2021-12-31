@@ -1,6 +1,5 @@
 import collections
 import dataclasses
-import inspect
 import re
 import types
 from typing import Any
@@ -11,6 +10,7 @@ from . import skipfiles
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin
 from .guards import GuardBuilder
+from .utils import getfile
 from .utils import istensor
 from .utils import istype
 from .utils import warning
@@ -18,16 +18,16 @@ from .variable_source import GetItemSource
 from .variable_source import Source
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
+from .variable_tracker import typestr
 from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserDefinedClassVariable
 from .variable_tracker import UserFunctionVariable
-from .variable_tracker import typestr
 
 
 @dataclasses.dataclass
@@ -131,13 +131,11 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, type) and not skipfiles.check(inspect.getfile(value)):
+        elif istype(value, type) and not skipfiles.check(getfile(value)):
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, types.FunctionType) and not skipfiles.check(
-            inspect.getfile(value)
-        ):
+        elif istype(value, types.FunctionType) and not skipfiles.check(getfile(value)):
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
