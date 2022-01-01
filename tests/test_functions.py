@@ -658,3 +658,21 @@ class FunctionTests(torchdynamo.testing.TestCase):
         it1 = (x + 1 for x in (a, b))
         it2 = (x - 1 for x in (a, b))
         return torch.cat([*it1, *it2], dim=-1)
+
+    def test_is_floating_point(self):
+        def fn(a, b):
+            x = a + 1.0
+            if torch.is_floating_point(b):
+                x = x + b
+            return x + 2.0
+
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
+
+    def test_is_tensor(self):
+        def fn(a, b):
+            x = a + 1.0
+            if torch.is_tensor(b):
+                x = x + b
+            return x + 2.0
+
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)

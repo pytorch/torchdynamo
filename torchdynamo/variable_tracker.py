@@ -1139,6 +1139,8 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
         return self.value
 
     def can_constant_fold_through(self):
+        if self.value in (torch.is_tensor, torch.is_floating_point):
+            return True
         return getattr(self.value, "__module__", None) == "math"
 
     def call_function(
@@ -1177,6 +1179,17 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
                 return LambdaVariable(fake_softmax, **options)
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
+        elif (
+            self.value in (torch.is_tensor, torch.is_floating_point)
+            and isinstance(args[0], TensorVariable)
+            and args[0].dtype is not None
+        ):
+            if self.value is torch.is_tensor:
+                return ConstantVariable(True, **options)
+            elif self.value is torch.is_floating_point:
+                return ConstantVariable("float" in str(args[0].dtype), **options)
+            else:
+                assert False
         else:
             return TensorVariable(
                 proxy=tx.create_proxy(
