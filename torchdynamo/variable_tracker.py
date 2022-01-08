@@ -286,6 +286,8 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(self.size, **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)
+        elif name == "is_floating_point" and self.dtype is not None:
+            constant_result = ConstantVariable("float" in str(self.dtype), **options)
         else:
             constant_result = None
 

@@ -5,9 +5,10 @@ import math
 import operator
 
 import torch
+from torch.fx import Transformer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 
-import torchdynamo.utils
+from torchdynamo.utils import counters
 from torchdynamo.allowed_functions import _allowed_function_ids
 
 VIEW_OPS = {
@@ -45,31 +46,44 @@ VIEW_OPS = {
     "values",
 }
 MAYBE_VIEW_OPS = {"contiguous", "reshape"}
+
+# convert x.foo(...) to torch.foo(x, ...)
 NORMALIZE_METHODS = {
     # 'size'
-    "transpose": torch.transpose,
-    "mean": torch.mean,
-    "sigmoid": torch.sigmoid,
-    "pow": torch.pow,
-    "sum": torch.sum,
-    "softmax": torch.nn.functional.softmax,
-    "unsqueeze": torch.unsqueeze,
-    "chunk": torch.chunk,
-    "tril": torch.tril,
-    "std": torch.std,
-    "flatten": torch.flatten,
-    "clone": torch.clone,
-    "flip": torch.flip,
-    "mul_": operator.imul,
+    # 'permute'
+    # 'reshape'
     "add_": operator.iadd,
+    "all": torch.all,
+    "chunk": torch.chunk,
+    "clamp": torch.clamp,
+    "clone": torch.clone,
+    "exp": torch.exp,
+    "flatten": torch.flatten,
+    "flip": torch.flip,
+    "log_softmax": torch.nn.functional.log_softmax,
+    "max": torch.max,
+    "mean": torch.mean,
+    "mul_": operator.imul,
+    "narrow": torch.narrow,
+    "nonzero": torch.nonzero,
+    "numel": torch.numel,
+    "pow": torch.pow,
+    "rsqrt": torch.rsqrt,
+    "sigmoid": torch.sigmoid,
+    "softmax": torch.nn.functional.softmax,
+    "sort": torch.sort,
+    "squeeze": torch.squeeze,
+    "std": torch.std,
+    "sum": torch.sum,
+    "transpose": torch.transpose,
+    "tril": torch.tril,
+    "unsqueeze": torch.unsqueeze,
 }
 DONT_EXPAND_MODULES = {
-    # This have internal control flow
+    # These have internal control flow
+    "ConvTranspose2d",
     "EmbeddingBag",
     "LSTM",
-    "BatchNorm2d",
-    "InstanceNorm2d",
-    "ConvTranspose2d",
 }
 FUNCTION_REPLACEMENTS = {
     torch.nn.functional.sigmoid: torch.sigmoid,
@@ -102,12 +116,18 @@ SKIP_INPLACE = {
 }
 
 
+def always_true(*args, **kwargs):
+    return True
+
+
 class InliningTracer(torch.fx.Tracer):
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return False
 
 
 def expand_module_call(prefix, graph: torch.fx.Graph, module, args, kwargs):
+    # this patch is needed to make BatchNorm2D FX trace
+    module.__dict__["_check_input_dim"] = always_true
     try:
         assert not kwargs
         arg_index = itertools.count()
@@ -126,6 +146,8 @@ def expand_module_call(prefix, graph: torch.fx.Graph, module, args, kwargs):
     except Exception:
         print(f"Error while expanding {module.__class__.__name__}")
         raise
+    finally:
+        del module.__dict__["_check_input_dim"]
 
 
 @dataclasses.dataclass
@@ -142,7 +164,9 @@ def short_name(gm, node: torch.fx.Node):
         return gm.get_submodule(node.target).__class__.__name__
     elif node.op == "get_attr":
         return node.target
-    assert False
+    elif node.op == "output":
+        return "output"
+    assert False, node.op
 
 
 def long_name(gm, node: torch.fx.Node):
@@ -160,6 +184,8 @@ def long_name(gm, node: torch.fx.Node):
         return f"{getattr(target, '__module__', '')}.{getattr(target, '__name__', '')}"
     elif node.op == "get_attr":
         return name
+    elif node.op == "output":
+        return "output"
     assert False
 
 
@@ -201,12 +227,12 @@ class Inplacifier:
                         continue
                     elif node.target in INPLACE_OPS:
                         kwargs["inplace"] = True
-                        torchdynamo.utils.counters["optimizations"]["inplace"] += 1
+                        counters["optimizations"]["inplace"] += 1
                     elif " out: torch.Tensor" in repr(
                         get_signature_for_torch_op(node.target)
                     ):
                         kwargs["out"] = arg
-                        torchdynamo.utils.counters["optimizations"]["out"] += 1
+                        counters["optimizations"]["out"] += 1
                     else:
                         continue
                     with self.gm.graph.inserting_before(node):
@@ -218,6 +244,82 @@ class Inplacifier:
             torch.fx.map_arg((node.args, node.kwargs), record_usage)
 
 
+class Functionalization(Transformer):
+    """
+    Remove most cases of mutation from a given fx Graph.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(Functionalization, self).__init__(*args, **kwargs)
+        self.tracer.tensor_attrs = dict()  # TODO(jansel): upstream this fix
+
+    def run_node(self, n: torch.fx.Node):
+        patches = []
+        target = n.target
+        args, kwargs = self.fetch_args_kwargs_from_env(n)
+        kwargs = dict(kwargs)
+        module_name = getattr(n.target, "__module__", None)
+        if not n.meta["is_input_mutation"] and issubclass(n.meta["type"], torch.Tensor):
+            if "inplace" in n.kwargs:
+                if kwargs["inplace"]:
+                    patches.append(n.args[0])
+                kwargs.pop("inplace")
+            elif "out" in n.kwargs:
+                kwargs.pop("out")
+                patches.append(n.kwargs["out"])
+            elif n.target is torch.relu_:
+                target = torch.relu
+                patches.append(n.args[0])
+            elif module_name == "_operator" and n.target.__name__.startswith("i"):
+                target = getattr(torch, n.target.__name__[1:])  # iadd, imul, etc
+                patches.append(n.args[0])
+            elif module_name == "_operator" and n.target not in (
+                operator.getitem,
+                operator.setitem,
+                # TODO(jansel): debug issue with truediv on maskrcnn
+                operator.truediv,
+            ):
+                name = n.target.__name__
+                # if name == "truediv":
+                #     if isinstance(args[0], (float, int)):
+                #         args = (torch.Tensor([args[0]], device=n.meta["device"])[0], args[1])
+                #     # target = torch.ops.aten.true_divide
+                #     target = torch.div
+                # else:
+                name = {
+                    "truediv": "div",
+                    "and_": "bitwise_and",
+                    "or_": "bitwise_or",
+                }.get(name, name)
+                target = getattr(torch, name)
+            elif n.meta["is_mutation"]:
+                counters["mutation"][long_name(self.module, n)] += 1
+
+        if target is builtins.getattr:
+            if args[1] == "dtype":
+                return n.args[0].meta["dtype"]
+            elif args[1] == "device":
+                return n.args[0].meta["device"]
+            else:
+                counters["getattr"][args[1]] += 1
+        elif not issubclass(n.meta["type"], torch.Tensor):
+            counters["nontensor"][long_name(self.module, n)] += 1
+
+        result = getattr(self, n.op)(target, args, kwargs)
+
+        for patch in patches:
+            assert isinstance(patch, torch.fx.Node)
+            if patch in self.env:
+                self.env[patch] = result
+
+        return result
+
+
+def swap_node(graph, old_node, new_node):
+    old_node.replace_all_uses_with(new_node)
+    graph.erase_node(old_node)
+
+
 def normalize(gm: torch.fx.GraphModule):
     # gm.graph.print_tabular()
     graph: torch.fx.Graph = gm.graph
@@ -225,20 +327,22 @@ def normalize(gm: torch.fx.GraphModule):
     for node in list(graph.nodes):
         with graph.inserting_before(node):
             if node.op == "call_method" and node.target in NORMALIZE_METHODS:
-                node.replace_all_uses_with(
+                swap_node(
+                    graph,
+                    node,
                     graph.call_function(
                         NORMALIZE_METHODS[node.target], node.args, node.kwargs
-                    )
+                    ),
                 )
-                graph.erase_node(node)
             elif node.op == "call_module":
                 submod = gm.get_submodule(node.target)
                 if submod.__class__.__name__ not in DONT_EXPAND_MODULES:
-                    node.replace_all_uses_with(
+                    swap_node(
+                        graph,
+                        node,
                         expand_module_call(
                             f"{node.target}.", graph, submod, node.args, node.kwargs
-                        )
+                        ),
                     )
-                    graph.erase_node(node)
 
     # gm.graph.print_tabular()

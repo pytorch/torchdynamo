@@ -9,6 +9,7 @@ import time
 from collections import defaultdict
 
 import torch
+from torch.fx.experimental.normalize import NormalizeOperators
 
 from torchdynamo import config
 from torchdynamo.utils import clone_inputs
@@ -16,8 +17,11 @@ from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
 from torchdynamo.utils import torchscript
 from torchdynamo.utils import warning
+from .analysis import ShapeAliasingAndMutationProp
 from .backends import BACKENDS
+from .normalize import Functionalization
 from .normalize import long_name
+from .normalize import normalize
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -99,9 +103,10 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
 
     example_inputs = clone_inputs(example_inputs)
 
-    # normalize(gm)
-    # gm = NormalizeOperators(gm).transform()
-    # Inplacifier(gm).inplacify()
+    normalize(gm)
+    gm = NormalizeOperators(gm).transform()
+    ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+    gm = Functionalization(gm).transform()
 
     record_graph_stats(gm)
     gm.recompile()
