@@ -22,7 +22,9 @@ from torch import fx
 
 from . import config
 from . import skipfiles
-from .allowed_functions import is_allowed, is_builtin
+from .allowed_functions import is_allowed
+from .allowed_functions import is_builtin
+from .allowed_functions import is_disallowed
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
@@ -80,7 +82,7 @@ def stack_op(fn: typing.Callable):
 
         if any(isinstance(i, TensorVariable) for i in inputs):
             try:
-                val = TensorVariable(
+                val = TensorVariable.create(
                     self.create_proxy(
                         "call_function", fn, tuple(i.as_proxy() for i in inputs), {}
                     ),
@@ -282,12 +284,13 @@ class InstructionTranslatorBase(fx.Tracer):
         options["guards"] = set(options.get("guards", []))
         source: Source = options["source"]
         if isinstance(mod, torch.Tensor):
-            options.update(TensorVariable.specialize(mod))
             options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
-                return TensorVariable(
-                    self.create_proxy("get_attr", module_key, tuple(), {}), **options
+                return TensorVariable.create(
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    example_value=mod,
+                    **options,
                 )
 
         else:
@@ -598,7 +601,7 @@ class InstructionTranslatorBase(fx.Tracer):
             isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
         ) and op in supported_tensors:
             self.push(
-                TensorVariable(
+                TensorVariable.create(
                     supported_tensors[op](left.as_proxy(), right.as_proxy()),
                     **options,
                 )
@@ -755,11 +758,11 @@ class InstructionTranslatorBase(fx.Tracer):
             except NotImplementedError:
                 self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, AllowedFunctionOrModuleVariable):
-            self.push(
-                AllowedFunctionOrModuleVariable(
-                    value=getattr(obj.value, name), **options
-                )
-            )
+            member = getattr(obj.value, name)
+            if not is_disallowed(member):
+                self.push(AllowedFunctionOrModuleVariable(member, **options))
+            else:
+                self.push(VariableBuilder(self, source)(member).add_guards(guards))
         elif isinstance(obj, PythonModuleVariable):
             member = obj.value.__dict__[name]
             self.push(VariableBuilder(self, source)(member).add_guards(guards))
@@ -943,12 +946,12 @@ class InstructionTranslatorBase(fx.Tracer):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable(proxy[i], **options))
+                self.push(TensorVariable.create(proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable(proxy[i], **options))
+                self.push(TensorVariable.create(proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 
@@ -1112,6 +1115,13 @@ class InstructionTranslatorBase(fx.Tracer):
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
+
+        if config.dynamic_propagation:
+            # free a bit of memory
+            for node in self.graph.nodes:
+                if "example_value" in node.meta:
+                    del node.meta["example_value"]
+
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")

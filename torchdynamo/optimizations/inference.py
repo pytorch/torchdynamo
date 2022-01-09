@@ -22,6 +22,7 @@ from .backends import BACKENDS
 from .normalize import Functionalization
 from .normalize import long_name
 from .normalize import normalize
+from ..variable_tracker import typestr
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -105,8 +106,17 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
 
     normalize(gm)
     gm = NormalizeOperators(gm).transform()
-    ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+    example_outputs = ShapeAliasingAndMutationProp(gm).run(*example_inputs)
     gm = Functionalization(gm).transform()
+
+    def visit(o):
+        if isinstance(o, (tuple, list)):
+            for i in o:
+                visit(i)
+        else:
+            counters["output_types"][typestr(o)] += 1
+
+    visit(example_outputs)
 
     record_graph_stats(gm)
     gm.recompile()

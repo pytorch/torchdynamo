@@ -1,4 +1,5 @@
 import builtins
+import collections
 import math
 import types
 import warnings
@@ -7,6 +8,41 @@ from functools import lru_cache
 import torch
 
 from torchdynamo import config
+
+
+@lru_cache(None)
+def _disallowed_function_ids():
+    remove = [
+        True,
+        False,
+        None,
+        torch.no_grad,
+        torch.inference_mode,
+        torch.set_autocast_enabled,
+        torch.clear_autocast_cache,
+        torch.set_autocast_cpu_enabled,
+        torch.set_autocast_cpu_dtype,
+        torch.set_autocast_gpu_dtype,
+        torch.autocast_increment_nesting,
+        torch.autocast_decrement_nesting,
+        torch.set_autocast_cache_enabled,
+        torch.set_anomaly_enabled,
+        warnings.warn,
+        collections.OrderedDict,
+    ]
+
+    if not config.dynamic_shapes:
+        # break graph on operators with dynamic return sizes
+        remove.extend(
+            [
+                torch.nonzero,
+                torch.unique,
+                torch.unique_consecutive,
+                torch.distributions.normal.Normal,
+                # TODO(jansel): need to get a complete list
+            ]
+        )
+    return {id(x) for x in remove}
 
 
 @lru_cache(None)
@@ -31,37 +67,8 @@ def _allowed_function_ids():
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
-    remove = [
-        True,
-        False,
-        None,
-        torch.no_grad,
-        torch.inference_mode,
-        torch.set_autocast_enabled,
-        torch.clear_autocast_cache,
-        torch.set_autocast_cpu_enabled,
-        torch.set_autocast_cpu_dtype,
-        torch.set_autocast_gpu_dtype,
-        torch.autocast_increment_nesting,
-        torch.autocast_decrement_nesting,
-        torch.set_autocast_cache_enabled,
-        torch.set_anomaly_enabled,
-        warnings.warn,
-    ]
-
-    if not config.dynamic_shapes:
-        # break graph on operators with dynamic return sizes
-        remove.extend(
-            [
-                torch.nonzero,
-                torch.unique,
-                torch.unique_consecutive,
-                # TODO(jansel): need to get a complete list
-            ]
-        )
-
-    for obj in remove:
-        del torch_object_ids[id(obj)]
+    for idx in _disallowed_function_ids():
+        del torch_object_ids[idx]
 
     return torch_object_ids
 
@@ -69,6 +76,11 @@ def _allowed_function_ids():
 def is_allowed(obj):
     """Is this safe to trace like torch.add ?"""
     return id(obj) in _allowed_function_ids()
+
+
+def is_disallowed(obj):
+    """Is this safe to trace like torch.add ?"""
+    return id(obj) in _disallowed_function_ids()
 
 
 @lru_cache(None)

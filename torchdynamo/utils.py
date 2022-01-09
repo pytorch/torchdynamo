@@ -183,3 +183,36 @@ def getfile(obj):
         return inspect.getfile(obj)
     except TypeError:
         return None
+
+
+def is_namedtuple(obj):
+    """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    if isinstance(obj, tuple):
+        bases = getattr(type(obj), "__bases__", []) or [None]
+        module = getattr(type(obj), "__module__", None)
+        return module == "torch.return_types" or (
+            bases[0] is tuple and hasattr(obj, "_make") and hasattr(obj, "_fields")
+        )
+    return False
+
+
+@functools.lru_cache(1)
+def namedtuple_fields(cls):
+    """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    assert issubclass(cls, tuple)
+    if hasattr(cls, "_fields"):
+        # normal namedtuples
+        return cls._fields
+
+    @dataclasses.dataclass
+    class Marker:
+        index: int
+
+    # frustrating ones e.g. torch.return_types.max
+    assert cls.__module__ == "torch.return_types"
+    obj = cls(map(Marker, range(cls.n_fields)))
+    fields = [None] * cls.n_fields
+    for name in dir(obj):
+        if name[0] != "_" and isinstance(getattr(obj, name), Marker):
+            fields[getattr(obj, name).index] = name
+    return fields

@@ -1,7 +1,10 @@
 import collections
+import copy
+import functools
 import inspect
 import itertools
 import math
+import operator
 import re
 import types
 from typing import Callable
@@ -11,6 +14,7 @@ from typing import Optional
 from typing import Set
 
 import torch.fx
+import torch.nn.modules.utils
 
 from . import config
 from .allowed_functions import is_allowed
@@ -28,6 +32,8 @@ from .variable_source import Source
 
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
+
+product = functools.partial(functools.reduce, operator.mul)
 
 
 def check_constant_args(args, kwargs):
@@ -207,6 +213,63 @@ class VariableTracker:
 class TensorVariable(VariableTracker):
     """Points to a tensor"""
 
+    @staticmethod
+    def propagate_args_kwargs(node):
+        def visit(n: torch.fx.Node):
+            return n.meta["example_value"]
+
+        return torch.fx.node.map_arg((node.args, node.kwargs), visit)
+
+    @classmethod
+    def create(cls, proxy, example_value=None, nnmodule=None, **options):
+        assert "example_value" not in proxy.node.meta
+        if not config.dynamic_propagation:
+            if isinstance(example_value, torch.Tensor):
+                options.update(TensorVariable.specialize(example_value))
+            return TensorVariable(proxy, **options)
+
+        if example_value is None:
+            op = proxy.node.op
+            args, kwargs = cls.propagate_args_kwargs(proxy.node)
+            if op == "call_function":
+                example_value = proxy.node.target(*args, **kwargs)
+            elif op == "call_method":
+                example_value = getattr(args[0], proxy.node.target)(*args[1:], **kwargs)
+            elif op == "call_module":
+                assert nnmodule is not None
+                example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
+            else:
+                assert False, op
+
+        if isinstance(example_value, torch.Tensor):
+            proxy.node.meta["example_value"] = example_value.clone()
+            options.update(TensorVariable.specialize(example_value))
+            return TensorVariable(proxy, **options)
+        elif isinstance(example_value, tuple):
+            unpacked = []
+            for i, val in enumerate(example_value):
+                unpacked.append(
+                    TensorVariable.create(
+                        proxy.tracer.create_proxy(
+                            "call_function", operator.getitem, (proxy, i), {}
+                        ),
+                        example_value=val,
+                        **options,
+                    )
+                )
+            if istype(example_value, tuple):
+                return TupleVariable(unpacked, **options)
+            else:
+                assert (
+                    example_value.__class__.__module__ == "torch.return_types"
+                    or hasattr(example_value, "_fields")
+                ), "namedtuple?"
+                return NamedTupleVariable(unpacked, example_value.__class__, **options)
+        else:
+            assert (
+                False
+            ), f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+
     def __init__(
         self,
         proxy: torch.fx.Proxy,
@@ -218,6 +281,7 @@ class TensorVariable(VariableTracker):
         requires_grad=None,
         **kwargs,
     ):
+        assert dtype is not None or not config.dynamic_propagation
         super(TensorVariable, self).__init__(**kwargs)
         self.proxy = proxy
         self.dtype = dtype
@@ -284,6 +348,8 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
             constant_result = ConstantVariable(self.size, **options)
+        elif name == "numel" and self.size is not None:
+            constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)
         elif name == "is_floating_point" and self.dtype is not None:
@@ -301,7 +367,10 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
 
-        return TensorVariable(
+        if name == "item":
+            unimplemented("Tensor.item()")
+
+        return TensorVariable.create(
             tx.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             ),
@@ -362,12 +431,13 @@ class NNModuleVariable(VariableTracker):
                 arg = tx.pop()
             return arg
         elif is_allowed(mod.__class__):
-            return TensorVariable(
+            return TensorVariable.create(
                 proxy=tx.create_proxy(
                     "call_module",
                     self.module_key,
                     *proxy_args_kwargs(args, kwargs),
                 ),
+                nnmodule=mod,
                 **options,
             )
         else:
@@ -604,7 +674,7 @@ class BuiltinVariable(VariableTracker):
                     assert not config.dynamic_shapes
                     return ConstantVariable(arg.size[0], **options)
                 else:
-                    return TensorVariable(
+                    return TensorVariable.create(
                         tx.create_proxy("call_function", len, (arg.as_proxy(),), {}),
                         **options,
                     )
@@ -789,6 +859,24 @@ class TupleVariable(BaseListVariable):
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         return [create_instruction("BUILD_TUPLE", len(self.items))]
+
+
+class NamedTupleVariable(TupleVariable):
+    def __init__(self, items, tuple_cls, **kwargs):
+        super().__init__(items, **kwargs)
+        self.tuple_cls = tuple_cls
+
+    def python_type(self):
+        return self.tuple_cls
+
+    def reconstruct(self, codegen):
+        create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
+        codegen.output.append(codegen._create_load_const(create_fn))
+        codegen.foreach(self.items)
+        return [
+            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("CALL_FUNCTION", 1),
+        ]
 
 
 class SliceVariable(BaseListVariable):
@@ -1169,7 +1257,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
                 dim = args[0] if args else kwargs.get("dim", ConstantVariable(None))
 
                 def fake_softmax(input):
-                    return TensorVariable(
+                    return TensorVariable.create(
                         proxy=tx.create_proxy(
                             "call_function",
                             torch.nn.functional.softmax,
@@ -1192,8 +1280,46 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
                 return ConstantVariable("float" in str(args[0].dtype), **options)
             else:
                 assert False
+        elif (
+            self.value is torch.numel
+            and isinstance(args[0], TensorVariable)
+            and args[0].size is not None
+        ):
+            return ConstantVariable(product(args[0].size), **options)
+        elif self.value in (
+            torch.nn.modules.utils._single,
+            torch.nn.modules.utils._pair,
+            torch.nn.modules.utils._triple,
+            torch.nn.modules.utils._quadruple,
+            torch.nn.modules.utils._ntuple,
+        ):
+
+            if self.value is torch.nn.modules.utils._ntuple:
+                count = args[0].as_python_constant()
+            else:
+                count = self.value.__closure__[0].cell_contents
+            assert isinstance(count, int)
+
+            def handle_ntuple(value):
+                if value.has_unpack_var_sequence(tx):
+                    return TupleVariable(
+                        list(value.unpack_var_sequence(tx)),
+                        **VariableTracker.propagate(self, value, args, kwargs.values()),
+                    )
+                else:
+                    return ConstantVariable(
+                        torch.nn.modules.utils._ntuple(count)(
+                            value.as_python_constant()
+                        ),
+                        **VariableTracker.propagate(self, value, args, kwargs.values()),
+                    )
+
+            if self.value is torch.nn.modules.utils._ntuple:
+                return LambdaVariable(handle_ntuple, **options)
+            else:
+                return handle_ntuple(args[0])
         else:
-            return TensorVariable(
+            return TensorVariable.create(
                 proxy=tx.create_proxy(
                     "call_function", self.value, *proxy_args_kwargs(args, kwargs)
                 ),

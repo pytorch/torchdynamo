@@ -8,8 +8,8 @@ import torch
 from torch.fx import Transformer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 
-from torchdynamo.utils import counters
 from torchdynamo.allowed_functions import _allowed_function_ids
+from torchdynamo.utils import counters
 
 VIEW_OPS = {
     # list taken from https://pytorch.org/docs/stable/tensor_view.html
@@ -85,13 +85,9 @@ DONT_EXPAND_MODULES = {
     "EmbeddingBag",
     "LSTM",
 }
-FUNCTION_REPLACEMENTS = {
-    torch.nn.functional.sigmoid: torch.sigmoid,
-    torch.nn.functional.tanh: torch.tanh,
-}
 
 F = torch.nn.functional
-INPLACE_OPS = {
+INPLACE_KEYWORD_OPS = {
     F.mish,
     F.silu,
     F.hardsigmoid,
@@ -105,6 +101,46 @@ INPLACE_OPS = {
     F.hardtanh,
     F.relu,
     F.threshold,
+}
+IOPERATOR_REPLACEMENTS = {
+    torch.relu_: torch.relu,
+    operator.iadd: torch.add,
+    operator.iand: torch.bitwise_and,
+    operator.ifloordiv: torch.ops.aten.floor_divide,
+    operator.itruediv: torch.ops.aten.true_divide,
+    operator.imul: torch.mul,
+    operator.imatmul: torch.matmul,
+    operator.ior: torch.bitwise_or,
+    operator.ipow: torch.pow,
+    operator.isub: torch.sub,
+    operator.ixor: torch.bitwise_xor,
+}
+OPERATOR_REPLACEMENTS = {
+    operator.lt: torch.lt,
+    operator.le: torch.le,
+    operator.eq: torch.eq,
+    operator.ne: torch.ne,
+    operator.ge: torch.ge,
+    operator.gt: torch.gt,
+    operator.abs: torch.abs,
+    operator.add: torch.add,
+    operator.and_: torch.bitwise_and,
+    operator.floordiv: torch.ops.aten.floor_divide,
+    operator.inv: torch.bitwise_not,
+    operator.invert: torch.bitwise_not,
+    operator.mod: torch.remainder,
+    operator.mul: torch.mul,
+    operator.matmul: torch.matmul,
+    operator.neg: torch.neg,
+    operator.or_: torch.bitwise_or,
+    operator.pos: torch.positive,
+    operator.pow: torch.pow,
+    operator.sub: torch.sub,
+    # operator.truediv: torch.div,  # TODO(jansel): debug issue in vision_maskrcnn
+    operator.xor: torch.bitwise_xor,
+    torch.nn.functional.sigmoid: torch.sigmoid,
+    torch.nn.functional.tanh: torch.tanh,
+    torch.nn.functional.relu: torch.relu,
 }
 
 SKIP_INPLACE = {
@@ -225,7 +261,7 @@ class Inplacifier:
                 if isinstance(arg, torch.fx.Node) and counts[arg].usages == 0:
                     if node.target in SKIP_INPLACE:
                         continue
-                    elif node.target in INPLACE_OPS:
+                    elif node.target in INPLACE_KEYWORD_OPS:
                         kwargs["inplace"] = True
                         counters["optimizations"]["inplace"] += 1
                     elif " out: torch.Tensor" in repr(
@@ -254,11 +290,12 @@ class Functionalization(Transformer):
         self.tracer.tensor_attrs = dict()  # TODO(jansel): upstream this fix
 
     def run_node(self, n: torch.fx.Node):
+
         patches = []
         target = n.target
         args, kwargs = self.fetch_args_kwargs_from_env(n)
         kwargs = dict(kwargs)
-        module_name = getattr(n.target, "__module__", None)
+
         if not n.meta["is_input_mutation"] and issubclass(n.meta["type"], torch.Tensor):
             if "inplace" in n.kwargs:
                 if kwargs["inplace"]:
@@ -267,33 +304,14 @@ class Functionalization(Transformer):
             elif "out" in n.kwargs:
                 kwargs.pop("out")
                 patches.append(n.kwargs["out"])
-            elif n.target is torch.relu_:
-                target = torch.relu
+            elif n.target in IOPERATOR_REPLACEMENTS:
+                target = IOPERATOR_REPLACEMENTS[n.target]
                 patches.append(n.args[0])
-            elif module_name == "_operator" and n.target.__name__.startswith("i"):
-                target = getattr(torch, n.target.__name__[1:])  # iadd, imul, etc
-                patches.append(n.args[0])
-            elif module_name == "_operator" and n.target not in (
-                operator.getitem,
-                operator.setitem,
-                # TODO(jansel): debug issue with truediv on maskrcnn
-                operator.truediv,
-            ):
-                name = n.target.__name__
-                # if name == "truediv":
-                #     if isinstance(args[0], (float, int)):
-                #         args = (torch.Tensor([args[0]], device=n.meta["device"])[0], args[1])
-                #     # target = torch.ops.aten.true_divide
-                #     target = torch.div
-                # else:
-                name = {
-                    "truediv": "div",
-                    "and_": "bitwise_and",
-                    "or_": "bitwise_or",
-                }.get(name, name)
-                target = getattr(torch, name)
             elif n.meta["is_mutation"]:
                 counters["mutation"][long_name(self.module, n)] += 1
+
+            if target in OPERATOR_REPLACEMENTS and not kwargs:
+                target = OPERATOR_REPLACEMENTS[target]
 
         if target is builtins.getattr:
             if args[1] == "dtype":
@@ -302,7 +320,8 @@ class Functionalization(Transformer):
                 return n.args[0].meta["device"]
             else:
                 counters["getattr"][args[1]] += 1
-        elif not issubclass(n.meta["type"], torch.Tensor):
+
+        if not issubclass(n.meta["type"], torch.Tensor):
             counters["nontensor"][long_name(self.module, n)] += 1
 
         result = getattr(self, n.op)(target, args, kwargs)

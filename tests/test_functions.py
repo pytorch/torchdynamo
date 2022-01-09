@@ -1,6 +1,8 @@
 #!/usr/bin/env pytest
+import collections
 import inspect
 import math
+import unittest
 
 import torch
 from torch import sub
@@ -35,6 +37,9 @@ def make_test(fn):
         return torchdynamo.testing.standard_test(self, fn=fn, nargs=nargs)
 
     return test_fn
+
+
+mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
 
 class FunctionTests(torchdynamo.testing.TestCase):
@@ -274,7 +279,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
             o.copy_(a / b)
             return o
 
-        torchdynamo.testing.standard_test(self, unpack4, 2, expected_ops=8)
+        torchdynamo.testing.standard_test(self, unpack4, 2, expected_ops=5)
 
     def test_unpack5(self):
         def unpack5(a, b):
@@ -285,7 +290,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
             o.copy_(a / b)
             return o
 
-        torchdynamo.testing.standard_test(self, unpack5, 2, expected_ops=8)
+        torchdynamo.testing.standard_test(self, unpack5, 2, expected_ops=5)
 
     def test_matmul1(self):
         def matmul_op1(a, b):
@@ -685,3 +690,79 @@ class FunctionTests(torchdynamo.testing.TestCase):
             return x + 2.0
 
         return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
+
+    def test_numel(self):
+        def fn(a):
+            return a + a.numel() + torch.numel(a)
+
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=2)
+
+    def test_pair(self):
+        def fn(a):
+            return (
+                torch.zeros(torch.nn.modules.utils._pair(a.size()))
+                + a
+                + torch.ones(torch.nn.modules.utils._ntuple(3)(3)).sum()
+            )
+
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=5)
+
+    def test_tensor_item(self):
+        def fn(a, b):
+            return (a + b).sum().item()
+
+        v1 = torch.randn((10, 10))
+        v2 = torch.randn((10, 10))
+        correct = fn(v1, v2)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnts)):
+            self.assertEqual(fn(v1, v2), correct)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+    @unittest.skip("todo")
+    def test_no_grad(self):
+        def fn(a, b):
+            x = a + 1
+            # redundant no_grad should get ignored
+            with torch.no_grad():
+                x = x + b
+            x = x + 2
+            return x
+
+        with torch.no_grad():
+            return torchdynamo.testing.standard_test(
+                self, fn=fn, nargs=2, expected_ops=3
+            )
+
+    @unittest.skip("todo")
+    def test_namedtuple1(self):
+        def fn(a, b):
+            return mytuple(a, b, a + b)
+
+        v1 = torch.Tensor([10])
+        v2 = torch.Tensor([20])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(v1, v2).ab, 30)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=1)
+
+    @unittest.skip("todo")
+    def test_namedtuple2(self):
+        def fn(packed):
+            a, b, c = packed
+            return packed.a + packed[1] + c
+
+        v1 = torch.Tensor([1])
+        v2 = torch.Tensor([2])
+        v3 = torch.Tensor([3])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(mytuple(v1, v2, v3))[0], 5)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+        return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=1)

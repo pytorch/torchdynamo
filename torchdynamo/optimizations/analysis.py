@@ -3,8 +3,8 @@ import weakref
 
 import torch
 from torch.fx.node import map_aggregate
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
