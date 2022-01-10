@@ -7,8 +7,6 @@ from functools import lru_cache
 
 import torch
 
-from torchdynamo import config
-
 
 @lru_cache(None)
 def _disallowed_function_ids():
@@ -29,19 +27,8 @@ def _disallowed_function_ids():
         torch.set_anomaly_enabled,
         warnings.warn,
         collections.OrderedDict,
+        torch.distributions.normal.Normal,
     ]
-
-    if not config.dynamic_shapes:
-        # break graph on operators with dynamic return sizes
-        remove.extend(
-            [
-                torch.nonzero,
-                torch.unique,
-                torch.unique_consecutive,
-                torch.distributions.normal.Normal,
-                # TODO(jansel): need to get a complete list
-            ]
-        )
     return {id(x) for x in remove}
 
 

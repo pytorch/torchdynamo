@@ -187,11 +187,16 @@ def getfile(obj):
 
 def is_namedtuple(obj):
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
-    if isinstance(obj, tuple):
-        bases = getattr(type(obj), "__bases__", []) or [None]
-        module = getattr(type(obj), "__module__", None)
+    return is_namedtuple_cls(type(obj))
+
+
+def is_namedtuple_cls(cls):
+    """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    if issubclass(cls, tuple):
+        bases = getattr(cls, "__bases__", []) or [None]
+        module = getattr(cls, "__module__", None)
         return module == "torch.return_types" or (
-            bases[0] is tuple and hasattr(obj, "_make") and hasattr(obj, "_fields")
+            bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
         )
     return False
 
@@ -199,6 +204,9 @@ def is_namedtuple(obj):
 @functools.lru_cache(1)
 def namedtuple_fields(cls):
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    if cls is slice:
+        return ["start", "stop", "step"]
+
     assert issubclass(cls, tuple)
     if hasattr(cls, "_fields"):
         # normal namedtuples

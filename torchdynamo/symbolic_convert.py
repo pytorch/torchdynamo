@@ -52,14 +52,15 @@ from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import GetAttrVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import MutableLocal
-from .variable_tracker import NNModuleVariable
+from .variable_tracker import NamedTupleVariable
 from .variable_tracker import NestedUserFunctionVariable
+from .variable_tracker import NNModuleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import SliceVariable
 from .variable_tracker import TensorVariable
@@ -213,7 +214,7 @@ class InstructionTranslatorBase(fx.Tracer):
             return create_instruction(
                 "LOAD_DEREF", self.cell_and_freevars().index(name), name
             )
-        assert name in self.code_options["co_varnames"]
+        assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction(
             "LOAD_FAST", self.code_options["co_varnames"].index(name), name
         )
@@ -512,6 +513,10 @@ class InstructionTranslatorBase(fx.Tracer):
         return GlobalSource(alias)
 
     def IMPORT_NAME(self, inst):
+        level, fromlist = self.popn(2)
+        if level.as_python_constant() != 0:
+            unimplemented("IMPORT_NAME with level")
+
         value = importlib.import_module(inst.argval)
         source = self.import_source(inst.argval)
 
@@ -521,6 +526,10 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")
+
+    def IMPORT_FROM(self, inst):
+        self.DUP_TOP(inst)
+        self.LOAD_ATTR(inst)
 
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
@@ -752,41 +761,51 @@ class InstructionTranslatorBase(fx.Tracer):
                 else:
                     unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
 
-        elif isinstance(obj, TensorVariable):
+        elif isinstance(obj, (TensorVariable, NamedTupleVariable, ConstantVariable)):
             try:
-                self.push(obj.get_var_attr(self, name))
+                self.push(
+                    obj.get_var_attr(self, name).clone(source=source).add_guards(guards)
+                )
             except NotImplementedError:
                 self.push(GetAttrVariable(obj, name, **options))
         elif isinstance(obj, AllowedFunctionOrModuleVariable):
             member = getattr(obj.value, name)
             if not is_disallowed(member):
                 self.push(AllowedFunctionOrModuleVariable(member, **options))
+            elif ConstantVariable.is_literal(member):
+                self.push(ConstantVariable(member, **options))
             else:
                 self.push(VariableBuilder(self, source)(member).add_guards(guards))
         elif isinstance(obj, PythonModuleVariable):
             member = obj.value.__dict__[name]
             self.push(VariableBuilder(self, source)(member).add_guards(guards))
-        elif obj.has_const_attr(self, name) and obj.can_create_guard():
-            try:
-                options["guards"] = obj.replace_guards(
-                    options.get("guards"),
-                    GuardBuilder.ID_MATCH,
-                    GuardBuilder.OBJECT_MUTATION,
-                )
-                self.push(ConstantVariable(obj.get_const_attr(self, name), **options))
-            except AttributeError:
-                unimplemented("dynamic attr UnsupportedVariable")
+        elif isinstance(obj, UnsupportedVariable) and name in getattr(
+            obj.value, "__dict__", {}
+        ):
+            subobj = inspect.getattr_static(obj.value, name)
+            assert id(subobj) == id(obj.value.__dict__[name])
+            self.push(VariableBuilder(self, source)(subobj).add_guards(guards))
+        # elif obj.has_const_attr(self, name) and obj.can_create_guard():
+        #     try:
+        #         options["guards"] = obj.replace_guards(
+        #             options.get("guards"),
+        #             GuardBuilder.ID_MATCH,
+        #             GuardBuilder.OBJECT_MUTATION,
+        #         )
+        #         self.push(ConstantVariable(obj.get_const_attr(self, name), **options))
+        #     except AttributeError:
+        #         unimplemented("dynamic attr UnsupportedVariable")
         else:
             self.push(GetAttrVariable(obj, name, **options))
 
     def STORE_ATTR(self, inst):
+        if not self.should_compile_partial_graph():
+            unimplemented("inline STORE_ATTR")
         warning("breaking graph: STORE_ATTR")
         self.compile_partial_subgraph()
         self.add_output_instructions([inst])
         self.popn(2)
         self.add_output_instructions(self.create_call_resume_at(self.next_instruction))
-
-    IMPORT_FROM = LOAD_ATTR
 
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
@@ -1594,6 +1613,16 @@ class PyCodegen(object):
 
     def __getattr__(self, item):
         return getattr(self.tx, item)
+
+    def setup_globally_cached(self, name, value):
+        """Store value in a new global"""
+        name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+        f_globals = self.tx.f_globals
+        if name in f_globals:
+            assert id(f_globals[name]) == id(value)
+        else:
+            f_globals[name] = value
+        return [self.tx.create_load_global(name, add=True)]
 
 
 @lru_cache(32)

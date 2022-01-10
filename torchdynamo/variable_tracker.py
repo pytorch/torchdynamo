@@ -17,12 +17,15 @@ import torch.fx
 import torch.nn.modules.utils
 
 from . import config
+from .allowed_functions import _allowed_function_ids
 from .allowed_functions import is_allowed
 from .bytecode_transformation import create_instruction
 from .guards import GuardBuilder
 from .utils import identity
+from .utils import is_namedtuple_cls
 from .utils import istype
 from .utils import make_cell
+from .utils import namedtuple_fields
 from .utils import proxy_args_kwargs
 from .utils import unimplemented
 from .variable_source import AttrSource
@@ -67,7 +70,7 @@ class VariableTracker:
                 for i in var:
                     visit(i)
             else:
-                assert isinstance(var, VariableTracker)
+                assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
 
         visit(vars)
@@ -353,7 +356,7 @@ class TensorVariable(VariableTracker):
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)
         elif name == "is_floating_point" and self.dtype is not None:
-            constant_result = ConstantVariable("float" in str(self.dtype), **options)
+            constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
         else:
             constant_result = None
 
@@ -367,8 +370,17 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
 
-        if name == "item":
-            unimplemented("Tensor.item()")
+        if (
+            name == "repeat"
+            and not all(
+                x.is_python_constant() for x in itertools.join(args, kwargs.values())
+            )
+            and not config.dynamic_shapes
+        ):
+            unimplemented("dynamic Tensor.repeat")
+
+        if name in ("item", "tolist"):
+            unimplemented(f"Tensor.{name}")
 
         return TensorVariable.create(
             tx.create_proxy(
@@ -555,6 +567,12 @@ class ConstantVariable(VariableTracker):
         except TypeError:
             raise NotImplementedError()
 
+    def get_var_attr(self, tx, name):
+        member = getattr(self.value, name)
+        if callable(member):
+            raise NotImplementedError()
+        return ConstantVariable(member, **VariableTracker.propagate(self))
+
 
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
@@ -568,27 +586,16 @@ class LambdaVariable(VariableTracker):
 
 
 class BuiltinVariable(VariableTracker):
-    def __init__(self, fn, **kwargs):
-        super(BuiltinVariable, self).__init__(**kwargs)
-        self.fn = fn
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.fn.__name__})"
-
-    def python_type(self):
-        return type(self.fn)
-
-    def as_python_constant(self):
-        return self.fn
-
-    def can_constant_fold_through(self):
-        return self.fn in (
+    @staticmethod
+    @functools.lru_cache(None)
+    def _constant_fold_functions():
+        fns = {
             abs,
             all,
             any,
             bool,
-            chr,
             callable,
+            chr,
             dict,
             divmod,
             float,
@@ -605,8 +612,25 @@ class BuiltinVariable(VariableTracker):
             sum,
             tuple,
             type,
-            math.sqrt,
-        )
+        }
+        fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
+        return fns
+
+    def can_constant_fold_through(self):
+        return self.fn in self._constant_fold_functions()
+
+    def __init__(self, fn, **kwargs):
+        super(BuiltinVariable, self).__init__(**kwargs)
+        self.fn = fn
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.fn.__name__})"
+
+    def python_type(self):
+        return type(self.fn)
+
+    def as_python_constant(self):
+        return self.fn
 
     def reconstruct(self, codegen):
         name = self.fn.__name__
@@ -640,6 +664,9 @@ class BuiltinVariable(VariableTracker):
                 )
             ]
             return ListVariable(items, **options)
+        elif self.fn is slice:
+            assert not kwargs
+            return SliceVariable(args, **options)
         elif self.fn is iter and args and isinstance(args[0], BaseListVariable):
             assert not kwargs and len(args) == 1
             return ListIteratorVariable(
@@ -878,8 +905,26 @@ class NamedTupleVariable(TupleVariable):
             create_instruction("CALL_FUNCTION", 1),
         ]
 
+    def get_var_attr(self, tx, name):
+        fields = namedtuple_fields(self.tuple_cls)
+        if name not in fields:
+            unimplemented(f"NamedTupleVariable.{name}")
+        return self.items[fields.index(name)].add_guards(self.guards)
+
 
 class SliceVariable(BaseListVariable):
+    def __init__(self, items, **kwargs):
+        start, stop, step = [ConstantVariable(None)] * 3
+        if len(items) == 1:
+            (stop,) = items
+        elif len(items) == 2:
+            start, stop = items
+        elif len(items) == 3:
+            start, stop, step = items
+        else:
+            assert False
+        super().__init__([start, stop, step], **kwargs)
+
     def as_proxy(self):
         return slice(*self._as_proxy())
 
@@ -892,6 +937,12 @@ class SliceVariable(BaseListVariable):
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         return [create_instruction("BUILD_SLICE", len(self.items))]
+
+    def get_var_attr(self, tx, name):
+        fields = ["start", "stop", "step"]
+        if name not in fields:
+            unimplemented(f"slice.{name}")
+        return self.items[fields.index(name)].add_guards(self.guards)
 
 
 class ConstDictVariable(VariableTracker):
@@ -1186,6 +1237,22 @@ class UserDefinedClassVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if is_namedtuple_cls(self.value):
+            fields = namedtuple_fields(self.value)
+            items = list(args)
+            items.extend([None] * (len(fields) - len(items)))
+            for name, value in kwargs.items():
+                assert name in fields
+                items[fields.index(name)] = value
+            assert all(x is not None for x in items)
+            return NamedTupleVariable(
+                items, self.value, **VariableTracker.propagate(self, items)
+            )
+        return super().call_function(tx, args, kwargs)
+
 
 class AllowedFunctionOrModuleVariable(VariableTracker):
     """Points to a module or method in torch.*"""
@@ -1216,6 +1283,15 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             pass
         else:
             assert False, f"{value} found with __self__ set"
+
+    def unique_var_name(self):
+        name = _allowed_function_ids().get(
+            id(self.value), f"allowed_fn_{id(self.value)}"
+        )
+        return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+
+    def reconstruct(self, codegen):
+        return codegen.setup_globally_cached(self.unique_var_name(), self.value)
 
     def as_proxy(self):
         return self.value
@@ -1253,20 +1329,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             )
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.Softmax:
-                # rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)
-                dim = args[0] if args else kwargs.get("dim", ConstantVariable(None))
-
-                def fake_softmax(input):
-                    return TensorVariable.create(
-                        proxy=tx.create_proxy(
-                            "call_function",
-                            torch.nn.functional.softmax,
-                            *proxy_args_kwargs([input, dim], {}),
-                        ),
-                        **VariableTracker.propagate([self, dim, input]),
-                    )
-
-                return LambdaVariable(fake_softmax, **options)
+                return self._call_softmax(tx, args, kwargs, options)
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
         elif (
@@ -1277,7 +1340,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             if self.value is torch.is_tensor:
                 return ConstantVariable(True, **options)
             elif self.value is torch.is_floating_point:
-                return ConstantVariable("float" in str(args[0].dtype), **options)
+                return ConstantVariable(args[0].dtype.is_floating_point, **options)
             else:
                 assert False
         elif (
@@ -1293,31 +1356,9 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             torch.nn.modules.utils._quadruple,
             torch.nn.modules.utils._ntuple,
         ):
-
-            if self.value is torch.nn.modules.utils._ntuple:
-                count = args[0].as_python_constant()
-            else:
-                count = self.value.__closure__[0].cell_contents
-            assert isinstance(count, int)
-
-            def handle_ntuple(value):
-                if value.has_unpack_var_sequence(tx):
-                    return TupleVariable(
-                        list(value.unpack_var_sequence(tx)),
-                        **VariableTracker.propagate(self, value, args, kwargs.values()),
-                    )
-                else:
-                    return ConstantVariable(
-                        torch.nn.modules.utils._ntuple(count)(
-                            value.as_python_constant()
-                        ),
-                        **VariableTracker.propagate(self, value, args, kwargs.values()),
-                    )
-
-            if self.value is torch.nn.modules.utils._ntuple:
-                return LambdaVariable(handle_ntuple, **options)
-            else:
-                return handle_ntuple(args[0])
+            return self._call_ntuple(tx, args, kwargs, options)
+        elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
+            unimplemented(f"dynamic shapes: {self.value.__name__}")
         else:
             return TensorVariable.create(
                 proxy=tx.create_proxy(
@@ -1325,6 +1366,79 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
                 ),
                 **options,
             )
+
+    def is_dynamic_shapes(self, args, kwargs):
+        """Check for dynamic shapes when shape specialization is enabled"""
+        # TODO(jansel): need to get a complete list
+        if self.value in (
+            torch.nonzero,
+            torch.unique,
+            torch.unique_consecutive,
+            # TODO(jansel): debug this
+            torch.as_tensor,
+        ):
+            return True
+
+        if self.value in (
+            torch.arange,
+            torch.repeat_interleave,
+        ):
+            none = ConstantVariable(None)
+
+            def has_non_const(it):
+                return not all(x.is_python_constant() for x in it)
+
+            def arange(start=none, end=none, step=none, **kwargs):
+                return has_non_const([start, end, step])
+
+            def repeat_interleave(input, repeats, dim=none, **kwargs):
+                return has_non_const([repeats])
+
+            return locals()[self.value.__name__](*args, **kwargs)
+
+        return False
+
+    def _call_softmax(self, tx, args, kwargs, options):
+        """rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)"""
+        dim = args[0] if args else kwargs.get("dim", ConstantVariable(None))
+
+        def fake_softmax(input):
+            return TensorVariable.create(
+                proxy=tx.create_proxy(
+                    "call_function",
+                    torch.nn.functional.softmax,
+                    *proxy_args_kwargs([input, dim], {}),
+                ),
+                **VariableTracker.propagate([self, dim, input]),
+            )
+
+        return LambdaVariable(fake_softmax, **options)
+
+    def _call_ntuple(self, tx, args, kwargs, options):
+        """inline behavior of torch.nn.modules.utils._ntuple"""
+        if self.value is torch.nn.modules.utils._ntuple:
+            count = args[0].as_python_constant()
+        else:
+            count = self.value.__closure__[0].cell_contents
+        assert isinstance(count, int)
+
+        def handle_ntuple(value):
+            if value.has_unpack_var_sequence(tx):
+                return TupleVariable(
+                    list(value.unpack_var_sequence(tx)),
+                    **VariableTracker.propagate(self, value, args, kwargs.values()),
+                )
+            else:
+                # constant prop through it
+                return ConstantVariable(
+                    torch.nn.modules.utils._ntuple(count)(value.as_python_constant()),
+                    **VariableTracker.propagate(self, value, args, kwargs.values()),
+                )
+
+        if self.value is torch.nn.modules.utils._ntuple:
+            return LambdaVariable(handle_ntuple, **options)
+        else:
+            return handle_ntuple(args[0])
 
 
 class PythonModuleVariable(VariableTracker):
@@ -1352,6 +1466,7 @@ class UnsupportedVariable(VariableTracker):
     def python_type(self):
         return self.value_type
 
+    """
     def get_const_attr(self, tx, name):
         if name not in getattr(self.value, "__dict__", {}):
             raise NotImplementedError()
@@ -1360,6 +1475,7 @@ class UnsupportedVariable(VariableTracker):
         if not ConstantVariable.is_literal(subobj):
             raise NotImplementedError()
         return subobj
+    """
 
 
 class SuperVariable(VariableTracker):

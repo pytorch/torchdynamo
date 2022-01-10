@@ -122,8 +122,14 @@ class GuardBuilder:
                 set,
                 frozenset,
                 torch.Size,
+                torch.device,
+                torch.dtype,
             ),
         ), type(val).__name__
+        if istype(val, (torch.device, torch.dtype)):
+            # TODO(jansel): is this slow? perhaps optimize it
+            self.code.append(f"str({self.arg_ref(guard)}) == {str(val)!r}")
+            return
         if istype(val, torch.Size):
             val = tuple(val)
         self.code.append(f"{self.arg_ref(guard)} == {val!r}")

@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import functools
 import re
 import types
 from typing import Any
@@ -11,6 +12,7 @@ from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin
 from .guards import GuardBuilder
 from .utils import getfile
+from .utils import is_namedtuple
 from .utils import istensor
 from .utils import istype
 from .utils import warning
@@ -18,9 +20,10 @@ from .variable_source import GetItemSource
 from .variable_source import Source
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstDictVariable
 from .variable_tracker import ConstantVariable
+from .variable_tracker import ConstDictVariable
 from .variable_tracker import ListVariable
+from .variable_tracker import NamedTupleVariable
 from .variable_tracker import PythonModuleVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
@@ -59,6 +62,8 @@ class VariableBuilder:
 
     @staticmethod
     def list_type(value):
+        if is_namedtuple(value):
+            return functools.partial(NamedTupleVariable, tuple_cls=type(value))
         return {
             tuple: TupleVariable,
             list: ListVariable,
@@ -80,7 +85,7 @@ class VariableBuilder:
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
-        elif istype(value, (tuple, list)):
+        elif istype(value, (tuple, list)) or is_namedtuple(value):
             guards = self.make_guards(GuardBuilder.LIST_LENGTH)
             output = [
                 VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
@@ -115,7 +120,9 @@ class VariableBuilder:
                 source=self.get_source(),
                 # Guards are added inside add_submodule
             )
-        elif ConstantVariable.is_literal(value) or istype(value, torch.Size):
+        elif ConstantVariable.is_literal(value) or istype(
+            value, (torch.Size, torch.device, torch.dtype)
+        ):
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,

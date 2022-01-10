@@ -1,5 +1,6 @@
 #!/usr/bin/env pytest
 import collections
+import functools
 import inspect
 import math
 import unittest
@@ -720,6 +721,35 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_namedtuple1(self):
+        def fn(a, b):
+            tmp = mytuple(a, b, a + b)
+            return mytuple(tmp.a, tmp[1], tmp.ab + b)
+
+        v1 = torch.Tensor([10])
+        v2 = torch.Tensor([20])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(v1, v2).ab, 50)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_namedtuple2(self):
+        def fn(packed):
+            a, b, c = packed
+            b = packed.b
+            c = packed[2]
+            return a + b + c
+
+        v1 = torch.Tensor([1])
+        v2 = torch.Tensor([2])
+        v3 = torch.Tensor([3])
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(mytuple(v1, v2, v3))[0], 6)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
     @unittest.skip("todo")
     def test_no_grad(self):
         def fn(a, b):
@@ -736,33 +766,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
             )
 
     @unittest.skip("todo")
-    def test_namedtuple1(self):
-        def fn(a, b):
-            return mytuple(a, b, a + b)
+    def test_range_input(self):
+        def fn(a, rng):
+            x = a
+            for i in rng:
+                x = x + i
+            return x
 
-        v1 = torch.Tensor([10])
-        v2 = torch.Tensor([20])
-        cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
-            self.assertEqual(fn(v1, v2).ab, 30)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
-
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=1)
-
-    @unittest.skip("todo")
-    def test_namedtuple2(self):
-        def fn(packed):
-            a, b, c = packed
-            return packed.a + packed[1] + c
-
-        v1 = torch.Tensor([1])
-        v2 = torch.Tensor([2])
-        v3 = torch.Tensor([3])
-        cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
-            self.assertEqual(fn(mytuple(v1, v2, v3))[0], 5)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
-
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=1)
+        return torchdynamo.testing.standard_test(
+            self, fn=functools.partial(fn, rng=range(3)), nargs=1, expected_ops=3
+        )

@@ -1,5 +1,6 @@
 import _weakrefset
 import abc
+import collections
 import copy
 import enum
 import importlib
@@ -29,6 +30,7 @@ SKIP_DIRS = [
     re.sub(r"__init__.py$", "", m.__file__)
     for m in (
         abc,
+        collections,
         copy,
         enum,
         importlib,
