@@ -121,6 +121,7 @@ class GuardBuilder:
                 tuple,
                 set,
                 frozenset,
+                range,
                 torch.Size,
                 torch.device,
                 torch.dtype,

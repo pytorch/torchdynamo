@@ -656,14 +656,13 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
         elif self.fn is range and constant_args:
-            items = [
-                ConstantVariable(x, **options)
-                for x in range(
+            return RangeVariable(
+                value=range(
                     *[x.value for x in args],
                     **{k: v.value for k, v in kwargs.items()},
-                )
-            ]
-            return ListVariable(items, **options)
+                ),
+                **options,
+            )
         elif self.fn is slice:
             assert not kwargs
             return SliceVariable(args, **options)
@@ -840,6 +839,44 @@ class BaseListVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
+
+
+class RangeVariable(BaseListVariable):
+    def __init__(self, value, items=None, guards=None, **kwargs):
+        if items is None:
+            items = [ConstantVariable(x, guards=guards) for x in value]
+        super().__init__(items, guards=guards, **kwargs)
+        self.value = value
+
+    def python_type(self):
+        return range
+
+    def as_python_constant(self):
+        return self.value
+
+    def reconstruct(self, codegen):
+        assert "range" not in codegen.tx.f_globals
+        range_fn = codegen.tx.create_load_global("range", add=True)
+        if self.value.step == 1:
+            if self.value.start == 0:
+                return [
+                    range_fn,
+                    codegen.tx.create_load_const(self.value.stop),
+                    create_instruction("CALL_FUNCTION", 1),
+                ]
+            return [
+                range_fn,
+                codegen.tx.create_load_const(self.value.start),
+                codegen.tx.create_load_const(self.value.stop),
+                create_instruction("CALL_FUNCTION", 2),
+            ]
+        return [
+            range_fn,
+            codegen.tx.create_load_const(self.value.start),
+            codegen.tx.create_load_const(self.value.stop),
+            codegen.tx.create_load_const(self.value.step),
+            create_instruction("CALL_FUNCTION", 3),
+        ]
 
 
 class ListVariable(BaseListVariable):

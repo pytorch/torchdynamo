@@ -25,6 +25,7 @@ from .variable_tracker import ConstDictVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import NamedTupleVariable
 from .variable_tracker import PythonModuleVariable
+from .variable_tracker import RangeVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
 from .variable_tracker import UnsupportedVariable
@@ -94,6 +95,9 @@ class VariableBuilder:
                 for i, item in enumerate(value)
             ]
             return self.list_type(value)(output, guards=guards)
+        elif istype(value, range):
+            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
+            return RangeVariable(value=value, guards=guards)
         elif istype(value, (dict, collections.OrderedDict)) and all(
             map(ConstantVariable.is_literal, value.keys())
         ):

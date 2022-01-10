@@ -750,6 +750,17 @@ class FunctionTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_range_input(self):
+        def fn(a, rng):
+            x = a
+            for i in rng:
+                x = x + i
+            return x
+
+        return torchdynamo.testing.standard_test(
+            self, fn=functools.partial(fn, rng=range(3)), nargs=1, expected_ops=3
+        )
+
     @unittest.skip("todo")
     def test_no_grad(self):
         def fn(a, b):
@@ -764,15 +775,3 @@ class FunctionTests(torchdynamo.testing.TestCase):
             return torchdynamo.testing.standard_test(
                 self, fn=fn, nargs=2, expected_ops=3
             )
-
-    @unittest.skip("todo")
-    def test_range_input(self):
-        def fn(a, rng):
-            x = a
-            for i in rng:
-                x = x + i
-            return x
-
-        return torchdynamo.testing.standard_test(
-            self, fn=functools.partial(fn, rng=range(3)), nargs=1, expected_ops=3
-        )
