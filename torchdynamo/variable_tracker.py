@@ -373,7 +373,7 @@ class TensorVariable(VariableTracker):
         if (
             name == "repeat"
             and not all(
-                x.is_python_constant() for x in itertools.join(args, kwargs.values())
+                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             )
             and not config.dynamic_shapes
         ):
@@ -817,6 +817,9 @@ class BaseListVariable(VariableTracker):
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
+        self.guards = set(self.guards)
+        for item in self.items:
+            self.guards.update(item.guards)
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -1374,8 +1377,6 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             torch.nonzero,
             torch.unique,
             torch.unique_consecutive,
-            # TODO(jansel): debug this
-            torch.as_tensor,
         ):
             return True
 
