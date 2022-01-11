@@ -104,19 +104,11 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
 
     example_inputs = clone_inputs(example_inputs)
 
-    normalize(gm)
-    gm = NormalizeOperators(gm).transform()
-    example_outputs = ShapeAliasingAndMutationProp(gm).run(*example_inputs)
-    gm = Functionalization(gm).transform()
-
-    def visit(o):
-        if isinstance(o, (tuple, list)):
-            for i in o:
-                visit(i)
-        else:
-            counters["output_types"][typestr(o)] += 1
-
-    visit(example_outputs)
+    if config.normalize_ir:
+        normalize(gm)
+        gm = NormalizeOperators(gm).transform()
+        ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+        gm = Functionalization(gm).transform()
 
     record_graph_stats(gm)
     gm.recompile()

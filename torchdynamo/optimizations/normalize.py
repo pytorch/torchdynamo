@@ -49,9 +49,27 @@ MAYBE_VIEW_OPS = {"contiguous", "reshape"}
 
 # convert x.foo(...) to torch.foo(x, ...)
 NORMALIZE_METHODS = {
-    # 'size'
-    # 'permute'
-    # 'reshape'
+    # These ones aren't normalized:
+    # ('view', 342)
+    # ('reshape', 285)
+    # ('expand', 87)
+    # ('permute', 78)
+    # ('to', 66)
+    # ('contiguous', 62)
+    # ('reshape_as', 57)
+    # ('masked_fill', 30)
+    # ('float', 22) -- could rewrite
+    # ('expand_as', 14) -- could rewrite
+    # ('detach', 4)
+    # ('repeat', 2)
+    # TODO(jansel): debug why this causes issues in detectron2_maskrcnn
+    # "div": torch.div,
+    "flatten": torch.flatten,
+    "split": torch.split,
+    "unbind": torch.unbind,
+    "ceil": torch.ceil,
+    "floor": torch.floor,
+    "min": torch.min,
     "add_": operator.iadd,
     "all": torch.all,
     "chunk": torch.chunk,
@@ -62,6 +80,7 @@ NORMALIZE_METHODS = {
     "flip": torch.flip,
     "log_softmax": torch.nn.functional.log_softmax,
     "max": torch.max,
+    "topk": torch.topk,
     "mean": torch.mean,
     "mul_": operator.imul,
     "narrow": torch.narrow,
@@ -104,6 +123,7 @@ INPLACE_KEYWORD_OPS = {
 }
 IOPERATOR_REPLACEMENTS = {
     torch.relu_: torch.relu,
+    torch.sigmoid_: torch.sigmoid,
     operator.iadd: torch.add,
     operator.iand: torch.bitwise_and,
     operator.ifloordiv: torch.ops.aten.floor_divide,
