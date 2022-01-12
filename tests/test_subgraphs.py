@@ -330,6 +330,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         def fn(a, b):
             tmp = [a + 1, b + 2, a + b]
             x = a
+            x = unsupported(x, x)
             for i in range(3):
                 x += tmp.pop(-1)
             return x

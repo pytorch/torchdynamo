@@ -765,17 +765,16 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_tensor_len(a, b):
         return a + b + len(a) + b.__len__()
 
-    @unittest.skip("todo")
     @make_test
     def test_pop(a, b):
-        l = [a, b]
-        l.append(a + 1)
-        l.append(b + 2)
-        l.append(a + b)
-        l.pop(-1)
-        l.pop(0)
-        l.pop()
-        v1, v2 = l
+        ll = [a, b]
+        ll.append(a + 1)
+        ll.append(b + 2)
+        ll.append(a + b)
+        ll.pop(-1)
+        ll.pop(0)
+        ll.pop()
+        v1, v2 = ll
         return v1 - v2
 
     @unittest.skip("todo")

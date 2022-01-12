@@ -932,7 +932,7 @@ class ListVariable(BaseListVariable):
                 ),
             )
             return ConstantVariable(None, **options)
-        if name == "insert" and self.mutable_local:
+        elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
             items = list(self.items)
@@ -942,6 +942,15 @@ class ListVariable(BaseListVariable):
                 ListVariable(items, mutable_local=MutableLocal(), **options),
             )
             return ConstantVariable(None, **options)
+        elif name == "pop" and self.mutable_local:
+            assert not kwargs
+            items = list(self.items)
+            result = items.pop(*[a.as_python_constant() for a in args])
+            tx.replace_all(
+                self,
+                ListVariable(items, mutable_local=MutableLocal(), **options),
+            )
+            return result
         else:
             return super().call_method(tx, name, args, kwargs)
 

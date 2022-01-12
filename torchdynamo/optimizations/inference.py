@@ -22,7 +22,6 @@ from .backends import BACKENDS
 from .normalize import Functionalization
 from .normalize import long_name
 from .normalize import normalize
-from ..variable_tracker import typestr
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
