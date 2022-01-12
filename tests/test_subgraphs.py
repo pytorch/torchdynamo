@@ -313,9 +313,28 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = unsupported(x, x)
             for i in rng:
                 x = x + i
-            return 3
+            return x
 
         self._common(fn, 2, 4)
+
+    def test_restore_range_iter(self):
+        def fn(a, b):
+            x = a + b
+            rng = iter(range(3, 8, 2))
+            x = unsupported(x, x)
+            return x, list(rng)
+
+        self._common(fn, 1, 1)
+
+    def test_pop_after_resume(self):
+        def fn(a, b):
+            tmp = [a + 1, b + 2, a + b]
+            x = a
+            for i in range(3):
+                x += tmp.pop(-1)
+            return x
+
+        self._common(fn, 1, 3)
 
     @unittest.skip("todo")
     def test_nograd(self):

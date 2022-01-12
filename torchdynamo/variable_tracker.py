@@ -90,19 +90,35 @@ class VariableTracker:
         return cls.apply(identity, value)
 
     @classmethod
-    def apply(cls, fn: Callable[["VariableTracker"], "VariableTracker"], value):
+    def apply(
+        cls, fn: Callable[["VariableTracker"], "VariableTracker"], value, cache=None
+    ):
         """
         Walk this object and call fn on all the VariableTracker
         instances to produce a new VariableTracker with the results.
         """
+        if cache is None:
+            cache = dict()
+
+        idx = id(value)
+        if idx in cache:
+            return cache[idx]
+
         if isinstance(value, VariableTracker):
-            return fn(value.clone(**cls.apply(fn, value.__dict__)))
+            result = fn(value.clone(**cls.apply(fn, value.__dict__, cache)))
         elif isinstance(value, list):
-            return [cls.apply(fn, v) for v in value]
+            result = [cls.apply(fn, v, cache) for v in value]
+        elif isinstance(value, collections.OrderedDict):
+            result = collections.OrderedDict(
+                cls.apply(fn, v, cache) for v in value.items()
+            )
         elif isinstance(value, dict):
-            return {k: cls.apply(fn, v) for k, v in value.items()}
+            result = {k: cls.apply(fn, v, cache) for k, v in value.items()}
         else:
-            return value
+            result = value
+
+        cache[idx] = result
+        return result
 
     def add_guard(self, guard):
         return self.clone(guards=set.union(self.guards, {guard}))
@@ -381,6 +397,9 @@ class TensorVariable(VariableTracker):
 
         if name in ("item", "tolist"):
             unimplemented(f"Tensor.{name}")
+
+        if name == "__len__":
+            return BuiltinVariable(len).call_function(tx, [self] + args, kwargs)
 
         return TensorVariable.create(
             tx.create_proxy(
@@ -773,6 +792,14 @@ class ListIteratorVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         return [x.add_guards(self.guards) for x in self.items[self.index :]]
+
+    def reconstruct(self, codegen):
+        remaining_items = self.items[self.index :]
+        codegen.foreach(remaining_items)
+        return [
+            create_instruction("BUILD_TUPLE", len(remaining_items)),
+            create_instruction("GET_ITER"),
+        ]
 
 
 class GetAttrVariable(VariableTracker):

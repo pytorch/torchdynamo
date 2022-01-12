@@ -761,6 +761,23 @@ class FunctionTests(torchdynamo.testing.TestCase):
             self, fn=functools.partial(fn, rng=range(3)), nargs=1, expected_ops=3
         )
 
+    @make_test
+    def test_tensor_len(a, b):
+        return a + b + len(a) + b.__len__()
+
+    @unittest.skip("todo")
+    @make_test
+    def test_pop(a, b):
+        l = [a, b]
+        l.append(a + 1)
+        l.append(b + 2)
+        l.append(a + b)
+        l.pop(-1)
+        l.pop(0)
+        l.pop()
+        v1, v2 = l
+        return v1 - v2
+
     @unittest.skip("todo")
     def test_no_grad(self):
         def fn(a, b):

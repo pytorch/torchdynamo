@@ -1256,10 +1256,8 @@ class InstructionTranslatorBase(fx.Tracer):
         graph_nodes = set(self.graph.nodes)
         guards = copy.deepcopy(self.guards)
         graphargs = list(self.graphargs)
-        symbolic_locals = collections.OrderedDict(
-            VariableTracker.copy(list(self.symbolic_locals.items()))
-        )
-        stack = VariableTracker.copy(self.stack)
+        symbolic_locals = collections.OrderedDict(self.symbolic_locals)
+        stack = list(self.stack)
         nn_modules = dict(self.nn_modules)
         return (
             graph_nodes,
