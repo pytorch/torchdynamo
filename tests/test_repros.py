@@ -159,7 +159,6 @@ class ReproTests(torchdynamo.testing.TestCase):
         )
 
     def test_convert_boxes_to_pooler_format(self):
-        torchdynamo.utils.counters.clear()
         boxes1 = [
             Boxes(torch.arange(0, 8).reshape((2, 4))),
             Boxes(torch.arange(8, 16).reshape((2, 4))),
@@ -170,12 +169,10 @@ class ReproTests(torchdynamo.testing.TestCase):
         ]
         correct1 = convert_boxes_to_pooler_format(boxes1)
         correct2 = convert_boxes_to_pooler_format(boxes2)
-        with eval_frame.optimize(convert_frame(torchdynamo.testing.CompileCounter())):
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnt)):
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes1), correct1))
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes2), correct2))
 
-        # self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 5)
-        # self.assertEqual(
-        #     torchdynamo.utils.counters["frames"]["total"],
-        #     torchdynamo.utils.counters["frames"]["ok"],
-        # )
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, 10)

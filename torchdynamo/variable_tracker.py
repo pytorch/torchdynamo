@@ -1551,6 +1551,23 @@ class UnsupportedVariable(VariableTracker):
         return subobj
     """
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name not in getattr(self.value, "__dict__", {}):
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            method = inspect.getattr_static(type(self.value), name)
+            # TODO(jansel): add a guard to check for monkey patching?
+            return UserMethodVariable(method, self, **options).call_function(
+                tx, args, kwargs
+            )
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
 
 class SuperVariable(VariableTracker):
     def __init__(self, typevar, objvar=None, **kwargs):
