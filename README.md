@@ -39,6 +39,7 @@ cd ..
 git clone git@github.com:jansel/torchdynamo.git
 cd torchdynamo
 conda activate torchbenchmark
+pip3 install torch tabulate
 make setup
 python setup.py develop  # compiles C/C++ extension
 pytest  # run tests
