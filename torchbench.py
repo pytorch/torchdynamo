@@ -389,8 +389,7 @@ def main():
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
-    with torch.jit.fuser("fuser2"):
-        pass
+
     if args.devices != ["cpu"] and torch.cuda.is_available():
         global synchronize
         synchronize = torch.cuda.synchronize
