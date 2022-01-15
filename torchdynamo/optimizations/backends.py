@@ -481,6 +481,15 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
 
     m = graph_executor.GraphModule(lib["default"](dev))
 
+    def to_torch_tensor(nd_tensor):
+        """A helper function to transfer a NDArray to torch.tensor."""
+        if nd_tensor.dtype == "bool":
+            # Note that DLPack does not support boolean so it needs to be handled by
+            # torch.utils.dlpack.from_pack. For now, the workaround is going thorugh
+            # numpy, although this brings additional data copy overheads.
+            return torch.from_numpy(nd_tensor.numpy())
+        return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
+
     def exec_tvm(*args):
         args = [a.contiguous() for a in args]
         for idx, arg in enumerate(args, 0):
@@ -490,9 +499,6 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
                     tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg)),
                 )
         m.run()
-        return [
-            torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack())
-            for i in range(m.get_num_outputs())
-        ]
+        return [to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())]
 
     return exec_tvm
