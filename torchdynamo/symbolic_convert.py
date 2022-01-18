@@ -629,6 +629,10 @@ class InstructionTranslatorBase(fx.Tracer):
                     **options,
                 )
             )
+        elif op in ("in", "not in"):
+            self.push(right.call_method(self, "__contains__", [left], {}))
+            if op == "not in":
+                self.UNARY_NOT(inst)
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 

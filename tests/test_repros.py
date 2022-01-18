@@ -6,6 +6,7 @@ import torchdynamo.testing
 import torchdynamo.utils
 from torchdynamo import eval_frame
 from torchdynamo.convert_frame import convert_frame
+from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.testing import same
 
 
@@ -176,3 +177,15 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 4)
         self.assertEqual(cnt.op_count, 10)
+
+    def test_boxes_len(self):
+        def fn(boxes):
+            return len(boxes) + boxes.__len__() + boxes.tensor
+
+        boxes1 = Boxes(torch.arange(0, 8).reshape((2, 4)))
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(same(fn(boxes1), boxes1.tensor + 4.0))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)

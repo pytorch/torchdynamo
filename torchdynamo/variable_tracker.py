@@ -215,6 +215,11 @@ class VariableTracker:
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if name == "__len__" and self.has_unpack_var_sequence(tx):
+            assert not (args or kwargs)
+            return ConstantVariable(
+                len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
+            )
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def __init__(
@@ -399,7 +404,14 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
 
         if name == "__len__":
-            return BuiltinVariable(len).call_function(tx, [self] + args, kwargs)
+            if self.size:
+                assert not config.dynamic_shapes
+                return ConstantVariable(self.size[0], **options)
+            else:
+                return TensorVariable.create(
+                    tx.create_proxy("call_function", len, (self.as_proxy(),), {}),
+                    **options,
+                )
 
         return TensorVariable.create(
             tx.create_proxy(
@@ -547,6 +559,9 @@ class NNModuleVariable(VariableTracker):
                     )
                 )
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "__len__":
+            assert not (args or kwargs)
+            return ConstantVariable(len(module), **options)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -591,6 +606,29 @@ class ConstantVariable(VariableTracker):
         if callable(member):
             raise NotImplementedError()
         return ConstantVariable(member, **VariableTracker.propagate(self))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        try:
+            const_args = [a.as_python_constant() for a in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except NotImplementedError:
+            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+
+        if isinstance(self.value, str) and name in str.__dict__.keys():
+            assert not kwargs
+            method = getattr(self.value, name)
+            return ConstantVariable(method(*const_args, **const_kwargs), **options)
+        elif name == "__len__" and not (args or kwargs):
+            return ConstantVariable(len(self.value), **options)
+
+        unimplemented(f"const method call {typestr(self.value)}.{name}")
 
 
 class LambdaVariable(VariableTracker):
@@ -690,10 +728,19 @@ class BuiltinVariable(VariableTracker):
             return ListIteratorVariable(
                 args[0].items, mutable_local=MutableLocal(), **options
             )
-        elif self.fn is iter and args and args[0].has_unpack_var_sequence(tx):
+        elif (
+            self.fn in (iter, tuple, list)
+            and args
+            and args[0].has_unpack_var_sequence(tx)
+        ):
             assert not kwargs and len(args) == 1
-            return ListIteratorVariable(
-                args[0].unpack_var_sequence(tx),
+            cls = {
+                iter: ListIteratorVariable,
+                tuple: TupleVariable,
+                list: ListVariable,
+            }[self.fn]
+            return cls(
+                list(args[0].unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
                 **options,
             )
@@ -713,27 +760,7 @@ class BuiltinVariable(VariableTracker):
             return TupleVariable(items, **options)
         elif self.fn is len:
             assert not kwargs and len(args) == 1
-            arg = args[0]
-            if isinstance(arg, TensorVariable):
-                if arg.size:
-                    assert not config.dynamic_shapes
-                    return ConstantVariable(arg.size[0], **options)
-                else:
-                    return TensorVariable.create(
-                        tx.create_proxy("call_function", len, (arg.as_proxy(),), {}),
-                        **options,
-                    )
-            elif isinstance(arg, (BaseListVariable, ConstDictVariable)):
-                return ConstantVariable(len(arg.items), **options)
-            elif isinstance(arg, NNModuleVariable):
-                # assuming constant length of nn.ModuleList, etc
-                return ConstantVariable(
-                    len(tx.get_submodule(arg.module_key)), **options
-                )
-            elif arg.has_unpack_var_sequence(tx):
-                return ConstantVariable(len(arg.unpack_var_sequence(tx)), **options)
-            else:
-                unimplemented(f"`len` with arg type {arg}")
+            return args[0].call_method(tx, "__len__", [], {})
         elif self.fn is isinstance:
             assert not kwargs and len(args) == 2
             arg, isinstance_type = args
@@ -1078,6 +1105,9 @@ class ConstDictVariable(VariableTracker):
         elif name == "values":
             assert not (args or kwargs)
             return TupleVariable(list(val.values()), **options)
+        elif name == "__len__":
+            assert not (args or kwargs)
+            return ConstantVariable(len(self.items), **options)
         elif (
             name == "__setattr__"
             and args
@@ -1089,6 +1119,39 @@ class ConstDictVariable(VariableTracker):
             newval[args[0].as_python_constant()] = args[1]
             tx.replace_all(
                 self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
+            )
+        elif (
+            name in ("pop", "get")
+            and args
+            and args[0].is_python_constant()
+            and args[0].as_python_constant() not in self.items
+            and len(args) == 2
+        ):
+            # missing item, return the default value
+            return args[1].add_guards(options["guards"])
+        elif (
+            name == "pop"
+            and args
+            and args[0].is_python_constant()
+            and self.mutable_local
+        ):
+            newval = collections.OrderedDict(val)
+            result = newval.pop(args[0].as_python_constant())
+            tx.replace_all(
+                self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
+            )
+            return result.add_guards(options["guards"])
+        elif (
+            name in ("get", "__getattr__")
+            and args
+            and args[0].is_python_constant()
+            and args[0].as_python_constant() in self.items
+        ):
+            result = self.items[args[0].as_python_constant()]
+            return result.add_guards(options["guards"])
+        elif name == "__contains__" and args and args[0].is_python_constant():
+            return ConstantVariable(
+                args[0].as_python_constant() in self.items, **options
             )
         else:
             return super().call_method(tx, name, args, kwargs)

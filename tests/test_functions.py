@@ -777,6 +777,30 @@ class FunctionTests(torchdynamo.testing.TestCase):
         v1, v2 = ll
         return v1 - v2
 
+    @make_test
+    def test_list_convert(a, b):
+        ll = [a + 2, b]
+        ll = tuple(ll)
+        tmp = b + 3
+        ll = list(ll)
+        v1, v2 = ll
+        return v1 - v2 + tmp
+
+    @make_test
+    def test_startswith(a, b):
+        x = a + b
+        if "foobar".startswith("foo"):
+            x = x + 1
+        return x
+
+    @make_test
+    def test_dict_ops(a, b):
+        tmp = {"a": a + 1, "b": b + 2}
+        v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
+        tmp["c"] = v
+        if "c" in tmp and "missing" not in tmp:
+            return tmp["c"] - tmp["a"] + len(tmp)
+
     @unittest.skip("todo")
     def test_no_grad(self):
         def fn(a, b):

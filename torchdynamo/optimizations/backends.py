@@ -352,8 +352,37 @@ def onnx2tensorrt_alt(subgraph):
 def cudagraphs(subgraph):
     model = subgraph.model
     inputs = subgraph.example_inputs
-
     assert subgraph.is_cuda
+    return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
+
+
+@create_backend
+def cudagraphs_ts(subgraph):
+    assert subgraph.is_cuda
+    model = subgraph.scripted
+    inputs = subgraph.example_inputs
+
+    # warmup
+    for _ in range(3):
+        model(*inputs)
+
+    return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
+
+
+@create_backend
+def cudagraphs_ts_ofi(subgraph):
+    assert subgraph.is_cuda
+    model = torch.jit.optimize_for_inference(torch.jit.freeze(subgraph.scripted))
+    inputs = subgraph.example_inputs
+
+    # warmup
+    for _ in range(3):
+        model(*inputs)
+
+    return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
+
+
+def cudagraphs_inner(model, inputs):
     assert isinstance(inputs, (list, tuple))
     static_inputs = [torch.randn_like(x) for x in inputs]
 
@@ -381,7 +410,7 @@ def cudagraphs(subgraph):
         graph.replay()
         return [x.clone() for x in static_outputs]
 
-    return subgraph.wrap_returns(run)
+    return run
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
