@@ -789,6 +789,12 @@ class InstructionTranslatorBase(fx.Tracer):
             subobj = inspect.getattr_static(obj.value, name)
             assert id(subobj) == id(obj.value.__dict__[name])
             self.push(VariableBuilder(self, source)(subobj).add_guards(guards))
+        elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
+            self.push(
+                ConstantVariable(
+                    getattr(obj.fn, name), **VariableTracker.propagate(obj)
+                )
+            )
         # elif obj.has_const_attr(self, name) and obj.can_create_guard():
         #     try:
         #         options["guards"] = obj.replace_guards(

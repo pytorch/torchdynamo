@@ -959,6 +959,23 @@ class ListVariable(BaseListVariable):
                 ),
             )
             return ConstantVariable(None, **options)
+        elif (
+            name == "extend"
+            and self.mutable_local
+            and args
+            and args[0].has_unpack_var_sequence(tx)
+        ):
+            assert not kwargs
+            (arg,) = args
+            tx.replace_all(
+                self,
+                ListVariable(
+                    list(self.items) + list(arg.unpack_var_sequence(tx)),
+                    mutable_local=MutableLocal(),
+                    **options,
+                ),
+            )
+            return ConstantVariable(None, **options)
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
@@ -1141,6 +1158,17 @@ class ConstDictVariable(VariableTracker):
                 self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
             )
             return result.add_guards(options["guards"])
+        elif (
+            name == "update"
+            and args
+            and isinstance(args[0], ConstDictVariable)
+            and self.mutable_local
+        ):
+            newval = collections.OrderedDict(val)
+            newval.update(args[0].items)
+            result = ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
+            tx.replace_all(self, result)
+            return result
         elif (
             name in ("get", "__getattr__")
             and args

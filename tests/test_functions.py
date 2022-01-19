@@ -769,8 +769,12 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_pop(a, b):
         ll = [a, b]
         ll.append(a + 1)
-        ll.append(b + 2)
-        ll.append(a + b)
+        ll.extend(
+            [
+                b + 2,
+                a + b,
+            ]
+        )
         ll.pop(-1)
         ll.pop(0)
         ll.pop()
@@ -789,7 +793,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_startswith(a, b):
         x = a + b
-        if "foobar".startswith("foo"):
+        if "foobar".startswith("foo") and "test" in constant3.__module__:
             x = x + 1
         return x
 
@@ -797,7 +801,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_dict_ops(a, b):
         tmp = {"a": a + 1, "b": b + 2}
         v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
-        tmp["c"] = v
+        tmp.update({"d": 3})
+        tmp["c"] = v + tmp["d"]
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
 
