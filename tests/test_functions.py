@@ -3,7 +3,6 @@ import collections
 import functools
 import inspect
 import math
-import unittest
 
 import torch
 from torch import sub
@@ -806,9 +805,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
 
-    @unittest.skip("todo")
     def test_no_grad(self):
-        def fn(a, b):
+        def fn1(a, b):
             x = a + 1
             # redundant no_grad should get ignored
             with torch.no_grad():
@@ -816,7 +814,35 @@ class FunctionTests(torchdynamo.testing.TestCase):
             x = x + 2
             return x
 
+        def fn2(a, b):
+            x = a + 1
+            with torch.set_grad_enabled(False):
+                x = x + b
+            x = x + 2
+            return x
+
+        def fn3(a, b):
+            x = a + 1
+            with torch.enable_grad():
+                x = x + b
+            x = x + 2
+            return x
+
+        def fn4(a, b):
+            x = a + 1
+            with torch.set_grad_enabled(True):
+                if torch.is_grad_enabled():
+                    x = x + b
+            x = x + 2
+            return x
+
         with torch.no_grad():
-            return torchdynamo.testing.standard_test(
-                self, fn=fn, nargs=2, expected_ops=3
-            )
+            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
+        with torch.enable_grad():
+            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)

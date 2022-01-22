@@ -54,7 +54,9 @@ from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
+from .variable_tracker import ContextManagerVariable
 from .variable_tracker import GetAttrVariable
+from .variable_tracker import LambdaVariable
 from .variable_tracker import ListIteratorVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import MutableLocal
@@ -555,10 +557,34 @@ class InstructionTranslatorBase(fx.Tracer):
         assert self.block_depth > 0
         self.block_depth -= 1
 
-    # def SETUP_WITH(self, inst):
-    #     # with is handled in resume_execution.py
-    #     self.compile_partial_subgraph()
-    #     self.add_output_instructions(self.create_call_resume_at(inst))
+    def SETUP_WITH(self, inst):
+        ctx = self.pop()
+        self.guards.update(ctx.guards)
+        if not isinstance(ctx, ContextManagerVariable):
+            unimplemented(f"SETUP_WITH {ctx}")
+
+        def exit(*args):
+            return ctx.exit(self, *args)
+
+        self.push(LambdaVariable(exit, **VariableTracker.propagate(ctx)))
+        self.block_depth += 1
+        self.push(ctx.enter(self))
+
+    def BEGIN_FINALLY(self, inst):
+        self.push(None)
+
+    def WITH_CLEANUP_START(self, inst):
+        exit, exc = self.popn(2)
+        assert exc is None
+        self.push(exc)
+        self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
+
+    def WITH_CLEANUP_FINISH(self, inst):
+        self.popn(2)
+        self.push(None)
+
+    def END_FINALLY(self, inst):
+        assert self.pop() is None
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1387,7 +1413,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def should_compile_partial_graph(self):
-        return True
+        return self.block_depth == 0
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None

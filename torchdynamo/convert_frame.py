@@ -9,6 +9,7 @@ import typing
 from typing import Callable
 from typing import List
 
+import torch
 from torch import fx
 
 from . import config
@@ -96,6 +97,7 @@ def convert_frame_assert(compiler_fn: Callable):
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+        prior_grad_mode = torch.is_grad_enabled()
         try:
             code = transform_code_object(frame.f_code, transform)
             output_codes.add(code)
@@ -130,6 +132,8 @@ def convert_frame_assert(compiler_fn: Callable):
                 # print(dis.Bytecode(frame.f_code).info())
                 print(dis.Bytecode(frame.f_code).dis())
             raise
+        finally:
+            torch._C._set_grad_enabled(prior_grad_mode)
 
     return _convert_frame_assert
 

@@ -20,7 +20,9 @@ from . import config
 from .allowed_functions import _allowed_function_ids
 from .allowed_functions import is_allowed
 from .bytecode_transformation import create_instruction
+from .guards import Guard
 from .guards import GuardBuilder
+from .guards import GuardSource
 from .utils import identity
 from .utils import is_namedtuple_cls
 from .utils import istype
@@ -400,7 +402,7 @@ class TensorVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.repeat")
 
-        if name in ("item", "tolist"):
+        if name in ("item", "tolist", "numpy"):
             unimplemented(f"Tensor.{name}")
 
         if name == "__len__":
@@ -1524,6 +1526,17 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             torch.nn.modules.utils._ntuple,
         ):
             return self._call_ntuple(tx, args, kwargs, options)
+        elif self.value is torch.no_grad:
+            return GradModeVariable(False, **options)
+        elif self.value is torch.enable_grad:
+            return GradModeVariable(True, **options)
+        elif self.value is torch.set_grad_enabled and len(args) == 1:
+            return GradModeVariable(args[0].as_python_constant(), **options)
+        elif self.value is torch.is_grad_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
+                GradModeVariable._guards_singleton
+            )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         else:
@@ -1712,6 +1725,38 @@ class ClosureVariable(UnknownVariable):
 
     def reconstruct(self, codegen):
         return [codegen.create_load_closure(self.name)]
+
+
+class ContextManagerVariable(VariableTracker):
+    pass
+
+
+class GradModeVariable(ContextManagerVariable):
+    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
+
+    def __init__(self, target_mode, original_mode=None, **kwargs):
+        super(GradModeVariable, self).__init__(**kwargs)
+        self.guards = self.guards | self._guards_singleton
+        self.target_mode = target_mode
+        if original_mode is None:
+            original_mode = torch.is_grad_enabled()
+        self.original_mode = original_mode
+
+    def enter(self, tx):
+        assert self.original_mode == torch.is_grad_enabled()
+        if self.target_mode != self.original_mode:
+            self._change_mode(tx, self.target_mode)
+        return ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def exit(self, tx, *args):
+        if self.target_mode != self.original_mode:
+            self._change_mode(tx, self.original_mode)
+        return ConstantVariable(None, **VariableTracker.propagate(self))
+
+    @staticmethod
+    def _change_mode(tx, value):
+        tx.graph.create_node("call_function", torch._C._set_grad_enabled, (value,), {}),
+        torch._C._set_grad_enabled(value)
 
 
 def typestr(*objs):

@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import enum
 import re
@@ -185,6 +186,15 @@ class GuardBuilder:
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
 
+    def GRAD_MODE(self, guard: Guard):
+        """Guard on the current value of torch.is_grad_enabled()"""
+        assert guard.name == ""
+        assert guard.source is GuardSource.GLOBAL
+        if torch.is_grad_enabled():
+            self.code.append("___is_grad_enabled()")
+        else:
+            self.code.append("not ___is_grad_enabled()")
+
 
 class GuardedCode:
     def __init__(
@@ -228,18 +238,25 @@ class GuardedCode:
 
         code = " and ".join(code)
 
+        closure_vars = collections.OrderedDict(
+            [
+                ("___guarded_code", self),
+                ("___check_type_id", check_type_id),
+                ("___check_obj_id", check_obj_id),
+                ("___check_tensors", check_tensors_fn),
+                ("___is_grad_enabled", torch.is_grad_enabled),
+            ]
+        )
         py_code = textwrap.dedent(
             f"""
-            def ___make_guard_fn(___guarded_code, ___check_type_id, ___check_obj_id, ___check_tensors):
+            def ___make_guard_fn({','.join(closure_vars.keys())}):
                 return lambda {args}: {code}
             """
         )
         # print("GUARDS", code)
         out = dict()
         exec(py_code, global_builder.scope, out)
-        return out["___make_guard_fn"](
-            self, check_type_id, check_obj_id, check_tensors_fn
-        )
+        return out["___make_guard_fn"](*closure_vars.values())
 
     def invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false
