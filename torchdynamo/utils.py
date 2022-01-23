@@ -163,19 +163,22 @@ def is_jit_model(model0):
     )
 
 
-def torchscript(model0, example_inputs, verbose=True):
-    if is_jit_model(model0):
-        return model0
+def torchscript(model, example_inputs, verbose=True):
+    if is_jit_model(model):
+        # already done?
+        return model
+
     try:
-        model1 = torch.jit.trace(model0, example_inputs)
+        return torch.jit.script(model)
     except Exception:
         if verbose:
-            log.exception("jit trace error")
+            log.exception("jit error")
         try:
-            model1 = torch.jit.script(model0)
+            return torch.jit.trace(model, example_inputs)
         except Exception:
-            model1 = None
-    return model1
+            if verbose:
+                log.exception("jit error")
+    return None
 
 
 def getfile(obj):

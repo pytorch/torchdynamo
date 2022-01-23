@@ -1,4 +1,7 @@
 #!/usr/bin/env pytest
+import copy
+from collections import namedtuple
+
 import torch
 from torch.nn import functional as F
 
@@ -114,6 +117,196 @@ def convert_boxes_to_pooler_format(box_lists):
     return cat([indices[:, None], boxes], dim=1)
 
 
+ReformerBackwardOutput = namedtuple(
+    "ReformerBackwardOutput",
+    ["attn_output", "hidden_states", "grad_attn_output", "grad_hidden_states"],
+)
+ReformerEncoderOutput = namedtuple(
+    "ReformerEncoderOutput",
+    ["hidden_states", "all_hidden_states", "all_attentions", "past_buckets_states"],
+)
+
+
+class _ReversibleFunction(torch.autograd.Function):
+    # taken from modeling_reformer.py in huggingface
+    @staticmethod
+    def forward(
+        ctx,
+        hidden_states,
+        layers,
+        attention_mask,
+        head_mask,
+        num_hashes,
+        all_hidden_states,
+        all_attentions,
+        past_buckets_states,
+        use_cache,
+        orig_sequence_length,
+        output_hidden_states,
+        output_attentions,
+    ):
+        all_buckets = ()
+
+        # split duplicated tensor
+        hidden_states, attn_output = torch.chunk(hidden_states, 2, dim=-1)
+
+        for layer_id, (layer, layer_head_mask) in enumerate(zip(layers, head_mask)):
+            if output_hidden_states is True:
+                all_hidden_states.append(hidden_states)
+
+            layer_outputs = layer(
+                prev_attn_output=attn_output,
+                hidden_states=hidden_states,
+                attention_mask=attention_mask,
+                head_mask=layer_head_mask,
+                num_hashes=num_hashes,
+                past_buckets_states=past_buckets_states,
+                use_cache=use_cache,
+                orig_sequence_length=orig_sequence_length,
+                output_attentions=output_attentions,
+            )
+
+            attn_output = layer_outputs.attn_output
+            hidden_states = layer_outputs.hidden_states
+            all_buckets = all_buckets + (layer_outputs.buckets,)
+
+            if output_attentions:
+                all_attentions.append(layer_outputs.attention_probs)
+
+        # Add last layer
+        if output_hidden_states is True:
+            all_hidden_states.append(hidden_states)
+
+        # attach params to ctx for backward
+        ctx.save_for_backward(attn_output.detach(), hidden_states.detach())
+        ctx.layers = layers
+        ctx.all_buckets = all_buckets
+        ctx.head_mask = head_mask
+        ctx.attention_mask = attention_mask
+
+        # Concatenate 2 RevNet outputs
+        return torch.cat([attn_output, hidden_states], dim=-1)
+
+    @staticmethod
+    def backward(ctx, grad_hidden_states):
+        grad_attn_output, grad_hidden_states = torch.chunk(
+            grad_hidden_states, 2, dim=-1
+        )
+
+        # retrieve params from ctx for backward
+        attn_output, hidden_states = ctx.saved_tensors
+
+        # create tuple
+        output = ReformerBackwardOutput(
+            attn_output=attn_output,
+            hidden_states=hidden_states,
+            grad_attn_output=grad_attn_output,
+            grad_hidden_states=grad_hidden_states,
+        )
+
+        # free memory
+        del grad_attn_output, grad_hidden_states, attn_output, hidden_states
+
+        layers = ctx.layers
+        all_buckets = ctx.all_buckets
+        head_mask = ctx.head_mask
+        attention_mask = ctx.attention_mask
+
+        for idx, layer in enumerate(layers[::-1]):
+            # pop last buckets from stack
+            buckets = all_buckets[-1]
+            all_buckets = all_buckets[:-1]
+
+            # backprop
+            output = layer.backward_pass(
+                next_attn_output=output.attn_output,
+                hidden_states=output.hidden_states,
+                grad_attn_output=output.grad_attn_output,
+                grad_hidden_states=output.grad_hidden_states,
+                head_mask=head_mask[len(layers) - idx - 1],
+                attention_mask=attention_mask,
+                buckets=buckets,
+            )
+
+        assert all_buckets == (), "buckets have to be empty after backpropagation"
+        grad_hidden_states = torch.cat(
+            [output.grad_attn_output, output.grad_hidden_states], dim=-1
+        )
+
+        # num of return vars has to match num of forward() args
+        # return gradient for hidden_states arg and None for other args
+        return (
+            grad_hidden_states,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+
+
+class ReformerEncoder(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dropout = 0.5
+        self.layer_norm = torch.nn.LayerNorm(512, eps=1.0e-12)
+        self.layers = []
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=[None] * 6,
+        num_hashes=None,
+        use_cache=False,
+        orig_sequence_length=64,
+        output_hidden_states=False,
+        output_attentions=False,
+    ):
+        # hidden_states and attention lists to be filled if wished
+        all_hidden_states = []
+        all_attentions = []
+        past_buckets_states = [((None), (None)) for i in range(len(self.layers))]
+
+        # concat same tensor for reversible ResNet
+        hidden_states = torch.cat([hidden_states, hidden_states], dim=-1)
+        hidden_states = _ReversibleFunction.apply(
+            hidden_states,
+            self.layers,
+            attention_mask,
+            head_mask,
+            num_hashes,
+            all_hidden_states,
+            all_attentions,
+            past_buckets_states,
+            use_cache,
+            orig_sequence_length,
+            output_hidden_states,
+            output_attentions,
+        )
+
+        # Apply layer norm to concatenated hidden states
+        hidden_states = self.layer_norm(hidden_states)
+
+        # Apply dropout
+        hidden_states = torch.nn.functional.dropout(
+            hidden_states, p=self.dropout, training=self.training
+        )
+
+        return ReformerEncoderOutput(
+            hidden_states=hidden_states,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_attentions,
+            past_buckets_states=past_buckets_states,
+        )
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -189,3 +382,16 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
+
+    def test_reformer(self):
+        input = torch.randn([1, 64, 256])
+        model = ReformerEncoder()
+        torch.manual_seed(1337)
+        correct = copy.deepcopy(model)(input)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnt)):
+            torch.manual_seed(1337)
+            self.assertTrue(same(model(input), correct))
+
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, 9)

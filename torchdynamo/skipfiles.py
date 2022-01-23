@@ -1,10 +1,11 @@
-import _weakrefset
 import abc
 import collections
 import copy
+import dataclasses
 import enum
 import importlib
 import inspect
+import linecache
 import multiprocessing
 import operator
 import os
@@ -12,10 +13,12 @@ import random
 import re
 import selectors
 import threading
+import traceback
 import types
 import typing
 import unittest
 import weakref
+import _weakrefset
 
 import torch
 
@@ -32,9 +35,11 @@ SKIP_DIRS = [
         abc,
         collections,
         copy,
+        dataclasses,
         enum,
         importlib,
         inspect,
+        linecache,
         multiprocessing,
         operator,
         os,
@@ -42,6 +47,7 @@ SKIP_DIRS = [
         re,
         selectors,
         threading,
+        traceback,
         types,
         typing,
         unittest,
@@ -80,7 +86,6 @@ for _name in (
     "tensorrt",
     "torch2trt",
     "tqdm",
-    "transformers.file_utils",
     "tvm",
 ):
     try:

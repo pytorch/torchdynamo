@@ -255,6 +255,7 @@ class TensorVariable(VariableTracker):
             return TensorVariable(proxy, **options)
 
         if example_value is None:
+            rng = torch.clone(torch.random.get_rng_state())
             op = proxy.node.op
             args, kwargs = cls.propagate_args_kwargs(proxy.node)
             if op == "call_function":
@@ -266,6 +267,7 @@ class TensorVariable(VariableTracker):
                 example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
             else:
                 assert False, op
+            torch.random.set_rng_state(rng)
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = example_value.clone()
@@ -1644,17 +1646,6 @@ class UnsupportedVariable(VariableTracker):
     def python_type(self):
         return self.value_type
 
-    """
-    def get_const_attr(self, tx, name):
-        if name not in getattr(self.value, "__dict__", {}):
-            raise NotImplementedError()
-        subobj = inspect.getattr_static(self.value, name)
-        assert id(subobj) == id(self.value.__dict__[name])
-        if not ConstantVariable.is_literal(subobj):
-            raise NotImplementedError()
-        return subobj
-    """
-
     def call_method(
         self,
         tx,
@@ -1663,14 +1654,19 @@ class UnsupportedVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name not in getattr(self.value, "__dict__", {}):
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            method = inspect.getattr_static(type(self.value), name)
-            # TODO(jansel): add a guard to check for monkey patching?
-            return UserMethodVariable(method, self, **options).call_function(
-                tx, args, kwargs
-            )
-        else:
-            return super().call_method(tx, name, args, kwargs)
+            try:
+                method = inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                method = None
+
+            # check for methods implemented in C++
+            if isinstance(method, types.FunctionType):
+                # TODO(jansel): add a guard to check for monkey patching?
+                options = VariableTracker.propagate(self, args, kwargs.values())
+                return UserMethodVariable(method, self, **options).call_function(
+                    tx, args, kwargs
+                )
+        return super().call_method(tx, name, args, kwargs)
 
 
 class SuperVariable(VariableTracker):

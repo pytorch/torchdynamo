@@ -55,6 +55,20 @@ def wrap_compiler_fn(compiler_fn):
     return inner
 
 
+def wrap_restore_state(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        prior_grad_mode = torch.is_grad_enabled()
+        rng_state = torch.clone(torch.random.get_rng_state())
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            torch._C._set_grad_enabled(prior_grad_mode)
+            torch.random.set_rng_state(rng_state)
+
+    return _fn
+
+
 def convert_frame_assert(compiler_fn: Callable):
     """Fully convert a frame into an FX graph"""
     if len(inspect.signature(compiler_fn).parameters) == 1:
@@ -97,7 +111,6 @@ def convert_frame_assert(compiler_fn: Callable):
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        prior_grad_mode = torch.is_grad_enabled()
         try:
             code = transform_code_object(frame.f_code, transform)
             output_codes.add(code)
@@ -132,10 +145,8 @@ def convert_frame_assert(compiler_fn: Callable):
                 # print(dis.Bytecode(frame.f_code).info())
                 print(dis.Bytecode(frame.f_code).dis())
             raise
-        finally:
-            torch._C._set_grad_enabled(prior_grad_mode)
 
-    return _convert_frame_assert
+    return wrap_restore_state(_convert_frame_assert)
 
 
 def convert_frame(compiler_fn: typing.Callable):
