@@ -43,7 +43,6 @@ from .utils import unimplemented
 from .utils import warning
 from .variable_builder import VariableBuilder
 from .variable_source import AttrSource
-from .variable_source import GetItemSource
 from .variable_source import GlobalSource
 from .variable_source import LocalSource
 from .variable_source import NNModuleSource
@@ -77,69 +76,11 @@ from .variable_tracker import typestr
 
 def stack_op(fn: typing.Callable):
     nargs = len(inspect.signature(fn).parameters)
+    fn_var = BuiltinVariable(fn)
 
     @functools.wraps(fn)
     def impl(self: "InstructionTranslatorBase", inst: Instruction):
-        inputs: List[VariableTracker] = self.popn(nargs)
-        options = VariableTracker.propagate(inputs)
-
-        if any(isinstance(i, TensorVariable) for i in inputs):
-            try:
-                val = TensorVariable.create(
-                    self.create_proxy(
-                        "call_function", fn, tuple(i.as_proxy() for i in inputs), {}
-                    ),
-                    **options,
-                )
-            except NotImplementedError:
-                unimplemented(f"partial tensor op: {inputs}")
-        elif all(i.is_python_constant() for i in inputs):
-            # constant fold
-            val = ConstantVariable(
-                fn(*[i.as_python_constant() for i in inputs]), **options
-            )
-        elif (
-            isinstance(inputs[0], (BaseListVariable, ConstDictVariable))
-            and fn is operator.getitem
-            and inputs[1].is_python_constant()
-        ):
-            base, item = inputs
-            val = base.getitem_const(item)
-
-        elif (
-            isinstance(inputs[0], BaseListVariable)
-            and isinstance(inputs[1], BaseListVariable)
-            and fn is operator.add
-        ):
-            a, b = inputs
-            assert type(a) is type(b)
-            val = type(a)(a.items + b.items, **options)
-        elif (
-            isinstance(inputs[0], NNModuleVariable)
-            and fn is operator.getitem
-            and inputs[1].is_python_constant()
-        ):
-            assert len(inputs) == 2
-            key = inputs[0].module_key
-            mod = self.get_submodule(key)
-            assert type(mod).__getitem__ in (
-                torch.nn.ModuleList.__getitem__,
-                torch.nn.ParameterList.__getitem__,
-            ), typestr(mod)
-            assert inputs[0].source
-            key = inputs[1].as_python_constant()
-            submod = mod[key]
-            val = self.add_submodule(
-                submod,
-                key,
-                inputs[1].as_python_constant(),
-                source=NNModuleSource(GetItemSource(inputs[0].source, key)),
-                **options,
-            )
-        else:
-            unimplemented(f"stack_op {typestr(*inputs)}")
-
-        self.push(val)
+        self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
 

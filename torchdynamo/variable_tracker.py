@@ -566,6 +566,22 @@ class NNModuleVariable(VariableTracker):
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable(len(module), **options)
+        elif name == "__getitem__":
+            assert not kwargs and len(args) == 1
+            assert type(module).__getitem__ in (
+                torch.nn.ModuleList.__getitem__,
+                torch.nn.ParameterList.__getitem__,
+            ), typestr(module)
+            assert self.source
+            key = args[0].as_python_constant()
+            submod = module[key]
+            return tx.add_submodule(
+                submod,
+                key,
+                args[0].as_python_constant(),
+                source=NNModuleSource(GetItemSource(self.source, key)),
+                **options,
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -673,12 +689,84 @@ class BuiltinVariable(VariableTracker):
             sum,
             tuple,
             type,
+            operator.pos,
+            operator.neg,
+            operator.not_,
+            operator.invert,
+            operator.pow,
+            operator.mul,
+            operator.matmul,
+            operator.floordiv,
+            operator.truediv,
+            operator.mod,
+            operator.add,
+            operator.sub,
+            operator.getitem,
+            operator.lshift,
+            operator.rshift,
+            operator.and_,
+            operator.or_,
+            operator.xor,
+            operator.ipow,
+            operator.imul,
+            operator.imatmul,
+            operator.ifloordiv,
+            operator.itruediv,
+            operator.imod,
+            operator.iadd,
+            operator.isub,
+            operator.ilshift,
+            operator.irshift,
+            operator.iand,
+            operator.ixor,
+            operator.ior,
         }
         fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
         return fns
 
     def can_constant_fold_through(self):
         return self.fn in self._constant_fold_functions()
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _fx_graph_functions():
+        fns = {
+            operator.pos,
+            operator.neg,
+            operator.not_,
+            operator.invert,
+            operator.pow,
+            operator.mul,
+            operator.matmul,
+            operator.floordiv,
+            operator.truediv,
+            operator.mod,
+            operator.add,
+            operator.sub,
+            operator.getitem,
+            operator.lshift,
+            operator.rshift,
+            operator.and_,
+            operator.or_,
+            operator.xor,
+            operator.ipow,
+            operator.imul,
+            operator.imatmul,
+            operator.ifloordiv,
+            operator.itruediv,
+            operator.imod,
+            operator.iadd,
+            operator.isub,
+            operator.ilshift,
+            operator.irshift,
+            operator.iand,
+            operator.ixor,
+            operator.ior,
+        }
+        return fns
+
+    def can_insert_in_graph(self):
+        return self.fn in self._fx_graph_functions()
 
     def __init__(self, fn, **kwargs):
         super(BuiltinVariable, self).__init__(**kwargs)
@@ -703,6 +791,10 @@ class BuiltinVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
+        tensor_args = any(
+            isinstance(i, TensorVariable)
+            for i in itertools.chain(args, kwargs.values())
+        )
         options = VariableTracker.propagate(self, args, kwargs.values())
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
@@ -716,6 +808,34 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif self.can_insert_in_graph() and tensor_args:
+            try:
+                return TensorVariable.create(
+                    tx.create_proxy(
+                        "call_function",
+                        self.fn,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
+            except NotImplementedError:
+                unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+        elif self.fn in (min, max) and tensor_args:
+            a, b = args
+            if not isinstance(a, TensorVariable):
+                a, b = b, a
+            assert isinstance(a, TensorVariable) and not kwargs
+            # convert min/max to torch ops
+            if b.is_python_constant():
+                kwargs = {"min": b} if (self.fn is max) else {"max": b}
+                return AllowedFunctionOrModuleVariable(
+                    torch.clamp, **options
+                ).call_function(tx, [a], kwargs)
+            else:
+                fn = {max: torch.maximum, min: torch.minimum}[self.fn]
+                return AllowedFunctionOrModuleVariable(fn, **options).call_function(
+                    tx, [a, b], {}
+                )
         elif self.fn is range and constant_args:
             return RangeVariable(
                 value=range(
@@ -763,8 +883,11 @@ class BuiltinVariable(VariableTracker):
             ]
             return TupleVariable(items, **options)
         elif self.fn is len:
-            assert not kwargs and len(args) == 1
-            return args[0].call_method(tx, "__len__", [], {})
+            return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        elif self.fn is operator.add:
+            return args[0].call_method(tx, "__add__", args[1:], kwargs)
+        elif self.fn is operator.getitem:
+            return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
         elif self.fn is isinstance:
             assert not kwargs and len(args) == 2
             arg, isinstance_type = args
@@ -897,6 +1020,23 @@ class BaseListVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "__getitem__":
+            assert not kwargs and len(args) == 1
+            return self.getitem_const(args[0])
+        elif name == "__add__":
+            assert not kwargs and len(args) == 1
+            return type(self)(self.items + args[0].items, **options)
+
+        return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
 
 
 class RangeVariable(BaseListVariable):
@@ -1107,7 +1247,11 @@ class ConstDictVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
-        if name == "items":
+
+        if name == "__getitem__":
+            assert not kwargs and len(args) == 1
+            return self.getitem_const(args[0])
+        elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
                 [

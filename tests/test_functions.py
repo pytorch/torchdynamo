@@ -846,3 +846,12 @@ class FunctionTests(torchdynamo.testing.TestCase):
             torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)
             torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)
+
+    @make_test
+    def test_min_max(a, b):
+        c = a + b
+        a = a.sum()
+        b = b.sum()
+        a = min(max(a, 0), 1)
+        b = max(0, min(1, b))
+        return max(a, b) - min(a, b) + c
