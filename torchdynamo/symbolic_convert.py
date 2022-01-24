@@ -317,6 +317,7 @@ class InstructionTranslatorBase(fx.Tracer):
         self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+        return newvar
 
     def inline_user_function_return(self, fn, args, kwargs):
         """
@@ -786,21 +787,9 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
-        if isinstance(obj, TensorVariable) and val.is_proxy() and key.is_proxy():
-            self.create_proxy(
-                "call_function",
-                operator.setitem,
-                (obj.as_proxy(), key.as_proxy(), val.as_proxy()),
-                {},
-            ),
-            # no result is pushed, so need to lift the guards to global
-            self.guards.update(
-                VariableTracker.propagate([val, obj, key]).get("guards", set())
-            )
-        elif isinstance(obj, ConstDictVariable):
-            obj.call_method(self, "__setattr__", [key, val], {})
-        else:
-            unimplemented(f"STORE_SUBSCR {obj}[{key}] = {val}")
+        result = obj.call_method(self, "__setitem__", [key, val], {})
+        # no result is pushed, so need to lift the guards to global
+        self.guards.update(result.guards)
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)

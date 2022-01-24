@@ -394,8 +394,7 @@ class TensorVariable(VariableTracker):
                     [constant_result.getitem_const(a) for a in args], **options
                 )
             return constant_result
-
-        if (
+        elif (
             name == "repeat"
             and not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
@@ -403,11 +402,9 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-
-        if name in ("item", "tolist", "numpy"):
+        elif name in ("item", "tolist", "numpy"):
             unimplemented(f"Tensor.{name}")
-
-        if name == "__len__":
+        elif name == "__len__":
             if self.size:
                 assert not config.dynamic_shapes
                 return ConstantVariable(self.size[0], **options)
@@ -416,13 +413,18 @@ class TensorVariable(VariableTracker):
                     tx.create_proxy("call_function", len, (self.as_proxy(),), {}),
                     **options,
                 )
-
-        return TensorVariable.create(
+        elif name == "__setitem__":
             tx.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             ),
-            **options,
-        )
+            return ConstantVariable(None, **options)
+        else:
+            return TensorVariable.create(
+                tx.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
 
 
 class NNModuleVariable(VariableTracker):
@@ -799,16 +801,7 @@ class BuiltinVariable(VariableTracker):
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
 
-        if self.can_constant_fold_through() and constant_args:
-            # constant fold
-            return ConstantVariable(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-                **options,
-            )
-        elif self.can_insert_in_graph() and tensor_args:
+        if self.can_insert_in_graph() and tensor_args:
             try:
                 return TensorVariable.create(
                     tx.create_proxy(
@@ -882,6 +875,15 @@ class BuiltinVariable(VariableTracker):
                 for idx, var in enumerate(args[0].unpack_var_sequence(tx))
             ]
             return TupleVariable(items, **options)
+        elif self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return ConstantVariable(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+                **options,
+            )
         elif self.fn is len:
             return args[0].call_method(tx, "__len__", args[1:], kwargs)
         elif self.fn is operator.add:
@@ -1096,13 +1098,12 @@ class ListVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
-            tx.replace_all(
+            return tx.replace_all(
                 self,
                 ListVariable(
                     self.items + [arg], mutable_local=MutableLocal(), **options
                 ),
             )
-            return ConstantVariable(None, **options)
         elif (
             name == "extend"
             and self.mutable_local
@@ -1111,7 +1112,7 @@ class ListVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            tx.replace_all(
+            return tx.replace_all(
                 self,
                 ListVariable(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
@@ -1119,17 +1120,15 @@ class ListVariable(BaseListVariable):
                     **options,
                 ),
             )
-            return ConstantVariable(None, **options)
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
             items = list(self.items)
             items.insert(idx.as_python_constant(), value)
-            tx.replace_all(
+            return tx.replace_all(
                 self,
                 ListVariable(items, mutable_local=MutableLocal(), **options),
             )
-            return ConstantVariable(None, **options)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
             items = list(self.items)
@@ -1139,6 +1138,18 @@ class ListVariable(BaseListVariable):
                 ListVariable(items, mutable_local=MutableLocal(), **options),
             )
             return result
+        elif (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            items = list(self.items)
+            items[key.as_python_constant()] = value
+            result = ListVariable(items, mutable_local=MutableLocal(), **options)
+            return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -1274,7 +1285,7 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             return ConstantVariable(len(self.items), **options)
         elif (
-            name == "__setattr__"
+            name == "__setitem__"
             and args
             and args[0].is_python_constant()
             and self.mutable_local
@@ -1282,7 +1293,7 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             newval = collections.OrderedDict(val)
             newval[args[0].as_python_constant()] = args[1]
-            tx.replace_all(
+            return tx.replace_all(
                 self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
             )
         elif (
@@ -1315,8 +1326,7 @@ class ConstDictVariable(VariableTracker):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
             result = ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
-            tx.replace_all(self, result)
-            return result
+            return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
             and args

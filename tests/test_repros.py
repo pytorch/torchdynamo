@@ -307,6 +307,26 @@ class ReformerEncoder(torch.nn.Module):
         )
 
 
+def longformer_chunk(hidden_states, window_overlap=256):
+    """convert into overlapping chunks. Chunk size = 2w, overlap size = w"""
+
+    # non-overlapping chunks of size = 2w
+    hidden_states = hidden_states.view(
+        hidden_states.size(0),
+        hidden_states.size(1) // (window_overlap * 2),
+        window_overlap * 2,
+        hidden_states.size(2),
+    )
+
+    # use `as_strided` to make the chunks overlap with an overlap size = window_overlap
+    chunk_size = list(hidden_states.size())
+    chunk_size[1] = chunk_size[1] * 2 - 1
+
+    chunk_stride = list(hidden_states.stride())
+    chunk_stride[1] = chunk_stride[1] // 2
+    return hidden_states.as_strided(size=chunk_size, stride=chunk_stride)
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -395,3 +415,18 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 4)
         self.assertEqual(cnt.op_count, 9)
+
+    def test_longformer_chunk(self):
+        input1 = torch.randn([1, 4096, 1])
+        input2 = torch.randn([12, 4096, 64])
+        correct1 = longformer_chunk(input1)
+        correct2 = longformer_chunk(input2)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnt)):
+            self.assertTrue(same(longformer_chunk(input1), correct1))
+            self.assertTrue(same(longformer_chunk(input2), correct2))
+            self.assertTrue(same(longformer_chunk(input1), correct1))
+            self.assertTrue(same(longformer_chunk(input2), correct2))
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
