@@ -1,5 +1,6 @@
 #!/usr/bin/env pytest
 import copy
+import inspect
 from collections import namedtuple
 
 import torch
@@ -405,6 +406,38 @@ class PartialT5(torch.nn.Module):
         return scores, value_states
 
 
+class ChunkReformerFeedForward(torch.nn.Module):
+    # simplified from HF modeling_reformer.py
+    def __init__(self):
+        super().__init__()
+        self.layer_norm = torch.nn.LayerNorm(256, eps=1e-12)
+        self.dense = torch.nn.Linear(256, 256)
+        self.output = torch.nn.Linear(256, 256)
+
+    def forward(self, attention_output):
+        return apply_chunking_to_forward(
+            self.forward_chunk,
+            attention_output + 1,
+        )
+
+    def forward_chunk(self, hidden_states):
+        hidden_states = self.layer_norm(hidden_states)
+        hidden_states = self.dense(hidden_states)
+        return self.output(hidden_states)
+
+
+def apply_chunking_to_forward(forward_fn, *input_tensors):
+    # simplified from HF model_utils.py
+    assert len(input_tensors) > 0
+    tensor_shape = input_tensors[0].shape[1]
+    assert all(input_tensor.shape[1] == tensor_shape for input_tensor in input_tensors)
+    num_args_in_forward_chunk_fn = len(inspect.signature(forward_fn).parameters)
+    if num_args_in_forward_chunk_fn != len(input_tensors):
+        raise ValueError()
+
+    return forward_fn(*input_tensors)
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -519,3 +552,14 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 11)
+
+    def test_chunk_reformer_ff(self):
+        input = torch.randn([1, 4096, 256])
+        model = ChunkReformerFeedForward()
+        correct = model(input)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(same(model(input), correct))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 4)

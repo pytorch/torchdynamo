@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import inspect
 import re
 import types
 from typing import Any
@@ -22,6 +23,8 @@ from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
+from .variable_tracker import InspectSignatureVariable
+from .variable_tracker import LambdaVariable
 from .variable_tracker import ListVariable
 from .variable_tracker import NamedTupleVariable
 from .variable_tracker import PythonModuleVariable
@@ -156,7 +159,11 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
-
+        elif value is inspect.signature:
+            return LambdaVariable(
+                InspectSignatureVariable.create,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         else:
             warning(f"UnsupportedVariable {typestr(value)}")
             return self.wrap_unsupported(value)
@@ -173,7 +180,7 @@ class VariableBuilder:
                 value,
                 self.name,
                 source=self.get_source(),
-                # Gaurd sare done inside add_submodule
+                # Guards are done inside add_submodule
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:

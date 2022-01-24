@@ -205,6 +205,9 @@ class VariableTracker:
         except Exception:
             return False
 
+    def num_parameters(self):
+        unimplemented(f"num_parameters: {self}")
+
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         unimplemented(f"hasattr: {self}")
 
@@ -674,7 +677,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs)
+        return self.fn(*args, **kwargs).add_guards(self.guards)
 
 
 class BuiltinVariable(VariableTracker):
@@ -995,6 +998,24 @@ class GetAttrVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs).add_guards(self.guards)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if (
+            name == "__len__"
+            and isinstance(self.obj, InspectSignatureVariable)
+            and self.name == "parameters"
+        ):
+            return ConstantVariable(
+                self.obj.inspected.num_parameters(),
+                **VariableTracker.propagate(self, self.obj, self.obj.inspected),
+            )
+        return super(GetAttrVariable, self).call_method(tx, name, args, kwargs)
 
 
 class BaseListVariable(VariableTracker):
@@ -1373,6 +1394,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         return tx.inline_user_function_return(self, self.self_args() + args, kwargs)
 
+    def num_parameters(self):
+        return len(inspect.signature(self.get_function()).parameters)
+
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
@@ -1476,6 +1500,9 @@ class UserMethodVariable(UserFunctionVariable):
                 self.guards
             )
         return super().call_function(tx, args, kwargs)
+
+    def num_parameters(self):
+        return super(UserMethodVariable, self).num_parameters() - 1
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
@@ -1919,6 +1946,8 @@ class ContextManagerVariable(VariableTracker):
 
 
 class GradModeVariable(ContextManagerVariable):
+    """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
+
     _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
 
     def __init__(self, target_mode, original_mode=None, **kwargs):
@@ -1944,6 +1973,20 @@ class GradModeVariable(ContextManagerVariable):
     def _change_mode(tx, value):
         tx.graph.create_node("call_function", torch._C._set_grad_enabled, (value,), {}),
         torch._C._set_grad_enabled(value)
+
+
+class InspectSignatureVariable(VariableTracker):
+    """represents inspect.signature(...)"""
+
+    @staticmethod
+    def create(callable, **kwargs):
+        if kwargs:
+            unimplemented(f"inspect.signature with {kwargs}")
+        return InspectSignatureVariable(callable)
+
+    def __init__(self, inspected, **kwargs):
+        super(InspectSignatureVariable, self).__init__(**kwargs)
+        self.inspected = inspected
 
 
 def typestr(*objs):
