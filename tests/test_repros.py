@@ -327,6 +327,84 @@ def longformer_chunk(hidden_states, window_overlap=256):
     return hidden_states.as_strided(size=chunk_size, stride=chunk_stride)
 
 
+class PartialT5(torch.nn.Module):
+    # Highly simplified T5Attention prefix
+    def __init__(self):
+        super(PartialT5, self).__init__()
+        self.q = torch.nn.Linear(512, 512)
+        self.k = torch.nn.Linear(512, 512)
+        self.v = torch.nn.Linear(512, 512)
+
+    def forward(
+        self,
+        hidden_states,
+        key_value_states=None,
+        past_key_value=None,
+        query_length=None,
+    ):
+        batch_size, seq_length = hidden_states.shape[:2]
+
+        real_seq_length = seq_length
+
+        if past_key_value is not None:
+            assert (
+                len(past_key_value) == 2
+            ), f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
+            real_seq_length += (
+                past_key_value[0].shape[2] if query_length is None else query_length
+            )
+
+        def shape(states):
+            """projection"""
+            return states.view(batch_size, -1, 8, 64).transpose(1, 2)
+
+        def project(hidden_states, proj_layer, key_value_states, past_key_value):
+            """projects hidden states correctly to key/query states"""
+            if key_value_states is None:
+                # self-attn
+                # (batch_size, n_heads, seq_length, dim_per_head)
+                hidden_states = shape(proj_layer(hidden_states))
+            elif past_key_value is None:
+                # cross-attn
+                # (batch_size, n_heads, seq_length, dim_per_head)
+                hidden_states = shape(proj_layer(key_value_states))
+
+            if past_key_value is not None:
+                if key_value_states is None:
+                    # self-attn
+                    # (batch_size, n_heads, key_length, dim_per_head)
+                    hidden_states = torch.cat([past_key_value, hidden_states], dim=2)
+                else:
+                    # cross-attn
+                    hidden_states = past_key_value
+            return hidden_states
+
+        # get query states
+        query_states = shape(
+            self.q(hidden_states)
+        )  # (batch_size, n_heads, seq_length, dim_per_head)
+
+        # get key/value states
+        key_states = project(
+            hidden_states,
+            self.k,
+            key_value_states,
+            past_key_value[0] if past_key_value is not None else None,
+        )
+        value_states = project(
+            hidden_states,
+            self.v,
+            key_value_states,
+            past_key_value[1] if past_key_value is not None else None,
+        )
+
+        # compute scores
+        scores = torch.matmul(query_states, key_states.transpose(3, 2))
+
+        # (truncated here )
+        return scores, value_states
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -430,3 +508,14 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 4)
+
+    def test_hf_t5_forward(self):
+        input = torch.randn([1, 2048, 512])
+        model = PartialT5()
+        correct = model(input)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnt)):
+            self.assertTrue(same(model(input), correct))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 11)

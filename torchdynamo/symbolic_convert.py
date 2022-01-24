@@ -425,6 +425,9 @@ class InstructionTranslatorBase(fx.Tracer):
     def STORE_FAST(self, inst):
         self.symbolic_locals[inst.argval] = self.pop()
 
+    def DELETE_FAST(self, inst):
+        del self.symbolic_locals[inst.argval]
+
     STORE_DEREF = STORE_FAST
 
     def LOAD_CLOSURE(self, inst):
@@ -911,6 +914,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 kwdefaults,
                 annotations,
                 closure,
+                closure_scope=self,
                 **options,
             )
         )

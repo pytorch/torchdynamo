@@ -406,9 +406,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
 
     @make_test
     def test_del(a, b):
-        c = a + b
-        del a, b
-        return c
+        c = a + 1
+        d = c + 2
+        del c, a
+        return b + d
 
     def test_fold(self):
         def fn(a):

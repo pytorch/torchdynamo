@@ -851,11 +851,7 @@ class BuiltinVariable(VariableTracker):
             and args[0].has_unpack_var_sequence(tx)
         ):
             assert not kwargs and len(args) == 1
-            cls = {
-                iter: ListIteratorVariable,
-                tuple: TupleVariable,
-                list: ListVariable,
-            }[self.fn]
+            cls = BaseListVariable.cls_for(self.fn)
             return cls(
                 list(args[0].unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
@@ -994,6 +990,15 @@ class GetAttrVariable(VariableTracker):
 
 
 class BaseListVariable(VariableTracker):
+    @staticmethod
+    def cls_for(obj):
+        return {
+            iter: ListIteratorVariable,
+            tuple: TupleVariable,
+            list: ListVariable,
+            slice: SliceVariable,
+        }[obj]
+
     def __init__(self, items, **kwargs):
         super(BaseListVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
@@ -1391,9 +1396,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         options = VariableTracker.propagate([self])
 
         def wrap(val):
-            if ConstantVariable.is_literal(val):
+            if isinstance(val, (tuple, list)):
+                cls = BaseListVariable.cls_for(type(val))
+                return cls(list(map(wrap, val)), **options)
+            elif ConstantVariable.is_literal(val):
                 return ConstantVariable(val, **options)
             else:
+                assert isinstance(val, VariableTracker), typestr(val)
                 return val
 
         fn: types.FunctionType = self.fn
@@ -1455,6 +1464,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
+        closure_scope,
         **kwargs,
     ):
         super(NestedUserFunctionVariable, self).__init__(**kwargs)
@@ -1468,6 +1478,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
+        if closure is None:
+            closure_scope = None
+        self.closure_scope = closure_scope
 
     def self_args(self):
         return []
@@ -1504,7 +1517,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_items = []
         if self.closure:
             closure_items = [
-                parent.symbolic_locals.get(c.name, None) for c in self.closure.items
+                self.closure_scope.symbolic_locals[c.name] for c in self.closure.items
             ]
 
         code = self.get_code()
