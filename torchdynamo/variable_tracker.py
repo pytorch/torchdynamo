@@ -205,6 +205,9 @@ class VariableTracker:
         except Exception:
             return False
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        unimplemented(f"hasattr: {self}")
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -452,6 +455,16 @@ class NNModuleVariable(VariableTracker):
             )
             for idx, submod in enumerate(base)
         ]
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        mod = tx.get_submodule(self.module_key)
+        result = hasattr(mod, name)
+        return ConstantVariable(result, **options).add_guard(
+            NNModuleSource(AttrSource(self.source, name)).create_guard(
+                GuardBuilder.HASATTR
+            )
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -904,16 +917,11 @@ class BuiltinVariable(VariableTracker):
             val, next_iter = args[0].next_variables()
             tx.replace_all(args[0], next_iter)
             return val.add_guards(self.guards)
-        elif self.fn is hasattr and args and isinstance(args[0], NNModuleVariable):
+        elif self.fn is hasattr and args:
+            assert not kwargs
             obj, attr = args
-            mod = tx.get_submodule(obj.module_key)
             name = attr.as_python_constant()
-            result = hasattr(mod, name)
-            return ConstantVariable(result, **options).add_guard(
-                NNModuleSource(AttrSource(obj.source, name)).create_guard(
-                    GuardBuilder.HASATTR
-                )
-            )
+            return obj.call_hasattr(tx, name).add_guards(options["guards"])
         else:
             raise super().call_function(tx, args, kwargs)
 
@@ -1191,6 +1199,11 @@ class NamedTupleVariable(TupleVariable):
             unimplemented(f"NamedTupleVariable.{name}")
         return self.items[fields.index(name)].add_guards(self.guards)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        fields = namedtuple_fields(self.tuple_cls)
+        return ConstantVariable(name in fields, **options)
+
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
@@ -1396,7 +1409,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         options = VariableTracker.propagate([self])
 
         def wrap(val):
-            if isinstance(val, (tuple, list)):
+            if isinstance(val, dict):
+                return ConstDictVariable(
+                    {k: wrap(v) for k, v in val.items()}, **options
+                )
+            elif isinstance(val, (tuple, list)):
                 cls = BaseListVariable.cls_for(type(val))
                 return cls(list(map(wrap, val)), **options)
             elif ConstantVariable.is_literal(val):
@@ -1420,7 +1437,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         bound = inspect.signature(fake_func).bind(*args, **kwargs)
         bound.apply_defaults()
-        return dict(bound.arguments.items())
+        result = dict(bound.arguments.items())
+
+        for k, v in list(result.items()):
+            if isinstance(v, (tuple, dict)):
+                # args/kwargs
+                result[k] = wrap(v)
+
+        return result
 
     def export_freevars(self, parent, child):
         pass
@@ -1569,7 +1593,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 class UserDefinedClassVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(UserDefinedClassVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def as_python_constant(self):

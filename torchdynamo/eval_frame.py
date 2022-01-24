@@ -51,6 +51,12 @@ def catch_errors_wrapper(callback):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
                 return None
+            if (
+                frame.f_code.co_filename == "<string>"
+                and frame.f_code.co_name == "__new__"
+            ):
+                # nametuple constructor
+                return None
             return callback(frame, cache_size)
         except Exception:
             logging.basicConfig()

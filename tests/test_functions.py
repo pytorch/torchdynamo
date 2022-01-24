@@ -737,7 +737,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_namedtuple2(self):
         def fn(packed):
             a, b, c = packed
-            b = packed.b
+            if hasattr(packed, "b"):
+                b = packed.b + 1
             c = packed[2]
             return a + b + c
 
@@ -746,9 +747,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
         v3 = torch.Tensor([3])
         cnts = torchdynamo.testing.CompileCounter()
         with eval_frame.optimize(convert_frame_assert(cnts)):
-            self.assertEqual(fn(mytuple(v1, v2, v3))[0], 6)
+            self.assertEqual(fn(mytuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 3)
 
     def test_range_input(self):
         def fn(a, rng):
