@@ -792,6 +792,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return v1 - v2 + tmp
 
     @make_test
+    def test_list_add(a, b):
+        l1 = (a, b)
+        l2 = () # being a LOAD_CONST in the bytecode
+        l3 = l1 + l2
+        return l3[0] + l3[1]
+
+    @make_test
     def test_startswith(a, b):
         x = a + b
         if "foobar".startswith("foo") and "test" in constant3.__module__:

@@ -619,11 +619,22 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
+    def __str__(self):
+        return f"ConstantVariable({self.value})"
+
     def python_type(self):
         return type(self.value)
 
     def as_python_constant(self):
         return self.value
+
+    @property
+    def items(self):
+        """
+        Need this when adding a BaseListVariable and a ConstantVariable together.
+        Happens in detectron2.
+        """
+        return self.unpack_var_sequence(tx=None)
 
     def getitem_const(self, arg: VariableTracker):
         return ConstantVariable(
