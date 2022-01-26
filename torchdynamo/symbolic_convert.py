@@ -1057,7 +1057,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if config.trace:
             print("INLINING ", code)
-            print(dis.dis(code))
+            dis.dis(code)
             print()
 
         if is_generator(code):
