@@ -1,5 +1,6 @@
 import builtins
 import dataclasses
+import functools
 import itertools
 import math
 import operator
@@ -66,23 +67,29 @@ NORMALIZE_METHODS = {
     # "div": torch.div,
     "add_": operator.iadd,
     "all": torch.all,
+    "any": torch.any,
     "ceil": torch.ceil,
     "chunk": torch.chunk,
     "clamp": torch.clamp,
     "clone": torch.clone,
     "exp": torch.exp,
     "flatten": torch.flatten,
+    "flatten": torch.flatten,
     "flip": torch.flip,
     "floor": torch.floor,
+    "index_select": torch.index_select,
+    "log2": torch.log2,
     "log_softmax": torch.nn.functional.log_softmax,
     "max": torch.max,
     "mean": torch.mean,
     "min": torch.min,
     "mul_": operator.imul,
     "narrow": torch.narrow,
+    "ne": torch.ne,
     "nonzero": torch.nonzero,
     "numel": torch.numel,
     "pow": torch.pow,
+    "round": torch.round,
     "rsqrt": torch.rsqrt,
     "sigmoid": torch.sigmoid,
     "softmax": torch.nn.functional.softmax,
@@ -94,6 +101,7 @@ NORMALIZE_METHODS = {
     "topk": torch.topk,
     "transpose": torch.transpose,
     "tril": torch.tril,
+    "t": torch.t,
     "unbind": torch.unbind,
     "unsqueeze": torch.unsqueeze,
 }
@@ -127,8 +135,8 @@ IOPERATOR_REPLACEMENTS = {
     torch.sigmoid_: torch.sigmoid,
     operator.iadd: torch.add,
     operator.iand: torch.bitwise_and,
-    operator.ifloordiv: torch.ops.aten.floor_divide,
-    operator.itruediv: torch.ops.aten.true_divide,
+    operator.ifloordiv: functools.partial(torch.div, rounding_mode="floor"),
+    operator.itruediv: torch.div,
     operator.imul: torch.mul,
     operator.imatmul: torch.matmul,
     operator.ior: torch.bitwise_or,
@@ -146,7 +154,8 @@ OPERATOR_REPLACEMENTS = {
     operator.abs: torch.abs,
     operator.add: torch.add,
     operator.and_: torch.bitwise_and,
-    operator.floordiv: torch.ops.aten.floor_divide,
+    operator.floordiv: functools.partial(torch.div, rounding_mode="floor"),
+    # operator.truediv: torch.div,  # TODO(jansel): debug issue in vision_maskrcnn
     operator.inv: torch.bitwise_not,
     operator.invert: torch.bitwise_not,
     operator.mod: torch.remainder,
@@ -157,7 +166,6 @@ OPERATOR_REPLACEMENTS = {
     operator.pos: torch.positive,
     operator.pow: torch.pow,
     operator.sub: torch.sub,
-    # operator.truediv: torch.div,  # TODO(jansel): debug issue in vision_maskrcnn
     operator.xor: torch.bitwise_xor,
     torch.nn.functional.sigmoid: torch.sigmoid,
     torch.nn.functional.tanh: torch.tanh,
@@ -342,13 +350,20 @@ class Functionalization(Transformer):
             else:
                 counters["getattr"][args[1]] += 1
 
+        if isinstance(target, functools.partial):
+            assert not target.args
+            kwargs.update(target.keywords)
+            target = target.func
+
         if not issubclass(n.meta["type"], torch.Tensor):
             counters["nontensor"][long_name(self.module, n)] += 1
 
         result = getattr(self, n.op)(target, args, kwargs)
 
         for patch in patches:
-            assert isinstance(patch, torch.fx.Node)
+            assert isinstance(
+                patch, torch.fx.Node
+            ), f"{patch} {n.target} {n.args} {n.kwargs}"
             if patch in self.env:
                 self.env[patch] = result
 

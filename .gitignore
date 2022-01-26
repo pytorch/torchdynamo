@@ -8,3 +8,4 @@ subgraphs
 total_latency.tsv
 perf.db*
 *.csv
+env

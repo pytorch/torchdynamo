@@ -49,6 +49,7 @@ from .variable_source import NNModuleSource
 from .variable_source import Source
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
+from .variable_tracker import BlackHoleVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ClosureVariable
 from .variable_tracker import ConstantVariable
@@ -780,6 +781,15 @@ class InstructionTranslatorBase(fx.Tracer):
             self.push(GetAttrVariable(obj, name, **options))
 
     def STORE_ATTR(self, inst):
+        if isinstance(self.stack[-1], BlackHoleVariable):
+            val, obj = self.popn(2)
+            self.guards.update(
+                obj.call_method(
+                    self, "__setattr__", [ConstantVariable(inst.argval), val], {}
+                ).guards
+            )
+            return
+
         if not self.should_compile_partial_graph():
             unimplemented("inline STORE_ATTR")
         warning("breaking graph: STORE_ATTR")

@@ -28,11 +28,45 @@ lint:
 		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
 
 setup:
-	pip install flake8 black pytest onnxruntime-gpu tensorflow-gpu onnx-tf
+	pip install flake8 black pytest ninja tabulate onnxruntime-gpu tensorflow-gpu onnx-tf
 
 clean:
 	python setup.py clean
 	rm -rf build torchdynamo.egg-info torchdynamo/*.so
+
+clone-deps:
+	(cd .. \
+		&& (test -e pytorch || git clone --recursive https://github.com/pytorch/pytorch pytorch) \
+		&& (test -e functorch || git clone --recursive https://github.com/pytorch/functorch) \
+		&& (test -e torchvision || git clone --recursive https://github.com/pytorch/vision torchvision) \
+		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
+		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
+		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
+		&& (test -e torchbenchmark || git clone --recursive https://github.com/jansel/benchmark torchbenchmark) \
+	)
+
+pull-deps:
+	(cd ../pytorch        && git pull && git submodule update --init --recursive)
+	(cd ../functorch      && git pull && git submodule update --init --recursive)
+	(cd ../torchvision    && git pull && git submodule update --init --recursive)
+	(cd ../torchtext      && git pull && git submodule update --init --recursive)
+	(cd ../torchaudio     && git pull && git submodule update --init --recursive)
+	(cd ../detectron2     && git pull && git submodule update --init --recursive)
+	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
+
+build-deps: clone-deps
+	# conda create --prefix `pwd`/env python=3.8
+	# conda activate `pwd`/env
+	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+	conda install -y -c pytorch magma-cuda113
+	make setup
+	(cd ../pytorch     && python setup.py clean && env LDFLAGS="-lncurses" python setup.py develop)
+	(cd ../functorch   && python setup.py clean && python setup.py develop)
+	(cd ../torchvision && python setup.py clean && python setup.py develop)
+	(cd ../torchtext   && python setup.py clean && python setup.py develop)
+	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
+	(cd ../detectron2  && python setup.py clean && python setup.py develop)
+	(cd ../torchbenchmark && python install.py)
 
 autotune-cpu: develop
 	rm -rf subgraphs

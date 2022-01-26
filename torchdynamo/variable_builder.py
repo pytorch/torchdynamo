@@ -20,6 +20,7 @@ from .utils import warning
 from .variable_source import GetItemSource
 from .variable_source import Source
 from .variable_tracker import AllowedFunctionOrModuleVariable
+from .variable_tracker import AutogradFunctionVariable
 from .variable_tracker import BuiltinVariable
 from .variable_tracker import ConstantVariable
 from .variable_tracker import ConstDictVariable
@@ -31,10 +32,10 @@ from .variable_tracker import PythonModuleVariable
 from .variable_tracker import RangeVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
+from .variable_tracker import typestr
 from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserDefinedClassVariable
 from .variable_tracker import UserFunctionVariable
-from .variable_tracker import typestr
 
 
 @dataclasses.dataclass
@@ -163,6 +164,10 @@ class VariableBuilder:
             return LambdaVariable(
                 InspectSignatureVariable.create,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif type(value) is torch.autograd.function.FunctionMeta:
+            return AutogradFunctionVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         else:
             warning(f"UnsupportedVariable {typestr(value)}")

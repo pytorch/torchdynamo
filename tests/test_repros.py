@@ -155,24 +155,7 @@ class _ReversibleFunction(torch.autograd.Function):
             if output_hidden_states is True:
                 all_hidden_states.append(hidden_states)
 
-            layer_outputs = layer(
-                prev_attn_output=attn_output,
-                hidden_states=hidden_states,
-                attention_mask=attention_mask,
-                head_mask=layer_head_mask,
-                num_hashes=num_hashes,
-                past_buckets_states=past_buckets_states,
-                use_cache=use_cache,
-                orig_sequence_length=orig_sequence_length,
-                output_attentions=output_attentions,
-            )
-
-            attn_output = layer_outputs.attn_output
-            hidden_states = layer_outputs.hidden_states
-            all_buckets = all_buckets + (layer_outputs.buckets,)
-
-            if output_attentions:
-                all_attentions.append(layer_outputs.attention_probs)
+            attn_output = layer(attn_output)
 
         # Add last layer
         if output_hidden_states is True:
@@ -257,7 +240,7 @@ class ReformerEncoder(torch.nn.Module):
         super().__init__()
         self.dropout = 0.5
         self.layer_norm = torch.nn.LayerNorm(512, eps=1.0e-12)
-        self.layers = []
+        self.layers = [torch.nn.Linear(256, 256)]
 
     def forward(
         self,
@@ -514,18 +497,29 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    def test_reformer(self):
+    def _reformer(self):
         input = torch.randn([1, 64, 256])
         model = ReformerEncoder()
         torch.manual_seed(1337)
         correct = copy.deepcopy(model)(input)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnt)):
+        with eval_frame.optimize(convert_frame_assert(cnt)):
             torch.manual_seed(1337)
             self.assertTrue(same(model(input), correct))
+        return cnt
 
+    def test_reformer_eval(self):
+        with torch.no_grad():
+            cnt = self._reformer()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 10)
+
+    def test_reformer_train(self):
+        with torch.enable_grad():
+            cnt = self._reformer()
+        # cant inline torch.autograd.Function means graph break
         self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, 9)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])

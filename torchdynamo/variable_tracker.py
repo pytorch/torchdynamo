@@ -104,12 +104,14 @@ class VariableTracker:
 
         idx = id(value)
         if idx in cache:
-            return cache[idx]
+            return cache[idx][0]
 
         if isinstance(value, VariableTracker):
             result = fn(value.clone(**cls.apply(fn, value.__dict__, cache)))
         elif isinstance(value, list):
             result = [cls.apply(fn, v, cache) for v in value]
+        elif isinstance(value, tuple):
+            result = tuple(cls.apply(fn, v, cache) for v in value)
         elif isinstance(value, collections.OrderedDict):
             result = collections.OrderedDict(
                 cls.apply(fn, v, cache) for v in value.items()
@@ -119,7 +121,8 @@ class VariableTracker:
         else:
             result = value
 
-        cache[idx] = result
+        # save `value` to keep it alive and ensure id() isn't reused
+        cache[idx] = (result, value)
         return result
 
     def add_guard(self, guard):
@@ -408,7 +411,7 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("item", "tolist", "numpy"):
+        elif name in ("item", "tolist", "numpy", "nonzero"):
             unimplemented(f"Tensor.{name}")
         elif name == "__len__":
             if self.size:
@@ -468,6 +471,10 @@ class NNModuleVariable(VariableTracker):
                 GuardBuilder.HASATTR
             )
         )
+
+    def is_training(self, tx):
+        mod = tx.get_submodule(self.module_key)
+        return getattr(mod, "training", False)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -819,10 +826,15 @@ class BuiltinVariable(VariableTracker):
 
         if self.can_insert_in_graph() and tensor_args:
             try:
+                fn = self.fn
+                if self.fn is operator.iadd and isinstance(args[0], ConstantVariable):
+                    # Work around weird bug in hf_T5
+                    fn, args = operator.add, [args[1], args[0]]
+
                 return TensorVariable.create(
                     tx.create_proxy(
                         "call_function",
-                        self.fn,
+                        fn,
                         *proxy_args_kwargs(args, kwargs),
                     ),
                     **options,
@@ -997,6 +1009,8 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
+            return self.obj.call_apply(tx, args, kwargs).add_guards(self.guards)
         return self.obj.call_method(tx, self.name, args, kwargs).add_guards(self.guards)
 
     def call_method(
@@ -1987,6 +2001,55 @@ class InspectSignatureVariable(VariableTracker):
     def __init__(self, inspected, **kwargs):
         super(InspectSignatureVariable, self).__init__(**kwargs)
         self.inspected = inspected
+
+
+class AutogradFunctionVariable(VariableTracker):
+    """represents a torch.autograd.Function subclass"""
+
+    def __init__(self, fn_cls, **kwargs):
+        super().__init__(**kwargs)
+        self.fn_cls = fn_cls
+
+    def call_apply(self, tx, args, kwargs):
+        requires_grad = False
+
+        def visit(node):
+            nonlocal requires_grad
+            if isinstance(node, TensorVariable):
+                if node.requires_grad is not False:
+                    requires_grad = True
+            if isinstance(node, NNModuleVariable):
+                if node.is_training(tx):
+                    requires_grad = True
+            return node
+
+        VariableTracker.apply(visit, (args, kwargs))
+
+        if requires_grad and torch.is_grad_enabled():
+            # TODO(jansel): handle this in training mode
+            unimplemented("autograd.Function with requires_grad")
+
+        args = [BlackHoleVariable()] + list(args)
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return UserFunctionVariable(self.fn_cls.forward, **options).call_function(
+            tx, args, kwargs
+        )
+
+
+class BlackHoleVariable(VariableTracker):
+    """A autograd.function context that just ignores everything (for forward extraction)"""
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert name in ("__setattr__", "save_for_backward"), name
+        return ConstantVariable(
+            None, **VariableTracker.propagate(self, args, kwargs.values())
+        )
 
 
 def typestr(*objs):

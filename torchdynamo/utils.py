@@ -169,12 +169,12 @@ def torchscript(model, example_inputs, verbose=True):
         return model
 
     try:
-        return torch.jit.script(model)
+        return torch.jit.trace(model, example_inputs)
     except Exception:
         if verbose:
             log.exception("jit error")
         try:
-            return torch.jit.trace(model, example_inputs)
+            return torch.jit.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")
@@ -195,12 +195,15 @@ def is_namedtuple(obj):
 
 def is_namedtuple_cls(cls):
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
-    if issubclass(cls, tuple):
-        bases = getattr(cls, "__bases__", []) or [None]
-        module = getattr(cls, "__module__", None)
-        return module == "torch.return_types" or (
-            bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
-        )
+    try:
+        if issubclass(cls, tuple):
+            bases = getattr(cls, "__bases__", []) or [None]
+            module = getattr(cls, "__module__", None)
+            return module == "torch.return_types" or (
+                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
+            )
+    except TypeError:
+        pass
     return False
 
 
