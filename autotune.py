@@ -94,9 +94,8 @@ def main():
     elif args.stats:
         rows = []
         for name in list_subgraphs(args):
-            keys, values = json.loads(
-                os.path.join(config.base_dir, "subgraphs", name, "stats.json")
-            )
+            with open(os.path.join(config.base_dir, "subgraphs", name, "stats.json")) as f:
+                keys, values = json.load(f)
             rows.append(OrderedDict(zip(keys, values)))
         headers = OrderedDict()
         for row in rows:
@@ -141,8 +140,8 @@ def list_subgraphs(args):
                 return
 
 
-def run(args, name):
-    subgraph = SubGraph.load(name)
+def run(args, graph_name):
+    subgraph = SubGraph.load(graph_name)
 
     # these next lines control which backends to try
     # for a list see torchdynamo/optimizations/backends.py
@@ -201,7 +200,7 @@ def run(args, name):
         format_speedup(s, p, c) for s, p, c in zip(speedups, pvalues, is_corrects[1:])
     ]
     sec = float(np.mean(timings[:, 0]))
-    row = [name, f"{sec:.4f}"] + results
+    row = [graph_name, f"{sec:.4f}"] + results
     names = [k for k, v in models]
     headers = ["name", "sec"] + names[1:]
     print(tabulate([row], headers=headers))
