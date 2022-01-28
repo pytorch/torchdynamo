@@ -2,9 +2,6 @@
 #include <Python.h>
 #include <torch/extension.h>
 
-// comment out for backends with dynamic shape support
-#define SPECIALIZE_SHAPES_AND_STRIDES
-
 namespace {
 
 struct LocalState {
@@ -23,10 +20,12 @@ struct LocalState {
 
 class TensorCheck {
 public:
-  TensorCheck(const LocalState &state, PyTypeObject *pt, const at::Tensor &v)
+  TensorCheck(const LocalState &state, PyTypeObject *pt, const at::Tensor &v,
+              bool dynamic_shapes)
       : pytype(pt), dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
-        requires_grad_(state.grad_mode_enabled && v.requires_grad()) {
+        requires_grad_(state.grad_mode_enabled && v.requires_grad()),
+        dynamic_shapes_(dynamic_shapes) {
     auto ndim = v.ndimension();
     const auto &sizes = v.sizes();
     const auto &strides = v.strides();
@@ -48,15 +47,15 @@ public:
     if (ndim != sizes_.size()) {
       return false;
     }
-#ifdef SPECIALIZE_SHAPES_AND_STRIDES
-    const auto &sizes = v.sizes();
-    const auto &strides = v.strides();
-    for (size_t i = 0; i < ndim; ++i) {
-      if (sizes_[i] != sizes[i] || strides_[i] != strides[i]) {
-        return false;
+    if (!dynamic_shapes_) {
+      const auto &sizes = v.sizes();
+      const auto &strides = v.strides();
+      for (size_t i = 0; i < ndim; ++i) {
+        if (sizes_[i] != sizes[i] || strides_[i] != strides[i]) {
+          return false;
+        }
       }
     }
-#endif
     return true;
   }
 
@@ -66,6 +65,7 @@ private:
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   at::ScalarType dtype_;
   bool requires_grad_;
+  bool dynamic_shapes_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
 };
@@ -100,6 +100,13 @@ static int TensorGuards_init(TensorGuards *self, PyObject *args,
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
     return -1;
   }
+  PyObject *dynamic_shapes_py = PyDict_GetItemString(kwds, "dynamic_shapes");
+  if (dynamic_shapes_py == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing dynamic_shapes=...");
+    return -1;
+  }
+  bool dynamic_shapes = PyObject_IsTrue(dynamic_shapes_py);
+
   auto &checks = *self->checks;
   ssize_t len = PyTuple_GET_SIZE(args);
   checks.reserve(len);
@@ -110,8 +117,8 @@ static int TensorGuards_init(TensorGuards *self, PyObject *args,
       PyErr_SetString(PyExc_TypeError, "expected Tensor()");
       return -1;
     }
-    checks.emplace_back(
-        TensorCheck(state, Py_TYPE(item), THPVariable_Unpack(item)));
+    checks.emplace_back(TensorCheck(state, Py_TYPE(item),
+                                    THPVariable_Unpack(item), dynamic_shapes));
   }
   return 0;
 }

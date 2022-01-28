@@ -233,7 +233,9 @@ class GuardedCode:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
-            check_tensors_fn = TensorGuards(*tensor_check_examples).check
+            check_tensors_fn = TensorGuards(
+                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+            ).check
             code.append(f"___check_tensors({', '.join(tensor_check_names)})")
 
         code = " and ".join(code)

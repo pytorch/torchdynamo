@@ -1,4 +1,6 @@
 #!/usr/bin/env pytest
+from unittest.mock import patch
+
 import torch
 
 import torchdynamo.testing
@@ -334,3 +336,26 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 1, 3)
+
+    def test_dynamic_shapes(self):
+        def fn(a, b):
+            return a - b * 10
+
+        torchdynamo.reset()
+        cnt_static = torchdynamo.testing.CompileCounter()
+        with patch("torchdynamo.config.dynamic_shapes", False), torchdynamo.optimize(
+            cnt_static
+        ):
+            for i in range(10):
+                fn(torch.randn(i), torch.randn(i))
+        self.assertEqual(cnt_static.frame_count, 10)
+
+        torchdynamo.reset()
+        cnt_dynamic = torchdynamo.testing.CompileCounter()
+        with patch("torchdynamo.config.dynamic_shapes", True), torchdynamo.optimize(
+            cnt_dynamic
+        ):
+            for i in range(10):
+                fn(torch.randn(i), torch.randn(i))
+        # just one graph now rather than 10
+        self.assertEqual(cnt_dynamic.frame_count, 1)
