@@ -32,10 +32,10 @@ from .variable_tracker import PythonModuleVariable
 from .variable_tracker import RangeVariable
 from .variable_tracker import TensorVariable
 from .variable_tracker import TupleVariable
-from .variable_tracker import typestr
 from .variable_tracker import UnsupportedVariable
 from .variable_tracker import UserDefinedClassVariable
 from .variable_tracker import UserFunctionVariable
+from .variable_tracker import typestr
 
 
 @dataclasses.dataclass

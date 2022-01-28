@@ -145,9 +145,9 @@ A useful (test driven development) workflow when adding a feature is:
 
 ## Linting and automatic code formatting
 
-This project is auto-formatted with [black](https://github.com/psf/black)
-and [clang-format](https://clang.llvm.org/docs/ClangFormat.html).
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
-- `pip install flake8 black` first, then:
+Install format/linter deps with `make setup`, then:
 - `make format` to reformat all files
 - `make lint` to run linters

@@ -18,8 +18,8 @@ import types
 import typing
 import unittest
 import weakref
-import _weakrefset
 
+import _weakrefset
 import torch
 
 SKIP_DIRS = [

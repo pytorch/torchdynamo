@@ -267,10 +267,10 @@ def _raise_timeout(signum, frame):
 
 @create_backend
 def fx2trt(subgraph):
+    import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
     from torch.fx.experimental.fx2trt.fx2trt import InputTensorSpec
     from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter
     from torch.fx.experimental.fx2trt.trt_module import TRTModule
-    import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 
     signal.signal(signal.SIGALRM, _raise_timeout)
     signal.alarm(120)  # fx2trt infinite loops sometimes
@@ -462,7 +462,8 @@ def llvm_target():
 def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=False):
     # based on functorch version in eager_compile.py
     import tvm
-    from tvm import relay, auto_scheduler
+    from tvm import auto_scheduler
+    from tvm import relay
     from tvm.contrib import graph_executor
 
     shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]

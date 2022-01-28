@@ -18,6 +18,7 @@ overhead: develop
 	python torchbench.py --overhead
 
 format:
+	isort $(PY_FILES)
 	black $(PY_FILES)
 	clang-format-10 -i $(C_FILES)
 
@@ -28,7 +29,7 @@ lint:
 		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
 
 setup:
-	pip install flake8 black pytest ninja tabulate onnxruntime-gpu tensorflow-gpu onnx-tf
+	pip install flake8 black "isort>=5.10.1" pytest ninja tabulate onnxruntime-gpu tensorflow-gpu onnx-tf
 
 clean:
 	python setup.py clean

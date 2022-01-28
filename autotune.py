@@ -23,7 +23,6 @@ from torchdynamo.optimizations.subgraph import SubGraph
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 
-
 synchronize = torch.cuda.synchronize
 
 

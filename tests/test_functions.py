@@ -12,9 +12,9 @@ import torchdynamo.testing
 from torchdynamo import eval_frame
 from torchdynamo.convert_frame import convert_frame
 from torchdynamo.convert_frame import convert_frame_assert
-from torchdynamo.testing import unsupported
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
+from torchdynamo.testing import unsupported
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)

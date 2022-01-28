@@ -1,5 +1,6 @@
 import dataclasses
-from typing import List, Any
+from typing import Any
+from typing import List
 
 import torch
 

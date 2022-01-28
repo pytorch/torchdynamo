@@ -5,9 +5,9 @@ import unittest
 import torch
 
 import torchdynamo
+from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
-from torchdynamo.optimizations.inference import user_compiler
 from torchdynamo.testing import same
 
 

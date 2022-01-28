@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import collections
+import copy
 import csv
 import functools
 import gc
@@ -17,7 +18,6 @@ import warnings
 from os.path import abspath
 from os.path import exists
 
-import copy
 import numpy as np
 import pandas as pd
 import torch
