@@ -59,10 +59,6 @@ class NullContext:
         pass
 
 
-def null_print(*args):
-    pass
-
-
 def synchronize():
     pass
 
@@ -70,16 +66,6 @@ def synchronize():
 def short_name(name, limit=20):
     """Truncate a model name to limit chars"""
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
-
-
-def global_fixes():
-    # TODO(jansel): upstream these into torchbenchmark
-    from fastNLP.core import logger
-    from pycocotools import coco
-
-    # silence some spam
-    coco.print = null_print
-    logger.setLevel(logging.WARNING)
 
 
 def iter_models(args):
@@ -170,6 +156,13 @@ def output_csv(headers, row):
 
 
 def coverage_experiment(coverage_results, model, example_inputs):
+    """
+    Test operator/model coverage of TorchDynamo and record statistics
+    taken from a profiler.  This target is mainly intended to check
+    correctness.
+
+    Writes to ./coverage.csv
+    """
     profiler = Profiler()
     with profiler.prof, torchdynamo.run():
         model(*example_inputs)
@@ -187,6 +180,14 @@ def coverage_experiment(coverage_results, model, example_inputs):
 
 
 def speedup_experiment(args, model, example_inputs):
+    """
+    Measure speedups over eager using the autotuning inference backend.  To use this:
+        1) First run once to record graphs that need autotuning
+        2) Next run ./autotune.py to select the right backend for each recorded graph
+        3) Finally, run this target again to measure speedups
+
+    Writes to ./speedups.csv
+    """
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
@@ -202,7 +203,20 @@ def speedup_experiment(args, model, example_inputs):
     return format_speedup(speedup, pvalue)
 
 
+def overhead_experiment(*args):
+    """
+    Measure overheads of TorchDynamo by running with no backend (only
+    eager+FX), and reporting speedup/slowdown over eager.
+
+    Writes to ./overheads.csv
+    """
+    return speedup_experiment(*args)
+
+
 def baselines(models, example_inputs, args):
+    """
+    Common measurement code across all baseline experiments.
+    """
     models = list(models)
     for idx, (name, model) in enumerate(models):
         if idx == 0:
@@ -252,6 +266,11 @@ def try_script(model, example_inputs):
 
 
 def speedup_experiment_ts(args, model, example_inputs):
+    """
+    Measure baseline performance (without using TorchDynamo) of TorchScript and optimize_for_inference.
+
+    Writes to ./baseline_ts.csv
+    """
     return baselines(
         [
             ("eager", model),
@@ -269,6 +288,12 @@ def speedup_experiment_ts(args, model, example_inputs):
 
 
 def speedup_experiment_sr(args, model, example_inputs):
+    """
+    Measure baseline performance (without using TorchDynamo) of static runtime.
+
+    Writes to ./baseline_sr.csv
+    """
+
     if current_name not in ("opacus_cifar10", "timm_nfnet", "hf_T5"):
         sr = backends.static_runtime(try_script(model, example_inputs), example_inputs)
     else:
@@ -288,6 +313,11 @@ def speedup_experiment_sr(args, model, example_inputs):
 
 
 def speedup_experiment_onnx(args, model, example_inputs):
+    """
+    Measure baseline performance (without using TorchDynamo) of ONNXRT and TensorFlow.
+
+    Writes to ./baseline_onnx.csv
+    """
     if current_device == "cpu":
         m_onnxrt = backends.onnxrt_cpu(
             try_script(model, example_inputs), example_inputs
@@ -315,6 +345,11 @@ def speedup_experiment_onnx(args, model, example_inputs):
 
 
 def speedup_experiment_trt(args, model, example_inputs):
+    """
+    Measure baseline performance (without using TorchDynamo) of TensorRT.
+
+    Writes to ./baseline_trt.csv
+    """
     m_onnx2trt = backends.onnx2tensorrt(
         try_script(model, example_inputs), example_inputs
     )
@@ -340,6 +375,10 @@ def speedup_experiment_trt(args, model, example_inputs):
 
 
 def null_experiment(model, example_inputs):
+    """
+    A no-op experiment useful for making sure TorchBenchark alone works properly.
+    """
+
     return []
 
 
@@ -350,57 +389,71 @@ def pick_grad(name):
         return torch.no_grad()
 
 
+def help(fn):
+    return fn.__doc__
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--filter", "-k", action="append", help="filter benchmarks")
-    parser.add_argument("--exclude", "-x", action="append", help="filter benchmarks")
+    parser.add_argument(
+        "--filter", "-k", action="append", help="filter benchmarks with regexp"
+    )
+    parser.add_argument(
+        "--exclude", "-x", action="append", help="filter benchmarks with regexp"
+    )
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
-    parser.add_argument("--threads", "-t", type=int, help="number of threads to use")
-    parser.add_argument("--verbose", "-v", action="store_true", help="show errors")
     parser.add_argument(
-        "--no-skip", action="store_true", help="run models that don't fx cleanly"
-    )
-    parser.add_argument("--overhead", action="store_true", help="measure overheads")
-    parser.add_argument(
-        "--speedup", action="store_true", help="measure speedup with default passes"
+        "--threads", "-t", type=int, help="number of threads to use for eager"
     )
     parser.add_argument(
-        "--speedup-ts",
+        "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
+    )
+    parser.add_argument(
+        "--no-skip",
         action="store_true",
-        help="baselines comparing against torchscript",
-    )
-    parser.add_argument(
-        "--speedup-sr",
-        action="store_true",
-        help="baselines comparing against static runtime",
-    )
-    parser.add_argument(
-        "--speedup-onnx", action="store_true", help="baselines comparing against onnxrt"
-    )
-    parser.add_argument(
-        "--speedup-trt",
-        action="store_true",
-        help="baselines comparing against tensorrt",
+        help="run models that are in the global SKIP list",
     )
     parser.add_argument(
         "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
     parser.add_argument(
-        "--nothing", action="store_true", help="just check the benchmark works"
-    )
-    parser.add_argument(
-        "--nops", action="store_true", help="check bytecode rewriting works"
-    )
-    parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
     )
+    parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
-        "--only",
+        "--minimum-call-count", type=int, help="filter out graphs with too few ops"
     )
-    parser.add_argument("--minimum-call-count", type=int)
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
+    )
+    group.add_argument("--speedup", action="store_true", help=help(speedup_experiment))
+    group.add_argument(
+        "--overhead", action="store_true", help=help(overhead_experiment)
+    )
+    group.add_argument(
+        "--speedup-ts", action="store_true", help=help(speedup_experiment_ts)
+    )
+    group.add_argument(
+        "--speedup-sr", action="store_true", help=help(speedup_experiment_sr)
+    )
+    group.add_argument(
+        "--speedup-onnx", action="store_true", help=help(speedup_experiment_onnx)
+    )
+    group.add_argument(
+        "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
+    )
+    group.add_argument("--nothing", action="store_true", help=help(null_experiment))
+    group.add_argument(
+        "--nops",
+        action="store_true",
+        help="Test that bytecode rewriting works properly.",
+    )
+
     args = parser.parse_args()
 
     # defaults
@@ -555,7 +608,7 @@ def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
             model(*example_inputs)
         _, frames_second_pass = Stats.reset_counters()  # should be 0
         if "coverage" in output_filename:
-            results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
+            results.append(f"{ok:4}/{total:4} frames (+{frames_second_pass:2}),")
 
         results.append(experiment(model, example_inputs))
         print(" ".join(map(str, results)))

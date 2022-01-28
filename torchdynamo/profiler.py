@@ -57,7 +57,7 @@ class ProfileResult:
 
     def __str__(self):
         return (
-            f"{self.captured.graphs:2} graphs {self.captured.operators:4}/{self.total.operators:4} ops, "
+            f"{self.captured.graphs:3} graphs {self.captured.operators:4}/{self.total.operators:4} ops, "
             + str(self.percent())
         )
 
