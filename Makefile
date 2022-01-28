@@ -9,7 +9,7 @@ develop:
 	python setup.py develop
 
 test: develop
-	pytest -v
+	pytest tests
 
 torchbench: develop
 	python torchbench.py
@@ -29,7 +29,7 @@ lint:
 		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
 
 setup:
-	pip install flake8 black "isort>=5.10.1" pytest ninja tabulate onnxruntime-gpu tensorflow-gpu onnx-tf
+	pip install -r requirements.txt
 
 clean:
 	python setup.py clean

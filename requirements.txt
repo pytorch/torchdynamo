@@ -1,0 +1,11 @@
+black
+flake8
+isort>=5.10.1
+ninja
+onnxruntime-gpu
+onnx-tf
+pytest
+tabulate
+tabulate
+tensorflow-gpu
+torch

@@ -1373,7 +1373,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         nargs = len(self.stack) + len(argnames)
 
-        name = unique_id(f"__resume_at_{self.next_instruction.offset}")
+        name = unique_id(f"__resume_at_{inst.offset}")
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code, inst.offset, len(self.stack), argnames
