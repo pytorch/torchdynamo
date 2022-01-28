@@ -9,6 +9,7 @@ class ProfileMetrics:
     microseconds: float = 0.0
     operators: int = 0
     fusions: int = 0
+    graphs: int = 0
 
     def __iadd__(self, other: "ProfileMetrics"):
         self.microseconds += other.microseconds
@@ -34,7 +35,10 @@ class ProfileMetrics:
         )
 
     def __str__(self):
-        return f"{self.operators:4.0%} ops {self.fusions:4.0%} fusions {self.microseconds:4.0%} time"
+        return f"{self.operators:4.0%} ops {self.microseconds:4.0%} time"
+
+    def tocsv(self):
+        return [self.operators, self.microseconds]
 
 
 class ProfileResult:
@@ -51,9 +55,17 @@ class ProfileResult:
         return self.captured / self.total
 
     def __str__(self):
-        return f"{self.captured.operators:3}/{self.total.operators:3} = " + str(
-            self.percent()
+        return (
+            f"{self.captured.graphs:2} graphs {self.captured.operators:4}/{self.total.operators:4} ops, "
+            + str(self.percent())
         )
+
+    def tocsv(self):
+        return self.percent().tocsv() + [
+            self.captured.operators,
+            self.total.operators - self.captured.operators,
+            self.captured.graphs,
+        ]
 
 
 class Profiler:
@@ -91,6 +103,7 @@ class Profiler:
                 microseconds=captured_microseconds,
                 operators=captured_ops,
                 fusions=captured_ops - captured_regions,
+                graphs=captured_regions,
             ),
             total=ProfileMetrics(
                 microseconds=total_microseconds,

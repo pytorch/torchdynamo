@@ -424,8 +424,10 @@ class TensorVariable(VariableTracker):
                 )
         elif name == "__setitem__":
             tx.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-            ),
+                "call_function",
+                operator.setitem,
+                *proxy_args_kwargs([self] + args, kwargs),
+            )
             return ConstantVariable(None, **options)
         else:
             return TensorVariable.create(

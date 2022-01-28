@@ -74,7 +74,6 @@ NORMALIZE_METHODS = {
     "clone": torch.clone,
     "exp": torch.exp,
     "flatten": torch.flatten,
-    "flatten": torch.flatten,
     "flip": torch.flip,
     "floor": torch.floor,
     "index_select": torch.index_select,

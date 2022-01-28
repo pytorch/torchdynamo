@@ -94,7 +94,9 @@ def main():
     elif args.stats:
         rows = []
         for name in list_subgraphs(args):
-            with open(os.path.join(config.base_dir, "subgraphs", name, "stats.json")) as f:
+            with open(
+                os.path.join(config.base_dir, "subgraphs", name, "stats.json")
+            ) as f:
                 keys, values = json.load(f)
             rows.append(OrderedDict(zip(keys, values)))
         headers = OrderedDict()

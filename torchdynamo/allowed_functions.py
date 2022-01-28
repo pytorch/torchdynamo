@@ -54,7 +54,8 @@ def _allowed_function_ids():
     _find_torch_objects(math)
 
     for idx in _disallowed_function_ids():
-        del torch_object_ids[idx]
+        if idx in torch_object_ids:
+            del torch_object_ids[idx]
 
     return torch_object_ids
 

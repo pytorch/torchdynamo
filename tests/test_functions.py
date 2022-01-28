@@ -794,7 +794,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_list_add(a, b):
         l1 = (a, b)
-        l2 = () # being a LOAD_CONST in the bytecode
+        l2 = ()  # being a LOAD_CONST in the bytecode
         l3 = l1 + l2
         return l3[0] + l3[1]
 

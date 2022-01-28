@@ -112,6 +112,21 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
     record_graph_stats(gm)
     gm.recompile()
 
+    if False:
+        try:
+            scripted = torch.jit.script(gm)
+        except Exception:
+            scripted = torch.jit.trace(gm, example_inputs)
+
+        correct = gm.forward(*example_inputs)
+        result = scripted(*example_inputs)
+        from torchdynamo.testing import same
+
+        if same(result, correct):
+            return scripted
+        print("SCRIPTED INCORRECT")
+        return gm.forward
+
     path = folder_name(gm, example_inputs)
     if not os.path.exists(path):
         if count_calls(gm.graph) >= config.minimum_call_count:

@@ -1,37 +1,38 @@
 #!/usr/bin/env python
 import argparse
 import collections
-import copy
 import csv
 import functools
 import gc
+import importlib
 import io
 import itertools
 import logging
 import os
 import re
+import subprocess
 import sys
-import textwrap
 import time
 import warnings
 from os.path import abspath
 from os.path import exists
 
+import copy
 import numpy as np
+import pandas as pd
 import torch
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
 
+import torchdynamo
 import torchdynamo.utils
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.inference import user_compiler
-from torchdynamo.profiler import fx_insert_profiling
-from torchdynamo.profiler import ProfileMetrics
 from torchdynamo.profiler import Profiler
+from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
-import torchdynamo
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 torchbench_dir = abspath(
@@ -47,6 +48,7 @@ SKIP = {
 }
 current_name = ""
 current_device = ""
+output_filename = None
 
 
 class NullContext:
@@ -71,6 +73,7 @@ def short_name(name, limit=20):
 
 
 def global_fixes():
+    # TODO(jansel): upstream these into torchbenchmark
     from fastNLP.core import logger
     from pycocotools import coco
 
@@ -78,36 +81,45 @@ def global_fixes():
     coco.print = null_print
     logger.setLevel(logging.WARNING)
 
-    # TODO(jansel): remove when https://github.com/pytorch/pytorch/pull/70459 lands
-    torch.nn.modules.utils._pair.__name__ = "_pair"
-
 
 def iter_models(args):
-    from torchbenchmark import list_models  # noqa
-
-    global_fixes()
-
-    for benchmark_cls in list_models():
-        if (
-            not re.search("|".join(args.filter), benchmark_cls.name, re.I)
-            or re.search("|".join(args.exclude), benchmark_cls.name, re.I)
-            or benchmark_cls.name in SKIP
-        ):
-            continue
+    for model_name in iter_model_names(args):
         for device in args.devices:
             try:
-                benchmark = benchmark_cls(device=device, jit=False)
-                model, example_inputs = benchmark.get_module()
-                model.eval()
-                gc.collect()
-                global current_name, current_device
-                current_device = device
-                current_name = short_name(benchmark.name)
-                yield device, current_name, model, example_inputs
+                yield load_model(device, model_name)
             except NotImplementedError:
-                pass
-            except Exception:
-                log.exception(f"misconfigured model {benchmark_cls.name}")
+                continue  # bad benchmark implementation
+
+
+def iter_model_names(args):
+    from torchbenchmark import _list_model_paths
+
+    for model_path in _list_model_paths():
+        model_name = os.path.basename(model_path)
+        if (
+            not re.search("|".join(args.filter), model_name, re.I)
+            or re.search("|".join(args.exclude), model_name, re.I)
+            or model_name in SKIP
+            or short_name(model_name) in SKIP
+        ):
+            continue
+
+        yield model_name
+
+
+def load_model(device, model_name):
+    module = importlib.import_module(f"torchbenchmark.models.{model_name}")
+    benchmark_cls = getattr(module, "Model", None)
+    if not hasattr(benchmark_cls, "name"):
+        benchmark_cls.name = model_name
+    benchmark = benchmark_cls(device=device, jit=False)
+    model, example_inputs = benchmark.get_module()
+    model.eval()
+    gc.collect()
+    global current_name, current_device
+    current_device = device
+    current_name = short_name(benchmark.name)
+    return device, current_name, model, example_inputs
 
 
 def timed(model, example_inputs, times=1):
@@ -141,16 +153,40 @@ class Stats:
             print(f"STATS {k}\n  {lines}")
 
 
+def output_csv(headers, row):
+    assert output_filename
+    existed = os.path.exists(output_filename)
+    output = csv.writer(
+        io.TextIOWrapper(
+            open(output_filename, "ab", buffering=0),
+            "utf-8",
+            write_through=True,
+        ),
+        lineterminator="\n",
+    )
+    if not existed:
+        output.writerow(headers)
+    output.writerow([(f"{x:.4f}" if isinstance(x, float) else x) for x in row])
+
+
 def coverage_experiment(coverage_results, model, example_inputs):
     profiler = Profiler()
     with profiler.prof, torchdynamo.run():
         model(*example_inputs)
     coverage_result = profiler.results()
     coverage_results.append(coverage_result.percent())
+    output_csv(
+        ("dev", "name", "operators", "time", "captured", "uncaptured", "graphs"),
+        [
+            current_device,
+            current_name,
+        ]
+        + coverage_result.tocsv(),
+    )
     return coverage_result
 
 
-def speedup_experiment(speedups, args, model, example_inputs):
+def speedup_experiment(args, model, example_inputs):
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
@@ -160,29 +196,13 @@ def speedup_experiment(speedups, args, model, example_inputs):
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
-    speedups.append(speedup)
     output_csv(
-        "speedups.csv",
-        ("dev", "name", "speedup"),
-    ).writerow([current_device, current_name, f"{speedup:.4f}"])
+        ("dev", "name", "speedup"), [current_device, current_name, float(speedup)]
+    )
     return format_speedup(speedup, pvalue)
 
 
-@functools.lru_cache(1)
-def output_csv(name, headers):
-    output = csv.writer(
-        io.TextIOWrapper(
-            open(os.path.join(torchdynamo.config.base_dir, name), "wb", buffering=0),
-            "utf-8",
-            write_through=True,
-        ),
-        lineterminator="\n",
-    )
-    output.writerow(headers)
-    return output
-
-
-def baselines(models, example_inputs, args, speedups, filaname="baselines"):
+def baselines(models, example_inputs, args):
     models = list(models)
     for idx, (name, model) in enumerate(models):
         if idx == 0:
@@ -211,7 +231,6 @@ def baselines(models, example_inputs, args, speedups, filaname="baselines"):
     for idx, (name, model) in enumerate(models[1:]):
         if model is None:
             speedup[idx] = 0.0
-    speedups.append(speedup)
     result = " ".join(
         [
             format_speedup(s, p, m is not None)
@@ -219,9 +238,9 @@ def baselines(models, example_inputs, args, speedups, filaname="baselines"):
         ]
     )
     output_csv(
-        f"{filaname}.csv",
         ("dev", "name") + tuple(n for n, m in models[1:]),
-    ).writerow([current_device, current_name] + [f"{x:.4f}" for x in speedup])
+        [current_device, current_name] + [f"{x:.4f}" for x in speedup],
+    )
     return result
 
 
@@ -232,7 +251,7 @@ def try_script(model, example_inputs):
         return None
 
 
-def speedup_experiment_ts(speedups, args, model, example_inputs):
+def speedup_experiment_ts(args, model, example_inputs):
     return baselines(
         [
             ("eager", model),
@@ -246,12 +265,10 @@ def speedup_experiment_ts(speedups, args, model, example_inputs):
         ],
         example_inputs,
         args,
-        speedups,
-        "baseline_ts",
     )
 
 
-def speedup_experiment_sr(speedups, args, model, example_inputs):
+def speedup_experiment_sr(args, model, example_inputs):
     if current_name not in ("opacus_cifar10", "timm_nfnet", "hf_T5"):
         sr = backends.static_runtime(try_script(model, example_inputs), example_inputs)
     else:
@@ -267,12 +284,10 @@ def speedup_experiment_sr(speedups, args, model, example_inputs):
         ],
         example_inputs,
         args,
-        speedups,
-        "baseline_sr",
     )
 
 
-def speedup_experiment_onnx(speedups, args, model, example_inputs):
+def speedup_experiment_onnx(args, model, example_inputs):
     if current_device == "cpu":
         m_onnxrt = backends.onnxrt_cpu(
             try_script(model, example_inputs), example_inputs
@@ -296,12 +311,10 @@ def speedup_experiment_onnx(speedups, args, model, example_inputs):
         ],
         example_inputs,
         args,
-        speedups,
-        "baseline_onnx",
     )
 
 
-def speedup_experiment_trt(speedups, args, model, example_inputs):
+def speedup_experiment_trt(args, model, example_inputs):
     m_onnx2trt = backends.onnx2tensorrt(
         try_script(model, example_inputs), example_inputs
     )
@@ -323,8 +336,6 @@ def speedup_experiment_trt(speedups, args, model, example_inputs):
         ],
         example_inputs,
         args,
-        speedups,
-        "baseline_trt",
     )
 
 
@@ -359,28 +370,35 @@ def main():
     parser.add_argument(
         "--speedup-ts",
         action="store_true",
+        help="baselines comparing against torchscript",
     )
     parser.add_argument(
         "--speedup-sr",
         action="store_true",
+        help="baselines comparing against static runtime",
     )
     parser.add_argument(
-        "--speedup-onnx",
-        action="store_true",
+        "--speedup-onnx", action="store_true", help="baselines comparing against onnxrt"
     )
     parser.add_argument(
         "--speedup-trt",
         action="store_true",
+        help="baselines comparing against tensorrt",
     )
     parser.add_argument(
-        "--nvfuser",
-        action="store_true",
+        "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
     parser.add_argument(
         "--nothing", action="store_true", help="just check the benchmark works"
     )
     parser.add_argument(
         "--nops", action="store_true", help="check bytecode rewriting works"
+    )
+    parser.add_argument(
+        "--isolate", action="store_true", help="run each model in its own process"
+    )
+    parser.add_argument(
+        "--only",
     )
     parser.add_argument("--minimum-call-count", type=int)
     args = parser.parse_args()
@@ -416,24 +434,31 @@ def main():
         torchdynamo.config.debug = True
 
     coverage_results = []
-    speedups = []
     experiment = null_experiment
     optimize_ctx = NullContext()
+    global output_filename
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile)
-        experiment = functools.partial(speedup_experiment, speedups, args)
+        experiment = functools.partial(speedup_experiment, args)
+        output_filename = "overheads.csv"
     elif args.speedup:
         optimize_ctx = torchdynamo.optimize(user_compiler)
-        experiment = functools.partial(speedup_experiment, speedups, args)
+        experiment = functools.partial(speedup_experiment, args)
+        output_filename = "speedups.csv"
+        args.isolate = True
     elif args.speedup_ts:
-        experiment = functools.partial(speedup_experiment_ts, speedups, args)
+        experiment = functools.partial(speedup_experiment_ts, args)
+        output_filename = "baseline_ts.csv"
     elif args.speedup_sr:
-        experiment = functools.partial(speedup_experiment_sr, speedups, args)
+        experiment = functools.partial(speedup_experiment_sr, args)
+        output_filename = "baseline_sr.csv"
     elif args.speedup_onnx:
-        experiment = functools.partial(speedup_experiment_onnx, speedups, args)
+        experiment = functools.partial(speedup_experiment_onnx, args)
+        output_filename = "baseline_onnx.csv"
     elif args.speedup_trt:
-        experiment = functools.partial(speedup_experiment_trt, speedups, args)
+        experiment = functools.partial(speedup_experiment_trt, args)
+        output_filename = "baseline_trt.csv"
     elif args.nothing:
         pass
     elif args.nops:
@@ -443,65 +468,97 @@ def main():
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling)
         experiment = functools.partial(coverage_experiment, coverage_results)
+        output_filename = "coverage.csv"
+
+    if output_filename:
+        output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
 
-    for device, name, model, example_inputs in iter_models(args):
-        with pick_grad(name):
-            sys.stdout.write(f"{current_device:4} {current_name:20} ")
-            sys.stdout.flush()
-            for submod in itertools.chain([model], model.modules()):
-                assert not torchdynamo.utils.is_jit_model(submod)
-            torch.manual_seed(1337)
-            correct_result = copy.deepcopy(model)(*example_inputs)
-            torch.manual_seed(1337)
-            torchdynamo.reset()
+    if args.only:
+        for device in args.devices:
             try:
-                with optimize_ctx:
-                    new_result = model(*example_inputs)
-            except Exception:
-                logging.exception("unhandled error")
+                device, name, model, example_inputs = load_model(device, args.only)
+            except NotImplementedError:
+                continue  # bad benchmark implementation
+            run_one_model(name, model, example_inputs, optimize_ctx, experiment)
+    elif args.isolate:
+        os.path.exists(output_filename) and os.unlink(output_filename)
+        os.chdir(torchdynamo.config.base_dir)
+        for name in iter_model_names(args):
+            try:
+                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
+            except subprocess.SubprocessError:
                 print("ERROR")
-                continue
-            if current_name == "pyhpc_turbulent_k...":
-                # This model has non-deterministic output so we cant
-                # check correctness.
-                # TODO(jansel): submit upstream fix for this
-                pass
-            elif not same(correct_result, new_result):
-                print("INCORRECT")
-                continue
-            ok, total = Stats.reset_counters()
-            results = []
-
-            # run one more time to see if we reached a fixed point
-            with optimize_ctx:
-                model(*example_inputs)
-            _, frames_second_pass = Stats.reset_counters()  # should be 0
-            results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
-
-            results.append(experiment(model, example_inputs))
-            print(" ".join(map(str, results)))
-            del model, example_inputs, correct_result, new_result
+                for device in args.devices:
+                    output_csv([], [device, short_name(name), 0.0])
+        print_summary(output_filename)
+    else:
+        os.path.exists(output_filename) and os.unlink(output_filename)
+        for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
+            run_one_model(name, model, example_inputs, optimize_ctx, experiment)
 
-    Stats.print_summary()
-    if coverage_results:
-        print(
-            "\nMEAN COVERAGE:",
-            functools.reduce(ProfileMetrics.__add__, coverage_results)
-            / len(coverage_results),
-        )
-    if speedups:
-        print(
-            textwrap.dedent(
-                f"""
-                MEAN SPEEDUP {np.mean(speedups, axis=0)}
-                GEOMEAN SPEEDUP {gmean(speedups, axis=0)}"""
+        Stats.print_summary()
+        print_summary(output_filename)
+
+
+def print_summary(filename):
+    data = pd.read_csv(filename)
+    width = max(map(len, data.columns))
+    for col in data.columns:
+        if col in ("dev", "name"):
+            continue
+        elif col in ("operators", "time"):
+            print(col.ljust(width), f"{data[col].mean():.1%}")
+        elif col in ("captured", "uncaptured", "graphs"):
+            print(col.ljust(width), f"{data[col].mean():.1f}")
+        else:
+            cdata = data[col].clip(1)
+            print(
+                col.ljust(width), f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x"
             )
-        )
+
+
+def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
+    with pick_grad(name):
+        sys.stdout.write(f"{current_device:4} {current_name:20} ")
+        sys.stdout.flush()
+        for submod in itertools.chain([model], model.modules()):
+            assert not torchdynamo.utils.is_jit_model(submod)
+        torch.manual_seed(1337)
+        correct_result = copy.deepcopy(model)(*example_inputs)
+        torch.manual_seed(1337)
+        torchdynamo.reset()
+        try:
+            with optimize_ctx:
+                new_result = model(*example_inputs)
+        except Exception:
+            logging.exception("unhandled error")
+            print("ERROR")
+            return
+        if current_name == "pyhpc_turbulent_k...":
+            # This model has non-deterministic output so we cant
+            # check correctness.
+            # TODO(jansel): submit upstream fix for this
+            pass
+        elif not same(correct_result, new_result):
+            print("INCORRECT")
+            return
+        ok, total = Stats.reset_counters()
+        results = []
+
+        # run one more time to see if we reached a fixed point
+        with optimize_ctx:
+            model(*example_inputs)
+        _, frames_second_pass = Stats.reset_counters()  # should be 0
+        if "coverage" in output_filename:
+            results.append(f"{ok:3}/{total:3} frames (+{frames_second_pass:2}),")
+
+        results.append(experiment(model, example_inputs))
+        print(" ".join(map(str, results)))
 
 
 if __name__ == "__main__":
