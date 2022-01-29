@@ -9,7 +9,7 @@ import os
 import torch
 
 from torchdynamo import config
-from torchdynamo.testing import same
+from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import is_jit_model
 from torchdynamo.utils import torchscript
 
@@ -73,26 +73,30 @@ class SubGraph(object):
         model_fx = load_module_fx(name)
         model_jit = load_module_jit(name)
         is_cuda = metadata["is_cuda"]
-        if is_cuda:
-            if model_fx is not None:
-                model_fx = model_fx.cuda()
-            if model_jit is not None:
-                model_jit = model_jit.cuda()
-            # assert all(
-            #    x.is_cuda for x in itertools.chain(example_inputs, example_outputs)
-            # )
 
-        if model_jit is None:
-            model_jit = torchscript(model_fx, example_inputs)
-        if not same(example_outputs, model_fx(*example_inputs)):
-            log.warning("FX graph is incorrect")
-            assert model_jit and same(example_outputs, model_jit(*example_inputs))
+        assert model_jit is not None
+
+        torch.set_rng_state(torch.load(os.path.join(model_dir, "rng_state.pt")))
+        if is_cuda:
+            model_jit = model_jit.cuda()
+        restore_jit = checkpoint_params(model_jit)
+        if model_fx is not None:
+            if is_cuda:
+                model_fx = model_fx.cuda()
+            restore_fx = checkpoint_params(model_fx)
+        else:
             model_fx = model_jit
+            restore_fx = restore_jit
+
+        def restore():
+            restore_fx()
+            restore_jit()
 
         subgraph = cls(model_fx, example_inputs, model_dir)
         subgraph._scripted = model_jit
         subgraph._example_outputs = example_outputs
         subgraph._is_cuda = is_cuda
+        subgraph.restore = restore
         return subgraph
 
     def __init__(self, model, example_inputs, model_dir):

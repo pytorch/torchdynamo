@@ -12,10 +12,10 @@ import torch
 from torch.fx.experimental.normalize import NormalizeOperators
 
 from torchdynamo import config
+from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
-from torchdynamo.utils import torchscript
 from torchdynamo.utils import warning
 
 from .analysis import ShapeAliasingAndMutationProp
@@ -85,15 +85,19 @@ def record_graph_stats(gm):
             assert False, node.op
 
 
-def user_compiler(gm: torch.fx.GraphModule, example_inputs):
-    if torch.is_grad_enabled():
-        if any(
-            getattr(x, "requires_grad", False)
-            for x in itertools.chain(example_inputs, gm.parameters(True))
-        ):
-            warning("not optimizing requires_grad=True")
-            return gm.forward
+def normalize_ir(gm, example_inputs):
+    if config.normalize_ir:
+        example_inputs = clone_inputs(example_inputs)
+        normalize(gm)
+        gm = NormalizeOperators(gm).transform()
+        ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+        gm = Functionalization(gm).transform()
+    gm.recompile()
+    # record_graph_stats(gm)
+    return gm
 
+
+def check_is_cuda(gm, example_inputs):
     any_cuda = any(
         x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True))
     )
@@ -101,66 +105,148 @@ def user_compiler(gm: torch.fx.GraphModule, example_inputs):
         assert all(
             x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True))
         )
+    return any_cuda
 
-    example_inputs = clone_inputs(example_inputs)
 
-    if config.normalize_ir:
-        normalize(gm)
-        gm = NormalizeOperators(gm).transform()
-        ShapeAliasingAndMutationProp(gm).run(*example_inputs)
-        gm = Functionalization(gm).transform()
+def check_requires_grad(gm, example_inputs):
+    if torch.is_grad_enabled():
+        if any(
+            getattr(x, "requires_grad", False)
+            for x in itertools.chain(example_inputs, gm.parameters(True))
+        ):
+            return True
+    return False
 
-    record_graph_stats(gm)
-    gm.recompile()
 
-    if False:
+def jit_trace(gm, example_inputs):
+    """Wrapper around jit.trace to handle hooks"""
+    restore_backward_hooks = []
+
+    def visit(mod):
+        if mod._backward_hooks:
+            restore_backward_hooks.append((mod, mod._backward_hooks))
+            mod._backward_hooks = []
+
+    if not check_requires_grad(gm, example_inputs):
+        # in inference mode it is safe to ignore backwards hooks to allow tracing
+        gm.apply(visit)
+
+    try:
+        return torch.jit.trace(gm.forward, example_inputs)
+    finally:
+        for mod, hooks in restore_backward_hooks:
+            mod._backward_hooks = hooks
+
+
+class TorchScriptStrategy(object):
+    """Common base for backend strategies that use TorchScript"""
+
+    @classmethod
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
+        if count_calls(gm.graph) < 2:
+            return gm.forward  # no point for tiny graphs
+        return cls(gm, example_inputs).verified_candidate()
+
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+        super(TorchScriptStrategy, self).__init__()
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = example_inputs
+        self.correct = gm.forward(*self.example_inputs)
+        self.gm = normalize_ir(gm, self.original_example_inputs)
+        self.scripted = jit_trace(self.gm, self.example_inputs)
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def verified_candidate(self):
         try:
-            scripted = torch.jit.script(gm)
-        except Exception:
-            scripted = torch.jit.trace(gm, example_inputs)
+            candidate = self.candidate()
+            if candidate is None:
+                return self.gm.forward
 
-        correct = gm.forward(*example_inputs)
-        result = scripted(*example_inputs)
-        from torchdynamo.testing import same
+            self.restore()
+            result = candidate(*self.example_inputs)
 
-        if same(result, correct):
-            return scripted
-        print("SCRIPTED INCORRECT")
-        return gm.forward
+            if all(
+                torch.allclose(a, b, atol=1e-4, rtol=1e-4)
+                for a, b in zip(result, self.correct)
+            ):
+                return candidate
 
-    path = folder_name(gm, example_inputs)
-    if not os.path.exists(path):
-        if count_calls(gm.graph) >= config.minimum_call_count:
+            print(f"incorrect candidate {self}")
+
+            return self.gm.forward
+        finally:
+            self.restore()
+
+    def candidate(self):
+        raise NotImplementedError()
+
+
+class FixedStrategy(TorchScriptStrategy):
+    def candidate(self):
+        return self.scripted
+
+
+fixed_strategy = FixedStrategy.compile_fn
+
+
+class OfflineAutotuner(TorchScriptStrategy):
+    def candidate(self):
+        gm = self.gm
+        if check_requires_grad(gm, self.original_example_inputs):
+            warning("not optimizing requires_grad=True")
+            return None
+
+        path = folder_name(gm, self.original_example_inputs)
+        if not os.path.exists(path):
+            # a new graph! lets save it for offline tuning
             try:
                 gm.to_folder(path)
-                jit_model = torchscript(gm, example_inputs, verbose=False)
-                if jit_model is not None:
-                    torch.jit.save(jit_model, os.path.join(path, "model.ts"))
-                with open(os.path.join(path, "key"), "w") as fd:
-                    fd.write(string_key(gm, example_inputs))
-                with open(os.path.join(path, "example_inputs.pt"), "wb") as fd:
-                    torch.save(example_inputs, fd)
-                with open(os.path.join(path, "example_outputs.pt"), "wb") as fd:
-                    torch.save(gm(*example_inputs), fd)
-                open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
-                with open(os.path.join(path, "metadata.json"), "w") as fd:
-                    json.dump(
-                        {
-                            "is_cuda": any_cuda,
-                        },
-                        fd,
-                    )
+                torch.jit.save(self.scripted, os.path.join(path, "model.ts"))
+                open(os.path.join(path, "key"), "w").write(
+                    string_key(gm, self.original_example_inputs)
+                )
+                save_pt(path, "example_inputs.pt", self.original_example_inputs)
+                save_pt(path, "example_outputs.pt", self.correct)
+                save_pt(path, "rng_state.pt", torch.get_rng_state())
+                save_metadata(path, self.gm, self.original_example_inputs)
+                touch_timestamp(path)
             except Exception:
                 shutil.rmtree(path)
                 raise
-    else:
-        open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
-        if os.path.exists(os.path.join(path, "perf.json")):
-            best = argmin(json.loads(open(os.path.join(path, "perf.json")).read()))
-            counters["backend"][best] += 1
-            return BACKENDS[best](gm, example_inputs)
+        else:
+            touch_timestamp(path)
+            if os.path.exists(os.path.join(path, "perf.json")):
+                best = argmin(json.loads(open(os.path.join(path, "perf.json")).read()))
+                counters["backend"][best] += 1
+                if best != "eager":
+                    return BACKENDS[best](self.scripted, self.example_inputs)
 
-    return gm.forward
+        return None
+
+
+offline_autotuner = OfflineAutotuner.compile_fn
+
+
+def save_pt(path, name, data):
+    with open(os.path.join(path, name), "wb") as fd:
+        torch.save(data, fd)
+
+
+def save_metadata(path, gm, example_inputs):
+    with open(os.path.join(path, "metadata.json"), "w") as fd:
+        json.dump(
+            {
+                "is_cuda": check_is_cuda(gm, example_inputs),
+            },
+            fd,
+        )
+
+
+def touch_timestamp(path):
+    open(os.path.join(path, "timestamp"), "w").write(str(time.time()))
 
 
 def argmin(perf):
@@ -170,4 +256,7 @@ def argmin(perf):
         if sec < best_sec:
             best = name
             best_sec = sec
+            if name == "eager":
+                # small bias torwards using eager since it is more robust
+                best *= 0.99
     return best

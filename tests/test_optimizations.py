@@ -5,7 +5,7 @@ import unittest
 import torch
 
 import torchdynamo
-from torchdynamo.optimizations.inference import user_compiler
+from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
 from torchdynamo.testing import same
@@ -71,6 +71,6 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        with torchdynamo.optimize_assert(user_compiler):
+        with torchdynamo.optimize_assert(offline_autotuner):
             r2 = s(i)
         self.assertTrue(same(r1, r2))

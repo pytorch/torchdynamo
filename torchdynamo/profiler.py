@@ -4,6 +4,8 @@ from typing import List
 
 import torch
 
+from torchdynamo import config
+
 
 @dataclasses.dataclass
 class ProfileMetrics:
@@ -114,9 +116,32 @@ class Profiler:
         )
 
 
+def shapes_of(it):
+    return [tuple(x.shape) for x in it]
+
+
 def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
-    def _wrapped(*args, **kwargs):
+    input_shapes = shapes_of(example_inputs)
+    output_shapes = None
+    result = None
+
+    def debug_print():
+        gm.graph.print_tabular()
+        return f"shape mismatch {input_shapes} {output_shapes} {shapes_of(result)}"
+
+    def _wrapped(*args):
+        nonlocal output_shapes, result
         with torch.profiler.record_function("TORCHDYNAMO"):
-            return gm.forward(*args, **kwargs)
+            assert (
+                shapes_of(args) == input_shapes or config.dynamic_shapes
+            ), debug_print()
+            result = gm.forward(*args)
+            if output_shapes is None:
+                output_shapes = shapes_of(result)
+            else:
+                assert (
+                    shapes_of(result) == output_shapes or config.dynamic_shapes
+                ), debug_print()
+            return result
 
     return _wrapped

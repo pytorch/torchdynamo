@@ -56,8 +56,8 @@ pull-deps:
 	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	# conda create --prefix `pwd`/env python=3.8
-	# conda activate `pwd`/env
+	# conda create --prefix torchdynamo python=3.8
+	# conda activate torchdynamo
 	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
 	conda install -y -c pytorch magma-cuda113
 	make setup
@@ -75,13 +75,13 @@ autotune-cpu: develop
 	python autotune.py
 	python torchbench.py --speedup -n50
 
-autotune-gpu: develop
+autotune-gpu-nnc: develop
 	rm -rf subgraphs
 	python torchbench.py --speedup -dcuda -n3
 	python autotune.py
 	python torchbench.py --speedup -dcuda -n100
 
-autotune-gpu-nvfuser: develop
+autotune-gpu: develop
 	rm -rf subgraphs
 	python torchbench.py --speedup -dcuda --nvfuser -n3
 	python autotune.py --nvfuser

@@ -2,6 +2,7 @@ import collections
 import dataclasses
 import functools
 import inspect
+import itertools
 import logging
 import os
 import weakref
@@ -25,6 +26,10 @@ def count_calls(g: fx.Graph):
 
 def identity(x):
     return x
+
+
+def nothing(*args, **kwargs):
+    pass
 
 
 class ExactWeakKeyDictionary:
@@ -230,3 +235,19 @@ def namedtuple_fields(cls):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
             fields[getattr(obj, name).index] = name
     return fields
+
+
+def checkpoint_params(gm):
+    with torch.no_grad():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        saved_state = []
+        for param in itertools.chain(gm.parameters(), gm.buffers()):
+            saved_state.append((param, torch.clone(param)))
+
+    def restore():
+        with torch.no_grad():
+            torch.random.set_rng_state(rng_state)
+            for param, original_value in saved_state:
+                param.copy_(original_value)
+
+    return restore

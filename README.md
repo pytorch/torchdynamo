@@ -156,7 +156,7 @@ GUARDS:
 
 If any of those guards fail, the graph will be recaptured and recompiled.
 The interesting guard type there is `TENSOR_MATCH`, which checks the
-following properties:
+following torch.Tensor properties:
 - Python class of the tensor (tensor subclassing, etc)
 - dtype
 - device
@@ -166,21 +166,23 @@ following properties:
 - sizes* (optional)
 - strides* (optional)
 
-This allows the backend compiler to assume an entirely static graph.
-Most backends require this.  Operators which return dynamic shapes will
-trigger a graph break.
-
 *For sizes/strides you can disable this specialization by setting:
 ```py
 torchdynamo.config.dynamic_shapes = True
 ```
 
+The full specialization mode allows the backend compiler to assume
+an entirely static graph.  Unfortunately, most backends require this.
+Operators which return dynamic shapes will trigger a graph break when
+not in dynamic shape mode.
+
+
 ## Run Mode / Quiescence Guarantee
 
-In some cases, you may not want unexpected compiles after a program has
-warmed up.  For example, if you are serving production traffic in a latency
-critical application.  For this, TorchDynamo provides an alternate mode
-where prior compiled graphs a used, but no new ones are generated:
+In some cases, you may not want unexpected compiles after a program
+has warmed up.  For example, if you are serving production traffic in a
+latency critical application.  For this, TorchDynamo provides an alternate
+mode where prior compiled graphs are used, but no new ones are generated:
 ```py
 with torchdynamo.run():
     toy_example(torch.randn(10), torch.randn(10))

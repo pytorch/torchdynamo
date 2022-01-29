@@ -844,6 +844,13 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
 
+                if (
+                    self.fn is operator.getitem
+                    and isinstance(args[1], TensorVariable)
+                    and not config.dynamic_shapes
+                ):
+                    unimplemented("dynamic Tensor.getitem")
+
                 return TensorVariable.create(
                     tx.create_proxy(
                         "call_function",
@@ -1797,11 +1804,18 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
     def is_dynamic_shapes(self, args, kwargs):
         """Check for dynamic shapes when shape specialization is enabled"""
         # TODO(jansel): need to get a complete list
-        if self.value in (
-            torch.nonzero,
-            torch.unique,
-            torch.unique_consecutive,
+        if (
+            self.value
+            in (
+                torch.nonzero,
+                torch.unique,
+                torch.unique_consecutive,
+            )
+            or self.value.__name__ in ("nms",)
         ):
+            return True
+
+        if self.value is torch.where and len(args) + len(kwargs) == 1:
             return True
 
         if self.value in (

@@ -13,21 +13,17 @@ from collections import OrderedDict
 
 import numpy as np
 import torch
-from scipy.stats import ttest_ind
 from tabulate import tabulate
 
 import torchdynamo.optimizations.backends
 from torchdynamo import config
 from torchdynamo.optimizations.backends import BACKENDS
 from torchdynamo.optimizations.subgraph import SubGraph
-from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
+from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import nothing
 
 synchronize = torch.cuda.synchronize
-
-
-def nothing():
-    pass
 
 
 def timed(model, example_inputs, times=1):
@@ -149,13 +145,13 @@ def run(args, graph_name):
     if subgraph.is_cuda:
         backend_names = [
             "eager",
-            "nnc",
-            "nvfuser",
-            "ofi",
             "cudagraphs",
-            "onnxrt_cuda",
+            "ts",
+            "cudagraphs_ts",
+            "ofi",
+            "cudagraphs_ts_ofi",
             "tensorrt",
-            "onnx2tf",
+            "nnc" if args.nvfuser else "nvfuser",
         ]
     else:
         backend_names = ["eager", "ts", "ofi", "onnxrt_cpu", "onnx2tf"]
@@ -163,49 +159,52 @@ def run(args, graph_name):
     skip = set(args.skip or [])
     backend_names = [x for x in backend_names if x not in skip]
 
+    example_inputs = torch.load(
+        os.path.join(config.base_dir, "subgraphs", graph_name, "example_inputs.pt")
+    )
+    example_outputs = torch.load(
+        os.path.join(config.base_dir, "subgraphs", graph_name, "example_outputs.pt")
+    )
+
     models = []
     for name in backend_names:
         with open(subgraph.filename("running"), "w") as fd:
             fd.write(name)
-        models.append((name, BACKENDS[name](subgraph)))
+        try:
+            compiled_model = BACKENDS[name](subgraph)
+            subgraph.restore()
+            result = compiled_model(*clone_inputs(example_inputs))
+            assert same(result, example_outputs)
+            models.append((name, compiled_model))
+        except AssertionError:
+            logging.exception(f"incorrect while running {name}")
+        except Exception:
+            logging.exception(f"error while running {name}")
     os.unlink(subgraph.filename("running"))
+    del example_outputs
 
-    example_inputs = subgraph.example_inputs
-    example_outputs = subgraph.example_outputs
-
-    is_corrects = [x is not None for _, x in models]
     timings = np.zeros((args.repeat, len(models)), np.float64)
-    timings.fill(1.0e10)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
         for i, (n, m) in enumerate(models):
-            if is_corrects[i]:
-                try:
-                    result, timings[rep, i] = timed(m, example_inputs)
-                    assert same(result, example_outputs)
-                except AssertionError:
-                    logging.exception(f"incorrect while running {n}")
-                    is_corrects[i] = False
-                except Exception:
-                    logging.exception(f"error while running {n}")
-                    is_corrects[i] = False
+            result, timings[rep, i] = timed(m, example_inputs)
 
-    assert is_corrects[0]
-
-    pvalues = [
-        ttest_ind(timings[:, 0], timings[:, i]).pvalue for i in range(1, len(models))
-    ]
     median = np.median(timings, axis=0)
-    speedups = [median[0] / median[i] for i in range(1, len(models))]
-    results = [
-        format_speedup(s, p, c) for s, p, c in zip(speedups, pvalues, is_corrects[1:])
-    ]
-    sec = float(np.mean(timings[:, 0]))
-    row = [graph_name, f"{sec:.4f}"] + results
     names = [k for k, v in models]
-    headers = ["name", "sec"] + names[1:]
+    sec = float(np.mean(timings[:, 0]))
+    headers = ["name", "sec"]
+    row = [graph_name, f"{sec:.4f}"]
+    if models[0][0] == "eager" and len(models) > 1:
+        speedups = [median[0] / median[i] for i in range(1, len(models))]
+        row.extend(f"{x:.2}x" for x in speedups)
+        headers.extend(names[1:])
+    else:
+        row.extend(f"{x:.2} sec" for x in median)
+        headers.extend(names)
+
     print(tabulate([row], headers=headers))
-    perf = {k: float(v) for k, v, c in zip(names, median, is_corrects) if c}
+
+    perf = {k: float(v) for k, v in zip(names, median)}
     with open(subgraph.filename("perf.json"), "w") as fd:
         json.dump(perf, fd)
     with open(subgraph.filename("stats.json"), "w") as fd:

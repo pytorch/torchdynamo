@@ -27,7 +27,8 @@ from scipy.stats import ttest_ind
 import torchdynamo
 import torchdynamo.utils
 from torchdynamo.optimizations import backends
-from torchdynamo.optimizations.inference import user_compiler
+from torchdynamo.optimizations.inference import fixed_strategy
+from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
@@ -433,6 +434,11 @@ def main():
     )
     group.add_argument("--speedup", action="store_true", help=help(speedup_experiment))
     group.add_argument(
+        "--speedup-fixed",
+        action="store_true",
+        help="speedup using experimental fixed_strategy backend",
+    )
+    group.add_argument(
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
@@ -496,9 +502,14 @@ def main():
         experiment = functools.partial(speedup_experiment, args)
         output_filename = "overheads.csv"
     elif args.speedup:
-        optimize_ctx = torchdynamo.optimize(user_compiler)
+        optimize_ctx = torchdynamo.optimize(offline_autotuner)
         experiment = functools.partial(speedup_experiment, args)
         output_filename = "speedups.csv"
+        args.isolate = True
+    elif args.speedup_fixed:
+        optimize_ctx = torchdynamo.optimize(fixed_strategy)
+        experiment = functools.partial(speedup_experiment, args)
+        output_filename = "speedups_fixed.csv"
         args.isolate = True
     elif args.speedup_ts:
         experiment = functools.partial(speedup_experiment_ts, args)
@@ -559,6 +570,8 @@ def main():
 
 
 def print_summary(filename):
+    if not os.path.exists(filename):
+        return
     data = pd.read_csv(filename)
     width = max(map(len, data.columns))
     for col in data.columns:
