@@ -172,6 +172,8 @@ def run(args, graph_name):
             fd.write(name)
         try:
             compiled_model = BACKENDS[name](subgraph)
+            if compiled_model is None:
+                continue
             subgraph.restore()
             result = compiled_model(*clone_inputs(example_inputs))
             assert same(result, example_outputs)

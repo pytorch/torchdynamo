@@ -255,8 +255,8 @@ def argmin(perf):
     for name, sec in perf.items():
         if sec < best_sec:
             best = name
-            best_sec = sec
+            best_sec = float(sec)
             if name == "eager":
                 # small bias torwards using eager since it is more robust
-                best *= 0.99
+                best_sec *= 0.99
     return best
