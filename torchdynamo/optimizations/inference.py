@@ -278,6 +278,10 @@ class OnlineAutotuner(TorchScriptStrategy):
     repeat = 15
 
     def candidate(self):
+        if check_requires_grad(self.gm, self.original_example_inputs):
+            warning("not optimizing requires_grad=True")
+            return None
+        self.scripted = self.scripted.eval()
         example_inputs_copy = self.example_inputs
         models = [("eager", self.gm.forward)]
         for name in self.select_backends():

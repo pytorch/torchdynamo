@@ -161,7 +161,7 @@ def clone_input(x):
             (x.data_ptr() - buffer.data_ptr()) % 32
         ) // x.element_size()
         result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
-        result.copy_(x)
+        result.copy_(x.clone())
         return result
 
 
