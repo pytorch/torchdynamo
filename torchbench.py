@@ -29,6 +29,7 @@ import torchdynamo.utils
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.inference import fixed_strategy
 from torchdynamo.optimizations.inference import offline_autotuner
+from torchdynamo.optimizations.inference import online_autotuner
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
@@ -64,11 +65,6 @@ def synchronize():
     pass
 
 
-def short_name(name, limit=20):
-    """Truncate a model name to limit chars"""
-    return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
-
-
 def iter_models(args):
     for model_name in iter_model_names(args):
         for device in args.devices:
@@ -87,7 +83,6 @@ def iter_model_names(args):
             not re.search("|".join(args.filter), model_name, re.I)
             or re.search("|".join(args.exclude), model_name, re.I)
             or model_name in SKIP
-            or short_name(model_name) in SKIP
         ):
             continue
 
@@ -105,7 +100,7 @@ def load_model(device, model_name):
     gc.collect()
     global current_name, current_device
     current_device = device
-    current_name = short_name(benchmark.name)
+    current_name = benchmark.name
     return device, current_name, model, example_inputs
 
 
@@ -432,7 +427,12 @@ def main():
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
     )
-    group.add_argument("--speedup", action="store_true", help=help(speedup_experiment))
+    group.add_argument(
+        "--online-autotune", action="store_true", help=help(speedup_experiment)
+    )
+    group.add_argument(
+        "--offline-autotune", action="store_true", help=help(speedup_experiment)
+    )
     group.add_argument(
         "--speedup-fixed",
         action="store_true",
@@ -501,7 +501,12 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile)
         experiment = functools.partial(speedup_experiment, args)
         output_filename = "overheads.csv"
-    elif args.speedup:
+    elif args.online_autotune:
+        optimize_ctx = torchdynamo.optimize(online_autotuner)
+        experiment = functools.partial(speedup_experiment, args)
+        output_filename = "speedups.csv"
+        args.isolate = True
+    elif args.offline_autotune:
         optimize_ctx = torchdynamo.optimize(offline_autotuner)
         experiment = functools.partial(speedup_experiment, args)
         output_filename = "speedups.csv"
@@ -556,7 +561,7 @@ def main():
             except subprocess.SubprocessError:
                 print("ERROR")
                 for device in args.devices:
-                    output_csv([], [device, short_name(name), 0.0])
+                    output_csv([], [device, name, 0.0])
         print_summary(output_filename)
     else:
         os.path.exists(output_filename) and os.unlink(output_filename)
@@ -604,7 +609,7 @@ def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
         except Exception:
             logging.exception("unhandled error")
             print("ERROR")
-            return
+            return sys.exit(-1)
         if current_name == "pyhpc_turbulent_k...":
             # This model has non-deterministic output so we cant
             # check correctness.
@@ -612,7 +617,7 @@ def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
             pass
         elif not same(correct_result, new_result):
             print("INCORRECT")
-            return
+            return sys.exit(-1)
         ok, total = Stats.reset_counters()
         results = []
 

@@ -309,7 +309,7 @@ python torchbench.py
 ## Performance Measurement
 
 To reproduce the performance measurements shared in the posts above,
-run either `make autotune-cpu` or `make autotune-gpu`.  These targets
+run either `make offline-autotune-cpu` or `make offline-autotune-gpu`.  These targets
 will run something like the following:
 
 ```shell

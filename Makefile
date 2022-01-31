@@ -69,23 +69,23 @@ build-deps: clone-deps
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py)
 
-autotune-cpu: develop
+offline-autotune-cpu: develop
 	rm -rf subgraphs
-	python torchbench.py --speedup -n3
+	python torchbench.py --offline-autotune -n3
 	python autotune.py
-	python torchbench.py --speedup -n50
+	python torchbench.py --offline-autotune -n50
 
-autotune-gpu-nnc: develop
+offline-autotune-gpu: develop
 	rm -rf subgraphs
-	python torchbench.py --speedup -dcuda -n3
-	python autotune.py
-	python torchbench.py --speedup -dcuda -n100
-
-autotune-gpu: develop
-	rm -rf subgraphs
-	python torchbench.py --speedup -dcuda --nvfuser -n3
+	python torchbench.py --nvfuser -d cuda --offline-autotune -n3
 	python autotune.py --nvfuser
-	python torchbench.py --speedup -dcuda --nvfuser -n100
+	python torchbench.py --nvfuser -d cuda --offline-autotune -n100
+
+online-autotune-cpu: develop
+	python torchbench.py --online-autotune -n50
+
+online-autotune-gpu: develop
+	python torchbench.py --nvfuser -d cuda --online-autotune -n100
 
 baseline-cpu: develop
 	 rm -f baseline_*.csv

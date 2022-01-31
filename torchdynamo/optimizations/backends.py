@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from torchdynamo.optimizations.subgraph import SubGraph
+from torchdynamo.utils import identity
 
 log = logging.getLogger(__name__)
 BACKENDS = dict()
@@ -59,15 +60,20 @@ def ts(subgraph):
     return subgraph.scripted
 
 
-def reload_jit_model(subgraph):
+def reload_jit_model(subgraph, opt_fn=identity):
     tmp = io.BytesIO()
     torch.jit.save(subgraph.scripted, tmp)
     tmp.seek(0)
     model = torch.jit.load(tmp)
+    model = opt_fn(model)
     # populate cache
     for _ in range(3):
         model(*subgraph.example_inputs)
     return model
+
+
+def reload_jit_model_ofi(subgraph):
+    return reload_jit_model(subgraph, torch.jit.optimize_for_inference)
 
 
 @create_backend
@@ -77,9 +83,21 @@ def nnc(subgraph):
 
 
 @create_backend
+def nnc_ofi(subgraph):
+    with torch.jit.fuser("fuser1"):
+        return reload_jit_model_ofi(subgraph)
+
+
+@create_backend
 def nvfuser(subgraph):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model(subgraph)
+
+
+@create_backend
+def nvfuser_ofi(subgraph):
+    with torch.jit.fuser("fuser2"):
+        return reload_jit_model_ofi(subgraph)
 
 
 @create_backend

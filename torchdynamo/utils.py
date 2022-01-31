@@ -1,10 +1,12 @@
 import collections
 import dataclasses
 import functools
+import gc
 import inspect
 import itertools
 import logging
 import os
+import time
 import weakref
 from typing import Any
 from typing import Dict
@@ -148,11 +150,26 @@ class CleanupManager(ExactWeakKeyDictionary):
 CleanupManager.instance = CleanupManager()
 
 
+def clone_input(x):
+    """copy while preserving strides"""
+    with torch.no_grad():
+        needed_size = sum(
+            (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
+        )
+        buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+        cache_line_offset = (
+            (x.data_ptr() - buffer.data_ptr()) % 32
+        ) // x.element_size()
+        result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+        result.copy_(x)
+        return result
+
+
 def clone_inputs(example_inputs):
     res = list(example_inputs)
     for i in range(len(res)):
         if isinstance(res[i], torch.Tensor):
-            res[i] = res[i].clone().detach()
+            res[i] = clone_input(res[i])
     return res
 
 
@@ -251,3 +268,20 @@ def checkpoint_params(gm):
                 param.copy_(original_value)
 
     return restore
+
+
+def timed(model, example_inputs, times=1):
+    if torch.cuda.is_available():
+        synchronize = torch.cuda.synchronize
+    else:
+        synchronize = nothing
+
+    synchronize()
+    gc.collect()
+    torch.manual_seed(1337)
+    t0 = time.perf_counter()
+    for _ in range(times):
+        result = model(*example_inputs)
+        synchronize()
+    t1 = time.perf_counter()
+    return result, t1 - t0

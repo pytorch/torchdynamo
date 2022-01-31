@@ -3,11 +3,13 @@ import hashlib
 import io
 import itertools
 import json
+import logging
 import os
 import shutil
 import time
 from collections import defaultdict
 
+import numpy as np
 import torch
 from torch.fx.experimental.normalize import NormalizeOperators
 
@@ -16,6 +18,7 @@ from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
+from torchdynamo.utils import timed
 from torchdynamo.utils import warning
 
 from .analysis import ShapeAliasingAndMutationProp
@@ -23,6 +26,8 @@ from .backends import BACKENDS
 from .normalize import Functionalization
 from .normalize import long_name
 from .normalize import normalize
+
+log = logging.getLogger(__name__)
 
 
 def string_key(gm: torch.fx.GraphModule, example_inputs):
@@ -138,6 +143,12 @@ def jit_trace(gm, example_inputs):
             mod._backward_hooks = hooks
 
 
+def same(left, right):
+    return len(left) == len(right) and all(
+        torch.allclose(a, b, atol=1e-4, rtol=1e-4) for a, b in zip(left, right)
+    )
+
+
 class TorchScriptStrategy(object):
     """Common base for backend strategies that use TorchScript"""
 
@@ -162,20 +173,20 @@ class TorchScriptStrategy(object):
     def verified_candidate(self):
         try:
             candidate = self.candidate()
-            if candidate is None:
+            if candidate is None or candidate is self.gm.forward:
                 return self.gm.forward
 
             self.restore()
             result = candidate(*self.example_inputs)
 
-            if all(
-                torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-                for a, b in zip(result, self.correct)
-            ):
+            if same(result, self.correct):
                 return candidate
 
             print(f"incorrect candidate {self}")
 
+            return self.gm.forward
+        except Exception:
+            log.exception("error in verified_candidate()")
             return self.gm.forward
         finally:
             self.restore()
@@ -205,6 +216,7 @@ class OfflineAutotuner(TorchScriptStrategy):
             try:
                 gm.to_folder(path)
                 torch.jit.save(self.scripted, os.path.join(path, "model.ts"))
+
                 open(os.path.join(path, "key"), "w").write(
                     string_key(gm, self.original_example_inputs)
                 )
@@ -260,3 +272,50 @@ def argmin(perf):
                 # small bias torwards using eager since it is more robust
                 best_sec *= 0.99
     return best
+
+
+class OnlineAutotuner(TorchScriptStrategy):
+    repeat = 15
+
+    def candidate(self):
+        example_inputs_copy = self.example_inputs
+        models = [("eager", self.gm.forward)]
+        for name in self.select_backends():
+            try:
+                compiled_model = BACKENDS[name](self.scripted, example_inputs_copy)
+                if compiled_model is None:
+                    continue
+                self.restore()
+                result = compiled_model(*self.example_inputs)
+                assert same(result, self.correct)
+                models.append((name, compiled_model))
+            except AssertionError:
+                logging.exception(f"incorrect while running {name}")
+            except Exception:
+                logging.exception(f"error while running {name}")
+
+        timings = np.zeros((self.repeat, len(models)), np.float64)
+        for rep in range(timings.shape[0]):
+            # interleave the runs to handle frequency scaling and load changes
+            for i, (n, m) in enumerate(models):
+                result, timings[rep, i] = timed(m, example_inputs_copy)
+        median = np.median(timings, axis=0)
+        median[0] *= 0.99  # a bias towards eager
+        best = int(np.argmin(median))
+        counters["backend"][models[best][0]] += 1
+        return models[best][1]
+
+    def select_backends(self):
+        if check_is_cuda(self.gm, self.original_example_inputs):
+            backend_names = [
+                "ts",
+                "cudagraphs_ts_ofi",
+                "nnc_ofi",
+                "tensorrt",
+            ]
+        else:
+            backend_names = ["ofi", "onnxrt_cpu"]
+        return backend_names
+
+
+online_autotuner = OnlineAutotuner.compile_fn

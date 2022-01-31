@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import argparse
-import gc
 import json
 import logging
 import os
@@ -21,25 +20,7 @@ from torchdynamo.optimizations.backends import BACKENDS
 from torchdynamo.optimizations.subgraph import SubGraph
 from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import nothing
-
-synchronize = torch.cuda.synchronize
-
-
-def timed(model, example_inputs, times=1):
-    if not torch.cuda.is_available():
-        global synchronize
-        synchronize = nothing
-
-    synchronize()
-    gc.collect()
-    torch.manual_seed(1337)
-    t0 = time.perf_counter()
-    for _ in range(times):
-        result = model(*example_inputs)
-        synchronize()
-    t1 = time.perf_counter()
-    return result, t1 - t0
+from torchdynamo.utils import timed
 
 
 def main():
