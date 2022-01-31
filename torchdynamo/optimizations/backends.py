@@ -402,7 +402,7 @@ def cudagraphs_ts_ofi(subgraph):
 
 def cudagraphs_inner(model, inputs):
     assert isinstance(inputs, (list, tuple))
-    static_inputs = [torch.randn_like(x) for x in inputs]
+    static_inputs = [torch.zeros_like(x) for x in inputs]
 
     # warmup
     torch.cuda.synchronize()
