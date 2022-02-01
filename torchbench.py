@@ -47,6 +47,9 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
+    # CUDA torchvision::nms build issues on AWS cluser
+    "detectron2_maskrcnn",
+    "vision_maskrcnn",
 }
 current_name = ""
 current_device = ""
@@ -580,17 +583,20 @@ def print_summary(filename):
     data = pd.read_csv(filename)
     width = max(map(len, data.columns))
     for col in data.columns:
-        if col in ("dev", "name"):
-            continue
-        elif col in ("operators", "time"):
-            print(col.ljust(width), f"{data[col].mean():.1%}")
-        elif col in ("captured", "uncaptured", "graphs"):
-            print(col.ljust(width), f"{data[col].mean():.1f}")
-        else:
-            cdata = data[col].clip(1)
-            print(
-                col.ljust(width), f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x"
-            )
+        try:
+            if col in ("dev", "name"):
+                continue
+            elif col in ("operators", "time"):
+                print(col.ljust(width), f"{data[col].mean():.1%}")
+            elif col in ("captured", "uncaptured", "graphs"):
+                print(col.ljust(width), f"{data[col].mean():.1f}")
+            else:
+                cdata = data[col].clip(1)
+                print(
+                    col.ljust(width), f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x"
+                )
+        except Exception:
+            pass
 
 
 def run_one_model(name, model, example_inputs, optimize_ctx, experiment):

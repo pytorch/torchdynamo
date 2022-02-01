@@ -197,6 +197,9 @@ class TorchScriptStrategy(object):
 
 class FixedStrategy(TorchScriptStrategy):
     def candidate(self):
+        cg = BACKENDS["cudagraphs_ts"](self.scripted, self.example_inputs)
+        if cg is not None:
+            return cg
         return self.scripted
 
 

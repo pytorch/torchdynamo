@@ -87,19 +87,25 @@ online-autotune-cpu: develop
 online-autotune-gpu: develop
 	python torchbench.py --nvfuser -d cuda --online-autotune -n100
 
+fixed-cpu: develop
+	python torchbench.py --speedup-fixed -n50
+
+fixed-gpu: develop
+	python torchbench.py --nvfuser -d cuda --speedup-fixed -n100
+
 baseline-cpu: develop
 	 rm -f baseline_*.csv
-	 python torchbench.py -n50 --overhead
-	 python torchbench.py -n50 --speedup-ts
-	 python torchbench.py -n50 --speedup-sr
-	 python torchbench.py -n50 --speedup-onnx
+	 python torchbench.py --isolate -n50 --overhead
+	 python torchbench.py --isolate -n50 --speedup-ts
+	 python torchbench.py --isolate -n50 --speedup-sr
+	 python torchbench.py --isolate -n50 --speedup-onnx
 	 paste -d, baseline_ts.csv baseline_sr.csv baseline_onnx.csv > baseline_all.csv
 
 baseline-gpu: develop
 	 rm -f baseline_*.csv
-	 python torchbench.py -dcuda -n100 --overhead
-	 python torchbench.py -dcuda -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
-	 python torchbench.py -dcuda -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
-	 python torchbench.py -dcuda -n100 --speedup-trt
-	 python torchbench.py -dcuda -n100 --speedup-onnx
+	 python torchbench.py -dcuda --isolate -n100 --overhead
+	 python torchbench.py -dcuda --isolate -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
+	 python torchbench.py -dcuda --isolate -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
+	 python torchbench.py -dcuda --isolate -n100 --speedup-trt
+	 python torchbench.py -dcuda --isolate -n100 --speedup-onnx
 	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
