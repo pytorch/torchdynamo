@@ -5,9 +5,11 @@ import functools
 import importlib
 import inspect
 import itertools
+import logging
 import operator
 import re
 import sys
+import traceback
 import types
 import typing
 from functools import lru_cache
@@ -74,6 +76,8 @@ from .variable_tracker import UserMethodVariable
 from .variable_tracker import VariableTracker
 from .variable_tracker import typestr
 
+log = logging.getLogger(__name__)
+
 
 def stack_op(fn: typing.Callable):
     nargs = len(inspect.signature(fn).parameters)
@@ -121,20 +125,18 @@ def break_graph_if_unsupported(inner_fn):
     def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
         state = self.copy_graphstate()
         try:
-            inner_fn(self, inst)
+            return inner_fn(self, inst)
         except Unsupported:
             if not self.should_compile_partial_graph():
                 raise
-            self.restore_graphstate(state)
-            self.compile_partial_subgraph()
-            # note, assuming inst pushes 1
-            vars = self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
-            warning(f"breaking graph: {vars[0]}")
-            self.add_output_instructions([inst])
-            self.push(UnknownVariable())
-            self.add_output_instructions(
-                self.create_call_resume_at(self.next_instruction)
-            )
+        self.restore_graphstate(state)
+        self.compile_partial_subgraph()
+        # note, assuming inst pushes 1
+        vars = self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
+        warning(f"breaking graph: {vars[0]}")
+        self.add_output_instructions([inst])
+        self.push(UnknownVariable())
+        self.add_output_instructions(self.create_call_resume_at(self.next_instruction))
 
     return wrapper
 
@@ -360,19 +362,18 @@ class InstructionTranslatorBase(fx.Tracer):
                 inst.opname != "RETURN_VALUE" and self.instruction_pointer is not None
             )
         except Unsupported:
-            if self.checkpoint:
-                assert not self.output_instructions
-                continue_inst, state = self.checkpoint
-                self.restore_graphstate(state)
-                if count_calls(self.graph) < config.minimum_call_count:
-                    raise
-                self.compile_partial_subgraph()
-                self.output_instructions.append(
-                    create_instruction("JUMP_ABSOLUTE", target=continue_inst)
-                )
-                self.output_instructions.extend(self.instructions)
-            else:
+            if not self.checkpoint:
                 raise
+
+        # generate code from checkpoint
+        assert not self.output_instructions
+        continue_inst, state = self.checkpoint
+        self.restore_graphstate(state)
+        self.compile_partial_subgraph()
+        self.output_instructions.append(
+            create_instruction("JUMP_ABSOLUTE", target=continue_inst)
+        )
+        self.output_instructions.extend(self.instructions)
 
     def run(self):
         try:
@@ -1124,14 +1125,25 @@ class InstructionTranslatorBase(fx.Tracer):
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")
-        compiled_fn = self.compiler_fn(gm, self.example_inputs())
-        assert callable(compiled_fn), "compiler_fn did not return callable"
+        compiled_fn = self.call_user_compiler(gm)
         self.install_global(name, compiled_fn)
         nargs = sum(map(len, self.graphargs))
         if config.debug:
             print(f"\n{name} {gm.forward.__code__.co_filename}")
             self.graph.print_tabular()
         return self.create_call_generated_code(name, nargs)
+
+    def call_user_compiler(self, gm):
+        try:
+            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            assert callable(compiled_fn), "compiler_fn did not return callable"
+        except Exception:
+            sys.stderr.write("-" * 40 + "\n")
+            sys.stderr.write("TORCHDYNAMO: backend compiler failed\n")
+            traceback.print_exc()
+            sys.stderr.write("-" * 40 + "\n")
+            compiled_fn = gm.forward
+        return compiled_fn
 
     def example_inputs(self):
         result = []
