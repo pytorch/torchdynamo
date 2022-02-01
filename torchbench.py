@@ -151,7 +151,7 @@ def output_csv(headers, row):
     output.writerow([(f"{x:.4f}" if isinstance(x, float) else x) for x in row])
 
 
-def coverage_experiment(coverage_results, model, example_inputs):
+def coverage_experiment(args, model, example_inputs):
     """
     Test operator/model coverage of TorchDynamo and record statistics
     taken from a profiler.  This target is mainly intended to check
@@ -163,7 +163,6 @@ def coverage_experiment(coverage_results, model, example_inputs):
     with profiler.prof, torchdynamo.run():
         model(*example_inputs)
     coverage_result = profiler.results()
-    coverage_results.append(coverage_result.percent())
     output_csv(
         ("dev", "name", "operators", "time", "captured", "uncaptured", "graphs"),
         [
@@ -370,7 +369,7 @@ def speedup_experiment_trt(args, model, example_inputs):
     )
 
 
-def null_experiment(model, example_inputs):
+def null_experiment(args, model, example_inputs):
     """
     A no-op experiment useful for making sure TorchBenchark alone works properly.
     """
@@ -492,41 +491,40 @@ def main():
     if args.verbose:
         torchdynamo.config.debug = True
 
-    coverage_results = []
     experiment = null_experiment
     optimize_ctx = NullContext()
     global output_filename
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile)
-        experiment = functools.partial(speedup_experiment, args)
+        experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner)
-        experiment = functools.partial(speedup_experiment, args)
+        experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
     elif args.offline_autotune:
         optimize_ctx = torchdynamo.optimize(offline_autotuner)
-        experiment = functools.partial(speedup_experiment, args)
+        experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
     elif args.speedup_fixed:
         optimize_ctx = torchdynamo.optimize(fixed_strategy)
-        experiment = functools.partial(speedup_experiment, args)
+        experiment = speedup_experiment
         output_filename = "speedups_fixed.csv"
         args.isolate = True
     elif args.speedup_ts:
-        experiment = functools.partial(speedup_experiment_ts, args)
+        experiment = speedup_experiment_ts
         output_filename = "baseline_ts.csv"
     elif args.speedup_sr:
-        experiment = functools.partial(speedup_experiment_sr, args)
+        experiment = speedup_experiment_sr
         output_filename = "baseline_sr.csv"
     elif args.speedup_onnx:
-        experiment = functools.partial(speedup_experiment_onnx, args)
+        experiment = speedup_experiment_onnx
         output_filename = "baseline_onnx.csv"
     elif args.speedup_trt:
-        experiment = functools.partial(speedup_experiment_trt, args)
+        experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
     elif args.nothing:
         pass
@@ -536,8 +534,10 @@ def main():
         )
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling)
-        experiment = functools.partial(coverage_experiment, coverage_results)
+        experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    experiment = functools.partial(experiment, args)
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
@@ -595,7 +595,7 @@ def print_summary(filename):
 
 def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
     with pick_grad(name):
-        sys.stdout.write(f"{current_device:4} {current_name:20} ")
+        sys.stdout.write(f"{current_device:4} {current_name:34} ")
         sys.stdout.flush()
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)

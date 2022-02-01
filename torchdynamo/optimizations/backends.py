@@ -171,6 +171,10 @@ def onnxrt_cuda(subgraph):
 
 @create_backend
 def onnx2tensorrt(subgraph):
+    if subgraph.will_tensorrt_barf():
+        # TensorRT fails violently with an abort() on this
+        return None
+
     return onnxrt_common(subgraph, provider="TensorrtExecutionProvider")
 
 
@@ -285,6 +289,10 @@ def _raise_timeout(signum, frame):
 
 @create_backend
 def fx2trt(subgraph):
+    if subgraph.will_tensorrt_barf():
+        # TensorRT fails violently with an abort() on this
+        return None
+
     import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
     from torch.fx.experimental.fx2trt.fx2trt import InputTensorSpec
     from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter
@@ -312,6 +320,10 @@ def fx2trt(subgraph):
 
 @create_backend
 def torch2trt(subgraph):
+    if subgraph.will_tensorrt_barf():
+        # TensorRT fails violently with an abort() on this
+        return None
+
     from torch2trt import torch2trt
 
     inputs = subgraph.example_inputs
@@ -326,6 +338,10 @@ def torch2trt(subgraph):
 
 @create_backend
 def tensorrt(subgraph):
+    if subgraph.will_tensorrt_barf():
+        # TensorRT fails violently with an abort() on this
+        return None
+
     model = onnx2tensorrt(subgraph)
     if model is None:
         model = torch2trt(subgraph)
@@ -334,6 +350,10 @@ def tensorrt(subgraph):
 
 @create_backend
 def onnx2tensorrt_alt(subgraph):
+    if subgraph.will_tensorrt_barf():
+        # TensorRT fails violently with an abort() on this
+        return None
+
     import tensorrt as trt
     from torch.fx.experimental.fx2trt.trt_module import TRTModule
 

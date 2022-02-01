@@ -1,5 +1,6 @@
 import functools
 import importlib
+import itertools
 import json
 import logging
 import math
@@ -230,3 +231,18 @@ class SubGraph(object):
             return fn
         else:
             return fn
+
+    def has_dtype(self, dtype):
+        for x in itertools.chain(
+            self.example_inputs, self.scripted.parameters(), self.scripted.buffers()
+        ):
+            if x.dtype == dtype:
+                return True
+        return False
+
+    def will_tensorrt_barf(self):
+        code = torch.jit.freeze(self.scripted).code
+        # TODO(jansel): submit a bug report for this one, issue is in opacus_cifar10
+        if "torch.group_norm(" in code:
+            return True
+        return self.has_dtype(torch.int64)
