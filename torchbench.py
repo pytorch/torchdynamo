@@ -27,7 +27,8 @@ from scipy.stats import ttest_ind
 import torchdynamo
 import torchdynamo.utils
 from torchdynamo.optimizations import backends
-from torchdynamo.optimizations.inference import fixed_strategy
+from torchdynamo.optimizations.inference import fixed_strategy1
+from torchdynamo.optimizations.inference import fixed_strategy2
 from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
 from torchdynamo.profiler import Profiler
@@ -436,7 +437,12 @@ def main():
         "--offline-autotune", action="store_true", help=help(speedup_experiment)
     )
     group.add_argument(
-        "--speedup-fixed",
+        "--speedup-fixed1",
+        action="store_true",
+        help="speedup using experimental fixed_strategy backend",
+    )
+    group.add_argument(
+        "--speedup-fixed2",
         action="store_true",
         help="speedup using experimental fixed_strategy backend",
     )
@@ -512,10 +518,15 @@ def main():
         experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
-    elif args.speedup_fixed:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy)
+    elif args.speedup_fixed1:
+        optimize_ctx = torchdynamo.optimize(fixed_strategy1)
         experiment = speedup_experiment
-        output_filename = "speedups_fixed.csv"
+        output_filename = "speedups_fixed1.csv"
+        args.isolate = True
+    elif args.speedup_fixed2:
+        optimize_ctx = torchdynamo.optimize(fixed_strategy2)
+        experiment = speedup_experiment
+        output_filename = "speedups_fixed2.csv"
         args.isolate = True
     elif args.speedup_ts:
         experiment = speedup_experiment_ts

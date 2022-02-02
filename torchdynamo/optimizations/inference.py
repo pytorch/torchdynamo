@@ -185,7 +185,15 @@ class TorchScriptStrategy(object):
         raise NotImplementedError()
 
 
-class FixedStrategy(TorchScriptStrategy):
+class FixedStrategy1(TorchScriptStrategy):
+    def candidate(self):
+        return self.scripted
+
+
+fixed_strategy1 = FixedStrategy1.compile_fn
+
+
+class FixedStrategy2(TorchScriptStrategy):
     def candidate(self):
         cg = BACKENDS["cudagraphs_ts"](self.scripted, self.example_inputs)
         if cg is not None:
@@ -193,7 +201,7 @@ class FixedStrategy(TorchScriptStrategy):
         return self.scripted
 
 
-fixed_strategy = FixedStrategy.compile_fn
+fixed_strategy2 = FixedStrategy2.compile_fn
 
 
 class OfflineAutotuner(TorchScriptStrategy):

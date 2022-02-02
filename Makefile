@@ -87,11 +87,11 @@ online-autotune-cpu: develop
 online-autotune-gpu: develop
 	python torchbench.py --nvfuser -d cuda --online-autotune -n100
 
-fixed-cpu: develop
-	python torchbench.py --speedup-fixed -n50
+fixed1-gpu: develop
+	python torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
 
-fixed-gpu: develop
-	python torchbench.py --nvfuser -d cuda --speedup-fixed -n100
+fixed2-gpu: develop
+	python torchbench.py --nvfuser -d cuda --speedup-fixed2 -n100
 
 baseline-cpu: develop
 	 rm -f baseline_*.csv
