@@ -14,6 +14,7 @@ import torch
 from torch.fx.experimental.normalize import NormalizeOperators
 
 from torchdynamo import config
+from torchdynamo.utils import check_is_cuda
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
@@ -100,17 +101,6 @@ def normalize_ir(gm, example_inputs):
     gm.recompile()
     # record_graph_stats(gm)
     return gm
-
-
-def check_is_cuda(gm, example_inputs):
-    any_cuda = any(
-        x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True))
-    )
-    if any_cuda:
-        assert all(
-            x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True))
-        )
-    return any_cuda
 
 
 def check_requires_grad(gm, example_inputs):

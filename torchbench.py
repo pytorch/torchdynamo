@@ -593,7 +593,8 @@ def print_summary(filename):
             else:
                 cdata = data[col].clip(1)
                 print(
-                    col.ljust(width), f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x"
+                    col.ljust(width),
+                    f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
                 )
         except Exception:
             pass

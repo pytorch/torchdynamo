@@ -10,22 +10,12 @@ import os
 import torch
 
 from torchdynamo import config
+from torchdynamo.utils import check_is_cuda
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import is_jit_model
 from torchdynamo.utils import torchscript
 
 log = logging.getLogger(__name__)
-
-
-def _find_cuda(x):
-    if hasattr(x, "is_cuda"):
-        return x.is_cuda
-    elif isinstance(x, (list, tuple)):
-        return any(_find_cuda(y) for y in x)
-    elif isinstance(x, dict):
-        return any(_find_cuda(y) for y in x.values())
-    else:
-        return _find_cuda(x.__dict__)
 
 
 def cached(fn):
@@ -183,7 +173,7 @@ class SubGraph(object):
     @property
     @cached
     def is_cuda(self):
-        return _find_cuda(self.example_inputs)
+        return check_is_cuda(self.model, self.example_inputs)
 
     @property
     def output_specs(self):

@@ -161,7 +161,13 @@ def clone_input(x):
             (x.data_ptr() - buffer.data_ptr()) % 32
         ) // x.element_size()
         result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
-        result.copy_(x.clone())
+        try:
+            result.copy_(x.clone())
+        except RuntimeError:
+            # RuntimeError: unsupported operation: more than one element of the written-to
+            # tensor refers to a single memory location. Please clone() the tensor before
+            # performing the operation.
+            return torch.clone(x)
         return result
 
 
@@ -259,13 +265,14 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         saved_state = []
         for param in itertools.chain(gm.parameters(), gm.buffers()):
-            saved_state.append((param, torch.clone(param)))
+            saved_state.append((param, param._version, torch.clone(param)))
 
     def restore():
         with torch.no_grad():
             torch.random.set_rng_state(rng_state)
-            for param, original_value in saved_state:
-                param.copy_(original_value)
+            for param, version, original_value in saved_state:
+                if param._version != version:
+                    param.copy_(original_value)
 
     return restore
 
@@ -285,3 +292,7 @@ def timed(model, example_inputs, times=1):
         synchronize()
     t1 = time.perf_counter()
     return result, t1 - t0
+
+
+def check_is_cuda(gm, example_inputs):
+    return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
