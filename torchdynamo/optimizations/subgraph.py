@@ -231,8 +231,9 @@ class SubGraph(object):
         return False
 
     def will_tensorrt_barf(self):
-        code = torch.jit.freeze(self.scripted).code
+        return False
+        # code = torch.jit.freeze(self.scripted).code
         # TODO(jansel): submit a bug report for this one, issue is in opacus_cifar10
-        if "group_norm" in code or "einsum" in code:
-            return True
-        return self.has_dtype(torch.int64)
+        # if "group_norm" in code or "einsum" in code:
+        #    return True
+        # return self.has_dtype(torch.int64)
