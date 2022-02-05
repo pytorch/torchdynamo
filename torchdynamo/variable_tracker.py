@@ -132,6 +132,16 @@ class VariableTracker:
         assert isinstance(guards, set)
         return self.clone(guards=set.union(self.guards, guards))
 
+    def add_options(self, options, *more):
+        if more:
+            return self.add_options(options).add_options(more[0], *more[1:])
+        if isinstance(options, VariableTracker):
+            return self.add_guards(options.guards)
+        assert isinstance(options, dict)
+        if "guards" in options:
+            return self.add_guards(options["guards"])
+        return self
+
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
@@ -701,7 +711,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs).add_guards(self.guards)
+        return self.fn(*args, **kwargs).add_options(self)
 
 
 class BuiltinVariable(VariableTracker):
@@ -955,12 +965,42 @@ class BuiltinVariable(VariableTracker):
         elif self.fn is next and args and isinstance(args[0], ListIteratorVariable):
             val, next_iter = args[0].next_variables()
             tx.replace_all(args[0], next_iter)
-            return val.add_guards(self.guards)
+            return val.add_options(self)
         elif self.fn is hasattr and args:
             assert not kwargs
             obj, attr = args
             name = attr.as_python_constant()
-            return obj.call_hasattr(tx, name).add_guards(options["guards"])
+            return obj.call_hasattr(tx, name).add_options(options)
+        elif self.fn is map and args[1].has_unpack_var_sequence(tx):
+            assert not kwargs and len(args) == 2
+            items = [
+                args[0].call_function(tx, [x], {})
+                for x in args[1].unpack_var_sequence(tx)
+            ]
+            return TupleVariable(items, **options)
+        elif self.fn is sum and args[0].has_unpack_var_sequence(tx):
+            start = kwargs.pop("start", ConstantVariable(0)).as_python_constant()
+            assert len(args) == 1 and not kwargs
+            items = args[0].unpack_var_sequence(tx)[start:]
+            return BuiltinVariable(functools.reduce, **options).call_function(
+                tx,
+                [
+                    BuiltinVariable(operator.add),
+                    TupleVariable(items),
+                    ConstantVariable(0, **options),
+                ],
+                {},
+            )
+        elif self.fn is functools.reduce and args[1].has_unpack_var_sequence(tx):
+            assert not kwargs or len(args) in (2, 3)
+            items = args[1].unpack_var_sequence(tx)
+            if len(args) == 2:
+                value, items = items[0], items[1:]
+            else:
+                value = args[2]
+            for element in items:
+                value = args[0].call_function(tx, [value, element], {})
+            return value.add_options(options)
         else:
             raise super().call_function(tx, args, kwargs)
 
@@ -977,7 +1017,7 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         if self.index >= len(self.items):
             raise StopIteration()
-        return self.items[self.index].add_guards(self.guards), ListIteratorVariable(
+        return self.items[self.index].add_options(self), ListIteratorVariable(
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
@@ -990,7 +1030,7 @@ class ListIteratorVariable(VariableTracker):
         return iter([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
-        return [x.add_guards(self.guards) for x in self.items[self.index :]]
+        return [x.add_options(self) for x in self.items[self.index :]]
 
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
@@ -1034,8 +1074,8 @@ class GetAttrVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
-            return self.obj.call_apply(tx, args, kwargs).add_guards(self.guards)
-        return self.obj.call_method(tx, self.name, args, kwargs).add_guards(self.guards)
+            return self.obj.call_apply(tx, args, kwargs).add_options(self)
+        return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
 
     def call_method(
         self,
@@ -1087,10 +1127,10 @@ class BaseListVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
         if isinstance(index, slice):
-            return self.clone(items=self.items[index]).add_guards(arg.guards)
+            return self.clone(items=self.items[index]).add_options(arg)
         else:
             assert isinstance(index, int)
-            return self.items[index].add_guards(self.guards).add_guards(arg.guards)
+            return self.items[index].add_options(self).add_options(arg)
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
@@ -1256,7 +1296,7 @@ class NamedTupleVariable(TupleVariable):
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
             unimplemented(f"NamedTupleVariable.{name}")
-        return self.items[fields.index(name)].add_guards(self.guards)
+        return self.items[fields.index(name)].add_options(self)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         options = VariableTracker.propagate(self)
@@ -1294,7 +1334,7 @@ class SliceVariable(BaseListVariable):
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"slice.{name}")
-        return self.items[fields.index(name)].add_guards(self.guards)
+        return self.items[fields.index(name)].add_options(self)
 
 
 class ConstDictVariable(VariableTracker):
@@ -1324,7 +1364,7 @@ class ConstDictVariable(VariableTracker):
 
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
-        return self.items[index].add_guards(self.guards).add_guards(arg.guards)
+        return self.items[index].add_options(self, arg)
 
     def call_method(
         self,
@@ -1381,7 +1421,7 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 2
         ):
             # missing item, return the default value
-            return args[1].add_guards(options["guards"])
+            return args[1].add_options(options)
         elif (
             name == "pop"
             and args
@@ -1393,7 +1433,7 @@ class ConstDictVariable(VariableTracker):
             tx.replace_all(
                 self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
             )
-            return result.add_guards(options["guards"])
+            return result.add_options(options)
         elif (
             name == "update"
             and args
@@ -1411,7 +1451,7 @@ class ConstDictVariable(VariableTracker):
             and args[0].as_python_constant() in self.items
         ):
             result = self.items[args[0].as_python_constant()]
-            return result.add_guards(options["guards"])
+            return result.add_options(options)
         elif name == "__contains__" and args and args[0].is_python_constant():
             return ConstantVariable(
                 args[0].as_python_constant() in self.items, **options
@@ -1534,8 +1574,8 @@ class UserMethodVariable(UserFunctionVariable):
         if isinstance(self.obj, NNModuleVariable) and getattr(
             self.fn, "__module__", ""
         ).startswith("torch.nn."):
-            return self.obj.call_method(tx, self.fn.__name__, args, kwargs).add_guards(
-                self.guards
+            return self.obj.call_method(tx, self.fn.__name__, args, kwargs).add_options(
+                self
             )
         return super().call_function(tx, args, kwargs)
 

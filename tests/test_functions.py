@@ -3,6 +3,7 @@ import collections
 import functools
 import inspect
 import math
+import operator
 
 import torch
 from torch import sub
@@ -864,6 +865,14 @@ class FunctionTests(torchdynamo.testing.TestCase):
         a = min(max(a, 0), 1)
         b = max(0, min(1, b))
         return max(a, b) - min(a, b) + c
+
+    @make_test
+    def test_map_sum(a, b, c, d):
+        return sum(map(lambda x: x + 1, [a, b, c, d]))
+
+    @make_test
+    def test_reduce(a, b, c, d):
+        return functools.reduce(operator.add, [a, b, c, d])
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):

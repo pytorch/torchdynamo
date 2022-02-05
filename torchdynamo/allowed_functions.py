@@ -1,6 +1,8 @@
 import builtins
 import collections
+import functools
 import math
+import operator
 import types
 import warnings
 from functools import lru_cache
@@ -72,11 +74,20 @@ def is_disallowed(obj):
 
 @lru_cache(None)
 def _builtin_function_ids():
-    return {
+    rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
         if not k.startswith("_") and callable(v)
     }
+    rv.update(
+        {
+            id(v): f"operator.{k}"
+            for k, v in operator.__dict__.items()
+            if not k.startswith("_") and callable(v)
+        }
+    )
+    rv[id(functools.reduce)] = "functools.reduce"
+    return rv
 
 
 def is_builtin(obj):
