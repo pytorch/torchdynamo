@@ -33,6 +33,7 @@ from .utils import unimplemented
 from .variable_source import AttrSource
 from .variable_source import GetItemSource
 from .variable_source import NNModuleSource
+from .variable_source import ODictGetItemSource
 from .variable_source import Source
 
 dict_values = type(dict().values())
@@ -634,7 +635,7 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        return f"ConstantVariable({self.value})"
+        return f"ConstantVariable({self.value!r})"
 
     def python_type(self):
         return type(self.value)
@@ -1958,20 +1959,70 @@ class UnsupportedVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
         if name not in getattr(self.value, "__dict__", {}):
             try:
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
 
+            if method is collections.OrderedDict.keys and self.source:
+                # subclass of OrderedDict
+                assert not (args or kwargs)
+                keys = list(self.value.keys())
+                assert all(map(ConstantVariable.is_literal, keys))
+                return TupleVariable(
+                    [ConstantVariable(k, **options) for k in keys], **options
+                ).add_guard(
+                    Guard(
+                        self.source.name(),
+                        self.source.guard_source(),
+                        GuardBuilder.ODICT_KEYS,
+                    )
+                )
+
+            if (
+                method is collections.OrderedDict.items
+                and isinstance(self.value, collections.OrderedDict)
+                and self.source
+            ):
+                assert not (args or kwargs)
+                items = []
+                keys = self.call_method(tx, "keys", [], {})
+                options = VariableTracker.propagate(self, args, kwargs.values(), keys)
+                for key in keys.unpack_var_sequence(tx):
+                    items.append(
+                        TupleVariable(
+                            [key, self.odict_getitem(tx, key)],
+                            **options,
+                        )
+                    )
+                return TupleVariable(items, **options)
+
+            if method is collections.OrderedDict.__getitem__ and len(args) == 1:
+                assert not kwargs
+                return self.odict_getitem(tx, args[0])
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 # TODO(jansel): add a guard to check for monkey patching?
-                options = VariableTracker.propagate(self, args, kwargs.values())
                 return UserMethodVariable(method, self, **options).call_function(
                     tx, args, kwargs
                 )
+
         return super().call_method(tx, name, args, kwargs)
+
+    def odict_getitem(self, tx, key):
+        from .variable_builder import VariableBuilder
+
+        return VariableBuilder(
+            tx,
+            ODictGetItemSource(self.source, key.as_python_constant()),
+        )(
+            collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
+        ).add_options(
+            key, self
+        )
 
 
 class SuperVariable(VariableTracker):

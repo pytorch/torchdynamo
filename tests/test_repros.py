@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import collections
 import copy
 import inspect
 from collections import namedtuple
@@ -483,6 +484,32 @@ class PartialMaml(torch.nn.Module):
         return accs
 
 
+class ModelOutput(collections.OrderedDict):
+    """based on file_utils.py in HuggingFace"""
+
+    def __getitem__(self, k):
+        if isinstance(k, str):
+            inner_dict = {k: v for (k, v) in self.items()}
+            return inner_dict[k]
+        else:
+            return self.to_tuple()[k]
+
+    def __setattr__(self, name, value):
+        if name in self.keys() and value is not None:
+            # Don't call self.__setitem__ to avoid recursion errors
+            super().__setitem__(name, value)
+        super().__setattr__(name, value)
+
+    def __setitem__(self, key, value):
+        # Will raise a KeyException if needed
+        super().__setitem__(key, value)
+        # Don't call self.__setattr__ to avoid recursion errors
+        super().__setattr__(key, value)
+
+    def to_tuple(self):
+        return tuple(self[k] for k in self.keys())
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -634,3 +661,25 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
+
+    def test_hf_model_output(self):
+        ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
+
+        def fn1(x):
+            return x["a"] + 1
+
+        def fn2(x):
+            return x.a + 1
+
+        def fn3(x):
+            return x.to_tuple()[0] + 1
+
+        def fn4(x):
+            return x[0] + 1
+
+        for fn in (fn1, fn2, fn3, fn4):
+            cnt = torchdynamo.testing.CompileCounter()
+            with eval_frame.optimize(convert_frame_assert(cnt)):
+                self.assertTrue(same(fn(ex), ex.a + 1))
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(cnt.op_count, 1)

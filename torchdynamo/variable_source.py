@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 from typing import Any
 
@@ -90,6 +91,28 @@ class GetItemSource(Source):
 
     def name(self):
         return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass
+class ODictGetItemSource(Source):
+    base: Source
+    index: Any
+
+    def reconstruct(self, codegen):
+        return (
+            [codegen._create_load_const(collections.OrderedDict.__getitem__)]
+            + self.base.reconstruct(codegen)
+            + [
+                codegen.create_load_const(self.index),
+                create_instruction("CALL_FUNCTION", 2),
+            ]
+        )
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass

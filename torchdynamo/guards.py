@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import enum
+import os
 import re
 import textwrap
 import types
@@ -20,6 +21,15 @@ from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
 from .utils import istype
+
+CLOSURE_VARS = collections.OrderedDict(
+    [
+        ("___check_type_id", check_type_id),
+        ("___check_obj_id", check_obj_id),
+        ("___is_grad_enabled", torch.is_grad_enabled),
+        ("___odict_getitem", collections.OrderedDict.__getitem__),
+    ]
+)
 
 
 class GuardSource(enum.Enum):
@@ -70,6 +80,24 @@ class Guard:
         return self.source.is_local()
 
 
+def strip_function_call(name):
+    """
+    "___odict_getitem(a, 1)" => "a"
+    """
+    m = re.match(r"^___[a-z0-9_]+\(([^),]+),", name)
+    if m:
+        return m.group(1)
+    return name
+
+
+def strip_getattr_getitem(name):
+    """
+    "a[1]" => "a"
+    "a.foo" => "a"
+    """
+    return re.split(r"[.\[]", name)[0]
+
+
 class GuardBuilder:
     def __init__(self, id_ref: Callable, scope: Dict[str, Any], guarded_code):
         self.id_ref = id_ref
@@ -82,13 +110,14 @@ class GuardBuilder:
         self.guarded_code = guarded_code
 
     def get(self, name: str):
-        return eval(name, self.scope)
+        return eval(name, self.scope, CLOSURE_VARS)
 
     def arg_ref(self, guard: Guard):
         name = guard.name
-        base = re.split(r"[.\[]", name)[0]
+        base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
             self.argnames.append(base)
+
         return name
 
     def HASATTR(self, guard: Guard):
@@ -164,13 +193,6 @@ class GuardBuilder:
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def TENSOR_MATCH(self, guard: Guard):
-        if guard.is_nn_module():
-            self.ID_MATCH(guard)
-        else:
-            self.tensor_check_names.append(self.arg_ref(guard))
-            self.tensor_check_examples.append(self.get(guard.name))
-
     def LIST_LENGTH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -183,6 +205,13 @@ class GuardBuilder:
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
+    def ODICT_KEYS(self, guard):
+        """OrderedDict keys match"""
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
+        self.code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
+
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
 
@@ -194,6 +223,13 @@ class GuardBuilder:
             self.code.append("___is_grad_enabled()")
         else:
             self.code.append("not ___is_grad_enabled()")
+
+    def TENSOR_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            self.ID_MATCH(guard)
+        else:
+            self.tensor_check_names.append(self.arg_ref(guard))
+            self.tensor_check_examples.append(self.get(guard.name))
 
 
 class GuardedCode:
@@ -238,24 +274,23 @@ class GuardedCode:
             ).check
             code.append(f"___check_tensors({', '.join(tensor_check_names)})")
 
-        code = " and ".join(code)
+        code = " and ".join(unique(code))
 
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
-                ("___check_type_id", check_type_id),
-                ("___check_obj_id", check_obj_id),
                 ("___check_tensors", check_tensors_fn),
-                ("___is_grad_enabled", torch.is_grad_enabled),
             ]
         )
+        closure_vars.update(CLOSURE_VARS)
         py_code = textwrap.dedent(
             f"""
             def ___make_guard_fn({','.join(closure_vars.keys())}):
                 return lambda {args}: {code}
             """
         )
-        # print("GUARDS", code)
+        if os.environ.get("PRINT_GUARDS", None) == "1":
+            print("GUARDS", code)
         out = dict()
         exec(py_code, global_builder.scope, out)
         return out["___make_guard_fn"](*closure_vars.values())
@@ -273,3 +308,11 @@ class GuardedCode:
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+
+def unique(seq):
+    seen = set()
+    for x in seq:
+        if x not in seen:
+            yield x
+            seen.add(x)
