@@ -864,3 +864,19 @@ class FunctionTests(torchdynamo.testing.TestCase):
         a = min(max(a, 0), 1)
         b = max(0, min(1, b))
         return max(a, b) - min(a, b) + c
+
+    def test_build_tuple_unpack(self):
+        def fn1(a, b, c):
+            return a - b / c
+
+        def fn2(a, b, c):
+            tmp1 = (a,)
+            tmp2 = (b, c)
+            args = (*tmp1, *tmp2)
+            return fn1(*args)
+
+        def fn3(a, *args):
+            return fn1(a, *args)
+
+        torchdynamo.testing.standard_test(self, fn=fn2, nargs=3, expected_ops=2)
+        torchdynamo.testing.standard_test(self, fn=fn3, nargs=3, expected_ops=2)

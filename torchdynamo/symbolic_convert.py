@@ -569,11 +569,12 @@ class InstructionTranslatorBase(fx.Tracer):
             itertools.chain(supported_tensors.items(), supported_is_const.items())
         )
         if (
-            isinstance(left, (TensorVariable, NNModuleVariable))
+            isinstance(left, (TensorVariable, NNModuleVariable, BaseListVariable))
             and isinstance(right, ConstantVariable)
             and right.value is None
             and op in supported_is_const
         ):
+            # <non-None> is None
             self.push(
                 ConstantVariable(
                     supported_is_const[op](object(), right.value), **options
@@ -833,6 +834,8 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def BUILD_TUPLE_UNPACK(self, inst):
         self.BUILD_LIST_UNPACK(inst, cls=TupleVariable)
+
+    BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
