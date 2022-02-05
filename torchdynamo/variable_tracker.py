@@ -533,6 +533,10 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
         module = tx.get_submodule(key)
+
+        if name == "forward":
+            return self.call_function(tx, args, kwargs)
+
         if not all(x.is_python_constant() for x in itertools.chain(args, kwargs)):
             raise unimplemented(f"non-const NNModule method {name}")
 

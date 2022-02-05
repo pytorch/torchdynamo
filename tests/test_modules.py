@@ -455,6 +455,18 @@ class EnumValues(torch.nn.ModuleDict):
         return torch.cat(features, 1)
 
 
+class CallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = torch.nn.Linear(10, 10)
+
+    def forward(self, x):
+        x = self.layer1.forward(x)
+        x = self.layer2.forward(x)
+        return x
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -500,6 +512,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_enumvalues = make_test(EnumValues())
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
+    test_forward_directly = make_test(CallForwardDirectly())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
