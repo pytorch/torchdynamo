@@ -2,6 +2,7 @@
 import copy
 import inspect
 from collections import namedtuple
+from copy import deepcopy
 
 import torch
 from torch.nn import functional as F
@@ -421,6 +422,67 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
     return forward_fn(*input_tensors)
 
 
+class FakeMamlInner(torch.nn.Module):
+    def __init__(self):
+        super(FakeMamlInner, self).__init__()
+        self.linear = torch.nn.Linear(784, 5)
+
+    def forward(self, x, ignored=None, bn_training=False):
+        return self.linear(x.view(x.shape[0], -1))
+
+
+class PartialMaml(torch.nn.Module):
+    # Highly simplified version of maml.meta.Meta.finetuning
+    def __init__(self):
+        super(PartialMaml, self).__init__()
+        self.net = FakeMamlInner()
+        self.update_step_test = 10
+        self.update_lr = 0.4
+
+    def forward(self, x_spt, y_spt, x_qry, y_qry):
+        querysz = x_qry.size(0)
+
+        corrects = [0 for _ in range(self.update_step_test + 1)]
+
+        # in order to not ruin the state of running_mean/variance and bn_weight/bias
+        # we finetunning on the copied model instead of self.net
+        net = deepcopy(self.net)
+
+        # 1. run the i-th task and compute loss for k=0
+        logits = net(x_spt)
+        loss = F.cross_entropy(logits, y_spt)
+        grad = torch.autograd.grad(loss, net.parameters())
+        fast_weights = list(
+            map(lambda p: p[1] - self.update_lr * p[0], zip(grad, net.parameters()))
+        )
+
+        # this is the loss and accuracy before first update
+        with torch.no_grad():
+            # [setsz, nway]
+            logits_q = net(x_qry, net.parameters(), bn_training=True)
+            # [setsz]
+            pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
+            # scalar
+            correct = torch.eq(pred_q, y_qry).sum().item()
+            corrects[0] = corrects[0] + correct
+
+        # this is the loss and accuracy after the first update
+        with torch.no_grad():
+            # [setsz, nway]
+            logits_q = net(x_qry, fast_weights, bn_training=True)
+            # [setsz]
+            pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
+            # scalar
+            correct = torch.eq(pred_q, y_qry).sum().item()
+            corrects[1] = corrects[1] + correct
+
+        del net
+
+        accs = torch.tensor(corrects) / querysz
+
+        return accs
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -557,3 +619,18 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
+
+    def test_maml(self):
+        """Note, we still need more work to capture this one properly"""
+        a = torch.randn(5, 1, 28, 28)
+        b = torch.zeros(5, dtype=torch.int64)
+        c = torch.randn(75, 1, 28, 28)
+        d = torch.zeros(75, dtype=torch.int64)
+        model = PartialMaml()
+        correct = model(a, b, c, d)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(same(model(a, b, c, d), correct))
+
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 9)

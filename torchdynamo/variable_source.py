@@ -62,7 +62,7 @@ class AttrSource(Source):
     member: str
 
     def reconstruct(self, codegen):
-        return self.base.reconstruct(codegen) + [codegen.create_load_attr(self.member)]
+        return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
 
     def guard_source(self):
         return self.base.guard_source()

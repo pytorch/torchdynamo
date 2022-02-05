@@ -134,13 +134,11 @@ class VariableTracker:
 
     def add_options(self, options, *more):
         if more:
-            return self.add_options(options).add_options(more[0], *more[1:])
+            return self.add_options(options).add_options(*more)
         if isinstance(options, VariableTracker):
             return self.add_guards(options.guards)
         assert isinstance(options, dict)
-        if "guards" in options:
-            return self.add_guards(options["guards"])
-        return self
+        return self.add_guards(options.get("guards", set()))
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
@@ -1068,7 +1066,7 @@ class GetAttrVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.obj)
-        return [codegen.create_load_attr(self.name)]
+        return codegen.create_load_attrs(self.name)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1726,6 +1724,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super(AllowedFunctionOrModuleVariable, self).__init__(**kwargs)
+
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -1922,6 +1921,9 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             return LambdaVariable(handle_ntuple, **options)
         else:
             return handle_ntuple(args[0])
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.value.__name__})"
 
 
 class PythonModuleVariable(VariableTracker):

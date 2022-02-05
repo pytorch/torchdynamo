@@ -1,5 +1,6 @@
 import builtins
 import collections
+import copy
 import functools
 import math
 import operator
@@ -17,6 +18,8 @@ def _disallowed_function_ids():
         False,
         None,
         collections.OrderedDict,
+        copy.copy,
+        copy.deepcopy,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
         torch.clear_autocast_cache,
