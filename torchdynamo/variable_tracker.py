@@ -698,6 +698,11 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable(method(*const_args, **const_kwargs), **options)
         elif name == "__len__" and not (args or kwargs):
             return ConstantVariable(len(self.value), **options)
+        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
+            assert not kwargs
+            search = args[0].as_python_constant()
+            result = search in self.value
+            return ConstantVariable(result, **options)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
@@ -856,14 +861,6 @@ class BuiltinVariable(VariableTracker):
                 if self.fn is operator.iadd and isinstance(args[0], ConstantVariable):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
-
-                if (
-                    self.fn is operator.getitem
-                    and isinstance(args[1], TensorVariable)
-                    and not config.dynamic_shapes
-                ):
-                    unimplemented("dynamic Tensor.getitem")
-
                 return TensorVariable.create(
                     tx.create_proxy(
                         "call_function",
@@ -924,6 +921,24 @@ class BuiltinVariable(VariableTracker):
                 TupleVariable(list(item), **options)
                 for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
             ]
+            return TupleVariable(items, **options)
+        elif self.fn is zip and all(
+            isinstance(x, TensorVariable) and x.size for x in args
+        ):
+            out_size = functools.reduce(min, [x.size[0] for x in args])
+            items = []
+            for i in range(out_size):
+                items.append(
+                    TupleVariable(
+                        [
+                            BuiltinVariable(operator.getitem, **options).call_function(
+                                tx, [arg, ConstantVariable(i)], {}
+                            )
+                            for arg in args
+                        ],
+                        **options,
+                    )
+                )
             return TupleVariable(items, **options)
         elif self.fn is enumerate and all(x.has_unpack_var_sequence(tx) for x in args):
             assert not kwargs and len(args) == 1
@@ -1148,6 +1163,16 @@ class BaseListVariable(VariableTracker):
         elif name == "__add__":
             assert not kwargs and len(args) == 1
             return type(self)(self.items + args[0].items, **options)
+        elif (
+            name == "__contains__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and all(x.is_python_constant() for x in self.items)
+        ):
+            assert not kwargs
+            search = args[0].as_python_constant()
+            result = any(x.as_python_constant() == search for x in self.items)
+            return ConstantVariable(result, **options)
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
 
@@ -1922,9 +1947,6 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             return LambdaVariable(handle_ntuple, **options)
         else:
             return handle_ntuple(args[0])
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.value.__name__})"
 
 
 class PythonModuleVariable(VariableTracker):

@@ -510,6 +510,28 @@ class ModelOutput(collections.OrderedDict):
         return tuple(self[k] for k in self.keys())
 
 
+def create_rand_mask_from_inputs(
+    from_blocked_mask,
+    to_blocked_mask,
+    rand_attn,
+    num_attention_heads,
+    num_rand_blocks,
+    batch_size,
+    from_seq_length,
+    from_block_size,
+):
+    """taken from HF modeling_big_bird.py"""
+    num_windows = from_seq_length // from_block_size - 2
+    rand_mask = torch.stack(
+        [p1[i1.flatten()] for p1, i1 in zip(to_blocked_mask, rand_attn)]
+    )
+    rand_mask = rand_mask.view(
+        batch_size, num_attention_heads, num_windows, num_rand_blocks * from_block_size
+    )
+    rand_mask = torch.einsum("blq,bhlk->bhlqk", from_blocked_mask[:, 1:-1], rand_mask)
+    return rand_mask
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -683,3 +705,22 @@ class ReproTests(torchdynamo.testing.TestCase):
                 self.assertTrue(same(fn(ex), ex.a + 1))
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
+
+    def test_create_rand_mask_from_inputs(self):
+        args = [
+            torch.randn([1, 64, 64]),
+            torch.randn([1, 64, 64]),
+            torch.zeros([1, 12, 62, 3], dtype=torch.int64),
+            12,
+            3,
+            1,
+            4096,
+            64,
+        ]
+        correct = create_rand_mask_from_inputs(*args)
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(same(create_rand_mask_from_inputs(*args), correct))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 8)

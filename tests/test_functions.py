@@ -422,3 +422,14 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_reduce(a, b, c, d):
         return functools.reduce(operator.add, [a, b, c, d])
+
+    @make_test
+    def test_tuple_contains(a, b):
+        v1 = "a"
+        v2 = "b"
+        v3 = "c"
+        vals1 = (v1, v2, v3)
+        vals2 = ("d", "e", "f")
+        if "a" in vals1 and "b" not in vals2:
+            return a + b
+        return a - b
