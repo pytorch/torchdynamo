@@ -472,3 +472,14 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         torchdynamo.testing.standard_test(self, fn=fn2, nargs=3, expected_ops=2)
         torchdynamo.testing.standard_test(self, fn=fn3, nargs=3, expected_ops=2)
+
+    def test_list_mul(self):
+        def fn(count):
+            head_mask = count * [None] * count
+            return head_mask
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(2), [None] * 4)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)

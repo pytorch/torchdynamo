@@ -947,6 +947,21 @@ class BuiltinVariable(VariableTracker):
                 for idx, var in enumerate(args[0].unpack_var_sequence(tx))
             ]
             return TupleVariable(items, **options)
+        elif (
+            self.fn is operator.mul
+            and isinstance(args[0], (ListVariable, TupleVariable))
+            and isinstance(args[1], ConstantVariable)
+        ):
+            assert not kwargs and len(args) == 2
+            return args[0].__class__(
+                args[0].items * args[1].as_python_constant(), **options
+            )
+        elif (
+            self.fn is operator.mul
+            and isinstance(args[1], (ListVariable, TupleVariable))
+            and isinstance(args[0], ConstantVariable)
+        ):
+            return self.call_function(tx, list(reversed(args)), {})
         elif self.can_constant_fold_through() and constant_args:
             # constant fold
             return ConstantVariable(
