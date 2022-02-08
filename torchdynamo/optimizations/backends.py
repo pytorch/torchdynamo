@@ -452,6 +452,16 @@ def cudagraphs_inner(model, inputs):
     return run
 
 
+@create_backend
+def aot_autograd(subgraph, **kwargs):
+    from functorch.compile import aot_function, memory_efficient_fusion
+
+    # If kwargs is empty, we fallback to default of memory_efficient_fusion
+    if kwargs:
+        return subgraph.wrap_returns(aot_function(subgraph.model, **kwargs))
+    return subgraph.wrap_returns(memory_efficient_fusion(subgraph.model))
+
+
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
     if jit_mod is None:
         return None
