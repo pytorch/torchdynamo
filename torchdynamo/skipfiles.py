@@ -5,7 +5,6 @@ import copy
 import copyreg
 import dataclasses
 import enum
-import functools
 import importlib
 import inspect
 import linecache
@@ -43,7 +42,6 @@ SKIP_DIRS = [
         copyreg,
         dataclasses,
         enum,
-        functools,
         importlib,
         inspect,
         linecache,
@@ -84,6 +82,7 @@ def check(filename):
 # skip common third party libs
 for _name in (
     "intel_extension_for_pytorch",
+    "functools",
     "functorch",
     "numpy",
     "omegaconf",
