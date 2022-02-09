@@ -5,6 +5,7 @@ import copy
 import copyreg
 import dataclasses
 import enum
+import functools
 import importlib
 import inspect
 import linecache
@@ -21,8 +22,8 @@ import typing
 import unittest
 import weakref
 
-import _weakrefset
 import _collections_abc
+import _weakrefset
 import torch
 
 SKIP_DIRS = [
@@ -42,6 +43,7 @@ SKIP_DIRS = [
         copyreg,
         dataclasses,
         enum,
+        functools,
         importlib,
         inspect,
         linecache,
@@ -59,7 +61,6 @@ SKIP_DIRS = [
         weakref,
         _collections_abc,
         _weakrefset,
-
     )
 ]
 SKIP_DIRS_RE = None  # set in add() below
@@ -82,7 +83,6 @@ def check(filename):
 # skip common third party libs
 for _name in (
     "intel_extension_for_pytorch",
-    "functools",
     "functorch",
     "numpy",
     "omegaconf",

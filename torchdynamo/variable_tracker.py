@@ -1,5 +1,6 @@
 import collections
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -48,12 +49,22 @@ def check_constant_args(args, kwargs):
 
 class MutableLocal:
     """
-    Marker used to indicate this (list, iter, etc) was constructed
-    in local scope and can be mutated safely in analysis without leaking
+    Marker used to indicate this (list, iter, etc) was constructed in
+    local scope and can be mutated safely in analysis without leaking
     state.
     """
 
     pass
+
+
+@dataclasses.dataclass
+class InputList:
+    """
+    Marker to indicate a list passed as an input that if we mutate we
+    need to re-apply those mutations after the graph runs.
+    """
+
+    source: Source
 
 
 class VariableTracker:

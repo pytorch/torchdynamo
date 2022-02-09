@@ -113,6 +113,9 @@ output         output  output                   ((mul,),)  {}
 Note that the order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 
+
+## Adding Backends
+
 One could replace `my_compiler()` with something that generates faster
 code, for example one using [optimize_for_inference]:
 ```py
@@ -139,9 +142,13 @@ def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     return gm.forward
 ```
 
+If you are adding new backends, you may need to add them to [skipfiles.py]
+to avoid an infinite loop where TorchDynamo tries to compile the backend
+with the backend.
+
 [optimize_for_inference]: https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html
 [backends.py]: https://github.com/jansel/torchdynamo/blob/main/torchdynamo/optimizations/backends.py
-
+[skipfiles.py]: https://github.com/jansel/torchdynamo/blob/main/torchdynamo/skipfiles.py
 
 ## Guards
 

@@ -4,6 +4,7 @@ import copy
 import inspect
 from collections import namedtuple
 from copy import deepcopy
+from typing import List
 
 import torch
 from torch.nn import functional as F
@@ -532,6 +533,22 @@ def create_rand_mask_from_inputs(
     return rand_mask
 
 
+class SequentialAppendList(torch.nn.Sequential):
+    """from timm/models/vovnet.py"""
+
+    def __init__(self, *args):
+        super(SequentialAppendList, self).__init__(*args)
+
+    def forward(self, x: torch.Tensor, concat_list: List[torch.Tensor]) -> torch.Tensor:
+        for i, module in enumerate(self):
+            if i == 0:
+                concat_list.append(module(x))
+            else:
+                concat_list.append(module(concat_list[-1]))
+        x = torch.cat(concat_list, dim=1)
+        return x
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -670,7 +687,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, 4)
 
     def test_maml(self):
-        """Note, we still need more work to capture this one properly"""
+        # Note, we still need more work to capture this one properly,
+        # creates nn.Modules dynamically
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
         c = torch.randn(75, 1, 28, 28)
@@ -724,3 +742,22 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(create_rand_mask_from_inputs(*args), correct))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
+
+    def test_seq_append_list(self):
+        x = torch.randn(4, 10)
+        model = SequentialAppendList(
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+        )
+        # this one is tricky because it mutates the list provided as an input
+        l1 = [x]
+        l2 = [x]
+        correct = model(x, l1)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(same(model(x, l2), correct))
+        self.assertTrue(same(l1, l2))
+        # self.assertEqual(cnt.frame_count, 1)
+        # self.assertEqual(cnt.op_count, 9)
