@@ -16,10 +16,10 @@ the best of both worlds: usability and performance.
 ![](TorchDynamo.png)
 
 For more information see progress updates posted on dev-discuss.pytorch.org:
-- [TorchDynamo: An Experiment in Dynamic Python Bytecode Transformation](https://dev-discuss.pytorch.org/t/torchdynamo-an-experiment-in-dynamic-python-bytecode-transformation/361)
-- [TorchDynamo Update: 1.48x geomean speedup on TorchBench CPU Inference](https://dev-discuss.pytorch.org/t/torchdynamo-update-1-48x-geomean-speedup-on-torchbench-cpu-inference/397)
-- [TorchDynamo Update 3: GPU Inference Edition](https://dev-discuss.pytorch.org/t/torchdynamo-update-3-gpu-inference-edition/460)
-
+- [Update 1: An Experiment in Dynamic Python Bytecode Transformation](https://dev-discuss.pytorch.org/t/torchdynamo-an-experiment-in-dynamic-python-bytecode-transformation/361)
+- [Update 2: 1.48x Geomean Speedup on TorchBench CPU Inference](https://dev-discuss.pytorch.org/t/torchdynamo-update-1-48x-geomean-speedup-on-torchbench-cpu-inference/397)
+- [Update 3: GPU Inference Edition](https://dev-discuss.pytorch.org/t/torchdynamo-update-3-gpu-inference-edition/460)
+- [Update 4: LazyTensor & nvFuser Experiments](https://dev-discuss.pytorch.org/t/torchdynamo-update-4-lazytensor-nvfuser-experiments/496)
 
 *TorchDynamo is experimental* and under active development.
 You are welcome to try it out and contribute, but should expect to find

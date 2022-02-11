@@ -32,6 +32,7 @@ SKIP_DIRS = [
     # torchdynamo.*
     os.path.dirname(__file__) + "/",
     "<frozen importlib",
+    "<__array_function__ internals>",
 ] + [
     # skip some standard libs
     re.sub(r"__init__.py$", "", m.__file__)

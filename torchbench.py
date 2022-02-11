@@ -98,7 +98,7 @@ def load_model(device, model_name):
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
-    benchmark = benchmark_cls(device=device, jit=False)
+    benchmark = benchmark_cls(test="eval", device=device, jit=False)
     model, example_inputs = benchmark.get_module()
     model.eval()
     gc.collect()
