@@ -8,6 +8,8 @@ from typing import Any
 
 import torch
 
+import torchdynamo
+
 from . import skipfiles
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin
@@ -56,13 +58,19 @@ class GraphArg:
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
-    def __init__(self, tx, source: Source):
+    def __init__(
+        self,
+        tx: "torchdynamo.symbolic_convert.InstructionTranslatorBase",
+        source: Source,
+    ):
         super(VariableBuilder, self).__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
 
     def __call__(self, value):
+        if value in self.tx.side_effects:
+            return self.tx.side_effects[value]
         return self._wrap(value).clone(**self.options())
 
     @staticmethod
@@ -98,7 +106,10 @@ class VariableBuilder:
                 ).add_guards(guards)
                 for i, item in enumerate(value)
             ]
-            return self.list_type(value)(output, guards=guards)
+            result = self.list_type(value)(output, guards=guards)
+            if istype(value, list):
+                return self.tx.side_effects.track_list(self.source, value, result)
+            return result
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)

@@ -29,7 +29,7 @@ def same(a, b):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
-        return all(same(ai, bi) for ai, bi in zip(a, b))
+        return len(a) == len(b) and all(same(ai, bi) for ai, bi in zip(a, b))
     elif isinstance(a, dict):
         assert isinstance(b, dict)
         assert set(a.keys()) == set(

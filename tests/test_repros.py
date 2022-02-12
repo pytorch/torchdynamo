@@ -546,7 +546,7 @@ class SequentialAppendList(torch.nn.Sequential):
             else:
                 concat_list.append(module(concat_list[-1]))
         x = torch.cat(concat_list, dim=1)
-        return x
+        return x, concat_list
 
 
 class ReproTests(torchdynamo.testing.TestCase):
@@ -754,10 +754,12 @@ class ReproTests(torchdynamo.testing.TestCase):
         # this one is tricky because it mutates the list provided as an input
         l1 = [x]
         l2 = [x]
-        correct = model(x, l1)
+        correct, _ = model(x, l1)
         cnt = torchdynamo.testing.CompileCounter()
         with eval_frame.optimize(convert_frame_assert(cnt)):
-            self.assertTrue(same(model(x, l2), correct))
+            result, l3 = model(x, l2)
+            self.assertTrue(same(result, correct))
         self.assertTrue(same(l1, l2))
-        # self.assertEqual(cnt.frame_count, 1)
-        # self.assertEqual(cnt.op_count, 9)
+        self.assertIs(l2, l3)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 5)

@@ -22,6 +22,8 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
+import torchdynamo.side_effects
+
 from . import config
 from . import skipfiles
 from .allowed_functions import is_allowed
@@ -36,6 +38,7 @@ from .bytecode_transformation import unique_id
 from .guards import Guard
 from .guards import GuardBuilder
 from .resume_execution import ContinueExecutionCache
+from .side_effects import SideEffects
 from .utils import CleanupHook
 from .utils import Unsupported
 from .utils import count_calls
@@ -311,15 +314,23 @@ class InstructionTranslatorBase(fx.Tracer):
         )
         self.push(fn.call_function(self, args, kwargs))
 
-    def replace_all(self, oldvar, newvar):
-        assert oldvar.mutable_local
-        assert newvar.mutable_local
+    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
+        if isinstance(oldvar.mutable_local, torchdynamo.side_effects.Mutable):
+            newvar = self.side_effects.mutation(oldvar, newvar)
+        else:
+            assert isinstance(
+                oldvar.mutable_local, torchdynamo.variable_tracker.MutableLocal
+            )
+            newvar = newvar.clone(
+                mutable_local=torchdynamo.variable_tracker.MutableLocal()
+            )
 
         def repl(v: VariableTracker):
             if v.mutable_local is oldvar.mutable_local:
                 return newvar
             return v
 
+        self.side_effects.apply(repl)
         self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(repl, x)
@@ -882,7 +893,6 @@ class InstructionTranslatorBase(fx.Tracer):
             obj,
             ConstDictVariable(
                 items,
-                mutable_local=MutableLocal(),
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )
@@ -897,7 +907,6 @@ class InstructionTranslatorBase(fx.Tracer):
             obj,
             ListVariable(
                 obj.items + [v],
-                mutable_local=MutableLocal(),
                 **VariableTracker.propagate([obj, v]),
             ),
         )
@@ -1069,6 +1078,7 @@ class InstructionTranslatorBase(fx.Tracer):
             stack_values
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
+            and self.side_effects.is_empty()
         ):
             # optimization to generate better code in a common case
             self.add_output_instructions(
@@ -1078,7 +1088,9 @@ class InstructionTranslatorBase(fx.Tracer):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(self, root, graph_output_var)
+            self.side_effects.codegen(pass1)
             pass1.foreach(stack_values)
+
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
                 self,
@@ -1086,7 +1098,9 @@ class InstructionTranslatorBase(fx.Tracer):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
+            self.side_effects.codegen(pass2)
             pass2.foreach(stack_values)
+
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -1268,6 +1282,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.current_instruction,
             self.next_instruction,
             self.block_depth,
+            self.side_effects.clone(),
         )
 
     def restore_graphstate(self, state):
@@ -1283,6 +1298,7 @@ class InstructionTranslatorBase(fx.Tracer):
             self.current_instruction,
             self.next_instruction,
             self.block_depth,
+            self.side_effects,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
@@ -1305,6 +1321,7 @@ class InstructionTranslatorBase(fx.Tracer):
         code_options: Dict[str, Any],
         cleanups,
         root,
+        side_effects,
         compiler_fn=None,
         symbolic_locals=None,
         f_code=None,
@@ -1321,6 +1338,7 @@ class InstructionTranslatorBase(fx.Tracer):
         self.next_instruction = None
         self.current_instruction = create_instruction("NOP")
         self.block_depth = 0
+        self.side_effects = side_effects
 
         # Properties of the input/output code
         self.instructions = instructions
@@ -1365,6 +1383,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             cleanups=dict(),
             root=self,
+            side_effects=SideEffects(),
         )
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
@@ -1501,6 +1520,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             compiler_fn=parent.compiler_fn,
             cleanups=parent.cleanups,
             root=parent.root,
+            side_effects=parent.side_effects,
         )
         self.symbolic_result = None
 
@@ -1555,7 +1575,7 @@ class PyCodegen(object):
         self.root = root
         self.graph_output_var = graph_output_var
 
-    def __call__(self, value):
+    def __call__(self, value, allow_cache=True):
         assert isinstance(value, VariableTracker)
         output = self.output
         graph_outputs = self.graph_outputs
@@ -1564,7 +1584,7 @@ class PyCodegen(object):
             output.append(create_instruction("DUP_TOP"))
             return
 
-        if self.tempvars.get(value) is not None:
+        if allow_cache and self.tempvars.get(value) is not None:
             output.append(self.create_load(self.tempvars[value]))
             return
 
@@ -1596,12 +1616,15 @@ class PyCodegen(object):
                 output.extend(value.reconstruct(self))
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
-            if value in self.tempvars:
-                var = self.new_var()
-                self.tempvars[value] = var
-                output.extend([create_instruction("DUP_TOP"), self.create_store(var)])
+            if allow_cache and value in self.tempvars:
+                self.add_cache(value)
 
         self.top_of_stack = value
+
+    def add_cache(self, value):
+        var = self.new_var()
+        self.tempvars[value] = var
+        self.output.extend([create_instruction("DUP_TOP"), self.create_store(var)])
 
     def foreach(self, items):
         for i in items:
@@ -1619,6 +1642,9 @@ class PyCodegen(object):
         else:
             f_globals[name] = value
         return [self.tx.create_load_global(name, add=True)]
+
+    def clear_tos(self):
+        self.top_of_stack = None
 
 
 @lru_cache(32)

@@ -335,7 +335,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
                 x += tmp.pop(-1)
             return x
 
-        self._common(fn, 1, 3)
+        self._common(fn, 2, 6)
 
     def test_dynamic_shapes(self):
         def fn(a, b):

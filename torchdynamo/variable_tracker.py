@@ -1,6 +1,5 @@
 import collections
 import copy
-import dataclasses
 import functools
 import inspect
 import itertools
@@ -55,16 +54,6 @@ class MutableLocal:
     """
 
     pass
-
-
-@dataclasses.dataclass
-class InputList:
-    """
-    Marker to indicate a list passed as an input that if we mutate we
-    need to re-apply those mutations after the graph runs.
-    """
-
-    source: Source
 
 
 class VariableTracker:
@@ -1262,9 +1251,7 @@ class ListVariable(BaseListVariable):
             (arg,) = args
             return tx.replace_all(
                 self,
-                ListVariable(
-                    self.items + [arg], mutable_local=MutableLocal(), **options
-                ),
+                ListVariable(self.items + [arg], **options),
             )
         elif (
             name == "extend"
@@ -1278,7 +1265,6 @@ class ListVariable(BaseListVariable):
                 self,
                 ListVariable(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
-                    mutable_local=MutableLocal(),
                     **options,
                 ),
             )
@@ -1289,7 +1275,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, mutable_local=MutableLocal(), **options),
+                ListVariable(items, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -1297,7 +1283,7 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, mutable_local=MutableLocal(), **options),
+                ListVariable(items, **options),
             )
             return result
         elif (
@@ -1310,7 +1296,7 @@ class ListVariable(BaseListVariable):
             key, value = args
             items = list(self.items)
             items[key.as_python_constant()] = value
-            result = ListVariable(items, mutable_local=MutableLocal(), **options)
+            result = ListVariable(items, **options)
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -1460,9 +1446,7 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             newval = collections.OrderedDict(val)
             newval[args[0].as_python_constant()] = args[1]
-            return tx.replace_all(
-                self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
-            )
+            return tx.replace_all(self, ConstDictVariable(newval, **options))
         elif (
             name in ("pop", "get")
             and args
@@ -1480,9 +1464,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(args[0].as_python_constant())
-            tx.replace_all(
-                self, ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
-            )
+            tx.replace_all(self, ConstDictVariable(newval, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -1492,7 +1474,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            result = ConstDictVariable(newval, mutable_local=MutableLocal(), **options)
+            result = ConstDictVariable(newval, **options)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -1995,7 +1977,10 @@ class UnsupportedVariable(VariableTracker):
         self.value_type = value_type or type(value)
 
     def __str__(self):
-        return f"{self.__class__.__name__}({self.value_type.__name__})"
+        inner = self.value_type.__name__
+        if inner == "builtin_function_or_method":
+            inner = str(self.value)
+        return f"{self.__class__.__name__}({inner})"
 
     def python_type(self):
         return self.value_type
