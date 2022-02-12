@@ -5,6 +5,7 @@ from typing import List
 
 import torchdynamo
 from torchdynamo.bytecode_transformation import create_instruction
+from torchdynamo.codegen import PyCodegen
 from torchdynamo.variable_tracker import VariableTracker
 
 
@@ -64,17 +65,17 @@ class SideEffects(object):
             (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
         )
 
-    def codegen(self, cg: "torchdynamo.symbolic_convert.PyCodegen"):
+    def codegen(self, cg: PyCodegen):
         for var in self.id_to_variable.values():
             if var.mutable_local.is_modified:
                 assert cg.tempvars.get(var) is None
                 cg(var, allow_cache=False)
-                cg.output.extend(var.mutable_local.source.reconstruct(cg))
+                cg(var.mutable_local.source)
                 if var in cg.tempvars:
                     # subsequent usage should point to the original variable
                     cg.add_cache(var)
                 # old[:] = new
-                cg.output.extend(
+                cg.extend_output(
                     [
                         cg.create_load_const(None),
                         cg.create_load_const(None),
@@ -82,7 +83,6 @@ class SideEffects(object):
                         create_instruction("STORE_SUBSCR"),
                     ]
                 )
-                cg.clear_tos()
 
     def is_empty(self):
         return all(

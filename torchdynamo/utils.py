@@ -7,7 +7,9 @@ import itertools
 import logging
 import os
 import time
+import types
 import weakref
+from functools import lru_cache
 from typing import Any
 from typing import Dict
 
@@ -296,3 +298,19 @@ def timed(model, example_inputs, times=1):
 
 def check_is_cuda(gm, example_inputs):
     return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
+
+
+@lru_cache(32)
+def rot_n_helper(n):
+    assert n > 1
+    vars = [f"v{i}" for i in range(n)]
+    rotated = reversed(vars[-1:] + vars[:-1])
+    fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
+    fn.__name__ = f"rot_{n}_helper"
+    return fn
+
+
+def is_safe_constant(v):
+    if istype(v, (tuple, frozenset)):
+        return all(map(is_safe_constant, v))
+    return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None)))

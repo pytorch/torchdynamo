@@ -12,7 +12,6 @@ import sys
 import traceback
 import types
 import typing
-from functools import lru_cache
 from typing import Any
 from typing import Dict
 from typing import List
@@ -35,6 +34,7 @@ from .bytecode_transformation import cleaned_instructions
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
+from .codegen import PyCodegen
 from .guards import Guard
 from .guards import GuardBuilder
 from .resume_execution import ContinueExecutionCache
@@ -43,6 +43,7 @@ from .utils import CleanupHook
 from .utils import Unsupported
 from .utils import count_calls
 from .utils import counters
+from .utils import is_safe_constant
 from .utils import istype
 from .utils import unimplemented
 from .utils import warning
@@ -144,12 +145,6 @@ def break_graph_if_unsupported(inner_fn):
     return wrapper
 
 
-def is_safe_constant(v):
-    if istype(v, (tuple, frozenset)):
-        return all(map(is_safe_constant, v))
-    return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None)))
-
-
 class InstructionTranslatorBase(fx.Tracer):
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
@@ -157,32 +152,6 @@ class InstructionTranslatorBase(fx.Tracer):
                 self.code_options["co_cellvars"] or []
             ) + tuple(self.code_options["co_freevars"] or [])
         return self._cell_and_freevars
-
-    def create_load(self, name):
-        if name in self.cell_and_freevars():
-            return create_instruction(
-                "LOAD_DEREF", self.cell_and_freevars().index(name), name
-            )
-        assert name in self.code_options["co_varnames"], f"{name} missing"
-        return create_instruction(
-            "LOAD_FAST", self.code_options["co_varnames"].index(name), name
-        )
-
-    def create_load_closure(self, name):
-        assert name in self.cell_and_freevars()
-        return create_instruction(
-            "LOAD_CLOSURE", self.cell_and_freevars().index(name), name
-        )
-
-    def create_store(self, name):
-        if name in self.cell_and_freevars():
-            return create_instruction(
-                "STORE_DEREF", self.cell_and_freevars().index(name), name
-            )
-        assert name in self.code_options["co_varnames"]
-        return create_instruction(
-            "STORE_FAST", self.code_options["co_varnames"].index(name), name
-        )
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
@@ -194,43 +163,12 @@ class InstructionTranslatorBase(fx.Tracer):
                 )
                 return var
 
-    def create_load_global(self, name, add=False):
-        if add and name not in self.code_options["co_names"]:
+    def update_co_names(self, name):
+        """Ensure self.code_options.co_names contains name"""
+        if name not in self.code_options["co_names"]:
             self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
                 name,
             )
-        assert name in self.code_options["co_names"]
-        return create_instruction(
-            "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
-        )
-
-    def create_load_const(self, value):
-        assert is_safe_constant(value), f"unsafe constant {value}"
-        return self._create_load_const(value)
-
-    def _create_load_const(self, value):
-        co_consts = self.code_options["co_consts"]
-        assert istype(co_consts, tuple)
-        index = None
-        for i, v in enumerate(co_consts):
-            if type(v) is type(value) and v == value:
-                index = i
-                break
-        if index is None:
-            index = len(co_consts)
-            co_consts = co_consts + (value,)
-            self.code_options["co_consts"] = co_consts
-        return create_instruction("LOAD_CONST", index, value)
-
-    create_load_output = _create_load_const
-
-    def create_load_attr(self, name):
-        if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = self.code_options["co_names"] + (name,)
-        return create_instruction("LOAD_ATTR", self.code_options["co_names"], name)
-
-    def create_load_attrs(self, names):
-        return [self.create_load_attr(name) for name in names.split(".")]
 
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
         options = dict(options)
@@ -472,7 +410,7 @@ class InstructionTranslatorBase(fx.Tracer):
         f_globals = self.root.f_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
-        self.create_load_global(alias, add=True)
+        self.update_co_names(alias)
         return GlobalSource(alias)
 
     def IMPORT_NAME(self, inst):
@@ -1106,15 +1044,16 @@ class InstructionTranslatorBase(fx.Tracer):
                 output.extend(
                     self.compile_subgraph(list(pass2.graph_outputs.keys()), root)
                 )
+
                 if len(pass2.graph_outputs) != 0:
-                    output.append(self.create_store(graph_output_var))
+                    output.append(pass2.create_store(graph_output_var))
                 else:
                     output.append(create_instruction("POP_TOP"))
-            self.add_output_instructions(output + pass2.output)
+            self.add_output_instructions(output + pass2.get_instructions())
 
         # restore all the live local vars
         self.add_output_instructions(
-            [self.create_store(var) for var in reversed(restore_vars)]
+            [PyCodegen(self).create_store(var) for var in reversed(restore_vars)]
         )
         self.instruction_pointer = None  # exit
 
@@ -1147,11 +1086,13 @@ class InstructionTranslatorBase(fx.Tracer):
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
         self.install_global(name, compiled_fn)
-        nargs = sum(map(len, self.graphargs))
         if config.debug:
             print(f"\n{name} {gm.forward.__code__.co_filename}")
             self.graph.print_tabular()
-        return self.create_call_generated_code(name, nargs)
+
+        cg = PyCodegen(self)
+        cg.make_call_generated_code(name)
+        return cg.get_instructions()
 
     def call_user_compiler(self, gm):
         try:
@@ -1170,60 +1111,6 @@ class InstructionTranslatorBase(fx.Tracer):
         for arg in self.graphargs:
             result.extend(arg.get_examples())
         return result
-
-    def create_call_generated_code(self, fn_name: str, nargs: int) -> List[Instruction]:
-        """Call the generated code function stored in fn_name"""
-        output = self.load_function_name(fn_name)
-
-        for arg in self.graphargs:
-            output.extend(arg.load(self))
-
-        output.append(create_instruction("CALL_FUNCTION", nargs))
-        return output
-
-    def load_function_name(self, fn_name, num_on_stack=0):
-        """Load the global fn_name on the stack num_on_stack down"""
-        return [self.create_load_global(fn_name, add=True)] + self.rot_n(
-            num_on_stack + 1
-        )
-
-    def make_function_with_closure(
-        self, fn_name: str, code: types.CodeType, num_on_stack=0
-    ):
-        freevars = code.co_freevars
-        assert freevars
-        output = []
-        for var in freevars:
-            assert var in self.cell_and_freevars()
-            output.append(
-                create_instruction(
-                    "LOAD_CLOSURE", self.cell_and_freevars().index(var), var
-                )
-            )
-        output.append(create_instruction("BUILD_TUPLE", len(freevars)))
-        output.append(self.create_load_const(code))
-        output.append(self.create_load_const(fn_name))
-        output.append(create_instruction("MAKE_FUNCTION", 0x08))
-        output.extend(self.rot_n(num_on_stack + 1))
-        return output
-
-    def rot_n(self, n):
-        if n == 0 or n == 1:
-            return []
-        elif n == 2:
-            return [create_instruction("ROT_TWO")]
-        elif n == 3:
-            return [create_instruction("ROT_THREE")]
-        elif n == 4 and sys.version_info >= (3, 8):
-            return [create_instruction("ROT_FOUR")]
-        else:
-            return [
-                create_instruction("BUILD_TUPLE", n),
-                self._create_load_const(rot_n_helper(n)),
-                create_instruction("ROT_TWO"),
-                create_instruction("CALL_FUNCTION_EX", 0),
-                create_instruction("UNPACK_SEQUENCE", n),
-            ]
 
     def remove_unused_graphargs(self):
         for node in reversed(list(self.graph.nodes)):
@@ -1416,22 +1303,24 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.f_code, inst.offset, len(self.stack), argnames
         )
 
+        cg = PyCodegen(self)
+
         if new_code.co_freevars:
-            load_fn = self.make_function_with_closure(name, new_code, len(self.stack))
+            cg.make_function_with_closure(name, new_code, len(self.stack))
         else:
             self.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
-            load_fn = self.load_function_name(name, len(self.stack))
+            cg.extend_output(cg.load_function_name(name, len(self.stack)))
 
-        return (
-            load_fn
-            + [self.create_load(k) for k in argnames]
-            + [
+        cg.extend_output([cg.create_load(k) for k in argnames])
+        cg.extend_output(
+            [
                 create_instruction("CALL_FUNCTION", nargs),
                 create_instruction("RETURN_VALUE"),
             ]
         )
+        return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
         if count_calls(self.graph) == 0:
@@ -1556,102 +1445,3 @@ class FakeRootModule(torch.nn.Module):
 
     def __repr__(self):
         return "FakeRootModule(...)"
-
-
-class PyCodegen(object):
-    def __init__(
-        self,
-        tx: InstructionTranslatorBase,
-        root: FakeRootModule,
-        graph_output_var: str,
-        tempvars=None,
-    ):
-        self.top_of_stack = None
-        self.uses = collections.Counter()
-        self.graph_outputs = collections.OrderedDict()
-        self.output: List[Instruction] = []
-        self.tempvars = tempvars or {}
-        self.tx = tx
-        self.root = root
-        self.graph_output_var = graph_output_var
-
-    def __call__(self, value, allow_cache=True):
-        assert isinstance(value, VariableTracker)
-        output = self.output
-        graph_outputs = self.graph_outputs
-
-        if self.top_of_stack is value:
-            output.append(create_instruction("DUP_TOP"))
-            return
-
-        if allow_cache and self.tempvars.get(value) is not None:
-            output.append(self.create_load(self.tempvars[value]))
-            return
-
-        self.guards.update(value.guards)
-        if value.source is not None:
-            output.extend(value.source.reconstruct(self))
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
-        ):
-            output.append(self.create_load_const(value.as_python_constant()))
-        elif isinstance(value, TensorVariable):
-            if value not in graph_outputs:
-                graph_outputs[value] = len(graph_outputs)
-            output.append(self.create_load(self.graph_output_var))
-            output.append(self._create_load_const(graph_outputs[value]))
-            output.append(create_instruction("BINARY_SUBSCR"))
-        elif isinstance(value, NNModuleVariable):
-            parts = value.module_key.split(".")
-            if parts[0] in self.code_options["co_varnames"]:
-                output.append(self.create_load(parts[0]))
-                parts = parts[1:]
-            else:
-                output.append(self.create_load_output(self.root))
-            for part in parts:
-                output.append(self.create_load_attr(part))
-        else:
-            self.uses[value] += 1
-            try:
-                output.extend(value.reconstruct(self))
-            except NotImplementedError:
-                unimplemented(f"reconstruct: {value}")
-            if allow_cache and value in self.tempvars:
-                self.add_cache(value)
-
-        self.top_of_stack = value
-
-    def add_cache(self, value):
-        var = self.new_var()
-        self.tempvars[value] = var
-        self.output.extend([create_instruction("DUP_TOP"), self.create_store(var)])
-
-    def foreach(self, items):
-        for i in items:
-            self(i)
-
-    def __getattr__(self, item):
-        return getattr(self.tx, item)
-
-    def setup_globally_cached(self, name, value):
-        """Store value in a new global"""
-        name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        f_globals = self.tx.f_globals
-        if name in f_globals:
-            assert id(f_globals[name]) == id(value)
-        else:
-            f_globals[name] = value
-        return [self.tx.create_load_global(name, add=True)]
-
-    def clear_tos(self):
-        self.top_of_stack = None
-
-
-@lru_cache(32)
-def rot_n_helper(n):
-    assert n > 1
-    vars = [f"v{i}" for i in range(n)]
-    rotated = reversed(vars[-1:] + vars[:-1])
-    fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
-    fn.__name__ = f"rot_{n}_helper"
-    return fn

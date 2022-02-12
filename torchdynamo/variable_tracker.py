@@ -1207,25 +1207,25 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        range_fn = codegen.tx.create_load_global("range", add=True)
+        range_fn = codegen.create_load_global("range", add=True)
         if self.value.step == 1:
             if self.value.start == 0:
                 return [
                     range_fn,
-                    codegen.tx.create_load_const(self.value.stop),
+                    codegen.create_load_const(self.value.stop),
                     create_instruction("CALL_FUNCTION", 1),
                 ]
             return [
                 range_fn,
-                codegen.tx.create_load_const(self.value.start),
-                codegen.tx.create_load_const(self.value.stop),
+                codegen.create_load_const(self.value.start),
+                codegen.create_load_const(self.value.stop),
                 create_instruction("CALL_FUNCTION", 2),
             ]
         return [
             range_fn,
-            codegen.tx.create_load_const(self.value.start),
-            codegen.tx.create_load_const(self.value.stop),
-            codegen.tx.create_load_const(self.value.step),
+            codegen.create_load_const(self.value.start),
+            codegen.create_load_const(self.value.stop),
+            codegen.create_load_const(self.value.step),
             create_instruction("CALL_FUNCTION", 3),
         ]
 
@@ -1321,7 +1321,7 @@ class NamedTupleVariable(TupleVariable):
 
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
-        codegen.output.append(codegen._create_load_const(create_fn))
+        codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
         return [
             create_instruction("BUILD_TUPLE", len(self.items)),
