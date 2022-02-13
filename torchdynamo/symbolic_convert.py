@@ -367,11 +367,11 @@ class InstructionTranslatorBase(object):
     JUMP_IF_TRUE_OR_POP = generic_jump(operator.truth, True)
 
     def SETUP_LOOP(self, inst):
-        self.block_depth += 1
+        # only exists in python<=3.7
+        self.block_stack.append(inst.target)
 
     def POP_BLOCK(self, inst):
-        assert self.block_depth > 0
-        self.block_depth -= 1
+        self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
         ctx = self.pop()
@@ -383,8 +383,11 @@ class InstructionTranslatorBase(object):
             return ctx.exit(self, *args)
 
         self.push(LambdaVariable(exit, **VariableTracker.propagate(ctx)))
-        self.block_depth += 1
+        self.block_stack.append(inst.target)
         self.push(ctx.enter(self))
+
+    def SETUP_FINALLY(self, inst):
+        self.block_stack.append(inst.target)
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -890,10 +893,10 @@ class InstructionTranslatorBase(object):
             self.output.copy_graphstate(),
             collections.OrderedDict(self.symbolic_locals),
             list(self.stack),
+            list(self.block_stack),
             self.instruction_pointer,
             self.current_instruction,
             self.next_instruction,
-            self.block_depth,
             self.lineno,
         )
 
@@ -903,10 +906,10 @@ class InstructionTranslatorBase(object):
             output_state,
             self.symbolic_locals,
             self.stack,
+            self.block_stack,
             self.instruction_pointer,
             self.current_instruction,
             self.next_instruction,
-            self.block_depth,
             self.lineno,
         ) = state
         self.output.restore_graphstate(output_state)
@@ -930,7 +933,7 @@ class InstructionTranslatorBase(object):
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
         self.next_instruction = None
-        self.block_depth = 0
+        self.block_stack = []
         self.lineno = code_options.get("co_firstlineno")
 
         # Properties of the input/output code
@@ -973,7 +976,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def should_compile_partial_graph(self):
-        return self.block_depth == 0
+        return len(self.block_stack) == 0
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None

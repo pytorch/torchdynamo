@@ -584,6 +584,22 @@ class BatchNormAct2d(torch.nn.BatchNorm2d):
         return x
 
 
+def get_parameter_dtype(parameter):
+    """from huggingface model_utils.py"""
+    try:
+        return next(parameter.parameters()).dtype
+    except StopIteration:
+        # For nn.DataParallel compatibility in PyTorch 1.5
+
+        def find_tensor_attributes(module):
+            tuples = [(k, v) for k, v in module.__dict__.items() if torch.is_tensor(v)]
+            return tuples
+
+        gen = parameter._named_members(get_members_fn=find_tensor_attributes)
+        first_tuple = next(gen)
+        return first_tuple[1].dtype
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -807,5 +823,20 @@ class ReproTests(torchdynamo.testing.TestCase):
         with eval_frame.optimize(convert_frame_assert(cnt)):
             self.assertTrue(same(model(a), correct))
 
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+    def test_get_parameter_dtype(self):
+        model = SequentialAppendList(
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+        )
+
+        def test_fn(model, x):
+            return x + torch.randn(10, dtype=get_parameter_dtype(model))
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertEqual(test_fn(model, torch.randn(10)).dtype, torch.float32)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)

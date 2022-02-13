@@ -188,7 +188,7 @@ class OutputGraph(fx.Tracer):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
-        if tx.block_depth != 0:
+        if tx.block_stack:
             unimplemented("compile_subgraph with block_depth != 0")
 
         tx.prune_dead_locals()
