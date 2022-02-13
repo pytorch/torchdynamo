@@ -17,6 +17,7 @@ import torch.fx
 import torch.nn.modules.utils
 
 from . import config
+from . import skipfiles
 from .allowed_functions import _allowed_function_ids
 from .allowed_functions import is_allowed
 from .bytecode_transformation import create_instruction
@@ -547,6 +548,11 @@ class NNModuleVariable(VariableTracker):
 
         if name == "forward":
             return self.call_function(tx, args, kwargs)
+
+        if name == "_check_input_dim" and skipfiles.is_torch_nn(
+            inspect.getfile(module.__class__._check_input_dim)
+        ):
+            return ConstantVariable(True, **options)
 
         if not all(x.is_python_constant() for x in itertools.chain(args, kwargs)):
             raise unimplemented(f"non-const NNModule method {name}")
@@ -1509,6 +1515,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def num_parameters(self):
         return len(inspect.signature(self.get_function()).parameters)
 
+    def closure_vars(self, tx):
+        return {}
+
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
@@ -1533,7 +1542,23 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return types.FunctionType
 
     def has_closure(self):
-        return getattr(self.fn, "__closure__", None) is not None
+        if getattr(self.fn, "__closure__", None) is not None:
+            if len(self.fn.__closure__) == 1 and self.fn.__code__.co_freevars == (
+                "__class__",
+            ):
+                # not a real closure, just a usage of `super()`
+                return False
+            return True
+        return False
+
+    def closure_vars(self, tx):
+        if self.fn.__code__.co_freevars and "__class__" in self.fn.__code__.co_freevars:
+            assert len(self.fn.__closure__) == len(self.fn.__code__.co_freevars)
+            cls = self.fn.__closure__[
+                self.fn.__code__.co_freevars.index("__class__")
+            ].cell_contents
+            return {"__class__": UserDefinedClassVariable(cls).add_options(self)}
+        return super().closure_vars(tx)
 
     def has_self(self):
         return getattr(self.fn, "__self__", None) is not None
@@ -1981,7 +2006,7 @@ class UnsupportedVariable(VariableTracker):
     def __str__(self):
         inner = self.value_type.__name__
         if inner == "builtin_function_or_method":
-            inner = str(self.value)
+            inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
     def python_type(self):

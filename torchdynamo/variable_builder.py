@@ -70,6 +70,7 @@ class VariableBuilder:
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
+            # TODO(jansel): add guard for alias relationship
             return self.tx.output.side_effects[value]
         return self._wrap(value).clone(**self.options())
 

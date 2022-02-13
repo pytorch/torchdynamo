@@ -103,3 +103,7 @@ for _name in (
         add(importlib.import_module(_name))
     except ImportError:
         pass
+
+
+def is_torch_nn(filename):
+    return filename.startswith(os.path.dirname(torch.nn.__file__))

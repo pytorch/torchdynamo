@@ -1034,15 +1034,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(parent, func, args, kwargs):
         assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
         if func.has_closure() and isinstance(func, UserFunctionVariable):
-            unimplemented("inline with  __closure__")
+            unimplemented(f"inline with __closure__ {func}")
         if func.has_self():
-            unimplemented("inline with  __self__")
-        if skipfiles.check(func.get_filename()):
+            unimplemented("inline with __self__")
+        if skipfiles.check(func.get_filename()) and not skipfiles.is_torch_nn(
+            func.get_filename()
+        ):
             unimplemented(
                 f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
             )
 
         sub_locals = func.bind_args(parent, args, kwargs)
+        sub_locals.update(func.closure_vars(parent))
         for v in sub_locals.values():
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")

@@ -549,6 +549,41 @@ class SequentialAppendList(torch.nn.Sequential):
         return x, concat_list
 
 
+class BatchNormAct2d(torch.nn.BatchNorm2d):
+    """Taken from timm"""
+
+    def __init__(
+        self,
+        num_features,
+        eps=1e-5,
+        momentum=0.1,
+        affine=True,
+        track_running_stats=True,
+        act_layer=torch.nn.ReLU,
+        inplace=True,
+    ):
+        super(BatchNormAct2d, self).__init__(
+            num_features,
+            eps=eps,
+            momentum=momentum,
+            affine=affine,
+            track_running_stats=track_running_stats,
+        )
+        self.act = act_layer(inplace=inplace)
+
+    @torch.jit.ignore
+    def _forward_python(self, x):
+        return super().forward(x)
+
+    def forward(self, x):
+        if torch.jit.is_scripting():
+            x = self._forward_jit(x)
+        else:
+            x = self._forward_python(x)
+        x = self.act(x)
+        return x
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -763,3 +798,14 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertIs(l2, l3)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 5)
+
+    def test_batch_norm_act(self):
+        a = torch.randn(5, 1, 28, 28)
+        model = BatchNormAct2d(1).eval()
+        correct = model(a)
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(same(model(a), correct))
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
