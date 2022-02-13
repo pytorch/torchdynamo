@@ -26,22 +26,22 @@ class PyCodegen(object):
 
     def __init__(
         self,
-        tx: "torchdynamo.symbolic_convert.InstructionTranslatorBase" = None,
+        tx: "torchdynamo.symbolic_convert.InstructionTranslator" = None,
         root: torch.nn.Module = None,
         graph_output_var: str = None,
         tempvars=None,
     ):
+        self.root = root
         self.top_of_stack = None
         self.uses = collections.Counter()
         self.graph_outputs = collections.OrderedDict()
         self._output: List[Instruction] = []
         self.tempvars = tempvars or {}
         self.tx = tx
-        self.root = root
         self.graph_output_var = graph_output_var
-        self.code_options = self.tx.code_options
+        self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
-        self.new_var = self.tx.new_var
+        self.new_var = self.tx.output.new_var
 
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
@@ -62,7 +62,7 @@ class PyCodegen(object):
             output.append(self.create_load(self.tempvars[value]))
             return
 
-        self.tx.guards.update(value.guards)
+        self.tx.output.guards.update(value.guards)
         if value.source is not None:
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
@@ -81,6 +81,7 @@ class PyCodegen(object):
                 output.append(self.create_load(parts[0]))
                 parts = parts[1:]
             else:
+                assert self.root is not None
                 output.append(self.create_load_output(self.root))
             for part in parts:
                 output.append(self.create_load_attr(part))
@@ -158,7 +159,7 @@ class PyCodegen(object):
 
     def create_load_global(self, name, add=False):
         if add:
-            self.tx.update_co_names(name)
+            self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"]
         return create_instruction(
             "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
@@ -240,7 +241,8 @@ class PyCodegen(object):
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name))
 
-        for arg in self.tx.graphargs:
+        graphargs = self.tx.output.graphargs
+        for arg in graphargs:
             self.extend_output(arg.load(self))
 
-        self.append_output(create_instruction("CALL_FUNCTION", len(self.tx.graphargs)))
+        self.append_output(create_instruction("CALL_FUNCTION", len(graphargs)))

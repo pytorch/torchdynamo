@@ -69,8 +69,8 @@ class VariableBuilder:
         self.name = source.name()
 
     def __call__(self, value):
-        if value in self.tx.side_effects:
-            return self.tx.side_effects[value]
+        if value in self.tx.output.side_effects:
+            return self.tx.output.side_effects[value]
         return self._wrap(value).clone(**self.options())
 
     @staticmethod
@@ -108,7 +108,9 @@ class VariableBuilder:
             ]
             result = self.list_type(value)(output, guards=guards)
             if istype(value, list):
-                return self.tx.side_effects.track_list(self.source, value, result)
+                return self.tx.output.side_effects.track_list(
+                    self.source, value, result
+                )
             return result
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
@@ -133,7 +135,7 @@ class VariableBuilder:
             )
             return ConstDictVariable(result, guards=guards)
         elif isinstance(value, torch.nn.Module):
-            return self.tx.add_submodule(
+            return self.tx.output.add_submodule(
                 value,
                 self.name,
                 source=self.get_source(),
@@ -192,7 +194,7 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
-            return self.tx.add_submodule(
+            return self.tx.output.add_submodule(
                 value,
                 self.name,
                 source=self.get_source(),
@@ -200,9 +202,9 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            self.tx.graphargs.append(GraphArg(self.get_source(), value))
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value))
             return TensorVariable.create(
-                proxy=self.tx.create_graph_input(
+                proxy=self.tx.output.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
                 ),
                 example_value=value,

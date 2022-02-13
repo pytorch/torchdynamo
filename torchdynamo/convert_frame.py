@@ -89,12 +89,12 @@ def convert_frame_assert(compiler_fn: Callable):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:
             unimplemented("cache_size_limit reached")
-        tracer = None
+        output = None
 
         # from .utils import print_once;  print_once(code.co_filename)
 
         def transform(instructions, code_options):
-            nonlocal tracer
+            nonlocal output
             tracer = InstructionTranslator(
                 instructions,
                 frame.f_code,
@@ -105,8 +105,10 @@ def convert_frame_assert(compiler_fn: Callable):
                 compiler_fn,
             )
             tracer.run()
-            assert tracer.output_instructions
-            instructions[:] = tracer.output_instructions
+            output = tracer.output
+            assert output.output_instructions
+            instructions[:] = output.output_instructions
+            code_options.update(output.code_options)
 
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
@@ -127,12 +129,12 @@ def convert_frame_assert(compiler_fn: Callable):
                 # print(dis.Bytecode(code).info())
                 print(dis.Bytecode(code).dis())
                 print("\nGUARDS:")
-                for guard in sorted(tracer.guards):
+                for guard in sorted(output.guards):
                     print(" -", str(guard))
                 print()
-            assert tracer.guards is not None
-            CleanupManager.instance[code] = tracer.cleanups
-            return GuardedCode(code, tracer.guards, frame.f_locals, frame.f_globals)
+            assert output.guards is not None
+            CleanupManager.instance[code] = output.cleanups
+            return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except Exception as e:
             if config.debug:
                 print(

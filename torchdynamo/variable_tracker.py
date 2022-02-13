@@ -214,7 +214,7 @@ class VariableTracker:
         try:
             self.unpack_var_sequence(tx)
             return True
-        except Exception:
+        except NotImplementedError:
             return False
 
     def num_parameters(self):
@@ -428,11 +428,13 @@ class TensorVariable(VariableTracker):
                 return ConstantVariable(self.size[0], **options)
             else:
                 return TensorVariable.create(
-                    tx.create_proxy("call_function", len, (self.as_proxy(),), {}),
+                    tx.output.create_proxy(
+                        "call_function", len, (self.as_proxy(),), {}
+                    ),
                     **options,
                 )
         elif name == "__setitem__":
-            tx.create_proxy(
+            tx.output.create_proxy(
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + args, kwargs),
@@ -440,7 +442,7 @@ class TensorVariable(VariableTracker):
             return ConstantVariable(None, **options)
         else:
             return TensorVariable.create(
-                tx.create_proxy(
+                tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
                 **options,
@@ -460,14 +462,14 @@ class NNModuleVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         # implement list/iter/tuple/etc calls
         key = self.module_key
-        base = tx.get_submodule(self.module_key)
+        base = tx.output.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
         assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
         ), typestr(base)
         assert self.source
         return [
-            tx.add_submodule(
+            tx.output.add_submodule(
                 submod, key, idx, source=GetItemSource(self.source, idx), **options
             )
             for idx, submod in enumerate(base)
@@ -475,7 +477,7 @@ class NNModuleVariable(VariableTracker):
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         options = VariableTracker.propagate(self)
-        mod = tx.get_submodule(self.module_key)
+        mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         return ConstantVariable(result, **options).add_guard(
             NNModuleSource(AttrSource(self.source, name)).create_guard(
@@ -484,14 +486,14 @@ class NNModuleVariable(VariableTracker):
         )
 
     def is_training(self, tx):
-        mod = tx.get_submodule(self.module_key)
+        mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
-        mod = tx.get_submodule(self.module_key)
+        mod = tx.output.get_submodule(self.module_key)
         if (
             isinstance(mod, torch.nn.Sequential)
             and mod.__class__.forward is torch.nn.Sequential.forward
@@ -501,7 +503,7 @@ class NNModuleVariable(VariableTracker):
             (arg,) = args
             for idx, submod in enumerate(mod):
                 tx.call_function(
-                    tx.add_submodule(
+                    tx.output.add_submodule(
                         submod,
                         self.module_key,
                         idx,
@@ -515,7 +517,7 @@ class NNModuleVariable(VariableTracker):
             return arg
         elif is_allowed(mod.__class__):
             return TensorVariable.create(
-                proxy=tx.create_proxy(
+                proxy=tx.output.create_proxy(
                     "call_module",
                     self.module_key,
                     *proxy_args_kwargs(args, kwargs),
@@ -541,7 +543,7 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
-        module = tx.get_submodule(key)
+        module = tx.output.get_submodule(key)
 
         if name == "forward":
             return self.call_function(tx, args, kwargs)
@@ -566,7 +568,7 @@ class NNModuleVariable(VariableTracker):
                 name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
                 src = NNModuleSource(getsource(self.source, name))
                 result.append(
-                    tx.add_submodule(
+                    tx.output.add_submodule(
                         submod,
                         key,
                         name,
@@ -592,7 +594,7 @@ class NNModuleVariable(VariableTracker):
                     TupleVariable(
                         [
                             ConstantVariable(name, **options),
-                            tx.add_submodule(
+                            tx.output.add_submodule(
                                 submod,
                                 key,
                                 name,
@@ -615,7 +617,7 @@ class NNModuleVariable(VariableTracker):
             assert self.source
             key = args[0].as_python_constant()
             submod = module[key]
-            return tx.add_submodule(
+            return tx.output.add_submodule(
                 submod,
                 key,
                 args[0].as_python_constant(),
@@ -862,7 +864,7 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
                 return TensorVariable.create(
-                    tx.create_proxy(
+                    tx.output.create_proxy(
                         "call_function",
                         fn,
                         *proxy_args_kwargs(args, kwargs),
@@ -1087,7 +1089,7 @@ class GetAttrVariable(VariableTracker):
     def get_const_attr(self, tx, name):
         if not isinstance(self.obj, NNModuleVariable):
             raise NotImplementedError()
-        step1 = tx.get_submodule(self.obj.module_key)
+        step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
             raise NotImplementedError()
         step2 = inspect.getattr_static(step1, self.name)
@@ -1872,7 +1874,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         else:
             return TensorVariable.create(
-                proxy=tx.create_proxy(
+                proxy=tx.output.create_proxy(
                     "call_function", self.value, *proxy_args_kwargs(args, kwargs)
                 ),
                 **options,
@@ -1920,7 +1922,7 @@ class AllowedFunctionOrModuleVariable(VariableTracker):
 
         def fake_softmax(input):
             return TensorVariable.create(
-                proxy=tx.create_proxy(
+                proxy=tx.output.create_proxy(
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
@@ -2142,7 +2144,9 @@ class GradModeVariable(ContextManagerVariable):
 
     @staticmethod
     def _change_mode(tx, value):
-        tx.graph.create_node("call_function", torch._C._set_grad_enabled, (value,), {}),
+        tx.output.graph.create_node(
+            "call_function", torch._C._set_grad_enabled, (value,), {}
+        ),
         torch._C._set_grad_enabled(value)
 
 

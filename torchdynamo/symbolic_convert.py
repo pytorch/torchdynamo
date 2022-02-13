@@ -1,5 +1,4 @@
 import collections
-import copy
 import dis
 import functools
 import importlib
@@ -7,19 +6,13 @@ import inspect
 import itertools
 import logging
 import operator
-import re
 import sys
-import traceback
 import types
 import typing
 from typing import Any
 from typing import Dict
 from typing import List
-from typing import Set
 from unittest.mock import patch
-
-import torch
-from torch import fx
 
 import torchdynamo.side_effects
 
@@ -35,15 +28,10 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
-from .guards import Guard
-from .guards import GuardBuilder
+from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
-from .side_effects import SideEffects
-from .utils import CleanupHook
 from .utils import Unsupported
-from .utils import count_calls
 from .utils import counters
-from .utils import is_safe_constant
 from .utils import istype
 from .utils import unimplemented
 from .utils import warning
@@ -52,7 +40,6 @@ from .variable_source import AttrSource
 from .variable_source import GlobalSource
 from .variable_source import LocalSource
 from .variable_source import NNModuleSource
-from .variable_source import Source
 from .variable_tracker import AllowedFunctionOrModuleVariable
 from .variable_tracker import BaseListVariable
 from .variable_tracker import BlackHoleVariable
@@ -97,7 +84,7 @@ def stack_op(fn: typing.Callable):
 def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
-        self.guards.update(value.guards)
+        self.output.guards.update(value.guards)
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
@@ -106,14 +93,14 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            self.compile_partial_subgraph()
+            self.output.compile_subgraph(self)
             self.pop()
 
             if_next = self.create_call_resume_at(self.next_instruction)
             push and self.push(value)
             if_jump = self.create_call_resume_at(inst.target)
 
-            self.output_instructions.extend(
+            self.output.add_output_instructions(
                 [(create_instruction(inst.opname, target=if_jump[0]))]
                 + if_next
                 + if_jump
@@ -134,80 +121,26 @@ def break_graph_if_unsupported(inner_fn):
             if not self.should_compile_partial_graph():
                 raise
         self.restore_graphstate(state)
-        self.compile_partial_subgraph()
+        self.output.compile_subgraph(self)
         # note, assuming inst pushes 1
         vars = self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
         warning(f"breaking graph: {vars[0]}")
-        self.add_output_instructions([inst])
+        self.output.add_output_instructions([inst])
         self.push(UnknownVariable())
-        self.add_output_instructions(self.create_call_resume_at(self.next_instruction))
+        self.output.add_output_instructions(
+            self.create_call_resume_at(self.next_instruction)
+        )
 
     return wrapper
 
 
-class InstructionTranslatorBase(fx.Tracer):
+class InstructionTranslatorBase(object):
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = tuple(
                 self.code_options["co_cellvars"] or []
             ) + tuple(self.code_options["co_freevars"] or [])
         return self._cell_and_freevars
-
-    def new_var(self, name="tmp"):
-        existing = set(self.code_options["co_varnames"])
-        for i in itertools.count():
-            var = f"___{name}_{i}"
-            if var not in existing:
-                self.code_options["co_varnames"] = self.code_options["co_varnames"] + (
-                    var,
-                )
-                return var
-
-    def update_co_names(self, name):
-        """Ensure self.code_options.co_names contains name"""
-        if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
-                name,
-            )
-
-    def add_submodule(self, mod: torch.nn.Module, *names, **options):
-        options = dict(options)
-        options["guards"] = set(options.get("guards", []))
-        source: Source = options["source"]
-        if isinstance(mod, torch.Tensor):
-            options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
-
-            def wrap_name(module_key):
-                return TensorVariable.create(
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
-                    example_value=mod,
-                    **options,
-                )
-
-        else:
-            assert isinstance(mod, torch.nn.Module)
-            options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
-
-            def wrap_name(module_key):
-                return NNModuleVariable(type(mod), module_key, **options)
-
-        for k, v in self.nn_modules.items():
-            if v is mod:
-                # it already exists
-                return wrap_name(k)
-
-        # create a new unique name
-        name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
-        if not name or not name[0].isalpha():
-            name = "sub" + name
-        base = name
-        for i in itertools.count():
-            if name not in self.nn_modules:
-                self.nn_modules[name] = mod
-                return wrap_name(name)
-            name = f"{base}_{i}"
-
-        assert False
 
     def prune_dead_locals(self):
         reads = livevars_analysis(self.instructions, self.current_instruction)
@@ -218,24 +151,6 @@ class InstructionTranslatorBase(fx.Tracer):
         self.symbolic_locals = collections.OrderedDict(
             [(k, v) for k, v in self.symbolic_locals.items() if k in reads]
         )
-
-    def create_graph_input(self, name, type_expr=None):
-        placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
-
-        # unique
-        used_names = {n.name for n in placeholders}
-        if name in used_names:
-            for i in itertools.count():
-                if f"{name}_{i}" not in used_names:
-                    name = f"{name}_{i}"
-                    break
-
-        if placeholders:
-            ctx = self.graph.inserting_after(placeholders[-1])
-        else:
-            ctx = self.graph.inserting_before(None)
-        with ctx:
-            return self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
 
     def call_function(
         self,
@@ -254,7 +169,7 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, torchdynamo.side_effects.Mutable):
-            newvar = self.side_effects.mutation(oldvar, newvar)
+            newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
             assert isinstance(
                 oldvar.mutable_local, torchdynamo.variable_tracker.MutableLocal
@@ -268,7 +183,7 @@ class InstructionTranslatorBase(fx.Tracer):
                 return newvar
             return v
 
-        self.side_effects.apply(repl)
+        self.output.side_effects.apply(repl)
         self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(repl, x)
@@ -281,7 +196,7 @@ class InstructionTranslatorBase(fx.Tracer):
         state = self.copy_graphstate()
         try:
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-            self.guards.update(fn.guards)
+            self.output.guards.update(fn.guards)
             return result
         except Exception:
             self.restore_graphstate(state)
@@ -310,26 +225,28 @@ class InstructionTranslatorBase(fx.Tracer):
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
             getattr(self, inst.opname)(inst)
-            return (
-                inst.opname != "RETURN_VALUE" and self.instruction_pointer is not None
-            )
+            return inst.opname != "RETURN_VALUE"
         except Unsupported:
             if not self.checkpoint:
                 raise
 
         # generate code from checkpoint
-        assert not self.output_instructions
+        assert not self.output.output_instructions
         continue_inst, state = self.checkpoint
         self.restore_graphstate(state)
-        self.compile_partial_subgraph()
-        self.output_instructions.append(
-            create_instruction("JUMP_ABSOLUTE", target=continue_inst)
+        self.output.compile_subgraph(self)
+        self.output.add_output_instructions(
+            [create_instruction("JUMP_ABSOLUTE", target=continue_inst)]
+            + self.instructions
         )
-        self.output_instructions.extend(self.instructions)
 
     def run(self):
         try:
-            while self.step():
+            while (
+                self.instruction_pointer is not None
+                and not self.output.should_exit
+                and self.step()
+            ):
                 pass
         except Unsupported:
             raise
@@ -395,7 +312,7 @@ class InstructionTranslatorBase(fx.Tracer):
             value = self.f_globals[inst.argval]
         except KeyError:
             return self.load_builtin(inst)
-        if self.root.f_globals is self.f_globals:
+        if self.output.root_globals is self.f_globals:
             source = GlobalSource(inst.argval)
         else:
             source = AttrSource(
@@ -407,10 +324,10 @@ class InstructionTranslatorBase(fx.Tracer):
         """Create an alias to a module for use in guards"""
         value = importlib.import_module(module_name)
         alias = f"__import_{module_name.replace('.', '_dot_')}"
-        f_globals = self.root.f_globals
+        f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
-        self.update_co_names(alias)
+        self.output.update_co_names(alias)
         return GlobalSource(alias)
 
     def IMPORT_NAME(self, inst):
@@ -458,7 +375,7 @@ class InstructionTranslatorBase(fx.Tracer):
 
     def SETUP_WITH(self, inst):
         ctx = self.pop()
-        self.guards.update(ctx.guards)
+        self.output.guards.update(ctx.guards)
         if not isinstance(ctx, ContextManagerVariable):
             unimplemented(f"SETUP_WITH {ctx}")
 
@@ -488,7 +405,7 @@ class InstructionTranslatorBase(fx.Tracer):
     def FOR_ITER(self, inst):
         it = self.pop()
         if isinstance(it, ListIteratorVariable):
-            self.guards.update(it.guards)
+            self.output.guards.update(it.guards)
             try:
                 val, next_iter = it.next_variables()
                 self.replace_all(it, next_iter)
@@ -612,16 +529,6 @@ class InstructionTranslatorBase(fx.Tracer):
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
 
-    def get_submodule(self, keys):
-        assert keys
-        obj = self.nn_modules
-        for k in keys.split("."):
-            if isinstance(obj, dict):
-                obj = obj[k]
-            else:
-                obj = getattr(obj, k)
-        return obj
-
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
         self.push(self.pop())
@@ -646,7 +553,7 @@ class InstructionTranslatorBase(fx.Tracer):
             source = None
 
         if isinstance(obj, NNModuleVariable):
-            base = self.get_submodule(obj.module_key)
+            base = self.output.get_submodule(obj.module_key)
             base_dict = object.__getattribute__(base, "__dict__")
             class_member = True
 
@@ -721,23 +628,13 @@ class InstructionTranslatorBase(fx.Tracer):
                     getattr(obj.fn, name), **VariableTracker.propagate(obj)
                 )
             )
-        # elif obj.has_const_attr(self, name) and obj.can_create_guard():
-        #     try:
-        #         options["guards"] = obj.replace_guards(
-        #             options.get("guards"),
-        #             GuardBuilder.ID_MATCH,
-        #             GuardBuilder.OBJECT_MUTATION,
-        #         )
-        #         self.push(ConstantVariable(obj.get_const_attr(self, name), **options))
-        #     except AttributeError:
-        #         unimplemented("dynamic attr UnsupportedVariable")
         else:
             self.push(GetAttrVariable(obj, name, **options))
 
     def STORE_ATTR(self, inst):
         if isinstance(self.stack[-1], BlackHoleVariable):
             val, obj = self.popn(2)
-            self.guards.update(
+            self.output.guards.update(
                 obj.call_method(
                     self, "__setattr__", [ConstantVariable(inst.argval), val], {}
                 ).guards
@@ -747,16 +644,18 @@ class InstructionTranslatorBase(fx.Tracer):
         if not self.should_compile_partial_graph():
             unimplemented("inline STORE_ATTR")
         warning("breaking graph: STORE_ATTR")
-        self.compile_partial_subgraph()
-        self.add_output_instructions([inst])
+        self.output.compile_subgraph(self)
+        self.output.add_output_instructions([inst])
         self.popn(2)
-        self.add_output_instructions(self.create_call_resume_at(self.next_instruction))
+        self.output.add_output_instructions(
+            self.create_call_resume_at(self.next_instruction)
+        )
 
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
         # no result is pushed, so need to lift the guards to global
-        self.guards.update(result.guards)
+        self.output.guards.update(result.guards)
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -888,7 +787,7 @@ class InstructionTranslatorBase(fx.Tracer):
         options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
             assert len(seq.items) == inst.argval
-            self.guards.update(seq.guards)
+            self.output.guards.update(seq.guards)
             for i in reversed(seq.items):
                 self.push(i)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
@@ -985,247 +884,54 @@ class InstructionTranslatorBase(fx.Tracer):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
-    def compile_partial_subgraph(self):
-        """
-        Generate a subgraph to continue execution on user code.
-        Automatically restore live variables.
-        """
-        if self.block_depth != 0:
-            unimplemented("compile_partial_subgraph with block_depth != 0")
-
-        self.prune_dead_locals()
-        stack_values = list(self.stack)
-        root = FakeRootModule(self.nn_modules)
-
-        # Add all the local vars to the "stack" so restore at the end
-        restore_vars = []
-        val_to_names = collections.OrderedDict()
-        if stack_values:
-            val_to_names[stack_values[-1]] = list()
-        for k, v in self.symbolic_locals.items():
-            if isinstance(v.source, LocalSource) and v.source.name() == k:
-                continue  # no need to restore initial state
-            if v not in val_to_names:
-                val_to_names[v] = list()
-            val_to_names[v].append(k)
-        for v in val_to_names.keys():
-            restore_vars.extend(val_to_names[v])
-            stack_values.extend([v] * len(val_to_names[v]))
-
-        if (
-            stack_values
-            and all(isinstance(x, TensorVariable) for x in stack_values)
-            and len(set(stack_values)) == len(stack_values)
-            and self.side_effects.is_empty()
-        ):
-            # optimization to generate better code in a common case
-            self.add_output_instructions(
-                self.compile_subgraph(list(reversed(stack_values)), root)
-                + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
-            )
-        else:
-            graph_output_var = self.new_var("graph_out")
-            pass1 = PyCodegen(self, root, graph_output_var)
-            self.side_effects.codegen(pass1)
-            pass1.foreach(stack_values)
-
-            # one more time now that we have established tempvars
-            pass2 = PyCodegen(
-                self,
-                root,
-                graph_output_var,
-                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
-            )
-            self.side_effects.codegen(pass2)
-            pass2.foreach(stack_values)
-
-            output = []
-            if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                output.extend(
-                    self.compile_subgraph(list(pass2.graph_outputs.keys()), root)
-                )
-
-                if len(pass2.graph_outputs) != 0:
-                    output.append(pass2.create_store(graph_output_var))
-                else:
-                    output.append(create_instruction("POP_TOP"))
-            self.add_output_instructions(output + pass2.get_instructions())
-
-        # restore all the live local vars
-        self.add_output_instructions(
-            [PyCodegen(self).create_store(var) for var in reversed(restore_vars)]
-        )
-        self.instruction_pointer = None  # exit
-
-    def compile_subgraph(self, rv, root):
-        """
-        Generate code from self.graph and return the Instruction()s to
-        call that generated code.
-        """
-        assert isinstance(rv, list)
-        assert isinstance(root, FakeRootModule)
-        for output in rv:
-            self.guards.update(output.guards)
-
-        self.create_node(
-            "output", "output", (self.create_arg(tuple(x.as_proxy() for x in rv)),), {}
-        )
-        self.remove_unused_graphargs()
-        ncalls = count_calls(self.graph)
-        counters["stats"]["calls_captured"] += ncalls
-        counters["stats"]["fusions_possible"] += ncalls - 1
-
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-
-        gm = fx.GraphModule(root, self.graph)
-        gm.recompile()
-        name = unique_id("__compiled_fn")
-        compiled_fn = self.call_user_compiler(gm)
-        self.install_global(name, compiled_fn)
-        if config.debug:
-            print(f"\n{name} {gm.forward.__code__.co_filename}")
-            self.graph.print_tabular()
-
-        cg = PyCodegen(self)
-        cg.make_call_generated_code(name)
-        return cg.get_instructions()
-
-    def call_user_compiler(self, gm):
-        try:
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            assert callable(compiled_fn), "compiler_fn did not return callable"
-        except Exception:
-            sys.stderr.write("-" * 40 + "\n")
-            sys.stderr.write("TORCHDYNAMO: backend compiler failed\n")
-            traceback.print_exc()
-            sys.stderr.write("-" * 40 + "\n")
-            compiled_fn = gm.forward
-        return compiled_fn
-
-    def example_inputs(self):
-        result = []
-        for arg in self.graphargs:
-            result.extend(arg.get_examples())
-        return result
-
-    def remove_unused_graphargs(self):
-        for node in reversed(list(self.graph.nodes)):
-            if len(list(node.users)) == 0:
-                if node.op == "get_attr":
-                    self.graph.erase_node(node)
-                elif node.op == "call_function" and node.target is operator.getitem:
-                    self.graph.erase_node(node)
-
-        expanded_graphargs = []
-        for arg in self.graphargs:
-            expanded_graphargs.extend([arg] * len(arg))
-            arg.uses = 0
-
-        for node, arg in zip(self.graph.nodes, expanded_graphargs):
-            assert node.op == "placeholder"
-            arg.uses += len(node.users)
-
-        for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
-            if arg.uses == 0:
-                self.graph.erase_node(node)
-
-        self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
-
-    def is_constant_or_input(self, value: VariableTracker):
-        if value.source is not None:
-            return True
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
-            return True
-        return False
-
-    def add_output_instructions(self, prefix: List[Instruction]):
-        """
-        We call this on the creation of a new compiled subgraph that is inserted
-        before user code.
-        """
-        self.output_instructions.extend(prefix)
-        self.instruction_pointer = None  # exit
-
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
-        graph_nodes = set(self.graph.nodes)
-        guards = copy.deepcopy(self.guards)
-        graphargs = list(self.graphargs)
-        symbolic_locals = collections.OrderedDict(self.symbolic_locals)
-        stack = list(self.stack)
-        nn_modules = dict(self.nn_modules)
         return (
-            graph_nodes,
-            graphargs,
-            guards,
-            symbolic_locals,
-            stack,
-            nn_modules,
+            self.output.copy_graphstate(),
+            collections.OrderedDict(self.symbolic_locals),
+            list(self.stack),
             self.instruction_pointer,
             self.current_instruction,
             self.next_instruction,
             self.block_depth,
-            self.side_effects.clone(),
+            self.lineno,
         )
 
     def restore_graphstate(self, state):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
-            graph_nodes,
-            self.graphargs,
-            self.guards,
+            output_state,
             self.symbolic_locals,
             self.stack,
-            self.nn_modules,
             self.instruction_pointer,
             self.current_instruction,
             self.next_instruction,
             self.block_depth,
-            self.side_effects,
+            self.lineno,
         ) = state
-        # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
-        for node in reversed(list(self.graph.nodes)):
-            if node not in graph_nodes:
-                self.graph.erase_node(node)
-
-    def install_global(self, name, value):
-        self.cleanups.append(CleanupHook.create(self.f_globals, name, value))
+        self.output.restore_graphstate(output_state)
 
     def __init__(
         self,
-        cnt: typing.Iterable,
-        graph: fx.Graph,
-        graphargs: List,
-        nn_modules: Dict,
-        guards: Set[Guard],
+        output: OutputGraph,
         instructions: List[Instruction],
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
-        cleanups,
-        root,
-        side_effects,
-        compiler_fn=None,
-        symbolic_locals=None,
-        f_code=None,
+        symbolic_locals: Dict[str, VariableTracker],
+        f_code: types.CodeType,
     ):
         super(InstructionTranslatorBase, self).__init__()
+
         # Mutable state checkpointed by copy_graphstate()
-        self.graph = graph
-        self.graphargs = graphargs
-        self.stack = []
+        self.output = output
         self.symbolic_locals = symbolic_locals
-        self.guards = guards
-        self.nn_modules = nn_modules
+        self.stack = []
         self.instruction_pointer = 0
-        self.next_instruction = None
         self.current_instruction = create_instruction("NOP")
+        self.next_instruction = None
         self.block_depth = 0
-        self.side_effects = side_effects
+        self.lineno = code_options.get("co_firstlineno")
 
         # Properties of the input/output code
         self.instructions = instructions
@@ -1233,16 +939,9 @@ class InstructionTranslatorBase(fx.Tracer):
         self.f_globals = f_globals
         self.f_builtins = f_builtins
         self.code_options = code_options
-        self.output_instructions = []
-        self.compiler_fn = compiler_fn
         self.f_code = f_code
-        self.root = root
 
-        # Dynamic state not checkpointed
         self.checkpoint = None
-        self.cnt = cnt
-        self.lineno = code_options.get("co_firstlineno")
-        self.cleanups = cleanups or []
 
 
 class InstructionTranslator(InstructionTranslatorBase):
@@ -1257,20 +956,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
     ):
         super(InstructionTranslator, self).__init__(
-            cnt=itertools.count(),
-            graph=fx.Graph(),
-            graphargs=[],
-            nn_modules={},
-            guards=set(),
+            output=OutputGraph(f_globals, code_options, compiler_fn),
             instructions=instructions,
             f_globals=f_globals,
             f_builtins=f_builtins,
             code_options=code_options,
-            compiler_fn=compiler_fn,
+            symbolic_locals=collections.OrderedDict(),  # set below
             f_code=f_code,
-            cleanups=dict(),
-            root=self,
-            side_effects=SideEffects(),
         )
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
@@ -1308,7 +1000,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, len(self.stack))
         else:
-            self.install_global(
+            self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, len(self.stack)))
@@ -1323,11 +1015,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if count_calls(self.graph) == 0:
+        if self.output.count_calls() == 0:
             unimplemented("no graph found")
         self.instruction_pointer = None
-        self.compile_partial_subgraph()
-        self.output_instructions.append(create_instruction("RETURN_VALUE"))
+        self.output.compile_subgraph(self)
+        self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
@@ -1374,7 +1066,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tracer.run()
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
-        parent.guards.update(tracer.guards)
 
         if config.trace:
             print("DONE INLINING", code)
@@ -1396,20 +1087,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_globals,
     ):
         super(InliningInstructionTranslator, self).__init__(
-            cnt=parent.cnt,
-            graph=parent.graph,
-            graphargs=parent.graphargs,
-            nn_modules=parent.nn_modules,
-            guards=parent.guards,
+            output=parent.output,
             f_globals=f_globals,
             f_builtins=f_globals["__builtins__"],
             symbolic_locals=symbolic_locals,
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
-            compiler_fn=parent.compiler_fn,
-            cleanups=parent.cleanups,
-            root=parent.root,
-            side_effects=parent.side_effects,
+            f_code=code,
         )
         self.symbolic_result = None
 
@@ -1433,15 +1117,3 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(self.pop())
         # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable(None))
-
-
-class FakeRootModule(torch.nn.Module):
-    """Trick the constructor of fx.GraphModule"""
-
-    def __init__(self, nn_modules: dict):
-        super(FakeRootModule, self).__init__()
-        for k, v in nn_modules.items():
-            setattr(self, k, v)
-
-    def __repr__(self):
-        return "FakeRootModule(...)"
