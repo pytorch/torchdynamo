@@ -5,6 +5,7 @@ import gc
 import inspect
 import itertools
 import logging
+import operator
 import os
 import time
 import types
@@ -114,7 +115,7 @@ def proxy_args_kwargs(args, kwargs):
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError:
-        from .variable_tracker import typestr
+        from torchdynamo.variables.base import typestr
 
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
@@ -314,3 +315,12 @@ def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None)))
+
+
+dict_values = type(dict().values())
+odict_values = type(collections.OrderedDict().values())
+product = functools.partial(functools.reduce, operator.mul)
+
+
+def check_constant_args(args, kwargs):
+    return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))

@@ -7,16 +7,17 @@ from typing import List
 import torch.nn
 
 import torchdynamo
-from torchdynamo.bytecode_transformation import Instruction
-from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.utils import is_safe_constant
-from torchdynamo.utils import istype
-from torchdynamo.utils import rot_n_helper
-from torchdynamo.utils import unimplemented
-from torchdynamo.variable_source import Source
-from torchdynamo.variable_tracker import NNModuleVariable
-from torchdynamo.variable_tracker import TensorVariable
-from torchdynamo.variable_tracker import VariableTracker
+
+from .bytecode_transformation import Instruction
+from .bytecode_transformation import create_instruction
+from .source import Source
+from .utils import is_safe_constant
+from .utils import istype
+from .utils import rot_n_helper
+from .utils import unimplemented
+from .variables.base import VariableTracker
+from .variables.nn_module import NNModuleVariable
+from .variables.tensor import TensorVariable
 
 
 class PyCodegen(object):

@@ -1,0 +1,87 @@
+from typing import Dict
+from typing import List
+
+from ..utils import unimplemented
+from .base import VariableTracker
+from .base import typestr
+
+
+class ConstantVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(ConstantVariable, self).__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self):
+        return self.value
+
+    def __str__(self):
+        return f"ConstantVariable({self.value!r})"
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
+
+    @property
+    def items(self):
+        """
+        Need this when adding a BaseListVariable and a ConstantVariable together.
+        Happens in detectron2.
+        """
+        return self.unpack_var_sequence(tx=None)
+
+    def getitem_const(self, arg: VariableTracker):
+        return ConstantVariable(
+            self.value[arg.as_python_constant()],
+            **VariableTracker.propagate([self, arg]),
+        )
+
+    @staticmethod
+    def is_literal(obj):
+        if type(obj) in (int, float, bool, type(None), str):
+            return True
+        if type(obj) in (list, tuple, set, frozenset):
+            return all(ConstantVariable.is_literal(x) for x in obj)
+        return False
+
+    def unpack_var_sequence(self, tx):
+        try:
+            options = VariableTracker.propagate([self])
+            return [ConstantVariable(x, **options) for x in self.as_python_constant()]
+        except TypeError:
+            raise NotImplementedError()
+
+    def get_var_attr(self, tx, name):
+        member = getattr(self.value, name)
+        if callable(member):
+            raise NotImplementedError()
+        return ConstantVariable(member, **VariableTracker.propagate(self))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        try:
+            const_args = [a.as_python_constant() for a in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except NotImplementedError:
+            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+
+        if isinstance(self.value, str) and name in str.__dict__.keys():
+            assert not kwargs
+            method = getattr(self.value, name)
+            return ConstantVariable(method(*const_args, **const_kwargs), **options)
+        elif name == "__len__" and not (args or kwargs):
+            return ConstantVariable(len(self.value), **options)
+        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
+            assert not kwargs
+            search = args[0].as_python_constant()
+            result = search in self.value
+            return ConstantVariable(result, **options)
+
+        unimplemented(f"const method call {typestr(self.value)}.{name}")

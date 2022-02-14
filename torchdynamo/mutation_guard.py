@@ -1,7 +1,7 @@
 import functools
 import weakref
 
-from torchdynamo.utils import ExactWeakKeyDictionary
+from .utils import ExactWeakKeyDictionary
 
 
 class MutationTracker:

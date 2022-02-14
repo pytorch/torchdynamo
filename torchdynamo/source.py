@@ -2,9 +2,9 @@ import collections
 import dataclasses
 from typing import Any
 
-from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.guards import Guard
-from torchdynamo.guards import GuardSource
+from .bytecode_transformation import create_instruction
+from .guards import Guard
+from .guards import GuardSource
 
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,

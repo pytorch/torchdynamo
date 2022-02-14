@@ -7,7 +7,7 @@ from typing import Any
 from typing import List
 from typing import Optional
 
-from torchdynamo.bytecode_analysis import stacksize_analysis
+from .bytecode_analysis import stacksize_analysis
 
 
 @dataclasses.dataclass

@@ -15,6 +15,12 @@ from typing import List
 from unittest.mock import patch
 
 import torchdynamo.side_effects
+import torchdynamo.variables.base
+from torchdynamo.source import AttrSource
+from torchdynamo.source import GlobalSource
+from torchdynamo.source import LocalSource
+from torchdynamo.source import NNModuleSource
+from torchdynamo.variables.builder import VariableBuilder
 
 from . import config
 from . import skipfiles
@@ -35,37 +41,32 @@ from .utils import counters
 from .utils import istype
 from .utils import unimplemented
 from .utils import warning
-from .variable_builder import VariableBuilder
-from .variable_source import AttrSource
-from .variable_source import GlobalSource
-from .variable_source import LocalSource
-from .variable_source import NNModuleSource
-from .variable_tracker import AllowedFunctionOrModuleVariable
-from .variable_tracker import BaseListVariable
-from .variable_tracker import BlackHoleVariable
-from .variable_tracker import BuiltinVariable
-from .variable_tracker import ClosureVariable
-from .variable_tracker import ConstantVariable
-from .variable_tracker import ConstDictVariable
-from .variable_tracker import ContextManagerVariable
-from .variable_tracker import GetAttrVariable
-from .variable_tracker import LambdaVariable
-from .variable_tracker import ListIteratorVariable
-from .variable_tracker import ListVariable
-from .variable_tracker import MutableLocal
-from .variable_tracker import NamedTupleVariable
-from .variable_tracker import NestedUserFunctionVariable
-from .variable_tracker import NNModuleVariable
-from .variable_tracker import PythonModuleVariable
-from .variable_tracker import SliceVariable
-from .variable_tracker import TensorVariable
-from .variable_tracker import TupleVariable
-from .variable_tracker import UnknownVariable
-from .variable_tracker import UnsupportedVariable
-from .variable_tracker import UserFunctionVariable
-from .variable_tracker import UserMethodVariable
-from .variable_tracker import VariableTracker
-from .variable_tracker import typestr
+from .variables.base import MutableLocal
+from .variables.base import VariableTracker
+from .variables.base import typestr
+from .variables.builtin import BuiltinVariable
+from .variables.constant import ConstantVariable
+from .variables.dicts import ConstDictVariable
+from .variables.functions import NestedUserFunctionVariable
+from .variables.functions import UserFunctionVariable
+from .variables.functions import UserMethodVariable
+from .variables.lists import BaseListVariable
+from .variables.lists import ListIteratorVariable
+from .variables.lists import ListVariable
+from .variables.lists import NamedTupleVariable
+from .variables.lists import SliceVariable
+from .variables.lists import TupleVariable
+from .variables.misc import BlackHoleVariable
+from .variables.misc import ClosureVariable
+from .variables.misc import ContextManagerVariable
+from .variables.misc import GetAttrVariable
+from .variables.misc import LambdaVariable
+from .variables.misc import PythonModuleVariable
+from .variables.misc import UnknownVariable
+from .variables.nn_module import NNModuleVariable
+from .variables.tensor import TensorVariable
+from .variables.torch import TorchVariable
+from .variables.user_defined import UserDefinedObjectVariable
 
 log = logging.getLogger(__name__)
 
@@ -168,14 +169,16 @@ class InstructionTranslatorBase(object):
         self.push(fn.call_function(self, args, kwargs))
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        if isinstance(oldvar.mutable_local, torchdynamo.side_effects.Mutable):
+        if isinstance(
+            oldvar.mutable_local, torchdynamo.side_effects.MutableSideEffects
+        ):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
             assert isinstance(
-                oldvar.mutable_local, torchdynamo.variable_tracker.MutableLocal
+                oldvar.mutable_local, torchdynamo.variables.base.MutableLocal
             )
             newvar = newvar.clone(
-                mutable_local=torchdynamo.variable_tracker.MutableLocal()
+                mutable_local=torchdynamo.variables.base.MutableLocal()
             )
 
         def repl(v: VariableTracker):
@@ -339,7 +342,7 @@ class InstructionTranslatorBase(object):
         source = self.import_source(inst.argval)
 
         if is_allowed(value):
-            self.push(AllowedFunctionOrModuleVariable(value, source=source))
+            self.push(TorchVariable(value, source=source))
         elif istype(value, types.ModuleType):
             self.push(PythonModuleVariable(value, source=source))
         else:
@@ -590,7 +593,7 @@ class InstructionTranslatorBase(object):
                     self.push(
                         UserMethodVariable(
                             subobj.__func__,
-                            UnsupportedVariable(type(base), guards=guards),
+                            UserDefinedObjectVariable(type(base), guards=guards),
                             **options,
                         )
                     )
@@ -608,10 +611,10 @@ class InstructionTranslatorBase(object):
                 )
             except NotImplementedError:
                 self.push(GetAttrVariable(obj, name, **options))
-        elif isinstance(obj, AllowedFunctionOrModuleVariable):
+        elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if not is_disallowed(member):
-                self.push(AllowedFunctionOrModuleVariable(member, **options))
+                self.push(TorchVariable(member, **options))
             elif ConstantVariable.is_literal(member):
                 self.push(ConstantVariable(member, **options))
             else:
@@ -619,7 +622,7 @@ class InstructionTranslatorBase(object):
         elif isinstance(obj, PythonModuleVariable):
             member = obj.value.__dict__[name]
             self.push(VariableBuilder(self, source)(member).add_guards(guards))
-        elif isinstance(obj, UnsupportedVariable) and name in getattr(
+        elif isinstance(obj, UserDefinedObjectVariable) and name in getattr(
             obj.value, "__dict__", {}
         ):
             subobj = inspect.getattr_static(obj.value, name)

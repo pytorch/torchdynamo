@@ -10,34 +10,34 @@ import torch
 
 import torchdynamo
 
-from . import skipfiles
-from .allowed_functions import is_allowed
-from .allowed_functions import is_builtin
-from .guards import GuardBuilder
-from .utils import getfile
-from .utils import is_namedtuple
-from .utils import istensor
-from .utils import istype
-from .utils import warning
-from .variable_source import GetItemSource
-from .variable_source import Source
-from .variable_tracker import AllowedFunctionOrModuleVariable
-from .variable_tracker import AutogradFunctionVariable
-from .variable_tracker import BuiltinVariable
-from .variable_tracker import ConstantVariable
-from .variable_tracker import ConstDictVariable
-from .variable_tracker import InspectSignatureVariable
-from .variable_tracker import LambdaVariable
-from .variable_tracker import ListVariable
-from .variable_tracker import NamedTupleVariable
-from .variable_tracker import PythonModuleVariable
-from .variable_tracker import RangeVariable
-from .variable_tracker import TensorVariable
-from .variable_tracker import TupleVariable
-from .variable_tracker import UnsupportedVariable
-from .variable_tracker import UserDefinedClassVariable
-from .variable_tracker import UserFunctionVariable
-from .variable_tracker import typestr
+from .. import skipfiles
+from ..allowed_functions import is_allowed
+from ..allowed_functions import is_builtin
+from ..guards import GuardBuilder
+from ..source import GetItemSource
+from ..source import Source
+from ..utils import getfile
+from ..utils import is_namedtuple
+from ..utils import istensor
+from ..utils import istype
+from ..utils import warning
+from .base import typestr
+from .builtin import BuiltinVariable
+from .constant import ConstantVariable
+from .dicts import ConstDictVariable
+from .functions import UserFunctionVariable
+from .lists import ListVariable
+from .lists import NamedTupleVariable
+from .lists import RangeVariable
+from .lists import TupleVariable
+from .misc import AutogradFunctionVariable
+from .misc import InspectSignatureVariable
+from .misc import LambdaVariable
+from .misc import PythonModuleVariable
+from .tensor import TensorVariable
+from .torch import TorchVariable
+from .user_defined import UserDefinedClassVariable
+from .user_defined import UserDefinedObjectVariable
 
 
 @dataclasses.dataclass
@@ -156,7 +156,7 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
         elif is_allowed(value):
-            return AllowedFunctionOrModuleVariable(
+            return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
@@ -188,7 +188,7 @@ class VariableBuilder:
             return self.wrap_unsupported(value)
 
     def wrap_unsupported(self, value):
-        return UnsupportedVariable(
+        return UserDefinedObjectVariable(
             value,
             guards=self.make_guards(GuardBuilder.TYPE_MATCH),
         )

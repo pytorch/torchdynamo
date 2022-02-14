@@ -4,7 +4,7 @@ from typing import List
 
 import torch
 
-from torchdynamo import config
+from . import config
 
 
 @dataclasses.dataclass

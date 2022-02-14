@@ -3,21 +3,21 @@ import dataclasses
 from typing import Any
 from typing import List
 
-import torchdynamo
-from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.codegen import PyCodegen
-from torchdynamo.variable_tracker import VariableTracker
+from .bytecode_transformation import create_instruction
+from .codegen import PyCodegen
+from .source import Source
+from .variables.base import VariableTracker
 
 
 @dataclasses.dataclass
-class Mutable:
+class MutableSideEffects:
     """
     VariableTracker.mutable_local marker to indicate a list passed as
     an input that if we mutate we need to re-apply those mutations after
     the graph runs.
     """
 
-    source: "torchdynamo.variable_source.Source"
+    source: Source
     is_modified: bool
 
 
@@ -47,18 +47,20 @@ class SideEffects(object):
 
     def track_list(
         self,
-        source: "torchdynamo.variable_source.Source",
+        source: Source,
         item: List[Any],
-        variable: "torchdynamo.variable_tracker.VariableTracker",
+        variable: VariableTracker,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=Mutable(source, False))
+        variable = variable.clone(mutable_local=MutableSideEffects(source, False))
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
     def mutation(self, oldvar, newvar):
-        return newvar.clone(mutable_local=Mutable(oldvar.mutable_local.source, True))
+        return newvar.clone(
+            mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
+        )
 
     def apply(self, fn):
         self.id_to_variable = collections.OrderedDict(

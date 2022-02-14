@@ -13,21 +13,21 @@ from typing import List
 import torch.nn
 from torch import fx
 
-from torchdynamo import config
-from torchdynamo.bytecode_transformation import Instruction
-from torchdynamo.bytecode_transformation import create_instruction
-from torchdynamo.bytecode_transformation import unique_id
-from torchdynamo.codegen import PyCodegen
-from torchdynamo.guards import GuardBuilder
-from torchdynamo.side_effects import SideEffects
-from torchdynamo.utils import CleanupHook
-from torchdynamo.utils import count_calls
-from torchdynamo.utils import counters
-from torchdynamo.utils import unimplemented
-from torchdynamo.variable_source import LocalSource
-from torchdynamo.variable_source import Source
-from torchdynamo.variable_tracker import NNModuleVariable
-from torchdynamo.variable_tracker import TensorVariable
+from . import config
+from .bytecode_transformation import Instruction
+from .bytecode_transformation import create_instruction
+from .bytecode_transformation import unique_id
+from .codegen import PyCodegen
+from .guards import GuardBuilder
+from .side_effects import SideEffects
+from .source import LocalSource
+from .source import Source
+from .utils import CleanupHook
+from .utils import count_calls
+from .utils import counters
+from .utils import unimplemented
+from .variables.nn_module import NNModuleVariable
+from .variables.tensor import TensorVariable
 
 
 class FakeRootModule(torch.nn.Module):
