@@ -1095,10 +1095,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_locals,
         f_globals,
     ):
+        f_builtins = f_globals["__builtins__"]
+        if not isinstance(f_builtins, dict):
+            f_builtins = f_builtins.__dict__
         super(InliningInstructionTranslator, self).__init__(
             output=parent.output,
             f_globals=f_globals,
-            f_builtins=f_globals["__builtins__"],
+            f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
