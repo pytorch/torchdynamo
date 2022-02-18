@@ -454,12 +454,12 @@ def cudagraphs_inner(model, inputs):
 
 @create_backend
 def aot_autograd(subgraph, **kwargs):
-    from functorch.compile import aot_function
+    from functorch.compile import aot_module
     from functorch.compile import memory_efficient_fusion
 
     # If kwargs is empty, we fallback to default of memory_efficient_fusion
     if kwargs:
-        return subgraph.wrap_returns(aot_function(subgraph.model, **kwargs))
+        return subgraph.wrap_returns(aot_module(subgraph.model, **kwargs))
     return subgraph.wrap_returns(memory_efficient_fusion(subgraph.model))
 
 
