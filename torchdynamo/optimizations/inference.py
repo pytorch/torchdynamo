@@ -11,7 +11,6 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-from torch.fx.experimental.normalize import NormalizeOperators
 
 from torchdynamo import config
 from torchdynamo.utils import check_is_cuda
@@ -22,11 +21,9 @@ from torchdynamo.utils import counters
 from torchdynamo.utils import timed
 from torchdynamo.utils import warning
 
-from .analysis import ShapeAliasingAndMutationProp
 from .backends import BACKENDS
-from .normalize import Functionalization
 from .normalize import long_name
-from .normalize import normalize
+from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
 
@@ -90,17 +87,6 @@ def record_graph_stats(gm):
         else:
             assert False, node.op
 
-
-def normalize_ir(gm, example_inputs):
-    if config.normalize_ir:
-        example_inputs = clone_inputs(example_inputs)
-        normalize(gm)
-        gm = NormalizeOperators(gm).transform()
-        ShapeAliasingAndMutationProp(gm).run(*example_inputs)
-        gm = Functionalization(gm).transform()
-    gm.recompile()
-    # record_graph_stats(gm)
-    return gm
 
 
 def check_requires_grad(gm, example_inputs):

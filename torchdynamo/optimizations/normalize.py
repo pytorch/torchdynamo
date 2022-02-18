@@ -7,10 +7,15 @@ import operator
 
 import torch
 from torch.fx import Transformer
+from torch.fx.experimental.normalize import NormalizeOperators
 from torch.fx.operator_schemas import get_signature_for_torch_op
 
+from torchdynamo import config
 from torchdynamo.allowed_functions import _allowed_function_ids
+from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import counters
+
+from .analysis import ShapeAliasingAndMutationProp
 
 VIEW_OPS = {
     # list taken from https://pytorch.org/docs/stable/tensor_view.html
@@ -400,3 +405,15 @@ def normalize(gm: torch.fx.GraphModule):
                     )
 
     # gm.graph.print_tabular()
+
+
+def normalize_ir(gm, example_inputs):
+    if config.normalize_ir:
+        example_inputs = clone_inputs(example_inputs)
+        normalize(gm)
+        gm = NormalizeOperators(gm).transform()
+        ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+        gm = Functionalization(gm).transform()
+    gm.recompile()
+    # record_graph_stats(gm)
+    return gm
