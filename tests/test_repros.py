@@ -623,6 +623,37 @@ def _get_min_chunk_len(config):
         )
 
 
+def _stable_argsort(vector, dim):
+    """from hf_Reformer"""
+    # this function scales the vector so that torch.argsort is stable.
+    # torch.argsort is not stable on its own
+    scale_offset = torch.arange(vector.shape[dim], device=vector.device).view(1, 1, -1)
+    scale_offset = scale_offset.expand(vector.shape)
+    scaled_vector = vector.shape[dim] * vector + (scale_offset % vector.shape[dim])
+    return torch.argsort(scaled_vector, dim=dim)
+
+
+def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
+    """from hf_Reformer"""
+    # no gradients are needed
+    with torch.no_grad():
+        # hash-based sort
+        sorted_bucket_idx = _stable_argsort(buckets, dim=-1)
+
+        # create simple indices to scatter to, to have undo sort
+        indices = (
+            torch.arange(sorted_bucket_idx.shape[-1], device=buckets.device)
+            .view(1, 1, -1)
+            .expand(sorted_bucket_idx.shape)
+        )
+
+        # get undo sort
+        undo_sorted_bucket_idx = sorted_bucket_idx.new(*sorted_bucket_idx.size())
+        undo_sorted_bucket_idx.scatter_(-1, sorted_bucket_idx, indices)
+
+    return sorted_bucket_idx, undo_sorted_bucket_idx
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -876,3 +907,15 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertEqual(test_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 3)
+
+    def test_reformer_sorting(self):
+        x = torch.zeros([1, 12, 4096], dtype=torch.int64)
+        correct = _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(x)
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertTrue(
+                same(_get_sorted_bucket_idx_and_undo_sorted_bucket_idx(x), correct)
+            )
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 14)

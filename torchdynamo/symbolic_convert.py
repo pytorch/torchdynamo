@@ -506,6 +506,8 @@ class InstructionTranslatorBase(object):
         else:
             unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
+        self.output.guards.update(argsvars.guards)
+        self.output.guards.update(kwargsvars.guards)
 
         if (
             isinstance(fn, GetAttrVariable)
@@ -518,10 +520,16 @@ class InstructionTranslatorBase(object):
             # but not generally.  See test_transpose_for_scores().
             argsvars = TupleVariable([argsvars])
 
+        if not isinstance(
+            argsvars, BaseListVariable
+        ) and argsvars.has_unpack_var_sequence(self):
+            argsvars = TupleVariable(argsvars.unpack_var_sequence(self))
+
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
         ):
             unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
+
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
     @break_graph_if_unsupported
