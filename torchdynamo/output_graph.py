@@ -71,6 +71,10 @@ class OutputGraph(fx.Tracer):
         self.cleanups = []
         self.should_exit = False
 
+    @property
+    def output(self):
+        return self
+
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
         graph_nodes = set(self.graph.nodes)
@@ -153,6 +157,7 @@ class OutputGraph(fx.Tracer):
 
             def wrap_name(module_key):
                 return TensorVariable.create(
+                    self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=mod,
                     **options,

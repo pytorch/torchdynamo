@@ -1,11 +1,10 @@
 import torch
 
-from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 
-from .normalize import normalize_ir
 from .backends import BACKENDS
+from .normalize import normalize_ir
 
 
 class AOTAutogradStrategy(object):
@@ -51,6 +50,7 @@ aot_autograd_debug_strategy1 = AOTAutogradEagerStrategy.compile_fn
 
 # Global counter to differentiate between different graphs.
 graph_idx = 0
+
 
 class AOTAutogradEagerSaveStrategy(AOTAutogradEagerStrategy):
     """Saves all the gm models so that we can run them separately"""

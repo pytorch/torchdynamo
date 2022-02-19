@@ -600,6 +600,29 @@ def get_parameter_dtype(parameter):
         return first_tuple[1].dtype
 
 
+class DummyConfig:
+    attn_layers = ["local", "lsh", "local", "lsh", "local", "lsh"]
+    lsh_attn_chunk_length = 64
+    local_attn_chunk_length = 64
+
+
+def _get_min_chunk_len(config):
+    """from hf_Reformer"""
+    attn_types = config.attn_layers
+    attn_types_set = set(attn_types)
+    if len(attn_types_set) == 1 and attn_types[0] == "lsh":
+        return config.lsh_attn_chunk_length
+    elif len(attn_types_set) == 1 and attn_types[0] == "local":
+        return config.local_attn_chunk_length
+    elif len(attn_types_set) == 2 and attn_types_set == set(["lsh", "local"]):
+        return min(config.lsh_attn_chunk_length, config.local_attn_chunk_length)
+    else:
+        raise NotImplementedError(
+            f"Only attn layer types 'lsh' and 'local' exist, but `config.attn_layers`: {config.attn_layers}. Select "
+            "attn layer types from ['lsh', 'local'] only."
+        )
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -840,3 +863,16 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertEqual(test_fn(model, torch.randn(10)).dtype, torch.float32)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_reformer_min_chunk_len(self):
+        def test_fn(cfg):
+            t = torch.empty(10)
+            t.fill_(_get_min_chunk_len(cfg))
+            return t[0]
+
+        cfg = DummyConfig()
+        cnt = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnt)):
+            self.assertEqual(test_fn(cfg), 64)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)

@@ -88,6 +88,7 @@ class NNModuleVariable(VariableTracker):
             return arg
         elif is_allowed(mod.__class__):
             return variables.TensorVariable.create(
+                tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_module",
                     self.module_key,

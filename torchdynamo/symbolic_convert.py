@@ -460,6 +460,7 @@ class InstructionTranslatorBase(object):
         ) and op in supported_tensors:
             self.push(
                 TensorVariable.create(
+                    self,
                     supported_tensors[op](left.as_proxy(), right.as_proxy()),
                     **options,
                 )
@@ -628,6 +629,13 @@ class InstructionTranslatorBase(object):
             subobj = inspect.getattr_static(obj.value, name)
             assert id(subobj) == id(obj.value.__dict__[name])
             self.push(VariableBuilder(self, source)(subobj).add_guards(guards))
+        elif isinstance(obj, UserDefinedObjectVariable):
+            subobj = inspect.getattr_static(obj.value, name)
+            if ConstantVariable.is_literal(subobj):
+                # configuration values defined on the class
+                self.push(VariableBuilder(self, source)(subobj).add_guards(guards))
+            else:
+                self.push(GetAttrVariable(obj, name, **options))
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             self.push(
                 ConstantVariable(
@@ -804,12 +812,12 @@ class InstructionTranslatorBase(object):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(proxy[i], **options))
+                self.push(TensorVariable.create(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(proxy[i], **options))
+                self.push(TensorVariable.create(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 

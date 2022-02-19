@@ -101,7 +101,7 @@ for _name in (
 ):
     try:
         add(importlib.import_module(_name))
-    except ImportError:
+    except (ImportError, TypeError):
         pass
 
 

@@ -28,7 +28,9 @@ class TensorVariable(VariableTracker):
         return torch.fx.node.map_arg((node.args, node.kwargs), visit)
 
     @classmethod
-    def create(cls, proxy, example_value=None, nnmodule=None, **options):
+    def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
+        if "guards" in options:
+            tx.output.guards.update(options["guards"])
         assert "example_value" not in proxy.node.meta
         if not config.dynamic_propagation:
             if isinstance(example_value, torch.Tensor):
@@ -59,6 +61,7 @@ class TensorVariable(VariableTracker):
             for i, val in enumerate(example_value):
                 unpacked.append(
                     TensorVariable.create(
+                        tx,
                         proxy.tracer.create_proxy(
                             "call_function", operator.getitem, (proxy, i), {}
                         ),
@@ -199,12 +202,14 @@ class TensorVariable(VariableTracker):
                 return ConstantVariable(self.size[0], **options)
             else:
                 return TensorVariable.create(
+                    tx,
                     tx.output.create_proxy(
                         "call_function", len, (self.as_proxy(),), {}
                     ),
                     **options,
                 )
         elif name == "__setitem__":
+            tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
                 "call_function",
                 operator.setitem,
@@ -213,6 +218,7 @@ class TensorVariable(VariableTracker):
             return ConstantVariable(None, **options)
         else:
             return TensorVariable.create(
+                tx,
                 tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),

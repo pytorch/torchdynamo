@@ -23,6 +23,8 @@ format:
 	clang-format-10 -i $(C_FILES)
 
 lint:
+	black --check --diff $(PY_FILES)
+	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
 	clang-tidy-10 $(C_FILES)  -- \
 		-I$(shell python -c "from distutils.sysconfig import get_python_inc as X; print(X())") \
@@ -33,7 +35,7 @@ setup:
 
 clean:
 	python setup.py clean
-	rm -rf build torchdynamo.egg-info torchdynamo/*.so
+	rm -rf build torchdynamo.egg-info torchdynamo/*.so __pycache__ .pytest_cache .benchmarks *.csv
 
 clone-deps:
 	(cd .. \
@@ -62,12 +64,12 @@ build-deps: clone-deps
 	conda install -y -c pytorch magma-cuda113
 	make setup
 	(cd ../pytorch     && python setup.py clean && env LDFLAGS="-lncurses" python setup.py develop)
-	(cd ../functorch   && python setup.py clean && python setup.py develop)
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
 	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py)
+	(cd ../functorch   && python setup.py clean && python setup.py develop)
 
 offline-autotune-cpu: develop
 	rm -rf subgraphs

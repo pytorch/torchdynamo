@@ -38,6 +38,7 @@ class BuiltinVariable(VariableTracker):
             pow,
             repr,
             round,
+            set,
             str,
             sum,
             tuple,
@@ -161,6 +162,7 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
                 return variables.TensorVariable.create(
+                    tx,
                     tx.output.create_proxy(
                         "call_function",
                         fn,

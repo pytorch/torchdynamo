@@ -87,6 +87,6 @@ class SideEffects(object):
                 )
 
     def is_empty(self):
-        return all(
-            (not var.mutable_local.is_modified) for var in self.id_to_variable.values()
+        return not any(
+            var.mutable_local.is_modified for var in self.id_to_variable.values()
         )

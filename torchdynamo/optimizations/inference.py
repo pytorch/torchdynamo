@@ -88,7 +88,6 @@ def record_graph_stats(gm):
             assert False, node.op
 
 
-
 def check_requires_grad(gm, example_inputs):
     if torch.is_grad_enabled():
         if any(

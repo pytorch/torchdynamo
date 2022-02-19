@@ -205,6 +205,7 @@ class VariableBuilder:
         else:
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value))
             return TensorVariable.create(
+                tx=self.tx,
                 proxy=self.tx.output.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
                 ),

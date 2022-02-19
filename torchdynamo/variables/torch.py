@@ -140,6 +140,7 @@ class TorchVariable(VariableTracker):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         else:
             return TensorVariable.create(
+                tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function", self.value, *proxy_args_kwargs(args, kwargs)
                 ),
@@ -188,6 +189,7 @@ class TorchVariable(VariableTracker):
 
         def fake_softmax(input):
             return variables.TensorVariable.create(
+                tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     torch.nn.functional.softmax,
