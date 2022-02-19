@@ -7,6 +7,7 @@ import itertools
 import logging
 import operator
 import sys
+import traceback
 import types
 import typing
 from typing import Any
@@ -229,7 +230,8 @@ class InstructionTranslatorBase(object):
                 unimplemented(f"missing: {inst.opname}")
             getattr(self, inst.opname)(inst)
             return inst.opname != "RETURN_VALUE"
-        except Unsupported:
+        except Unsupported as exc:
+            exc.real_stack.append(self.frame_summary())
             if not self.checkpoint:
                 raise
 
@@ -924,6 +926,14 @@ class InstructionTranslatorBase(object):
         ) = state
         self.output.restore_graphstate(output_state)
 
+    def frame_summary(self):
+        return traceback.FrameSummary(
+            getattr(self.f_code, "co_filename", "<unknown>"),
+            self.lineno,
+            getattr(self.f_code, "co_name", "<unknown>"),
+            lookup_line=False,
+        )
+
     def __init__(
         self,
         output: OutputGraph,
@@ -967,6 +977,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_builtins,
         code_options,
         compiler_fn,
+        one_graph,
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn),
@@ -977,6 +988,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals=collections.OrderedDict(),  # set below
             f_code=f_code,
         )
+        self.one_graph = one_graph
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(
@@ -986,7 +998,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def should_compile_partial_graph(self):
-        return len(self.block_stack) == 0
+        return len(self.block_stack) == 0 and not self.one_graph
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None

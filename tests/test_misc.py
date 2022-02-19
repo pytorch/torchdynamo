@@ -1,7 +1,9 @@
 #!/usr/bin/env pytest
 import collections
+import dataclasses
 import functools
 import math
+import unittest
 
 import torch
 
@@ -479,7 +481,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             return head_mask
 
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with eval_frame.optimize(convert_frame(cnts)):
             self.assertEqual(fn(2), [None] * 4)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
@@ -516,3 +518,47 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    @unittest.skip("todo")
+    def test_dataclass_fields(self):
+        @dataclasses.dataclass
+        class MyDataClass:
+            a: torch.Tensor
+            b: torch.Tensor = None
+            c: torch.Tensor = None
+            d: torch.Tensor = None
+            e: torch.Tensor = None
+
+        def fn(obj):
+            class_fields = dataclasses.fields(obj)
+            assert len(class_fields)
+            assert all(field.default is None for field in class_fields[1:])
+            other_fields_are_none = all(
+                getattr(obj, field.name) is None for field in class_fields[1:]
+            )
+            assert not other_fields_are_none
+
+            total = getattr(obj, class_fields[0].name)
+            for field in class_fields[1:]:
+                v = getattr(obj, field.name)
+                if v is not None:
+                    total += v
+
+            return total
+
+        obj1 = MyDataClass(torch.randn(10), torch.randn(10), torch.randn(10))
+        obj2 = MyDataClass(torch.randn(10), e=torch.randn(10))
+        correct1 = fn(obj1)
+        correct2 = fn(obj2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertTrue(same(fn(obj1), correct1))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertTrue(same(fn(obj2), correct2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)

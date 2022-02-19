@@ -195,6 +195,27 @@ with torchdynamo.run():
     toy_example(torch.randn(10), torch.randn(10))
 ```
 
+## Single Whole-Program Graph Mode
+
+In some cases, you may want to ensure there are no graph breaks in your
+program to debug performance issues.  You can turn graph breaks into
+errors by setting
+`nopython=True`:
+```py
+with torchdynamo.optimize(my_compiler, nopython=True):
+    toy_example(torch.randn(10), torch.randn(10))
+```
+
+Which will trigger the following error in the example program above:
+```py
+Traceback (most recent call last):
+  ...
+torchdynamo.utils.Unsupported: generic_jump TensorVariable()
+Processing original code:
+  File "example.py", line 7, in toy_example
+    if b.sum() < 0:
+```
+
 ## Deeper Dive
 
 If you want to understand better what TorchDynamo is doing, you can set:

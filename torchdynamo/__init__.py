@@ -4,7 +4,9 @@ import torchdynamo.resume_execution
 from . import eval_frame
 
 
-def optimize(fx_compile_fn):
+def optimize(fx_compile_fn, nopython=False):
+    if nopython:
+        return optimize_assert(fx_compile_fn)
     return eval_frame.optimize(torchdynamo.convert_frame.convert_frame(fx_compile_fn))
 
 

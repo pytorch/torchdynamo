@@ -48,6 +48,8 @@ output_codes = Tracker()
 
 
 def wrap_compiler_fn(compiler_fn):
+    """Shim to convert 1 arg to 2 arg compiler_fn"""
+
     @functools.wraps(compiler_fn)
     def inner(gm: fx.GraphModule, example_inputs: List):
         return compiler_fn(gm)
@@ -69,7 +71,7 @@ def wrap_restore_state(fn):
     return _fn
 
 
-def convert_frame_assert(compiler_fn: Callable):
+def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     """Fully convert a frame into an FX graph"""
     if len(inspect.signature(compiler_fn).parameters) == 1:
         # older 1-arg version
@@ -103,6 +105,7 @@ def convert_frame_assert(compiler_fn: Callable):
                 frame.f_builtins,
                 code_options,
                 compiler_fn,
+                one_graph,
             )
             tracer.run()
             output = tracer.output
@@ -146,6 +149,7 @@ def convert_frame_assert(compiler_fn: Callable):
                 )
                 # print(dis.Bytecode(frame.f_code).info())
                 print(dis.Bytecode(frame.f_code).dis())
+                traceback.print_exc()
             raise
 
     return wrap_restore_state(_convert_frame_assert)
@@ -153,7 +157,7 @@ def convert_frame_assert(compiler_fn: Callable):
 
 def convert_frame(compiler_fn: typing.Callable):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn)
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1

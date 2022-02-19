@@ -736,7 +736,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         torch.manual_seed(1337)
         correct = copy.deepcopy(model)(input)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with eval_frame.optimize(convert_frame(cnt)):
             torch.manual_seed(1337)
             self.assertTrue(same(model(input), correct))
         return cnt
@@ -801,7 +801,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = PartialMaml()
         correct = model(a, b, c, d)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with eval_frame.optimize(convert_frame(cnt)):
             self.assertTrue(same(model(a, b, c, d), correct))
 
         self.assertEqual(cnt.frame_count, 3)

@@ -8,6 +8,7 @@ import logging
 import operator
 import os
 import time
+import traceback
 import types
 import weakref
 from functools import lru_cache
@@ -95,7 +96,16 @@ def make_cell(val):
 
 
 class Unsupported(RuntimeError):
-    pass
+    def __init__(self, msg):
+        super(Unsupported, self).__init__(msg)
+        self.real_stack = []
+
+    def __str__(self):
+        msgs = [super(Unsupported, self).__str__()]
+        if self.real_stack:
+            msgs.append("Processing original code:")
+            msgs.extend(traceback.StackSummary.from_list(self.real_stack).format())
+        return "\n".join(msgs)
 
 
 def unimplemented(msg: str):
