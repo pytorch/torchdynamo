@@ -623,19 +623,10 @@ class InstructionTranslatorBase(object):
         elif isinstance(obj, PythonModuleVariable):
             member = obj.value.__dict__[name]
             self.push(VariableBuilder(self, source)(member).add_guards(guards))
-        elif isinstance(obj, UserDefinedObjectVariable) and name in getattr(
-            obj.value, "__dict__", {}
-        ):
-            subobj = inspect.getattr_static(obj.value, name)
-            assert id(subobj) == id(obj.value.__dict__[name])
-            self.push(VariableBuilder(self, source)(subobj).add_guards(guards))
         elif isinstance(obj, UserDefinedObjectVariable):
-            subobj = inspect.getattr_static(obj.value, name)
-            if ConstantVariable.is_literal(subobj):
-                # configuration values defined on the class
-                self.push(VariableBuilder(self, source)(subobj).add_guards(guards))
-            else:
-                self.push(GetAttrVariable(obj, name, **options))
+            self.push(
+                obj.call_method(self, "__getattr__", [ConstantVariable(name)], {})
+            )
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             self.push(
                 ConstantVariable(

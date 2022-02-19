@@ -7,9 +7,11 @@ from typing import List
 from .. import variables
 from ..guards import Guard
 from ..guards import GuardBuilder
+from ..source import AttrSource
 from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
+from ..utils import unimplemented
 from .base import VariableTracker
 
 
@@ -68,7 +70,18 @@ class UserDefinedObjectVariable(VariableTracker):
         from . import TupleVariable
         from . import UserMethodVariable
 
+        if (
+            name == "__getattr__"
+            and len(args) == 1
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            return self.call_getattr(tx, args[0].as_python_constant()).add_options(
+                args[0]
+            )
+
         options = VariableTracker.propagate(self, args, kwargs.values())
+
         if name not in getattr(self.value, "__dict__", {}):
             try:
                 method = inspect.getattr_static(type(self.value), name)
@@ -120,6 +133,39 @@ class UserDefinedObjectVariable(VariableTracker):
                 )
 
         return super().call_method(tx, name, args, kwargs)
+
+    def call_getattr(self, tx, name):
+        from . import ConstantVariable
+        from .builder import VariableBuilder
+
+        options = VariableTracker.propagate(self)
+        value = self.value
+        source = AttrSource(self.source, name) if self.source else None
+        try:
+            getattr_fn = inspect.getattr_static(type(value), "__getattr__")
+        except AttributeError:
+            getattr_fn = None
+
+        if isinstance(getattr_fn, types.FunctionType):
+            return variables.UserMethodVariable(
+                getattr_fn, self, **options
+            ).call_function(tx, [ConstantVariable(name)], {})
+        elif getattr_fn is not None:
+            unimplemented("UserDefined with non-function __getattr__")
+
+        subobj = inspect.getattr_static(value, name)
+
+        if isinstance(subobj, property):
+            return variables.UserMethodVariable(
+                subobj.fget, self, **options
+            ).call_function(tx, [], {})
+
+        if name in getattr(value, "__dict__", {}) or ConstantVariable.is_literal(
+            subobj
+        ):
+            return VariableBuilder(tx, source)(subobj).add_options(options)
+
+        return variables.GetAttrVariable(self, name, source=source, **options)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
