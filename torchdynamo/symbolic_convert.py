@@ -712,6 +712,7 @@ class InstructionTranslatorBase(object):
         )
 
     def UNPACK_SEQUENCE(self, inst):
+        # TODO(jansel): rewrite this using unpack_var_sequence
         seq = self.pop()
         options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
@@ -735,6 +736,26 @@ class InstructionTranslatorBase(object):
                 self.push(TensorVariable.create(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
+
+    def UNPACK_EX(self, inst):
+        assert 0 <= inst.argval <= 0xFFFF
+        prefix = inst.argval & 0xFF  # low byte
+        suffix = inst.argval >> 8  # high byte
+        seq = self.pop()
+        options = VariableTracker.propagate(seq)
+        if seq.has_unpack_var_sequence(self):
+            vals = list(seq.unpack_var_sequence(self))
+            assert len(vals) >= prefix + suffix
+            vals_prefix = vals[:prefix]
+            vals_list = vals[prefix : len(vals) - suffix]
+            vals_suffix = vals[len(vals) - suffix :]
+            for item in reversed(vals_suffix):
+                self.push(item.add_options(options))
+            self.push(TupleVariable(vals_list, **options))
+            for item in reversed(vals_prefix):
+                self.push(item.add_options(options))
+        else:
+            unimplemented(f"UNPACK_EX {seq}")
 
     def NOP(self, inst):
         pass

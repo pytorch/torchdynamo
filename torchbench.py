@@ -411,6 +411,9 @@ def main():
         "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
     )
     parser.add_argument(
+        "--nopython", action="store_true", help="Turn graph breaks into errors"
+    )
+    parser.add_argument(
         "--no-skip",
         action="store_true",
         help="run models that are in the global SKIP list",
@@ -505,26 +508,26 @@ def main():
     global output_filename
 
     if args.overhead:
-        optimize_ctx = torchdynamo.optimize(dummy_fx_compile)
+        optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.online_autotune:
-        optimize_ctx = torchdynamo.optimize(online_autotuner)
+        optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
     elif args.offline_autotune:
-        optimize_ctx = torchdynamo.optimize(offline_autotuner)
+        optimize_ctx = torchdynamo.optimize(offline_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
     elif args.speedup_fixed1:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy1)
+        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups_fixed1.csv"
         args.isolate = True
     elif args.speedup_fixed2:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy2)
+        optimize_ctx = torchdynamo.optimize(fixed_strategy2, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups_fixed2.csv"
         args.isolate = True
@@ -544,10 +547,10 @@ def main():
         pass
     elif args.nops:
         optimize_ctx = torchdynamo.eval_frame.optimize(
-            torchdynamo.testing.debug_insert_nops
+            torchdynamo.testing.debug_insert_nops, nopython=args.nopython
         )
     else:
-        optimize_ctx = torchdynamo.optimize(fx_insert_profiling)
+        optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 

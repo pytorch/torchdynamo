@@ -439,3 +439,21 @@ class FunctionTests(torchdynamo.testing.TestCase):
         output = (a, b)
         output += (a + b, a - b)
         return output
+
+    @make_test
+    def test_unpack_ex1(x):
+        output = (x, x + 1, x + 2, x + 3)
+        a, b, *cd = output
+        return a - b / cd[0]
+
+    @make_test
+    def test_unpack_ex2(x):
+        output = (x, x + 1, x + 2, x + 3)
+        *ab, c, d = output
+        return c - d / ab[0]
+
+    @make_test
+    def test_unpack_ex3(x):
+        output = (x, x + 1, x + 2, x + 3)
+        a, *bc, d = output
+        return a - d / bc[0]
