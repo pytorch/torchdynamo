@@ -20,14 +20,12 @@ import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
 from torchdynamo.source import GlobalSource
 from torchdynamo.source import LocalSource
-from torchdynamo.source import NNModuleSource
 from torchdynamo.variables.builder import VariableBuilder
 
 from . import config
 from . import skipfiles
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin
-from .allowed_functions import is_disallowed
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
@@ -41,7 +39,6 @@ from .utils import Unsupported
 from .utils import counters
 from .utils import istype
 from .utils import unimplemented
-from .utils import warning
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
@@ -50,11 +47,9 @@ from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import NestedUserFunctionVariable
 from .variables.functions import UserFunctionVariable
-from .variables.functions import UserMethodVariable
 from .variables.lists import BaseListVariable
 from .variables.lists import ListIteratorVariable
 from .variables.lists import ListVariable
-from .variables.lists import NamedTupleVariable
 from .variables.lists import SliceVariable
 from .variables.lists import TupleVariable
 from .variables.misc import BlackHoleVariable
@@ -67,7 +62,6 @@ from .variables.misc import UnknownVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable
 
 log = logging.getLogger(__name__)
 
@@ -119,14 +113,15 @@ def break_graph_if_unsupported(inner_fn):
         state = self.copy_graphstate()
         try:
             return inner_fn(self, inst)
-        except Unsupported:
+        except Unsupported as exc:
             if not self.should_compile_partial_graph():
                 raise
+            exc.remove_from_stats()
+            exc.add_to_stats("graph_break")
         self.restore_graphstate(state)
         self.output.compile_subgraph(self)
         # note, assuming inst pushes 1
-        vars = self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
-        warning(f"breaking graph: {vars[0]}")
+        self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
         self.output.add_output_instructions([inst])
         self.push(UnknownVariable())
         self.output.add_output_instructions(
@@ -560,91 +555,10 @@ class InstructionTranslatorBase(object):
 
     def LOAD_ATTR(self, inst):
         obj = self.pop()
-        name = inst.argval
-        options = VariableTracker.propagate([obj])
-        guards = options.get("guards", set())
-        if obj.source:
-            source = AttrSource(obj.source, name)
-            options["source"] = source
-        else:
-            source = None
-
-        if isinstance(obj, NNModuleVariable):
-            base = self.output.get_submodule(obj.module_key)
-            base_dict = object.__getattribute__(base, "__dict__")
-            class_member = True
-
-            if not obj.source:
-                unimplemented("GETATTR with no source")
-
-            if name in base_dict:
-                subobj = base_dict[name]
-            elif name in base_dict["_modules"]:
-                subobj = base_dict["_modules"][name]
-            elif name in base_dict["_parameters"]:
-                subobj = base_dict["_parameters"][name]
-            elif name in base_dict["_buffers"]:
-                subobj = base_dict["_buffers"][name]
-            else:
-                subobj = inspect.getattr_static(base, name)
-                class_member = False
-
-            if class_member:
-                self.push(
-                    VariableBuilder(self, NNModuleSource(source))(subobj).add_guards(
-                        guards
-                    )
-                )
-            else:
-                if istype(subobj, property):
-                    self.call_function(
-                        UserFunctionVariable(subobj.fget, guards=guards), [obj], {}
-                    )
-                elif istype(subobj, classmethod):
-                    self.push(
-                        UserMethodVariable(
-                            subobj.__func__,
-                            UserDefinedObjectVariable(type(base), guards=guards),
-                            **options,
-                        )
-                    )
-                elif istype(subobj, staticmethod):
-                    self.push(UserFunctionVariable(subobj.__get__(base), **options))
-                elif istype(subobj, types.FunctionType):
-                    self.push(UserMethodVariable(subobj, obj, **options))
-                else:
-                    unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
-
-        elif isinstance(obj, (TensorVariable, NamedTupleVariable, ConstantVariable)):
-            try:
-                self.push(
-                    obj.get_var_attr(self, name).clone(source=source).add_guards(guards)
-                )
-            except NotImplementedError:
-                self.push(GetAttrVariable(obj, name, **options))
-        elif isinstance(obj, TorchVariable):
-            member = getattr(obj.value, name)
-            if not is_disallowed(member):
-                self.push(TorchVariable(member, **options))
-            elif ConstantVariable.is_literal(member):
-                self.push(ConstantVariable(member, **options))
-            else:
-                self.push(VariableBuilder(self, source)(member).add_guards(guards))
-        elif isinstance(obj, PythonModuleVariable):
-            member = obj.value.__dict__[name]
-            self.push(VariableBuilder(self, source)(member).add_guards(guards))
-        elif isinstance(obj, UserDefinedObjectVariable):
-            self.push(
-                obj.call_method(self, "__getattr__", [ConstantVariable(name)], {})
-            )
-        elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
-            self.push(
-                ConstantVariable(
-                    getattr(obj.fn, name), **VariableTracker.propagate(obj)
-                )
-            )
-        else:
-            self.push(GetAttrVariable(obj, name, **options))
+        result = BuiltinVariable(getattr).call_function(
+            self, [obj, ConstantVariable(inst.argval)], {}
+        )
+        self.push(result)
 
     def STORE_ATTR(self, inst):
         if isinstance(self.stack[-1], BlackHoleVariable):
@@ -658,7 +572,7 @@ class InstructionTranslatorBase(object):
 
         if not self.should_compile_partial_graph():
             unimplemented("inline STORE_ATTR")
-        warning("breaking graph: STORE_ATTR")
+
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([inst])
         self.popn(2)
