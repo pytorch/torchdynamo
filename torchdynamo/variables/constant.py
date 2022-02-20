@@ -1,6 +1,8 @@
 from typing import Dict
 from typing import List
 
+from .. import variables
+from ..utils import istype
 from ..utils import unimplemented
 from .base import VariableTracker
 from .base import typestr
@@ -66,6 +68,13 @@ class ConstantVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if istype(self.value, tuple):
+            # empty tuple constant etc
+            return variables.TupleVariable(
+                self.unpack_var_sequence(tx), **options
+            ).call_method(tx, name, args, kwargs)
+
         try:
             const_args = [a.as_python_constant() for a in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

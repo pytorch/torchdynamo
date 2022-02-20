@@ -457,3 +457,15 @@ class FunctionTests(torchdynamo.testing.TestCase):
         output = (x, x + 1, x + 2, x + 3)
         a, *bc, d = output
         return a - d / bc[0]
+
+    @make_test
+    def test_const_tuple_add1(x):
+        output = (x, x + 1, x + 2, x + 3)
+        output = () + output + ()
+        return output[2] + output[3]
+
+    @make_test
+    def test_const_tuple_add2(x):
+        output = (x, x + 1, x + 2, x + 3)
+        output = (None,) + output + (None,)
+        return output[2] + output[3]

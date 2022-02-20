@@ -209,6 +209,15 @@ class TupleVariable(BaseListVariable):
         ):
             assert not kwargs
             return TupleVariable(self.items + args[0].items, **options)
+        elif (
+            name in ("__add__", "__iadd__")
+            and len(args) == 1
+            and isinstance(args[0], variables.ConstantVariable)
+        ):
+            assert not kwargs
+            return TupleVariable(
+                self.items + list(args[0].unpack_var_sequence(self)), **options
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
