@@ -433,3 +433,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
         if "a" in vals1 and "b" not in vals2:
             return a + b
         return a - b
+
+    @make_test
+    def test_tuple_iadd(a, b):
+        output = (a, b)
+        output += (a + b, a - b)
+        return output

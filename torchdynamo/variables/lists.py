@@ -138,7 +138,7 @@ class ListVariable(BaseListVariable):
                 ListVariable(self.items + [arg], **options),
             )
         elif (
-            name == "extend"
+            name in ("extend", "__iadd__")
             and self.mutable_local
             and args
             and args[0].has_unpack_var_sequence(tx)
@@ -193,6 +193,23 @@ class TupleVariable(BaseListVariable):
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         return [create_instruction("BUILD_TUPLE", len(self.items))]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name in ("__add__", "__iadd__")
+            and len(args) == 1
+            and isinstance(args[0], TupleVariable)
+        ):
+            assert not kwargs
+            return TupleVariable(self.items + args[0].items, **options)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class NamedTupleVariable(TupleVariable):

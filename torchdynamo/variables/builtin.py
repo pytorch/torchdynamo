@@ -316,6 +316,9 @@ class BuiltinVariable(VariableTracker):
     def call_add(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__add__", args[1:], kwargs)
 
+    def call_iadd(self, tx, *args, **kwargs):
+        return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
+
     def call_getitem(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
