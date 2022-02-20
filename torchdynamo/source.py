@@ -28,6 +28,9 @@ class Source:
     def name(self):
         raise NotImplementedError()
 
+    def make_guard(self, fn):
+        return Guard(self.name(), self.guard_source(), fn)
+
 
 @dataclasses.dataclass
 class LocalSource(Source):

@@ -3,7 +3,6 @@ import collections
 import dataclasses
 import functools
 import math
-import unittest
 
 import torch
 
@@ -519,7 +518,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    @unittest.skip("todo")
     def test_dataclass_fields(self):
         @dataclasses.dataclass
         class MyDataClass:

@@ -103,9 +103,11 @@ class Unsupported(RuntimeError):
     def __str__(self):
         msgs = [super(Unsupported, self).__str__()]
         if self.real_stack:
-            msgs.append("Processing original code:")
-            msgs.extend(traceback.StackSummary.from_list(self.real_stack).format())
-        return "\n".join(msgs)
+            msgs.append("\nProcessing original code:\n")
+            msgs.extend(
+                reversed(traceback.StackSummary.from_list(self.real_stack).format())
+            )
+        return "".join(msgs)
 
 
 def unimplemented(msg: str):

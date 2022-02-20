@@ -8,7 +8,9 @@ from typing import List
 import torch
 
 from .. import variables
+from ..bytecode_transformation import create_instruction
 from ..utils import check_constant_args
+from ..utils import istype
 from ..utils import proxy_args_kwargs
 from ..utils import unimplemented
 from .base import MutableLocal
@@ -354,5 +356,15 @@ class BuiltinVariable(VariableTracker):
             for element in items:
                 value = args[0].call_function(tx, [value, element], {})
             return value.add_options(options)
+        elif (
+            self.fn is getattr
+            and len(args) == 2
+            and isinstance(args[1], variables.ConstantVariable)
+            and istype(args[1].value, str)
+        ):
+            tx.push(args[0])
+            tx.LOAD_ATTR(create_instruction("LOAD_ATTR", args[1].value))
+            val = tx.pop()
+            return val.add_options(options)
         else:
             raise super().call_function(tx, args, kwargs)

@@ -10,6 +10,7 @@ from ..source import AttrSource
 from ..source import Source
 from ..utils import dict_values
 from ..utils import identity
+from ..utils import istype
 from ..utils import odict_values
 from ..utils import unimplemented
 
@@ -31,6 +32,9 @@ class VariableTracker:
     VariableTracker instances are immutable and should be copied in
     order to change them.
     """
+
+    # fields to leave unmodified in apply()
+    _nonvar_fields = ["value"]
 
     @staticmethod
     def propagate(*vars: List[List["VariableTracker"]]):
@@ -77,16 +81,20 @@ class VariableTracker:
             return cache[idx][0]
 
         if isinstance(value, VariableTracker):
-            result = fn(value.clone(**cls.apply(fn, value.__dict__, cache)))
-        elif isinstance(value, list):
+            updated_dict = dict(value.__dict__)
+            for key in updated_dict.keys():
+                if key not in value._nonvar_fields:
+                    updated_dict[key] = cls.apply(fn, updated_dict[key], cache)
+            result = fn(value.clone(**updated_dict))
+        elif istype(value, list):
             result = [cls.apply(fn, v, cache) for v in value]
-        elif isinstance(value, tuple):
+        elif istype(value, tuple):
             result = tuple(cls.apply(fn, v, cache) for v in value)
-        elif isinstance(value, collections.OrderedDict):
+        elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
                 cls.apply(fn, v, cache) for v in value.items()
             )
-        elif isinstance(value, dict):
+        elif istype(value, dict):
             result = {k: cls.apply(fn, v, cache) for k, v in value.items()}
         else:
             result = value

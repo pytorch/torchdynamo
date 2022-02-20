@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import inspect
 import types
 from typing import Dict
@@ -8,8 +9,10 @@ from .. import variables
 from ..guards import Guard
 from ..guards import GuardBuilder
 from ..source import AttrSource
+from ..source import GetItemSource
 from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
+from ..utils import istype
 from ..utils import namedtuple_fields
 from ..utils import unimplemented
 from .base import VariableTracker
@@ -49,6 +52,7 @@ class UserDefinedObjectVariable(VariableTracker):
         super(UserDefinedObjectVariable, self).__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
+        assert type(value) is self.value_type
 
     def __str__(self):
         inner = self.value_type.__name__
@@ -58,6 +62,31 @@ class UserDefinedObjectVariable(VariableTracker):
 
     def python_type(self):
         return self.value_type
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if (
+            self.value is dataclasses.fields
+            and len(args) == 1
+            and isinstance(args[0], UserDefinedObjectVariable)
+        ):
+            assert not kwargs
+            items = []
+            for field in dataclasses.fields(args[0].value):
+                source = None
+                if args[0].source:
+                    source = GetItemSource(
+                        AttrSource(args[0].source, "__dataclass_fields__"), field.name
+                    )
+                items.append(UserDefinedObjectVariable(field, source=source, **options))
+            return variables.TupleVariable(items, **options).add_guard(
+                self.source.make_guard(GuardBuilder.FUNCTION_MATCH)
+            )
+
+        return super().call_function(tx, args, kwargs)
 
     def call_method(
         self,
@@ -153,7 +182,11 @@ class UserDefinedObjectVariable(VariableTracker):
         elif getattr_fn is not None:
             unimplemented("UserDefined with non-function __getattr__")
 
-        subobj = inspect.getattr_static(value, name)
+        if istype(value, dataclasses.Field):
+            # getattr_static doesn't work right on Field
+            subobj = getattr(value, name)
+        else:
+            subobj = inspect.getattr_static(self.value, name)
 
         if isinstance(subobj, property):
             return variables.UserMethodVariable(

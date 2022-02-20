@@ -20,6 +20,16 @@ from .base import typestr
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
+    _nonvar_fields = [
+        "proxy",
+        "dtype",
+        "device",
+        "ndim",
+        "size",
+        "stride",
+        "requires_grad",
+    ]
+
     @staticmethod
     def propagate_args_kwargs(node):
         def visit(n: torch.fx.Node):

@@ -21,6 +21,8 @@ from .base import typestr
 
 
 class NNModuleVariable(VariableTracker):
+    _nonvar_fields = ["module_type", "module_key"]
+
     def __init__(self, module_type: type, module_key: str, **kwargs):
         super(NNModuleVariable, self).__init__(**kwargs)
         self.module_type = module_type

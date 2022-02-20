@@ -20,8 +20,6 @@ from ..utils import getfile
 from ..utils import is_namedtuple
 from ..utils import istensor
 from ..utils import istype
-from ..utils import warning
-from .base import typestr
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -184,7 +182,6 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         else:
-            warning(f"UnsupportedVariable {typestr(value)}")
             return self.wrap_unsupported(value)
 
     def wrap_unsupported(self, value):
