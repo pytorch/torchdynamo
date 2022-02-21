@@ -271,22 +271,6 @@ class BuiltinVariable(VariableTracker):
                 for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
             ]
             return variables.TupleVariable(items, **options)
-        elif all(isinstance(x, variables.TensorVariable) and x.size for x in args):
-            out_size = functools.reduce(min, [x.size[0] for x in args])
-            items = []
-            for i in range(out_size):
-                items.append(
-                    variables.TupleVariable(
-                        [
-                            BuiltinVariable(operator.getitem, **options).call_function(
-                                tx, [arg, variables.ConstantVariable(i)], {}
-                            )
-                            for arg in args
-                        ],
-                        **options,
-                    )
-                )
-            return variables.TupleVariable(items, **options)
 
     def call_enumerate(self, tx, arg):
         options = VariableTracker.propagate(self, arg)

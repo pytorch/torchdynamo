@@ -162,6 +162,18 @@ class TensorVariable(VariableTracker):
 
         return result
 
+    def unpack_var_sequence(self, tx):
+        options = VariableTracker.propagate(self)
+        if self.size:
+            return [
+                variables.BuiltinVariable(operator.getitem, **options).call_function(
+                    tx, [self, variables.ConstantVariable(i)], {}
+                )
+                for i in range(self.size[0])
+            ]
+
+        return super(TensorVariable, self).unpack_var_sequence(tx)
+
     def call_method(
         self,
         tx,

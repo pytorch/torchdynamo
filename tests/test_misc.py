@@ -560,3 +560,15 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(obj2), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_tensor_build_list_unpack(self):
+        def fn(x):
+            return torch.cat([*x], dim=-1)
+
+        val = torch.randn([1, 1, 473, 768])
+        correct = fn(val)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnts)):
+            self.assertTrue(same(fn(val), correct))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
