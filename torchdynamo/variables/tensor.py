@@ -216,7 +216,9 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("item", "tolist", "numpy", "nonzero"):
+        elif name in ("item", "tolist", "numpy", "backward"):
+            unimplemented(f"Tensor.{name}")
+        elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
         elif name == "__len__":
             if self.size:

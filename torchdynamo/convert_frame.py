@@ -11,8 +11,10 @@ from typing import List
 
 import torch
 from torch import fx
+from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
+from ._eval_frame import skip_code
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
@@ -47,44 +49,65 @@ input_codes = Tracker()
 output_codes = Tracker()
 
 
+@functools.wraps(original_forward_from_src)
+def fx_forward_from_src_skip_result(*args, **kwargs):
+    # we monkey patch FX to prevent infinite loop of trying to convert
+    # our generated code
+    result: types.FunctionType = original_forward_from_src(*args, **kwargs)
+    skip_code(result.__code__)
+    return result
+
+
 def wrap_compiler_fn(compiler_fn):
     """Shim to convert 1 arg to 2 arg compiler_fn"""
+    if len(inspect.signature(compiler_fn).parameters) == 1:
+        # older 1-arg version
 
-    @functools.wraps(compiler_fn)
-    def inner(gm: fx.GraphModule, example_inputs: List):
-        return compiler_fn(gm)
+        @functools.wraps(compiler_fn)
+        def inner(gm: fx.GraphModule, example_inputs: List):
+            return compiler_fn(gm)
 
-    return inner
+        return inner
+    else:
+        return compiler_fn
 
 
-def wrap_restore_state(fn):
+def wrap_convert_context(fn):
+    """
+    Context manager to:
+        1) Save/restore torch random state
+        2) Save/restore torch.is_grad_enabled() state
+        3) Monkey patch torch.fx.graph_module._forward_from_src
+    """
+
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
         rng_state = torch.clone(torch.random.get_rng_state())
+        prior_fwd_from_src = torch.fx.graph_module._forward_from_src
+        torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         try:
             return fn(*args, **kwargs)
         finally:
             torch._C._set_grad_enabled(prior_grad_mode)
             torch.random.set_rng_state(rng_state)
+            torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
     return _fn
 
 
 def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     """Fully convert a frame into an FX graph"""
-    if len(inspect.signature(compiler_fn).parameters) == 1:
-        # older 1-arg version
-        compiler_fn = wrap_compiler_fn(compiler_fn)
+    compiler_fn = wrap_compiler_fn(compiler_fn)
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
-        if code.co_filename.startswith("<eval_with_key>") or code in output_codes:
-            return None  # skip FX output
+        if code in output_codes:
+            return None
         if (
-            os.environ.get("DEBUG_FUNCTION")
-            and os.environ.get("DEBUG_FUNCTION") != code.co_name
+            os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")
+            and os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION") != code.co_name
         ):
             return None
         if is_generator(code):
@@ -152,7 +175,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 traceback.print_exc()
             raise
 
-    return wrap_restore_state(_convert_frame_assert)
+    return wrap_convert_context(_convert_frame_assert)
 
 
 def convert_frame(compiler_fn: typing.Callable):

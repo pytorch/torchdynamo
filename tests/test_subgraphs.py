@@ -359,3 +359,13 @@ class SubGraphTests(torchdynamo.testing.TestCase):
                 fn(torch.randn(i), torch.randn(i))
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
+
+    def test_graph_break_on_item(self):
+        def fn(a, b):
+            x = a + b - 1.5
+            x = x.sum()
+            x.item()
+            x = x / (a + b)
+            return x
+
+        self._common(fn, 2, 5)
