@@ -6,6 +6,7 @@ import re
 import types
 from typing import Any
 
+import numpy as np
 import torch
 
 import torchdynamo
@@ -181,6 +182,20 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
+        if istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        ):
+            return self._wrap(int(value))
         else:
             return self.wrap_unsupported(value)
 

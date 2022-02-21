@@ -13,6 +13,7 @@ from typing import List
 from typing import Optional
 from typing import Set
 
+import numpy as np
 import torch
 
 from . import config
@@ -155,6 +156,14 @@ class GuardBuilder:
                 torch.Size,
                 torch.device,
                 torch.dtype,
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
             ),
         ), type(val).__name__
         if istype(val, (torch.device, torch.dtype)):

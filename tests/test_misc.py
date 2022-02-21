@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import math
 
+import numpy as np
 import torch
 
 import torchdynamo.testing
@@ -563,6 +564,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
     def test_tensor_build_list_unpack(self):
         def fn(x):
+            # seen in fastNLP_Bert
             return torch.cat([*x], dim=-1)
 
         val = torch.randn([1, 1, 473, 768])
@@ -572,3 +574,16 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(val), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_numpy_int_constant(self):
+        def fn(x, a, b):
+            return x + (a % b)
+
+        args = [torch.randn(10), 4096, np.int64(8)]
+        correct = fn(*args)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnts)):
+            self.assertTrue(same(fn(*args), correct))
+            self.assertTrue(same(fn(*args), correct))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
