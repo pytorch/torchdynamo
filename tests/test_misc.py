@@ -587,3 +587,18 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_mutation_side_effect(self):
+        def fn(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        args1 = {"a": torch.randn(10), "b": torch.randn(10)}
+        args2 = dict(args1)
+        assert fn(args1) is args1
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnts)):
+            self.assertIs(fn(args2), args2)
+            self.assertTrue(same(args1, args2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)

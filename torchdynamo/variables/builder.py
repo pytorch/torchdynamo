@@ -133,7 +133,12 @@ class VariableBuilder:
                 )
                 for k in keys
             )
-            return ConstDictVariable(result, guards=guards)
+            result = ConstDictVariable(result, guards=guards)
+            if istype(value, dict):
+                return self.tx.output.side_effects.track_dict(
+                    self.source, value, result
+                )
+            return result
         elif isinstance(value, torch.nn.Module):
             return self.tx.output.add_submodule(
                 value,

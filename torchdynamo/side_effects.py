@@ -1,8 +1,8 @@
 import collections
 import dataclasses
 from typing import Any
-from typing import List
 
+from . import variables
 from .bytecode_transformation import create_instruction
 from .codegen import PyCodegen
 from .source import Source
@@ -45,10 +45,10 @@ class SideEffects(object):
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
-    def track_list(
+    def _track_obj(
         self,
         source: Source,
-        item: List[Any],
+        item: Any,
         variable: VariableTracker,
     ):
         """Start tracking a new variable for mutation"""
@@ -56,6 +56,9 @@ class SideEffects(object):
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
+
+    track_list = _track_obj
+    track_dict = _track_obj
 
     def mutation(self, oldvar, newvar):
         return newvar.clone(
@@ -76,15 +79,34 @@ class SideEffects(object):
                 if var in cg.tempvars:
                     # subsequent usage should point to the original variable
                     cg.add_cache(var)
-                # old[:] = new
-                cg.extend_output(
-                    [
-                        cg.create_load_const(None),
-                        cg.create_load_const(None),
-                        create_instruction("BUILD_SLICE", 2),
-                        create_instruction("STORE_SUBSCR"),
-                    ]
-                )
+                if isinstance(var, variables.ListVariable):
+                    # old[:] = new
+                    cg.extend_output(
+                        [
+                            cg.create_load_const(None),
+                            cg.create_load_const(None),
+                            create_instruction("BUILD_SLICE", 2),
+                            create_instruction("STORE_SUBSCR"),
+                        ]
+                    )
+                elif isinstance(var, variables.ConstDictVariable):
+                    cg.tx.output.update_co_names("clear")
+                    cg.tx.output.update_co_names("update")
+                    cg.extend_output(
+                        [
+                            create_instruction("DUP_TOP"),
+                            create_instruction("LOAD_METHOD", "clear"),
+                            create_instruction("CALL_METHOD", 0),
+                            create_instruction("POP_TOP"),
+                            create_instruction("LOAD_METHOD", "update"),
+                            create_instruction("ROT_THREE"),
+                            create_instruction("ROT_THREE"),
+                            create_instruction("CALL_METHOD", 1),
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                else:
+                    assert False, type(var)
 
     def is_empty(self):
         return not any(
