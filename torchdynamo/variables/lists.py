@@ -238,7 +238,7 @@ class NamedTupleVariable(TupleVariable):
             create_instruction("CALL_FUNCTION", 1),
         ]
 
-    def get_var_attr(self, tx, name):
+    def var_getattr(self, tx, name):
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
             unimplemented(f"NamedTupleVariable.{name}")
@@ -276,7 +276,7 @@ class SliceVariable(BaseListVariable):
         codegen.foreach(self.items)
         return [create_instruction("BUILD_SLICE", len(self.items))]
 
-    def get_var_attr(self, tx, name):
+    def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"slice.{name}")

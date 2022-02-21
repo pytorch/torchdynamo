@@ -54,11 +54,11 @@ class ConstantVariable(VariableTracker):
         except TypeError:
             raise NotImplementedError()
 
-    def get_var_attr(self, tx, name):
+    def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError()
-        return ConstantVariable(member, **VariableTracker.propagate(self))
+        return member
 
     def call_method(
         self,

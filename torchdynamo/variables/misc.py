@@ -30,7 +30,7 @@ class SuperVariable(VariableTracker):
         else:
             return [create_instruction("CALL_FUNCTION", 1)]
 
-    def get_const_attr(self, tx, name):
+    def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
         search_type = self.typevar.as_python_constant()
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
@@ -46,7 +46,7 @@ class SuperVariable(VariableTracker):
         options = VariableTracker.propagate(
             self, args, kwargs.values(), self.objvar, self.typevar
         )
-        inner_fn = self.get_const_attr(self, name)
+        inner_fn = self.const_getattr(self, name)
         if not isinstance(inner_fn, types.FunctionType):
             unimplemented(f"non-function super: {typestr(inner_fn)}")
         return variables.UserFunctionVariable(inner_fn, **options).call_function(
@@ -193,7 +193,7 @@ class GetAttrVariable(VariableTracker):
     def as_proxy(self):
         return getattr(self.obj.as_proxy(), self.name)
 
-    def get_const_attr(self, tx, name):
+    def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError()
         step1 = tx.output.get_submodule(self.obj.module_key)

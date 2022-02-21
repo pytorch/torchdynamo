@@ -134,7 +134,7 @@ class TensorVariable(VariableTracker):
             props["stride"] = tuple(value.stride())
         return props
 
-    def get_var_attr(self, tx, name):
+    def var_getattr(self, tx, name):
         from . import ConstantVariable
         from . import TorchVariable
 

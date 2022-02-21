@@ -467,6 +467,19 @@ class CallForwardDirectly(torch.nn.Module):
         return x
 
 
+class ModuleNameString(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+
+    def forward(self, x):
+        if self.__class__.__name__ == "ABC":
+            return 10
+        if self.linear1.__class__.__name__ == "Linear":
+            return F.relu(self.linear1(x) + 10)
+        return 11
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -513,6 +526,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
+    test_module_name_string = make_test(ModuleNameString())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

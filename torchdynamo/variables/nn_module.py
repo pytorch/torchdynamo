@@ -1,6 +1,7 @@
 import inspect
 import itertools
 import re
+import types
 from typing import Dict
 from typing import List
 
@@ -13,6 +14,7 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import NNModuleSource
+from ..utils import istype
 from ..utils import proxy_args_kwargs
 from ..utils import unimplemented
 from .base import MutableLocal
@@ -61,6 +63,62 @@ class NNModuleVariable(VariableTracker):
     def is_training(self, tx):
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
+
+    def var_getattr(self, tx, name):
+        from .builder import VariableBuilder
+
+        options = VariableTracker.propagate(self)
+        guards = options.get("guards", set())
+
+        if self.source:
+            source = AttrSource(self.source, name)
+            options["source"] = source
+        else:
+            source = None
+
+        base = tx.output.get_submodule(self.module_key)
+        base_dict = object.__getattribute__(base, "__dict__")
+        class_member = True
+
+        if not self.source:
+            unimplemented("GETATTR with no source")
+
+        if name in base_dict:
+            subobj = base_dict[name]
+        elif name in base_dict["_modules"]:
+            subobj = base_dict["_modules"][name]
+        elif name in base_dict["_parameters"]:
+            subobj = base_dict["_parameters"][name]
+        elif name in base_dict["_buffers"]:
+            subobj = base_dict["_buffers"][name]
+        else:
+            subobj = inspect.getattr_static(base, name)
+            class_member = False
+
+        if name == "__class__" and not class_member:
+            return variables.UserDefinedClassVariable(base.__class__, **options)
+
+        if class_member:
+            return VariableBuilder(tx, NNModuleSource(source))(subobj)
+        else:
+            if istype(subobj, property):
+                return variables.UserFunctionVariable(
+                    subobj.fget, guards=guards
+                ).call_function(tx, [(self)], {})
+            elif istype(subobj, classmethod):
+                return variables.UserMethodVariable(
+                    subobj.__func__,
+                    variables.UserDefinedObjectVariable(type(base), guards=guards),
+                    **options,
+                )
+            elif istype(subobj, staticmethod):
+                return variables.UserFunctionVariable(subobj.__get__(base), **options)
+            elif istype(subobj, types.FunctionType):
+                return variables.UserMethodVariable(subobj, self, **options)
+            else:
+                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+
+        return variables.GetAttrVariable(self, name, **options)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

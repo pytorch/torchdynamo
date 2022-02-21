@@ -1,4 +1,5 @@
 import collections
+from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
@@ -156,20 +157,16 @@ class VariableTracker:
         new_guards.update(self.source.create_guard(fn) for fn in fns)
         return new_guards
 
-    def has_const_attr(self, tx, name):
-        try:
-            return variables.ConstantVariable.is_literal(self.get_const_attr(tx, name))
-        except NotImplementedError:
-            return False
-
-    def get_const_attr(self, tx, name):
+    def const_getattr(self, tx, name: str) -> Any:
+        """getattr(self, name) returning a python constant"""
         raise NotImplementedError()
 
-    def get_var_attr(self, tx, name):
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
         if self.source:
             options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable(self.get_const_attr(tx, name), **options)
+        return variables.ConstantVariable(self.const_getattr(tx, name), **options)
 
     def is_proxy(self):
         try:
@@ -203,7 +200,7 @@ class VariableTracker:
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        raise unimplemented(f"call_function {self} {args} {kwargs}")
+        unimplemented(f"call_function {self} {args} {kwargs}")
 
     def call_method(
         self,
@@ -216,6 +213,15 @@ class VariableTracker:
             assert not (args or kwargs)
             return variables.ConstantVariable(
                 len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
+            )
+        elif (
+            name == "__getattr__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and not kwargs
+        ):
+            return self.var_getattr(tx, args[0].as_python_constant()).add_options(
+                self, args[0]
             )
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 

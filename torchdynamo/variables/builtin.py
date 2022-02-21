@@ -1,9 +1,7 @@
 import functools
-import inspect
 import itertools
 import math
 import operator
-import types
 from typing import Dict
 from typing import List
 
@@ -12,7 +10,6 @@ import torch
 from .. import variables
 from ..allowed_functions import is_disallowed
 from ..source import AttrSource
-from ..source import NNModuleSource
 from ..utils import Unsupported
 from ..utils import check_constant_args
 from ..utils import istype
@@ -20,7 +17,6 @@ from ..utils import proxy_args_kwargs
 from ..utils import unimplemented
 from .base import MutableLocal
 from .base import VariableTracker
-from .base import typestr
 
 
 class BuiltinVariable(VariableTracker):
@@ -367,13 +363,9 @@ class BuiltinVariable(VariableTracker):
     ):
         from . import ConstantVariable
         from . import GetAttrVariable
-        from . import NamedTupleVariable
         from . import PythonModuleVariable
-        from . import TensorVariable
         from . import TorchVariable
-        from . import UserDefinedObjectVariable
         from . import UserFunctionVariable
-        from . import UserMethodVariable
         from .builder import VariableBuilder
 
         if not name_var.is_python_constant():
@@ -392,51 +384,20 @@ class BuiltinVariable(VariableTracker):
             source = None
 
         if isinstance(obj, variables.NNModuleVariable):
-            base = tx.output.get_submodule(obj.module_key)
-            base_dict = object.__getattribute__(base, "__dict__")
-            class_member = True
-
-            if not obj.source:
-                unimplemented("GETATTR with no source")
-
-            if name in base_dict:
-                subobj = base_dict[name]
-            elif name in base_dict["_modules"]:
-                subobj = base_dict["_modules"][name]
-            elif name in base_dict["_parameters"]:
-                subobj = base_dict["_parameters"][name]
-            elif name in base_dict["_buffers"]:
-                subobj = base_dict["_buffers"][name]
-            else:
-                subobj = inspect.getattr_static(base, name)
-                class_member = False
-
-            if class_member:
-                return VariableBuilder(tx, NNModuleSource(source))(subobj).add_guards(
-                    guards
-                )
-            else:
-                if istype(subobj, property):
-                    return UserFunctionVariable(
-                        subobj.fget, guards=guards
-                    ).call_function(tx, [obj], {})
-                elif istype(subobj, classmethod):
-                    return UserMethodVariable(
-                        subobj.__func__,
-                        UserDefinedObjectVariable(type(base), guards=guards),
-                        **options,
-                    )
-                elif istype(subobj, staticmethod):
-                    return UserFunctionVariable(subobj.__get__(base), **options)
-                elif istype(subobj, types.FunctionType):
-                    return UserMethodVariable(subobj, obj, **options)
-                else:
-                    unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
-
-        elif isinstance(obj, (TensorVariable, NamedTupleVariable, ConstantVariable)):
+            return obj.var_getattr(tx, name).add_options(options)
+        elif isinstance(
+            obj,
+            (
+                variables.TensorVariable,
+                variables.NamedTupleVariable,
+                variables.ConstantVariable,
+                variables.UserDefinedClassVariable,
+                variables.UserDefinedObjectVariable,
+            ),
+        ):
             try:
                 return (
-                    obj.get_var_attr(tx, name).clone(source=source).add_guards(guards)
+                    obj.var_getattr(tx, name).clone(source=source).add_options(options)
                 )
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
@@ -451,8 +412,6 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(obj, PythonModuleVariable):
             member = obj.value.__dict__[name]
             return VariableBuilder(tx, source)(member).add_guards(guards)
-        elif isinstance(obj, UserDefinedObjectVariable):
-            return obj.call_method(tx, "__getattr__", [ConstantVariable(name)], {})
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable(
                 getattr(obj.fn, name), **VariableTracker.propagate(obj)

@@ -42,6 +42,11 @@ class UserDefinedClassVariable(VariableTracker):
             )
         return super().call_function(tx, args, kwargs)
 
+    def const_getattr(self, tx, name):
+        if name == "__name__":
+            return self.value.__name__
+        return super().const_getattr(tx, name)
+
 
 class UserDefinedObjectVariable(VariableTracker):
     """
@@ -99,16 +104,6 @@ class UserDefinedObjectVariable(VariableTracker):
         from . import TupleVariable
         from . import UserMethodVariable
 
-        if (
-            name == "__getattr__"
-            and len(args) == 1
-            and not kwargs
-            and args[0].is_python_constant()
-        ):
-            return self.call_getattr(tx, args[0].as_python_constant()).add_options(
-                args[0]
-            )
-
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name not in getattr(self.value, "__dict__", {}):
@@ -163,7 +158,7 @@ class UserDefinedObjectVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def call_getattr(self, tx, name):
+    def var_getattr(self, tx, name):
         from . import ConstantVariable
         from .builder import VariableBuilder
 
