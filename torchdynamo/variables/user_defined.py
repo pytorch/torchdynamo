@@ -5,6 +5,8 @@ import types
 from typing import Dict
 from typing import List
 
+import torch.nn
+
 from .. import variables
 from ..guards import Guard
 from ..guards import GuardBuilder
@@ -12,13 +14,16 @@ from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
-from ..utils import istype
 from ..utils import namedtuple_fields
 from ..utils import unimplemented
 from .base import VariableTracker
 
 
-class UserDefinedClassVariable(VariableTracker):
+class UserDefinedVariable(VariableTracker):
+    pass
+
+
+class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -48,7 +53,7 @@ class UserDefinedClassVariable(VariableTracker):
         return super().const_getattr(tx, name)
 
 
-class UserDefinedObjectVariable(VariableTracker):
+class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
@@ -68,28 +73,38 @@ class UserDefinedObjectVariable(VariableTracker):
     def python_type(self):
         return self.value_type
 
+    def unpack_var_sequence(self, tx):
+        from .builder import VariableBuilder
+
+        try:
+            fn = inspect.getattr_static(self.value_type, "__iter__")
+        except AttributeError:
+            raise NotImplementedError()
+
+        if fn in (
+            torch.nn.ModuleList.__iter__,
+            torch.nn.ParameterList.__iter__,
+            torch.nn.Sequential.__iter__,
+        ):
+            assert self.source
+            return [
+                VariableBuilder(tx, source=GetItemSource(self.source, idx))(
+                    item
+                ).add_options(self)
+                for idx, item in enumerate(self.value)
+            ]
+
+        return super().unpack_var_sequence(tx)
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if (
-            self.value is dataclasses.fields
-            and len(args) == 1
-            and isinstance(args[0], UserDefinedObjectVariable)
-        ):
-            assert not kwargs
-            items = []
-            for field in dataclasses.fields(args[0].value):
-                source = None
-                if args[0].source:
-                    source = GetItemSource(
-                        AttrSource(args[0].source, "__dataclass_fields__"), field.name
-                    )
-                items.append(UserDefinedObjectVariable(field, source=source, **options))
-            return variables.TupleVariable(items, **options).add_guard(
-                self.source.make_guard(GuardBuilder.FUNCTION_MATCH)
-            )
+        if isinstance(self.value, torch.nn.Module):
+            return variables.UserFunctionVariable(
+                self.value_type.forward, **options
+            ).call_function(tx, [self] + list(args), kwargs)
 
         return super().call_function(tx, args, kwargs)
 
@@ -170,6 +185,10 @@ class UserDefinedObjectVariable(VariableTracker):
         except AttributeError:
             getattr_fn = None
 
+        if getattr_fn is torch.nn.Module.__getattr__:
+            # ignore this case of getattr
+            getattr_fn = None
+
         if isinstance(getattr_fn, types.FunctionType):
             return variables.UserMethodVariable(
                 getattr_fn, self, **options
@@ -177,8 +196,8 @@ class UserDefinedObjectVariable(VariableTracker):
         elif getattr_fn is not None:
             unimplemented("UserDefined with non-function __getattr__")
 
-        if istype(value, dataclasses.Field):
-            # getattr_static doesn't work right on Field
+        if isinstance(value, (dataclasses.Field, torch.nn.Module)):
+            # getattr_static doesn't work on these
             subobj = getattr(value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
@@ -188,8 +207,10 @@ class UserDefinedObjectVariable(VariableTracker):
                 subobj.fget, self, **options
             ).call_function(tx, [], {})
 
-        if name in getattr(value, "__dict__", {}) or ConstantVariable.is_literal(
-            subobj
+        if (
+            name in getattr(value, "__dict__", {})
+            or ConstantVariable.is_literal(subobj)
+            or isinstance(subobj, (torch.Tensor, torch.nn.Module))
         ):
             return VariableBuilder(tx, source)(subobj).add_options(options)
 

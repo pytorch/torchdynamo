@@ -804,7 +804,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         with eval_frame.optimize(convert_frame(cnt)):
             self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 4)
         self.assertEqual(cnt.op_count, 9)
 
     def test_hf_model_output(self):

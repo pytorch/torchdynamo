@@ -241,3 +241,12 @@ class PythonModuleVariable(VariableTracker):
 
     def python_type(self):
         return types.ModuleType
+
+
+class SkipFilesVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self):
+        return type(self.value)

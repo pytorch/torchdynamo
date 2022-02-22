@@ -1,6 +1,8 @@
 import functools
 import weakref
 
+from torch.nn import Module
+
 from .utils import ExactWeakKeyDictionary
 
 
@@ -48,3 +50,39 @@ def ensure_patched(cls):
             return original_setattr(self, key, value)
 
         cls.__setattr__ = custom_setattr
+
+
+class GenerationTracker:
+    generation = 0
+    db = ExactWeakKeyDictionary()
+
+    @classmethod
+    def tag(cls, obj):
+        cls.db[obj] = cls.generation
+
+    @classmethod
+    def check(cls, obj):
+        return cls.db.get(obj, -1) == cls.generation
+
+
+def generation_tagging_new(cls, *args, **kwargs):
+    obj = object.__new__(cls)
+    GenerationTracker.tag(obj)
+    return obj
+
+
+is_current_generation = GenerationTracker.check
+
+
+def install_generation_tagging_new():
+    """
+    Monkey patch torch.nn.Module.__new__ so we can detect nn.Module
+    instances created dynamically inside forward methods.
+    """
+    assert (
+        Module.__dict__.get("__new__") is generation_tagging_new
+        or Module.__new__ is object.__new__
+    )
+    Module.__new__ = generation_tagging_new
+    GenerationTracker.db.clear()
+    GenerationTracker.generation += 1

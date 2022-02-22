@@ -74,10 +74,12 @@ def add(module: types.ModuleType):
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
-def check(filename):
+def check(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return True
+    if allow_torch and is_torch(filename):
+        return False
     return bool(SKIP_DIRS_RE.match(filename))
 
 
@@ -107,3 +109,7 @@ for _name in (
 
 def is_torch_nn(filename):
     return filename.startswith(os.path.dirname(torch.nn.__file__))
+
+
+def is_torch(filename):
+    return filename.startswith(os.path.dirname(torch.__file__))

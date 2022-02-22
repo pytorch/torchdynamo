@@ -45,6 +45,7 @@ from .variables.base import typestr
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
+from .variables.functions import BaseUserFunctionVariable
 from .variables.functions import NestedUserFunctionVariable
 from .variables.functions import UserFunctionVariable
 from .variables.lists import BaseListVariable
@@ -62,6 +63,7 @@ from .variables.misc import UnknownVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
+from .variables.user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -441,7 +443,16 @@ class InstructionTranslatorBase(object):
             itertools.chain(supported_tensors.items(), supported_is_const.items())
         )
         if (
-            isinstance(left, (TensorVariable, NNModuleVariable, BaseListVariable))
+            isinstance(
+                left,
+                (
+                    TensorVariable,
+                    NNModuleVariable,
+                    BaseListVariable,
+                    UserDefinedVariable,
+                    BaseUserFunctionVariable,
+                ),
+            )
             and isinstance(right, ConstantVariable)
             and right.value is None
             and op in supported_is_const

@@ -48,6 +48,9 @@ class ExactWeakKeyDictionary:
     def __getitem__(self, key):
         return self.values[id(key)]
 
+    def get(self, key, default=None):
+        return self.values.get(id(key), default)
+
     def __contains__(self, key):
         return id(key) in self.values
 

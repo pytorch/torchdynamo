@@ -11,10 +11,12 @@ import torch
 
 import torchdynamo
 
+from .. import mutation_guard
 from .. import skipfiles
 from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin
 from ..guards import GuardBuilder
+from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import Source
 from ..utils import getfile
@@ -33,6 +35,7 @@ from .misc import AutogradFunctionVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
 from .misc import PythonModuleVariable
+from .misc import SkipFilesVariable
 from .tensor import TensorVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
@@ -140,12 +143,18 @@ class VariableBuilder:
                 )
             return result
         elif isinstance(value, torch.nn.Module):
-            return self.tx.output.add_submodule(
-                value,
-                self.name,
-                source=self.get_source(),
-                # Guards are added inside add_submodule
-            )
+            if mutation_guard.is_current_generation(value):
+                # created dynamically, don't specialize on it
+                return UserDefinedObjectVariable(
+                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                )
+            else:
+                return self.tx.output.add_submodule(
+                    value,
+                    self.name,
+                    source=self.get_source(),
+                    # Guards are added inside add_submodule
+                )
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
@@ -164,11 +173,27 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, type) and not skipfiles.check(getfile(value)):
+        elif value is inspect.signature:
+            return LambdaVariable(
+                InspectSignatureVariable.create,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif value is dataclasses.fields:
+            return LambdaVariable(
+                _dataclasses_fields_lambda,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif istype(value, (type, types.FunctionType)) and skipfiles.check(
+            getfile(value), allow_torch=True
+        ):
+            return SkipFilesVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif istype(value, type):
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, types.FunctionType) and not skipfiles.check(getfile(value)):
+        elif istype(value, types.FunctionType):
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
@@ -177,11 +202,6 @@ class VariableBuilder:
             return PythonModuleVariable(
                 value,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
-            )
-        elif value is inspect.signature:
-            return LambdaVariable(
-                InspectSignatureVariable.create,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif type(value) is torch.autograd.function.FunctionMeta:
             return AutogradFunctionVariable(
@@ -229,3 +249,16 @@ class VariableBuilder:
                 example_value=value,
                 guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
+
+
+def _dataclasses_fields_lambda(obj):
+    assert isinstance(obj, UserDefinedObjectVariable)
+    items = []
+    for field in dataclasses.fields(obj.value):
+        source = None
+        if obj.source:
+            source = GetItemSource(
+                AttrSource(obj.source, "__dataclass_fields__"), field.name
+            )
+        items.append(UserDefinedObjectVariable(field, source=source).add_options(obj))
+    return TupleVariable(items).add_options(obj)

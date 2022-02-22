@@ -5,6 +5,7 @@ from . import config
 from . import skipfiles
 from ._eval_frame import set_eval_frame
 from ._eval_frame import set_eval_frame_run_only
+from .mutation_guard import install_generation_tagging_new
 
 
 class _Context:
@@ -36,6 +37,7 @@ class _OptimizeContext(_Context):
         self.callback = callback
 
     def __enter__(self):
+        install_generation_tagging_new()
         assert self.prior is None
         self.prior = set_eval_frame(self.callback)
 

@@ -78,6 +78,7 @@ class BuiltinVariable(VariableTracker):
             operator.iand,
             operator.ixor,
             operator.ior,
+            operator.index,
         }
         fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
         return fns

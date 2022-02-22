@@ -1,5 +1,6 @@
 #!/usr/bin/env pytest
 import collections
+import copy
 import dataclasses
 import functools
 import math
@@ -602,3 +603,34 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_module_deepcopy(self):
+        m1 = torch.nn.Sequential(
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+        )
+        m2 = torch.nn.Sequential(
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 10),
+            torch.nn.ReLU(),
+        )
+
+        def fn(m, x):
+            m_copy = copy.deepcopy(m)
+            return m_copy(x)
+
+        v = torch.randn(10)
+        correct1 = fn(m1, v)
+        correct2 = fn(m2, v)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame(cnts)):
+            for _ in range(10):
+                self.assertTrue(same(fn(m1, v), correct1))
+        with eval_frame.optimize(convert_frame(cnts)):
+            for _ in range(10):
+                self.assertTrue(same(fn(m2, v), correct2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 4)
