@@ -79,9 +79,9 @@ def istensor(obj):
     return istype(obj, (torch.Tensor, torch.nn.Parameter))
 
 
-@functools.lru_cache(None)
-def print_once(msg):
-    print(msg)
+@functools.lru_cache(4096)
+def print_once(*args):
+    print(*args)
 
 
 def make_cell(val):

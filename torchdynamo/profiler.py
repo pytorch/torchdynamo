@@ -1,10 +1,12 @@
 import dataclasses
+import os
 from typing import Any
 from typing import List
 
 import torch
 
 from . import config
+from .utils import print_once
 
 
 @dataclasses.dataclass
@@ -71,10 +73,24 @@ class ProfileResult:
         ]
 
 
+def should_print_missing():
+    return os.environ.get("TORCHDYNAMO_PRINT_MISSING") == "1"
+
+
+def print_missing(stack):
+    if any("/torch/autograd/profiler.py" in x for x in stack):
+        return
+    stack = [
+        x for x in stack if ("<built-in" not in x and "site-packages/torch/" not in x)
+    ]
+    print_once("MISSING", " >> ".join(stack[-3:]))
+
+
 class Profiler:
     def __init__(self):
         self.prof = torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU]
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=should_print_missing(),
         )
 
     def results(self):
@@ -91,11 +107,15 @@ class Profiler:
             if e.name == "TORCHDYNAMO":
                 captured_region_end_time = e.time_range.end
                 captured_regions += 1
+                # ignore `handle = torch.zeros(1)` in record_function.__init__()
+                total_ops -= 1
             elif e.time_range.start >= last_op_end_time:
                 last_op_end_time = e.time_range.end
                 if e.time_range.end <= captured_region_end_time:
                     captured_ops += 1
                     captured_microseconds += e.time_range.elapsed_us()
+                elif should_print_missing():
+                    print_missing(e.stack)
                 total_ops += 1
                 total_microseconds += e.time_range.elapsed_us()
             else:
