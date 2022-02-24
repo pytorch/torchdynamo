@@ -92,3 +92,13 @@ class ShapeAliasingAndMutationProp(ShapeProp):
             # cleanup
             self.storage_cleanup_hooks.clear()
             self.env.clear()
+
+
+def has_mutation(gm, example_inputs):
+    """Check if the graph module has any form of mutation"""
+    ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+
+    for node in gm.graph.nodes:
+        if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
+            return True
+    return False

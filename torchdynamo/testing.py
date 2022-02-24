@@ -21,6 +21,41 @@ unsupported = torchdynamo._eval_frame.unsupported
 three = 3
 
 
+def reduce_out(out):
+    """Reduce the output of a model to get scalar loss"""
+    if isinstance(out, torch.Tensor):
+        return out.sum()
+    elif isinstance(out, tuple):
+        return sum([reduce_out(x) for x in out])
+    elif type(out).__name__ in (
+        "MaskedLMOutput",
+        "Seq2SeqLMOutput",
+        "CausalLMOutputWithCrossAttentions",
+    ):
+        return reduce_out(out.logits)
+    elif type(out).__name__ == "SquashedNormal":
+        return out.mean
+    elif isinstance(out, dict):
+        return sum([reduce_out(value) for value in out.values()])
+    raise NotImplementedError("Don't know how to reduce")
+
+
+def checkpoint_module_params(mod):
+    """Checkpointing state for nn module"""
+    with torch.no_grad():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        module_state = {}
+        for k, v in mod.state_dict().items():
+            module_state[k] = torch.clone(v)
+
+    def restore():
+        with torch.no_grad():
+            torch.random.set_rng_state(rng_state)
+            mod.load_state_dict(module_state)
+
+    return restore
+
+
 def exc_bytecode_offset():
     dis.Bytecode.from_traceback(sys.exc_info()[2]).current_offset
 

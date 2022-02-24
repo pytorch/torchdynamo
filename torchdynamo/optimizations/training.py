@@ -1,10 +1,15 @@
+import logging
+
 import torch
 
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 
+from .analysis import has_mutation
 from .backends import BACKENDS
 from .normalize import normalize_ir
+
+log = logging.getLogger(__name__)
 
 
 class AOTAutogradStrategy(object):
@@ -14,7 +19,7 @@ class AOTAutogradStrategy(object):
     def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
         if count_calls(gm.graph) < 2:
             return gm.forward  # no point for tiny graphs
-        return cls(gm, example_inputs).candidate()
+        return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
         super(AOTAutogradStrategy, self).__init__()
@@ -23,10 +28,21 @@ class AOTAutogradStrategy(object):
         # self.correct = gm.forward(*self.example_inputs)
         self.original_example_inputs = example_inputs
         self.gm = normalize_ir(gm, self.example_inputs)
+        self.use_fallback = False
+        gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
+
+        if has_mutation(self.gm, self.example_inputs) or len(gm_inputs) == 0:
+            self.use_fallback = True
 
     @property
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
+
+    def verified_candidate(self):
+        if self.use_fallback:
+            log.warn("Unable to use AOT Autograd because graph has mutation")
+            return self.gm
+        return self.candidate()
 
     def candidate(self):
         raise NotImplementedError()
