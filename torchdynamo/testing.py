@@ -21,6 +21,25 @@ unsupported = torchdynamo._eval_frame.unsupported
 three = 3
 
 
+def reduce_out(out):
+    """Reduce the output of a model to get scalar loss"""
+    if isinstance(out, torch.Tensor):
+        return out.sum()
+    elif isinstance(out, tuple):
+        return sum([reduce_out(x) for x in out])
+    elif type(out).__name__ in (
+        "MaskedLMOutput",
+        "Seq2SeqLMOutput",
+        "CausalLMOutputWithCrossAttentions",
+    ):
+        return reduce_out(out.logits)
+    elif type(out).__name__ == "SquashedNormal":
+        return out.mean
+    elif isinstance(out, dict):
+        return sum([reduce_out(value) for value in out.values()])
+    raise NotImplementedError("Don't know how to reduce")
+
+
 def exc_bytecode_offset():
     dis.Bytecode.from_traceback(sys.exc_info()[2]).current_offset
 

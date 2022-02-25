@@ -38,4 +38,4 @@ guard_nn_modules = False
 dynamic_propagation = True
 
 # run FX normalization passes in optimizer
-normalize_ir = False
+normalize_ir = True
