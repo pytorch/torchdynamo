@@ -87,6 +87,7 @@ def check(filename, allow_torch=False):
 for _name in (
     "intel_extension_for_pytorch",
     "functorch",
+    "networkx",
     "numpy",
     "omegaconf",
     "onnx",
