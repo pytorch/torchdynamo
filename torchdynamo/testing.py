@@ -40,22 +40,6 @@ def reduce_out(out):
     raise NotImplementedError("Don't know how to reduce")
 
 
-def checkpoint_module_params(mod):
-    """Checkpointing state for nn module"""
-    with torch.no_grad():
-        rng_state = torch.clone(torch.random.get_rng_state())
-        module_state = {}
-        for k, v in mod.state_dict().items():
-            module_state[k] = torch.clone(v)
-
-    def restore():
-        with torch.no_grad():
-            torch.random.set_rng_state(rng_state)
-            mod.load_state_dict(module_state)
-
-    return restore
-
-
 def exc_bytecode_offset():
     dis.Bytecode.from_traceback(sys.exc_info()[2]).current_offset
 
