@@ -1,3 +1,6 @@
+import copy
+import dataclasses
+import types
 from typing import Any
 from typing import Dict
 from typing import List
@@ -20,8 +23,15 @@ CO_ITERABLE_COROUTINE = 0x0100
 CO_ASYNC_GENERATOR = 0x0200
 
 
+@dataclasses.dataclass
+class ResumeFunctionMetadata:
+    code: types.CodeType
+    instructions: List[Instruction] = None
+
+
 class ContinueExecutionCache:
     cache = ExactWeakKeyDictionary()
+    generated_code_metadata = ExactWeakKeyDictionary()
 
     @classmethod
     def lookup(cls, code, *key):
@@ -40,13 +50,22 @@ class ContinueExecutionCache:
         nstack: int,
         argnames: List[str],
     ):
+        assert offset is not None
         assert not (
             code.co_flags
             & (CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR)
         )
         assert code.co_flags & CO_OPTIMIZED
+        if code in ContinueExecutionCache.generated_code_metadata:
+            return cls.generate_based_on_original_code_object(
+                code, offset, nstack, argnames
+            )
+
+        meta = ResumeFunctionMetadata(code)
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
+            meta.instructions = copy.deepcopy(instructions)
+
             args = [f"___stack{i}" for i in range(nstack)]
             args.extend(v for v in argnames if v not in args)
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
@@ -71,7 +90,41 @@ class ContinueExecutionCache:
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
-        return transform_code_object(code, update)
+        new_code = transform_code_object(code, update)
+        ContinueExecutionCache.generated_code_metadata[new_code] = meta
+        return new_code
+
+    @classmethod
+    def generate_based_on_original_code_object(cls, code, offset: int, *args):
+        """
+        This handles the case of generating a resume into code generated
+        to resume something else.  We want to always generate starting
+        from the original code object so that if control flow paths
+        converge we only generated 1 resume function (rather than 2^n
+        resume functions).
+        """
+
+        meta: ResumeFunctionMetadata = ContinueExecutionCache.generated_code_metadata[
+            code
+        ]
+        new_offset = None
+
+        def find_new_offset(
+            instructions: List[Instruction], code_options: Dict[str, Any]
+        ):
+            nonlocal new_offset
+            (target,) = [i for i in instructions if i.offset == offset]
+            # match the functions starting at the last instruction as we have added a prefix
+            (new_target,) = [
+                i2
+                for i1, i2 in zip(reversed(instructions), reversed(meta.instructions))
+                if i1 is target
+            ]
+            assert target.opcode == new_target.opcode
+            new_offset = new_target.offset
+
+        transform_code_object(code, find_new_offset)
+        return ContinueExecutionCache.lookup(meta.code, new_offset, *args)
 
 
 """

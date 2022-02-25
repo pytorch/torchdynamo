@@ -369,3 +369,30 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 2, 5)
+
+    def test_resume_paths_join(self):
+        def fn(x, c1, c2, c3):
+            x = x + 1
+            if c1:
+                x = x + 2
+            x = x + 3
+            if c2:
+                x = x + 4
+            x = x + 5
+            if c3:
+                x = x + 6
+            return x + 7
+
+        v1 = torch.randn(10)
+        t = torch.Tensor([True])
+        f = torch.Tensor([False])
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            for a in (t, f):
+                for b in (t, f):
+                    for c in (t, f):
+                        fn(v1, a, b, c)
+
+        # checking here we don't create 2^n graphs
+        self.assertEqual(cnt.frame_count, 7)
+        self.assertEqual(cnt.op_count, 10)
