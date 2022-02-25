@@ -11,7 +11,6 @@ from .. import variables
 from ..guards import Guard
 from ..guards import GuardBuilder
 from ..source import AttrSource
-from ..source import GetItemSource
 from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
@@ -72,41 +71,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def python_type(self):
         return self.value_type
-
-    def unpack_var_sequence(self, tx):
-        from .builder import VariableBuilder
-
-        try:
-            fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError:
-            raise NotImplementedError()
-
-        if fn in (
-            torch.nn.ModuleList.__iter__,
-            torch.nn.ParameterList.__iter__,
-            torch.nn.Sequential.__iter__,
-        ):
-            assert self.source
-            return [
-                VariableBuilder(tx, source=GetItemSource(self.source, idx))(
-                    item
-                ).add_options(self)
-                for idx, item in enumerate(self.value)
-            ]
-
-        return super().unpack_var_sequence(tx)
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
-        if isinstance(self.value, torch.nn.Module):
-            return variables.UserFunctionVariable(
-                self.value_type.forward, **options
-            ).call_function(tx, [self] + list(args), kwargs)
-
-        return super().call_function(tx, args, kwargs)
 
     def call_method(
         self,

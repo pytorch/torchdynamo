@@ -36,6 +36,7 @@ from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
 from .misc import PythonModuleVariable
 from .misc import SkipFilesVariable
+from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
@@ -145,7 +146,7 @@ class VariableBuilder:
         elif isinstance(value, torch.nn.Module):
             if mutation_guard.is_current_generation(value):
                 # created dynamically, don't specialize on it
-                return UserDefinedObjectVariable(
+                return UnspecializedNNModuleVariable(
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
             else:

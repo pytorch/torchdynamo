@@ -792,8 +792,6 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, 4)
 
     def test_maml(self):
-        # Note, we still need more work to capture this one properly,
-        # creates nn.Modules dynamically
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
         c = torch.randn(75, 1, 28, 28)
@@ -802,9 +800,10 @@ class ReproTests(torchdynamo.testing.TestCase):
         correct = model(a, b, c, d)
         cnt = torchdynamo.testing.CompileCounter()
         with eval_frame.optimize(convert_frame(cnt)):
-            self.assertTrue(same(model(a, b, c, d), correct))
+            for _ in range(1):
+                self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
 
     def test_hf_model_output(self):

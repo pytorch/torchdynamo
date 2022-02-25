@@ -24,6 +24,7 @@ from .misc import PythonModuleVariable
 from .misc import SuperVariable
 from .misc import UnknownVariable
 from .nn_module import NNModuleVariable
+from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
@@ -55,6 +56,7 @@ __all__ = [
     "TorchVariable",
     "TupleVariable",
     "UnknownVariable",
+    "UnspecializedNNModuleVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",

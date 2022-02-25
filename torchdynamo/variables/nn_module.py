@@ -1,3 +1,4 @@
+import functools
 import inspect
 import itertools
 import re
@@ -20,6 +21,7 @@ from ..utils import unimplemented
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
+from .user_defined import UserDefinedObjectVariable
 
 
 class NNModuleVariable(VariableTracker):
@@ -267,3 +269,91 @@ class NNModuleVariable(VariableTracker):
             )
         else:
             return super().call_method(tx, name, args, kwargs)
+
+
+class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
+    """
+    The above class will specialize on the id() of a module and place
+    parameters on the torch.fx.GraphModule.  Giving one graph per
+    module instance.  This version treats nn.Modules() like other user
+    defined objects and will pass parameters into the FX graph as inputs.
+    Giving one graph per module class.
+    """
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _nn_module_method_ids():
+        return {
+            id(x.__code__)
+            for x in torch.nn.Module.__dict__.values()
+            if hasattr(x, "__code__")
+        }
+
+    def unpack_var_sequence(self, tx):
+        from .builder import VariableBuilder
+
+        try:
+            fn = inspect.getattr_static(self.value_type, "__iter__")
+        except AttributeError:
+            raise NotImplementedError()
+
+        if fn in (
+            torch.nn.ModuleList.__iter__,
+            torch.nn.ParameterList.__iter__,
+            torch.nn.Sequential.__iter__,
+        ):
+            assert self.source
+            return [
+                VariableBuilder(tx, source=GetItemSource(self.source, idx))(
+                    item
+                ).add_options(self)
+                for idx, item in enumerate(self.value)
+            ]
+
+        return super().unpack_var_sequence(tx)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return variables.UserFunctionVariable(
+            self.value_type.forward, **options
+        ).call_function(tx, [self] + list(args), kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from .builder import VariableBuilder
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                method = inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                method = None
+
+            if method is torch.nn.Module.parameters:
+                assert not args or kwargs
+                options["guards"].add(
+                    self.source.create_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
+                )
+                items = []
+                for name, value in self.value.named_parameters():
+                    items.append(
+                        VariableBuilder(tx, AttrSource(self.source, name))(
+                            value
+                        ).add_options(options)
+                    )
+                return variables.ListIteratorVariable(
+                    items, mutable_local=MutableLocal(), **options
+                )
+
+            if id(method.__code__) in self._nn_module_method_ids():
+                unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+
+        return super().call_method(tx, name, args, kwargs)

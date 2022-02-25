@@ -214,6 +214,13 @@ class GuardBuilder:
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
+    def NN_MODULE_PARAM_NAMES(self, guard):
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        keys = {k for k, v in value.named_parameters()}
+        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
+        self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
+
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
@@ -298,7 +305,7 @@ class GuardedCode:
                 return lambda {args}: {code}
             """
         )
-        if os.environ.get("PRINT_GUARDS", None) == "1":
+        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         out = dict()
         exec(py_code, global_builder.scope, out)
