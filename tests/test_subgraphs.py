@@ -396,3 +396,48 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         # checking here we don't create 2^n graphs
         self.assertEqual(cnt.frame_count, 7)
         self.assertEqual(cnt.op_count, 10)
+
+    def test_resume_with_no_grad1(self):
+        def fn(a, b):
+            x = a + b
+            with torch.no_grad():
+                x = x + 1
+                x.sum().item()  # graph break
+                x = x + 2
+            x = x + 3
+            return x
+
+        self._common(fn, 2, 9)
+        torchdynamo.reset()
+        with torch.no_grad():
+            # fewer ops (no disable grad) if already disabled
+            self._common(fn, 2, 5)
+
+    def test_resume_with_no_grad2(self):
+        def fn(a, b):
+            x = a + b
+            with torch.no_grad():
+                x = x + 1
+                x.sum().item()  # graph break
+                x = x + 2
+                x.sum().item()  # graph break
+                x = x + 3
+            x = x + 4
+            return x
+
+        self._common(fn, 3, 13)
+
+    def test_resume_with_no_grad3(self):
+        def fn(a, b):
+            x = a + b
+            with torch.no_grad():
+                with torch.no_grad():
+                    x = x + 1
+                    with torch.enable_grad():
+                        x.sum().item()  # graph break
+                        x = x + 2
+                    x = x + 3
+            x = x + 4
+            return x
+
+        self._common(fn, 2, 14)

@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import dis
 import functools
 import importlib
@@ -35,6 +36,7 @@ from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
+from .resume_execution import ReenterWith
 from .utils import Unsupported
 from .utils import counters
 from .utils import istype
@@ -57,15 +59,32 @@ from .variables.misc import BlackHoleVariable
 from .variables.misc import ClosureVariable
 from .variables.misc import ContextManagerVariable
 from .variables.misc import GetAttrVariable
-from .variables.misc import LambdaVariable
 from .variables.misc import PythonModuleVariable
 from .variables.misc import UnknownVariable
+from .variables.misc import WithExitFunctionVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class BlockStackEntry:
+    target: Instruction
+    stack_index: int = None
+    with_context: ContextManagerVariable = None
+
+    def can_restore(self):
+        return self.with_context is not None
+
+    def resume_fn(self):
+        assert self.stack_index is not None
+        return ReenterWith(self.stack_index)
+
+    def exit(self, tx):
+        return self.with_context.exit(tx)
 
 
 def stack_op(fn: typing.Callable):
@@ -236,7 +255,7 @@ class InstructionTranslatorBase(object):
         assert not self.output.output_instructions
         continue_inst, state = self.checkpoint
         self.restore_graphstate(state)
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(self, partial_convert=True)
         self.output.add_output_instructions(
             [create_instruction("JUMP_ABSOLUTE", target=continue_inst)]
             + self.instructions
@@ -370,26 +389,33 @@ class InstructionTranslatorBase(object):
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(inst.target)
+        self.block_stack.append(BlockStackEntry(inst.target))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
         ctx = self.pop()
-        self.output.guards.update(ctx.guards)
         if not isinstance(ctx, ContextManagerVariable):
             unimplemented(f"SETUP_WITH {ctx}")
+        self.output.guards.update(ctx.guards)
 
-        def exit(*args):
-            return ctx.exit(self, *args)
-
-        self.push(LambdaVariable(exit, **VariableTracker.propagate(ctx)))
-        self.block_stack.append(inst.target)
+        if isinstance(self, InstructionTranslator):
+            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
+        else:
+            # can't restore this while inlining
+            self.block_stack.append(BlockStackEntry(inst.target))
+        self.push(
+            WithExitFunctionVariable(
+                ctx,
+                inst.target,
+                **VariableTracker.propagate(ctx),
+            )
+        )
         self.push(ctx.enter(self))
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(inst.target)
+        self.block_stack.append(BlockStackEntry(inst.target))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -893,22 +919,22 @@ class InstructionTranslatorBase(object):
         super(InstructionTranslatorBase, self).__init__()
 
         # Mutable state checkpointed by copy_graphstate()
-        self.output = output
-        self.symbolic_locals = symbolic_locals
-        self.stack = []
-        self.instruction_pointer = 0
-        self.current_instruction = create_instruction("NOP")
-        self.next_instruction = None
-        self.block_stack = []
-        self.lineno = code_options.get("co_firstlineno")
+        self.output: OutputGraph = output
+        self.symbolic_locals: Dict[str, VariableTracker] = symbolic_locals
+        self.stack: List[VariableTracker] = []
+        self.instruction_pointer: int = 0
+        self.current_instruction: Instruction = create_instruction("NOP")
+        self.next_instruction: typing.Optional[Instruction] = None
+        self.block_stack: List[BlockStackEntry] = []
+        self.lineno: int = code_options.get("co_firstlineno")
 
         # Properties of the input/output code
-        self.instructions = instructions
-        self.indexof = {id(i): n for n, i in enumerate(instructions)}
-        self.f_globals = f_globals
-        self.f_builtins = f_builtins
-        self.code_options = code_options
-        self.f_code = f_code
+        self.instructions: List[Instruction] = instructions
+        self.indexof: Dict[int, int] = {id(i): n for n, i in enumerate(instructions)}
+        self.f_globals: Dict[str, Any] = f_globals
+        self.f_builtins: Dict[str, Any] = f_builtins
+        self.code_options: Dict[str, Any] = code_options
+        self.f_code: types.CodeType = f_code
 
         self.checkpoint = None
 
@@ -934,7 +960,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals=collections.OrderedDict(),  # set below
             f_code=f_code,
         )
-        self.one_graph = one_graph
+        self.one_graph: bool = one_graph
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(
@@ -944,7 +970,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def should_compile_partial_graph(self):
-        return len(self.block_stack) == 0 and not self.one_graph
+        return all(b.can_restore() for b in self.block_stack) and not self.one_graph
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None
@@ -963,7 +989,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         name = unique_id(f"__resume_at_{inst.offset}")
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
-            self.f_code, inst.offset, len(self.stack), argnames
+            self.f_code,
+            inst.offset,
+            len(self.stack),
+            argnames,
+            tuple(b.resume_fn() for b in self.block_stack),
         )
 
         cg = PyCodegen(self)

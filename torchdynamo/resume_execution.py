@@ -23,6 +23,27 @@ CO_ITERABLE_COROUTINE = 0x0100
 CO_ASYNC_GENERATOR = 0x0200
 
 
+@dataclasses.dataclass(frozen=True)
+class ReenterWith:
+    stack_index: int = None
+
+    def __call__(self, code_options, cleanup):
+        with_cleanup_start = create_instruction("WITH_CLEANUP_START")
+        cleanup[:] = [
+            create_instruction("POP_BLOCK"),
+            create_instruction("BEGIN_FINALLY"),
+            with_cleanup_start,
+            create_instruction("WITH_CLEANUP_FINISH"),
+            create_instruction("END_FINALLY"),
+        ] + cleanup
+
+        return [
+            create_instruction("CALL_FUNCTION", 0),
+            create_instruction("SETUP_WITH", target=with_cleanup_start),
+            create_instruction("POP_TOP"),
+        ]
+
+
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
@@ -49,6 +70,7 @@ class ContinueExecutionCache:
         offset: int,
         nstack: int,
         argnames: List[str],
+        setup_fns: List[ReenterWith],
     ):
         assert offset is not None
         assert not (
@@ -58,7 +80,7 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, offset, nstack, argnames
+                code, offset, nstack, argnames, setup_fns
             )
 
         meta = ResumeFunctionMetadata(code)
@@ -83,16 +105,41 @@ class ContinueExecutionCache:
                 CO_VARARGS | CO_VARKEYWORDS
             )
             (target,) = [i for i in instructions if i.offset == offset]
-            prefix = [
-                create_instruction("LOAD_FAST", f"___stack{i}") for i in range(nstack)
-            ]
+
+            prefix = []
+            cleanup = []
+            hooks = {fn.stack_index: fn for fn in setup_fns}
+            for i in range(nstack):
+                prefix.append(create_instruction("LOAD_FAST", f"___stack{i}"))
+                if i in hooks:
+                    prefix.extend(hooks.pop(i)(code_options, cleanup))
+            assert not hooks
+
             prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
+            if cleanup:
+                prefix.extend(cleanup)
+                prefix.extend(cls.unreachable_codes(code_options))
+
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
         new_code = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
+
+    @staticmethod
+    def unreachable_codes(code_options):
+        """Codegen a `raise None` to make analysis work for unreachable code"""
+        if None not in code_options["co_consts"]:
+            code_options["co_consts"] = tuple(code_options["co_consts"]) + (None,)
+        return [
+            create_instruction(
+                "LOAD_CONST",
+                argval=None,
+                arg=code_options["co_consts"].index(None),
+            ),
+            create_instruction("RAISE_VARARGS", 1),
+        ]
 
     @classmethod
     def generate_based_on_original_code_object(cls, code, offset: int, *args):

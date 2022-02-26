@@ -188,13 +188,18 @@ class OutputGraph(fx.Tracer):
 
         assert False
 
-    def compile_subgraph(self, tx):
+    def compile_subgraph(self, tx, partial_convert=False):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
-        if tx.block_stack:
+        self.partial_convert = partial_convert
+
+        if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
+
+        for block in reversed(tx.block_stack):
+            block.exit(tx)
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)

@@ -23,6 +23,7 @@ from .misc import LambdaVariable
 from .misc import PythonModuleVariable
 from .misc import SuperVariable
 from .misc import UnknownVariable
+from .misc import WithExitFunctionVariable
 from .nn_module import NNModuleVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
@@ -62,4 +63,5 @@ __all__ = [
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
+    "WithExitFunctionVariable",
 ]

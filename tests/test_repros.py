@@ -800,11 +800,11 @@ class ReproTests(torchdynamo.testing.TestCase):
         correct = model(a, b, c, d)
         cnt = torchdynamo.testing.CompileCounter()
         with eval_frame.optimize(convert_frame(cnt)):
-            for _ in range(1):
+            for _ in range(10):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 9)
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, 29)
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
