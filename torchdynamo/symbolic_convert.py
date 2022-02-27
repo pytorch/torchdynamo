@@ -1051,7 +1051,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")
 
-        code = func.get_code()
+        code: types.CodeType = func.get_code()
+        if code.co_name in ("__setitem__", "__setattr__"):
+            unimplemented(f"inline {code.co_name}")
 
         if config.trace:
             print("INLINING ", code)

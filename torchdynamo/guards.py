@@ -18,10 +18,14 @@ import torch
 
 from . import config
 from . import mutation_guard
+from ._eval_frame import set_guard_fail_hook
 from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
 from .utils import istype
+from .utils import rename_implicit
+from .utils import tuple_iterator_getitem
+from .utils import tuple_iterator_len
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -29,6 +33,8 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___check_obj_id", check_obj_id),
         ("___is_grad_enabled", torch.is_grad_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
+        ("___tuple_iterator_len", tuple_iterator_len),
+        ("___tuple_iterator_getitem", tuple_iterator_getitem),
     ]
 )
 
@@ -63,7 +69,12 @@ class Guard:
         return hash((self.name, self.source, id(self.create_fn)))
 
     def sort_key(self):
-        return self.source.value, self.name, self.create_fn.__code__.co_firstlineno
+        return (
+            self.source.value,
+            len(self.name),
+            self.name,
+            self.create_fn.__code__.co_firstlineno,
+        )
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
@@ -100,8 +111,15 @@ def strip_getattr_getitem(name):
 
 
 class GuardBuilder:
-    def __init__(self, id_ref: Callable, scope: Dict[str, Any], guarded_code):
+    def __init__(
+        self, id_ref: Callable, scope: Dict[str, Any], guarded_code, renames=True
+    ):
         self.id_ref = id_ref
+        if scope:
+            if renames:
+                scope = {rename_implicit(k): v for k, v in scope.items()}
+        else:
+            scope = dict()
         self.scope = scope
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
@@ -208,6 +226,12 @@ class GuardBuilder:
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
 
+    def TUPLE_ITERATOR_LEN(self, guard):
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
+        self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -261,8 +285,8 @@ class GuardedCode:
         self._weakrefs = []
         self._seen_ids = set()
 
-        local_builder = GuardBuilder(self.id_ref, f_locals, self)
-        global_builder = GuardBuilder(self.id_ref, f_globals, self)
+        local_builder = GuardBuilder(self.id_ref, f_locals, self, renames=True)
+        global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
@@ -272,9 +296,14 @@ class GuardedCode:
 
     def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
-        args = local_builder.argnames + ["**___kwargs_ignored"]
+        # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
+        args = [a for a in local_builder.scope.keys() if a == "___implicit0"]
+        args += [a for a in local_builder.argnames if a != "___implicit0"]
+        args += ["**___kwargs_ignored"]
         args = ",".join(args)
-        code = ["___guarded_code.valid"] + local_builder.code + global_builder.code
+        code_parts = (
+            ["___guarded_code.valid"] + local_builder.code + global_builder.code
+        )
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -288,9 +317,9 @@ class GuardedCode:
             check_tensors_fn = TensorGuards(
                 *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
             ).check
-            code.append(f"___check_tensors({', '.join(tensor_check_names)})")
+            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
 
-        code = " and ".join(unique(code))
+        code = " and ".join(unique(code_parts))
 
         closure_vars = collections.OrderedDict(
             [
@@ -307,9 +336,15 @@ class GuardedCode:
         )
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
+        if os.environ.get("TORCHDYNAMO_PRINT_GUARD_FAILS", None) == "1":
+            set_guard_fail_hook(guard_fail_hook)
         out = dict()
         exec(py_code, global_builder.scope, out)
-        return out["___make_guard_fn"](*closure_vars.values())
+        guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        guard_fn.closure_vars = closure_vars
+        guard_fn.code_parts = code_parts
+        guard_fn.global_scope = global_builder.scope
+        return guard_fn
 
     def invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false
@@ -324,6 +359,25 @@ class GuardedCode:
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+
+def guard_fail_hook(
+    guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
+):
+    """
+    set TORCHDYNAMO_PRINT_GUARD_FAILS=1 to cause this to be called
+    whenever a guard fails.
+    """
+    if not last:
+        return
+    scope = {rename_implicit(k): v for k, v in f_locals.items()}
+    scope.update(guard_fn.closure_vars)
+    reasons = []
+    for part in guard_fn.code_parts:
+        if not eval(part, guard_fn.global_scope, scope):
+            reasons.append(part)
+            break
+    print(f"Failed guards {reasons} (code={id(code)}, last={last})")
 
 
 def unique(seq):

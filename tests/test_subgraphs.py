@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -322,9 +323,10 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = a + b
             rng = iter(range(3, 8, 2))
             x = unsupported(x, x)
+            x += next(rng)
             return x, list(rng)
 
-        self._common(fn, 1, 1)
+        self._common(fn, 2, 2)
 
     def test_pop_after_resume(self):
         def fn(a, b):
@@ -441,3 +443,60 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 2, 14)
+
+    def test_resume_tuple_iterator(self):
+        def fn(a, b):
+            x = a + b
+            it = iter(tuple(range(10)))
+            x = x + next(it)
+            x = x + next(it)
+            x = x + next(it)
+            x = unsupported(x, x)
+            x = x + next(it)
+            x = x + next(it)
+            x = x + next(it)
+            x = x + next(it)
+            return x
+
+        self._common(fn, 2, 8)
+
+    def test_tuple_iterator_return(self):
+        def fn(x):
+            it = iter(tuple(range(10)))
+            x = x + next(it)
+            x = x + next(it)
+            x = unsupported(x, x)
+            x = x + next(it)
+            x = x + next(it)
+            x = unsupported(x, x)
+            x = x + next(it)
+            x = x + next(it)
+            return x, it
+
+        v1 = torch.randn(10)
+        v2, it2 = fn(v1)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            v3, it3 = fn(v1)
+            v4, it4 = fn(v1)
+        self.assertEqual(v2.tolist(), v3.tolist())
+        self.assertEqual(v2.tolist(), v4.tolist())
+        self.assertEqual(list(it2), list(it3))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 6)
+
+    @unittest.skip("not working yet")
+    def test_tuple_iterator_mutate(self):
+        def fn(x, it):
+            x = x + next(it)
+            x = x + next(it)
+            x = x + next(it)
+            x = x + next(it)
+            return x
+
+        v1 = torch.randn(10)
+        it1 = iter(tuple(range(10)))
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            self.assertEqual(fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
+        self.assertEqual(list(it1), [4, 5, 6, 7, 8, 9])

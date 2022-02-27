@@ -5,6 +5,7 @@ from typing import Any
 from .bytecode_transformation import create_instruction
 from .guards import Guard
 from .guards import GuardSource
+from .utils import rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
@@ -43,7 +44,7 @@ class LocalSource(Source):
         return GuardSource.LOCAL
 
     def name(self):
-        return self.local_name
+        return rename_implicit(self.local_name)
 
 
 @dataclasses.dataclass
@@ -96,6 +97,25 @@ class GetItemSource(Source):
 
     def name(self):
         return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass
+class TupleIteratorGetItemSource(GetItemSource):
+    def reconstruct(self, codegen):
+        tuple_iterator_getitem = AttrSource(
+            codegen.tx.import_source("torchdynamo.utils"), "tuple_iterator_getitem"
+        )
+        return (
+            tuple_iterator_getitem.reconstruct(codegen)
+            + self.base.reconstruct(codegen)
+            + [
+                codegen.create_load_const(self.index),
+                create_instruction("CALL_FUNCTION", 2),
+            ]
+        )
+
+    def name(self):
+        return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass

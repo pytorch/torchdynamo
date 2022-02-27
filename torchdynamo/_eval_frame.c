@@ -55,7 +55,9 @@
 // TODO(jansel): make this threadlocal to support MT
 static PyObject *eval_frame_callback = NULL;
 
-static PyObject *noargs = NULL; /* cached empty tuple */
+static PyObject *noargs = NULL;     /* cached empty tuple */
+static PyObject *dotzerokey = NULL; /* ".0" */
+static PyObject *guard_fail_hook = NULL;
 
 size_t extra_index = -1;
 
@@ -112,11 +114,31 @@ static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
   if (e == NULL) {
     return NULL;
   }
-  PyObject *valid = PyObject_Call(e->check_fn, noargs, f_locals);
+  PyObject *dotzero = PyDict_GetItem(f_locals, dotzerokey);
+  PyObject *valid = NULL;
+  if (unlikely(dotzero != NULL)) {
+    // .0 is a special variable name used for implicit args
+    PyObject *args = PyTuple_Pack(1, dotzero);
+    NULL_CHECK(args);
+    valid = PyObject_Call(e->check_fn, args, f_locals);
+    Py_DECREF(args);
+  } else {
+    valid = PyObject_Call(e->check_fn, noargs, f_locals);
+  }
   NULL_CHECK(valid);
   Py_DECREF(valid);
   if (valid == Py_True) {
     return e->code;
+  }
+  if (unlikely(guard_fail_hook != NULL)) {
+    // call debugging logic when a guard fails
+    PyObject *args = PyTuple_Pack(4, e->check_fn, e->code, f_locals,
+                                  (e->next == NULL ? Py_True : Py_False));
+    NULL_CHECK(args);
+    PyObject *result = PyObject_CallObject(guard_fail_hook, args);
+    NULL_CHECK(result);
+    Py_DECREF(result);
+    Py_DECREF(args);
   }
   return lookup(e->next, f_locals);
 }
@@ -352,12 +374,28 @@ static PyObject *skip_code(PyObject *dummy, PyObject *args) {
   Py_RETURN_NONE;
 }
 
+static PyObject *set_guard_fail_hook(PyObject *dummy, PyObject *args) {
+  PyObject *obj = NULL;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return NULL;
+  }
+  Py_XDECREF(guard_fail_hook);
+  if (obj == Py_None) {
+    guard_fail_hook = NULL;
+  } else {
+    guard_fail_hook = obj;
+    Py_INCREF(guard_fail_hook);
+  }
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_VARARGS, NULL},
+    {"set_guard_fail_hook", set_guard_fail_hook, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -370,5 +408,6 @@ PyMODINIT_FUNC PyInit__eval_frame(void) {
   Py_INCREF(Py_None);
   eval_frame_callback = Py_None;
   noargs = PyTuple_New(0);
+  dotzerokey = PyUnicode_InternFromString(".0");
   return PyModule_Create(&_module);
 }

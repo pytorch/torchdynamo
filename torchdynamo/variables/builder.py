@@ -19,14 +19,20 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import Source
+from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
 from ..utils import is_namedtuple
 from ..utils import istensor
 from ..utils import istype
+from ..utils import tuple_iterator
+from ..utils import tuple_iterator_getitem
+from ..utils import tuple_iterator_len
+from .base import MutableLocal
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .functions import UserFunctionVariable
+from .lists import ListIteratorVariable
 from .lists import ListVariable
 from .lists import NamedTupleVariable
 from .lists import RangeVariable
@@ -116,6 +122,17 @@ class VariableBuilder:
                     self.source, value, result
                 )
             return result
+        elif istype(value, tuple_iterator):
+            guards = self.make_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
+            output = [
+                VariableBuilder(
+                    self.tx, TupleIteratorGetItemSource(self.get_source(), i)
+                )(tuple_iterator_getitem(value, i)).add_guards(guards)
+                for i in range(tuple_iterator_len(value))
+            ]
+            return ListIteratorVariable(
+                output, mutable_local=MutableLocal(), guards=guards
+            )
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)
