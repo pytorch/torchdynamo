@@ -189,6 +189,33 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(v[0], 7)
         self.assertEqual(cnts.op_count, 8)
 
+    def test_config_getattr_default(self):
+        class Cfg:
+            def __init__(self):
+                self.val = 0.5
+                self.count = 10
+
+        def fn(x, cfg):
+            if getattr(cfg, "just_add_7", False):
+                return x + 7
+            for i in range(cfg.count):
+                x = x + cfg.val
+            return x
+
+        cfg1 = Cfg()
+        v = torch.zeros(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertEqual(fn(v, cfg1)[0], 5)
+            self.assertEqual(fn(v, cfg1)[0], 5)
+            cfg1.just_add_7 = True
+            self.assertEqual(fn(v, cfg1)[0], 7)
+            self.assertEqual(fn(v, cfg1)[0], 7)
+            cfg1.just_add_7 = False
+            self.assertEqual(fn(v, cfg1)[0], 5)
+            self.assertEqual(fn(v, cfg1)[0], 5)
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_size_input(self):
         def fn(x, s):
             a, b = s

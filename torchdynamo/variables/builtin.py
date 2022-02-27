@@ -324,12 +324,12 @@ class BuiltinVariable(VariableTracker):
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
             name = attr.as_python_constant()
-            return obj.call_hasattr(tx, name)
+            return obj.call_hasattr(tx, name).add_options(self, obj, attr)
 
     def call_map(self, tx, fn, seq):
         if seq.has_unpack_var_sequence(tx):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
-            return variables.TupleVariable(items)
+            return variables.TupleVariable(items).add_options(self, fn, seq)
 
     def call_sum(self, tx, seq, **kwargs):
         if seq.has_unpack_var_sequence(tx):
@@ -369,14 +369,19 @@ class BuiltinVariable(VariableTracker):
         from . import UserFunctionVariable
         from .builder import VariableBuilder
 
-        if not name_var.is_python_constant():
-            unimplemented("non-const getattr name")
-        if default is not None:
-            unimplemented("getattr with default")
-
         options = VariableTracker.propagate(self, obj, name_var)
-        guards = options.get("guards", set())
+        guards = options["guards"]
         name = name_var.as_python_constant()
+
+        if not name_var.is_python_constant():
+            unimplemented("non-const getattr() name")
+
+        if default is not None:
+            hasattr_var = self.call_hasattr(tx, obj, name_var)
+            guards.update(hasattr_var.guards)
+            assert hasattr_var.as_python_constant() in (True, False)
+            if not hasattr_var.as_python_constant():
+                return default.add_guards(guards)
 
         if obj.source:
             source = AttrSource(obj.source, name)

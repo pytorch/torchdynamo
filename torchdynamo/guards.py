@@ -132,7 +132,10 @@ class GuardBuilder:
         return eval(name, self.scope, CLOSURE_VARS)
 
     def arg_ref(self, guard: Guard):
-        name = guard.name
+        if isinstance(guard, str):
+            name = guard
+        else:
+            name = guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
             self.argnames.append(base)
@@ -140,8 +143,15 @@ class GuardBuilder:
         return name
 
     def HASATTR(self, guard: Guard):
-        assert guard.is_nn_module(), str(guard)
-        pass  # TODO(jansel): add a guard for this
+        m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
+        assert m, f"invalid hasattr check {guard.name}"
+        base, attr = m.group(1, 2)
+        ref = self.arg_ref(base)
+        val = hasattr(self.get(base), attr)
+        if val:
+            self.code.append(f"hasattr({ref}, {attr!r})")
+        else:
+            self.code.append(f"not hasattr({ref}, {attr!r})")
 
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
