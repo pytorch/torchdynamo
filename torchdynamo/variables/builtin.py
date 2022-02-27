@@ -10,6 +10,7 @@ import torch
 from .. import variables
 from ..allowed_functions import is_disallowed
 from ..source import AttrSource
+from ..source import TypeSource
 from ..utils import Unsupported
 from ..utils import check_constant_args
 from ..utils import istype
@@ -424,3 +425,21 @@ class BuiltinVariable(VariableTracker):
             )
         else:
             return GetAttrVariable(obj, name, **options)
+
+    def call_type(self, tx, obj: VariableTracker):
+        from .builder import VariableBuilder
+
+        try:
+            py_type = obj.python_type()
+        except NotImplementedError:
+            py_type = None
+
+        if istype(obj, variables.TupleVariable):
+            return BuiltinVariable(py_type).add_options(self, obj)
+
+        if py_type is not None and obj.source:
+            return VariableBuilder(tx, TypeSource(obj.source))(py_type).add_options(
+                self, obj
+            )
+
+        unimplemented(f"type({obj})")

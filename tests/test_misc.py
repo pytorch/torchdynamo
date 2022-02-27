@@ -661,3 +661,21 @@ class MiscTests(torchdynamo.testing.TestCase):
                 self.assertTrue(same(fn(m2, v), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
+
+    def test_type_copy(self):
+        def fn(seq):
+            a, b = seq
+            return type(seq)([a + 1, b + 2, a + b])
+
+        args1 = [torch.randn(10), torch.randn(10)]
+        args2 = tuple([torch.randn(10), torch.randn(10)])
+        correct1 = fn(args1)
+        correct2 = fn(args2)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertTrue(same(fn(args1), correct1))
+            self.assertTrue(same(fn(args2), correct2))
+            self.assertIsInstance(fn(args1), list)
+            self.assertIsInstance(fn(args2), tuple)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)

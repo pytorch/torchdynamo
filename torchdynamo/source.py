@@ -77,9 +77,6 @@ class AttrSource(Source):
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
 
-    def from_module(self):
-        return self.base.from_module()
-
 
 @dataclasses.dataclass
 class GetItemSource(Source):
@@ -116,6 +113,25 @@ class TupleIteratorGetItemSource(GetItemSource):
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
+
+
+@dataclasses.dataclass
+class TypeSource(Source):
+    base: Source
+
+    def reconstruct(self, codegen):
+        type_fn = AttrSource(codegen.tx.import_source("builtins"), "type")
+        return (
+            type_fn.reconstruct(codegen)
+            + self.base.reconstruct(codegen)
+            + [create_instruction("CALL_FUNCTION", 1)]
+        )
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"type({self.base.name()})"
 
 
 @dataclasses.dataclass

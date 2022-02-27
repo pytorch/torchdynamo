@@ -96,7 +96,7 @@ def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
     """
-    m = re.match(r"^[a-z0-9_]+\(([^),]+),", name)
+    m = re.match(r"^[a-z0-9_]+\(([^),]+)[),]", name)
     if m:
         return strip_getattr_getitem(m.group(1))
     return name
@@ -142,6 +142,22 @@ class GuardBuilder:
 
         return name
 
+    def TYPE_MATCH(self, guard: Guard):
+        # ___check_type_id is same as `id(type(x)) == y`
+        self.code.append(
+            f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
+        )
+
+    def ID_MATCH(self, guard: Guard):
+        # ___check_obj_id is same as `id(x) == y`
+        m = re.match(r"^type\((.+)\)$", guard.name)
+        if m:
+            # optional optimization to produce cleaner/faster guard code
+            return self.TYPE_MATCH(Guard(m.group(1), guard.source, None))
+        self.code.append(
+            f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
+        )
+
     def HASATTR(self, guard: Guard):
         m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
         assert m, f"invalid hasattr check {guard.name}"
@@ -152,18 +168,6 @@ class GuardBuilder:
             self.code.append(f"hasattr({ref}, {attr!r})")
         else:
             self.code.append(f"not hasattr({ref}, {attr!r})")
-
-    def TYPE_MATCH(self, guard: Guard):
-        # ___check_type_id is same as `id(type(x)) == y`
-        self.code.append(
-            f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
-        )
-
-    def ID_MATCH(self, guard: Guard):
-        # ___check_obj_id is same as `id(x) == y`
-        self.code.append(
-            f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
-        )
 
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
