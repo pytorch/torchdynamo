@@ -514,7 +514,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
-    def test_user_getattr(self):
+    def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
                 return self[name]
@@ -529,6 +529,27 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_user_getattr2(self):
+        class MyConfig:
+            defined_on_class = 1
+
+            def __init__(self):
+                self.defined_on_object = 2
+
+            def __getattr__(self, name):
+                return 3
+
+        def fn(cfg, x):
+            return x + cfg.defined_on_class - cfg.defined_on_object + cfg.not_defined
+
+        x = torch.randn(10)
+        cfg = MyConfig()
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertTrue(same(fn(cfg, x), x + 1 - 2 + 3))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
 
     def test_user_property(self):
         class MyConfig:

@@ -175,14 +175,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
-        if isinstance(getattr_fn, types.FunctionType):
-            return variables.UserMethodVariable(
-                getattr_fn, self, **options
-            ).call_function(tx, [ConstantVariable(name)], {})
-        elif getattr_fn is not None:
-            unimplemented("UserDefined with non-function __getattr__")
-
-        subobj = self._getattr_static(name)
+        try:
+            subobj = self._getattr_static(name)
+        except AttributeError:
+            if isinstance(getattr_fn, types.FunctionType):
+                return variables.UserMethodVariable(
+                    getattr_fn, self, **options
+                ).call_function(tx, [ConstantVariable(name)], {})
+            elif getattr_fn is not None:
+                unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
             return variables.UserMethodVariable(
