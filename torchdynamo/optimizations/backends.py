@@ -8,6 +8,7 @@ import tempfile
 
 import numpy as np
 import torch
+import copy
 
 from torchdynamo.optimizations.subgraph import SubGraph
 from torchdynamo.utils import identity
@@ -582,3 +583,34 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
         return [to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())]
 
     return exec_tvm
+
+
+@functools.lru_cache(None)
+def _init_ltc():
+    try:
+        import lazy_tensor_core
+        from lazy_tensor_core import _LAZYC
+        # hopefully changing this line to sth like _ltc_init_xla_backend in future
+        # will enable XLA
+        _LAZYC._ltc_init_ts_backend()
+        import lazy_tensor_core.core.extract_compiled_graph
+        return lazy_tensor_core
+    except ModuleNotFoundError as e:
+        print_once(f"ltc backend fails. Can not import {e.name}")
+        raise
+
+def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs):
+    ltc = _init_ltc()
+    return ltc.core.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
+
+def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
+    _init_ltc()
+    lazy_model = copy.deepcopy(gm).to(device="lazy")
+    def ltc_model(*inputs):
+        orig_device = inputs[0].device
+        lazy_inputs = tuple(inp.to(device="lazy") for inp in inputs)
+
+        lazy_out = lazy_model(*lazy_inputs)
+        out = tuple(out.to(device=orig_device) for out in lazy_out)
+        return out
+    return ltc_model
