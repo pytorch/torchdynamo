@@ -71,42 +71,56 @@ class SideEffects(object):
         )
 
     def codegen(self, cg: PyCodegen):
-        for var in self.id_to_variable.values():
-            if var.mutable_local.is_modified:
-                assert cg.tempvars.get(var) is None
+        modified_vars = [
+            var for var in self.id_to_variable.values() if var.mutable_local.is_modified
+        ]
+
+        for var in modified_vars:
+            assert cg.tempvars.get(var) is None
+            if var in cg.tempvars:
+                # subsequent usage should point to the original variable
+                cg(var.mutable_local.source)
+                cg.add_cache(var)
+
+        suffixes = []
+        for var in modified_vars:
+            if isinstance(var, variables.ListVariable):
+                # old[:] = new
                 cg(var, allow_cache=False)
                 cg(var.mutable_local.source)
-                if var in cg.tempvars:
-                    # subsequent usage should point to the original variable
-                    cg.add_cache(var)
-                if isinstance(var, variables.ListVariable):
-                    # old[:] = new
-                    cg.extend_output(
-                        [
-                            cg.create_load_const(None),
-                            cg.create_load_const(None),
-                            create_instruction("BUILD_SLICE", 2),
-                            create_instruction("STORE_SUBSCR"),
-                        ]
-                    )
-                elif isinstance(var, variables.ConstDictVariable):
-                    cg.tx.output.update_co_names("clear")
-                    cg.tx.output.update_co_names("update")
-                    cg.extend_output(
-                        [
-                            create_instruction("DUP_TOP"),
-                            create_instruction("LOAD_METHOD", "clear"),
-                            create_instruction("CALL_METHOD", 0),
-                            create_instruction("POP_TOP"),
-                            create_instruction("LOAD_METHOD", "update"),
-                            create_instruction("ROT_THREE"),
-                            create_instruction("ROT_THREE"),
-                            create_instruction("CALL_METHOD", 1),
-                            create_instruction("POP_TOP"),
-                        ]
-                    )
-                else:
-                    assert False, type(var)
+                cg.extend_output(
+                    [
+                        cg.create_load_const(None),
+                        cg.create_load_const(None),
+                        create_instruction("BUILD_SLICE", 2),
+                    ]
+                )
+                suffixes.append([create_instruction("STORE_SUBSCR")])
+            elif isinstance(var, variables.ConstDictVariable):
+                cg.tx.output.update_co_names("clear")
+                cg.tx.output.update_co_names("update")
+
+                cg(var.mutable_local.source)
+                cg.extend_output([create_instruction("LOAD_METHOD", "update")])
+                cg(var, allow_cache=False)
+
+                cg(var.mutable_local.source)
+                cg.extend_output([create_instruction("LOAD_METHOD", "clear")])
+
+                suffixes.append(
+                    [
+                        create_instruction("CALL_METHOD", 0),  # clear
+                        create_instruction("POP_TOP"),
+                        create_instruction("CALL_METHOD", 1),  # update
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+            else:
+                assert False, type(var)
+
+        # do all the actual mutations at the very end to handle dependencies
+        for suffix in reversed(suffixes):
+            cg.extend_output(suffix)
 
     def is_empty(self):
         return not any(

@@ -93,6 +93,7 @@ class PyCodegen(object):
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
+                self._output.append(create_instruction("DUP_TOP"))
                 self.add_cache(value)
 
         self.top_of_stack = value
@@ -100,7 +101,7 @@ class PyCodegen(object):
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
-        self._output.extend([create_instruction("DUP_TOP"), self.create_store(var)])
+        self._output.append(self.create_store(var))
 
     def foreach(self, items):
         for i in items:
