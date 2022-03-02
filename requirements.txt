@@ -1,11 +1,10 @@
-black
-flake8
-isort>=5.10.1
+black==22.1.0
+flake8==4.0.1
+isort==5.10.1
 ninja
 onnxruntime-gpu
 onnx-tf
 pytest
-tabulate
 tabulate
 tensorflow-gpu
 torch

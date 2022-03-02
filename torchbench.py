@@ -532,12 +532,16 @@ def main():
         output_filename = "speedups.csv"
         args.isolate = True
     elif args.speedup_ltc:
-        optimize_ctx = torchdynamo.optimize(backends.ltc_reuse_graph, nopython=args.nopython)
+        optimize_ctx = torchdynamo.optimize(
+            backends.ltc_reuse_graph, nopython=args.nopython
+        )
         experiment = speedup_experiment
         output_filename = "speedups_ltc.csv"
         args.isolate = True
     elif args.speedup_ltc_trivial:
-        optimize_ctx = torchdynamo.optimize(backends.ltc_trivial, nopython=args.nopython)
+        optimize_ctx = torchdynamo.optimize(
+            backends.ltc_trivial, nopython=args.nopython
+        )
         experiment = speedup_experiment
         output_filename = "speedups_ltc_trivial.csv"
         args.isolate = True

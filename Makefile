@@ -20,15 +20,18 @@ overhead: develop
 format:
 	isort $(PY_FILES)
 	black $(PY_FILES)
-	clang-format-10 -i $(C_FILES)
+	! which clang-format-10 >/dev/null 2>&1 || clang-format-10 -i $(C_FILES)
 
 lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
-	clang-tidy-10 $(C_FILES)  -- \
+	! which clang-tidy-10 >/dev/null 2>&1 || clang-tidy-10 $(C_FILES)  -- \
 		-I$(shell python -c "from distutils.sysconfig import get_python_inc as X; print(X())") \
 		$(shell python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))')
+
+lint-deps:
+	grep -E '(black|flake8|isort)' requirements.txt | xargs pip install
 
 setup:
 	pip install -r requirements.txt
