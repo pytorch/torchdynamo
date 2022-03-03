@@ -2,7 +2,6 @@
 __pycache__
 .idea
 build
-.*
 *.egg-info
 subgraphs
 total_latency.tsv

@@ -1,4 +1,4 @@
-name: Lint
+name: Test Python 3.8
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  test-py38:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -15,8 +15,8 @@ jobs:
       with:
         python-version: '3.8'
         cache: 'pip'
-    - run: make lint-deps
-    - run: make lint
+    - run: make setup
+    - run: make test
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
