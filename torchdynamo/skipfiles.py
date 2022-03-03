@@ -9,6 +9,7 @@ import functools
 import importlib
 import inspect
 import linecache
+import logging
 import multiprocessing
 import operator
 import os
@@ -48,6 +49,7 @@ SKIP_DIRS = [
         importlib,
         inspect,
         linecache,
+        logging,
         multiprocessing,
         operator,
         os,
