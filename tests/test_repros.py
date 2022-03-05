@@ -730,20 +730,20 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    def _reformer(self):
+    def _reformer(self, cf=convert_frame):
         input = torch.randn([1, 64, 256])
         model = ReformerEncoder()
         torch.manual_seed(1337)
         correct = copy.deepcopy(model)(input)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnt)):
+        with eval_frame.optimize(cf(cnt)):
             torch.manual_seed(1337)
             self.assertTrue(same(model(input), correct))
         return cnt
 
     def test_reformer_eval(self):
         with torch.no_grad():
-            cnt = self._reformer()
+            cnt = self._reformer(cf=convert_frame_assert)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 10)
 

@@ -55,7 +55,6 @@ from .variables.lists import ListIteratorVariable
 from .variables.lists import ListVariable
 from .variables.lists import SliceVariable
 from .variables.lists import TupleVariable
-from .variables.misc import BlackHoleVariable
 from .variables.misc import ClosureVariable
 from .variables.misc import ContextManagerVariable
 from .variables.misc import GetAttrVariable
@@ -598,18 +597,23 @@ class InstructionTranslatorBase(object):
         self.push(result)
 
     def STORE_ATTR(self, inst):
-        if isinstance(self.stack[-1], BlackHoleVariable):
-            val, obj = self.popn(2)
+        prior = self.copy_graphstate()
+        val, obj = self.popn(2)
+        try:
             self.output.guards.update(
-                obj.call_method(
-                    self, "__setattr__", [ConstantVariable(inst.argval), val], {}
-                ).guards
+                BuiltinVariable(setattr)
+                .call_function(self, [obj, ConstantVariable(inst.argval), val], {})
+                .guards
             )
             return
+        except Unsupported as e:
+            if not self.should_compile_partial_graph():
+                raise
+            e.remove_from_stats()
+            e.add_to_stats("graph_break")
+            self.restore_graphstate(prior)
 
-        if not self.should_compile_partial_graph():
-            unimplemented("inline STORE_ATTR")
-
+        # break the graph
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([inst])
         self.popn(2)

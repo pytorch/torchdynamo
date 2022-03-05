@@ -18,7 +18,22 @@ class MutableSideEffects:
     """
 
     source: Source
-    is_modified: bool
+    is_modified: bool = False
+
+
+@dataclasses.dataclass
+class AttributeMutation:
+    """
+    VariableTracker.mutable_local marker to track changes to attributes
+    """
+
+    source: Source
+
+    def __hash__(self):
+        return id(self)
+
+    def __eq__(self, other):
+        return self is other
 
 
 class SideEffects(object):
@@ -27,15 +42,20 @@ class SideEffects(object):
     applied after an FX graph is run.
     """
 
-    def __init__(self, id_to_variable=None, keepalive=None):
+    def __init__(self, id_to_variable=None, store_attr_mutations=None, keepalive=None):
         super(SideEffects, self).__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
+        self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
 
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
             id_to_variable=collections.OrderedDict(self.id_to_variable),
+            store_attr_mutations=collections.OrderedDict(
+                (k, collections.OrderedDict(v))
+                for k, v in self.store_attr_mutations.items()
+            ),
             keepalive=list(self.keepalive),
         )
 
@@ -45,20 +65,47 @@ class SideEffects(object):
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
+        assert self.is_attribute_mutation(item)
+        if item.mutable_local not in self.store_attr_mutations:
+            self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
+        self.store_attr_mutations[item.mutable_local][name] = value
+
+    def load_attr(self, item, name):
+        assert self.is_attribute_mutation(item)
+        return self.store_attr_mutations[item.mutable_local][name]
+
+    def is_attribute_mutation(self, item):
+        return isinstance(item.mutable_local, AttributeMutation)
+
+    def is_modified(self, item):
+        if self.is_attribute_mutation(item):
+            return item.mutable_local in self.store_attr_mutations
+        return item.mutable_local.is_modified
+
     def _track_obj(
         self,
         source: Source,
         item: Any,
         variable: VariableTracker,
+        mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=MutableSideEffects(source, False))
+        variable = variable.clone(mutable_local=mutable_cls(source), source=source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
     track_list = _track_obj
     track_dict = _track_obj
+
+    def track_object(
+        self,
+        source: Source,
+        item: Any,
+        variable: VariableTracker,
+    ):
+        return self._track_obj(source, item, variable, mutable_cls=AttributeMutation)
 
     def mutation(self, oldvar, newvar):
         return newvar.clone(
@@ -72,7 +119,7 @@ class SideEffects(object):
 
     def codegen(self, cg: PyCodegen):
         modified_vars = [
-            var for var in self.id_to_variable.values() if var.mutable_local.is_modified
+            var for var in self.id_to_variable.values() if self.is_modified(var)
         ]
 
         for var in modified_vars:
@@ -115,6 +162,12 @@ class SideEffects(object):
                         create_instruction("POP_TOP"),
                     ]
                 )
+            elif self.is_attribute_mutation(var):
+                for name, value in self.store_attr_mutations[var.mutable_local].items():
+                    cg.tx.output.update_co_names(name)
+                    cg(value)
+                    cg(var.mutable_local.source)
+                    suffixes.append([create_instruction("STORE_ATTR", name)])
             else:
                 assert False, type(var)
 
@@ -123,6 +176,4 @@ class SideEffects(object):
             cg.extend_output(suffix)
 
     def is_empty(self):
-        return not any(
-            var.mutable_local.is_modified for var in self.id_to_variable.values()
-        )
+        return not any(map(self.is_modified, self.id_to_variable.values()))

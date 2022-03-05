@@ -700,3 +700,32 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertIsInstance(fn(args2), tuple)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 6)
+
+    def test_setattr_mutation1(self):
+        class MyObj:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        def fn(obj):
+            obj.c = obj.a * obj.b + 1
+            obj.b = obj.a * obj.c + 2
+            obj.a = obj.b * obj.c + 3
+            obj.c = obj.a * obj.b + 4
+            obj.b = obj.a * obj.c + 5
+            obj.a = obj.b * obj.c + 6
+            return obj
+
+        x1 = torch.randn(10)
+        x2 = torch.randn(10)
+        obj1 = MyObj(x1, x2)
+        obj2 = MyObj(x1, x2)
+        fn(obj2)
+        cnts = torchdynamo.testing.CompileCounter()
+        with eval_frame.optimize(convert_frame_assert(cnts)):
+            self.assertIs(fn(obj1), obj1)
+        self.assertTrue(same(obj1.a, obj2.a))
+        self.assertTrue(same(obj1.b, obj2.b))
+        self.assertTrue(same(obj1.c, obj2.c))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 12)

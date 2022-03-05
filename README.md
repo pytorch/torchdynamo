@@ -318,6 +318,8 @@ point for the first time.
 
 ## Tests
 
+[![Test Python 3.8](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml)
+
 Run tests with
 ```shell
 pytest tests
@@ -332,7 +334,6 @@ Test on torchbenchmark models with:
 ```shell
 python torchbench.py
 ```
-
 
 ## Performance Measurement
 
@@ -363,6 +364,7 @@ generate `*.csv` files.  See `./torchbench.py --help` for more options.
 
 ## Linting and Automatic Code Formatting
 
+[![Lint](https://github.com/facebookresearch/torchdynamo/actions/workflows/lint.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/lint.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
@@ -371,3 +373,7 @@ Install format/linter deps with `pip install -r requirements.txt`, then:
 make format  # reformat all files (in-place)
 make lint    # run the linters
 ```
+
+## License
+
+TorchDynamo has a BSD-style license, as found in the LICENSE file.

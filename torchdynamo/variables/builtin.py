@@ -377,6 +377,13 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
+        if tx.output.side_effects.is_attribute_mutation(obj):
+            try:
+                # re-read a pending side effect?
+                return tx.output.side_effects.load_attr(obj, name).add_options(options)
+            except KeyError:
+                pass
+
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
             guards.update(hasattr_var.guards)
@@ -425,6 +432,18 @@ class BuiltinVariable(VariableTracker):
             )
         else:
             return GetAttrVariable(obj, name, **options)
+
+    def call_setattr(
+        self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
+    ):
+        if isinstance(obj, variables.BlackHoleVariable):
+            return obj.call_method(self, "__setattr__", [name_var, val], {})
+        elif (
+            tx.output.side_effects.is_attribute_mutation(obj)
+            and name_var.is_python_constant()
+        ):
+            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            return val.add_options(self, obj, name_var)
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder

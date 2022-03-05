@@ -2,6 +2,8 @@
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) $(wildcard tests/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
+CLANG_TIDY ?= clang-tidy-10
+CLANG_FORMAT ?= clang-format-10
 
 default: develop
 
@@ -20,13 +22,13 @@ overhead: develop
 format:
 	isort $(PY_FILES)
 	black $(PY_FILES)
-	! which clang-format-10 >/dev/null 2>&1 || clang-format-10 -i $(C_FILES)
+	! which $(CLANG_FORMAT) >/dev/null 2>&1 || $(CLANG_FORMAT) -i $(C_FILES)
 
 lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
-	! which clang-tidy-10 >/dev/null 2>&1 || clang-tidy-10 $(C_FILES) -- \
+	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
 		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 

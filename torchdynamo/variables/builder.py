@@ -240,13 +240,16 @@ class VariableBuilder:
         ):
             return self._wrap(int(value))
         else:
-            return self.wrap_unsupported(value)
-
-    def wrap_unsupported(self, value):
-        return UserDefinedObjectVariable(
-            value,
-            guards=self.make_guards(GuardBuilder.TYPE_MATCH),
-        )
+            result = UserDefinedObjectVariable(
+                value,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
+            if inspect.getattr_static(type(value), "__setattr__", None) not in (
+                object.__setattr__,
+            ):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object(self.source, value, result)
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
