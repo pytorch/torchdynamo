@@ -8,6 +8,7 @@ import types
 import warnings
 from functools import lru_cache
 
+import numpy
 import torch
 
 
@@ -95,3 +96,22 @@ def _builtin_function_ids():
 
 def is_builtin(obj):
     return id(obj) in _builtin_function_ids()
+
+
+@lru_cache(None)
+def _numpy_function_ids():
+    rv = dict()
+    for mod in (numpy, numpy.random):
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
+    return rv
+
+
+def is_numpy(obj):
+    return isinstance(obj, numpy.ndarray) or id(obj) in _numpy_function_ids()

@@ -47,13 +47,15 @@ class ProfileMetrics:
 
 
 class ProfileResult:
-    def __init__(self, captured=None, total=None):
+    def __init__(self, captured, total, unique_graphs):
         self.captured: ProfileMetrics = captured or ProfileMetrics()
         self.total: ProfileMetrics = total or ProfileMetrics()
+        self.unique_graphs: int = unique_graphs
 
     def __iadd__(self, other: ProfileMetrics):
         self.captured += other.captured
         self.total += other.total
+        self.unique_graphs += other.unique_graphs
         return self
 
     def percent(self):
@@ -61,16 +63,18 @@ class ProfileResult:
 
     def __str__(self):
         return (
-            f"{self.captured.graphs:3} graphs {self.captured.operators:4}/{self.total.operators:4} ops, "
+            f"{self.unique_graphs:2} graphs {self.captured.graphs:2} graph calls "
+            f"{self.captured.operators:4}/{self.total.operators:4} = "
             + str(self.percent())
         )
 
     def tocsv(self):
-        return self.percent().tocsv() + [
-            self.captured.operators,
-            self.total.operators - self.captured.operators,
+        return [
+            self.unique_graphs,
             self.captured.graphs,
-        ]
+            self.captured.operators,
+            self.total.operators,
+        ] + self.percent().tocsv()
 
 
 def should_print_missing():
@@ -87,6 +91,8 @@ def print_missing(stack):
 
 
 class Profiler:
+    unique_graphs = 0
+
     def __init__(self):
         self.prof = torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
@@ -121,6 +127,9 @@ class Profiler:
             else:
                 pass  # ops recursively called from other ops (ignored)
 
+        unique_graphs = Profiler.unique_graphs
+        Profiler.unique_graphs = 0
+
         return ProfileResult(
             captured=ProfileMetrics(
                 microseconds=captured_microseconds,
@@ -133,6 +142,7 @@ class Profiler:
                 operators=total_ops,
                 fusions=total_ops - 1,
             ),
+            unique_graphs=unique_graphs,
         )
 
 
@@ -164,4 +174,5 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
                 ), debug_print()
             return result
 
+    Profiler.unique_graphs += 1
     return _wrapped

@@ -444,6 +444,10 @@ class BuiltinVariable(VariableTracker):
         ):
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val.add_options(self, obj, name_var)
+        elif isinstance(obj, variables.UserDefinedObjectVariable):
+            unimplemented(
+                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
+            )
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder

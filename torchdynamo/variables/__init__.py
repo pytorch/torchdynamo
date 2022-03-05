@@ -20,6 +20,7 @@ from .misc import GetAttrVariable
 from .misc import GradModeVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
+from .misc import NumpyVariable
 from .misc import PythonModuleVariable
 from .misc import SuperVariable
 from .misc import UnknownVariable
@@ -49,6 +50,7 @@ __all__ = [
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NNModuleVariable",
+    "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "SliceVariable",

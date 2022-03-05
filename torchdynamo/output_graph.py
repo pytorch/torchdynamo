@@ -294,6 +294,7 @@ class OutputGraph(fx.Tracer):
         gm.recompile()
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
+        counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
         if config.debug:
             print(f"\n{name} {gm.forward.__code__.co_filename}")

@@ -168,7 +168,16 @@ def coverage_experiment(args, model, example_inputs):
         model(*example_inputs)
     coverage_result = profiler.results()
     output_csv(
-        ("dev", "name", "operators", "time", "captured", "uncaptured", "graphs"),
+        (
+            "dev",
+            "name",
+            "graphs",
+            "graph_calls",
+            "captured_ops",
+            "total_ops",
+            "pct_ops",
+            "pct_time",
+        ),
         [
             current_device,
             current_name,
@@ -624,9 +633,9 @@ def print_summary(filename):
         try:
             if col in ("dev", "name"):
                 continue
-            elif col in ("operators", "time"):
+            elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
-            elif col in ("captured", "uncaptured", "graphs"):
+            elif col in ("graphs", "graph_calls", "captured_ops", "total_ops"):
                 print(col.ljust(width), f"{data[col].mean():.1f}")
             else:
                 cdata = data[col].clip(1)
@@ -670,8 +679,10 @@ def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
         with optimize_ctx:
             model(*example_inputs)
         _, frames_second_pass = Stats.reset_counters()  # should be 0
+        assert frames_second_pass == 0
+
         if "coverage" in output_filename:
-            results.append(f"{ok:4}/{total:4} frames (+{frames_second_pass:2}),")
+            results.append(f"{ok:3}/{total:3} frames")
 
         results.append(experiment(model, example_inputs))
         print(" ".join(map(str, results)))

@@ -15,6 +15,7 @@ from .. import mutation_guard
 from .. import skipfiles
 from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin
+from ..allowed_functions import is_numpy
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..source import GetItemSource
@@ -40,6 +41,7 @@ from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
+from .misc import NumpyVariable
 from .misc import PythonModuleVariable
 from .misc import SkipFilesVariable
 from .nn_module import UnspecializedNNModuleVariable
@@ -206,6 +208,15 @@ class VariableBuilder:
         ):
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif is_numpy(value):
+            return NumpyVariable(
+                value,
+                guards=make_guards(
+                    GuardBuilder.FUNCTION_MATCH
+                    if callable(value)
+                    else GuardBuilder.TYPE_MATCH
+                ),
             )
         elif istype(value, type):
             return UserDefinedClassVariable(

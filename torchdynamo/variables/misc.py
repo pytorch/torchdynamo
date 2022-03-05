@@ -292,3 +292,27 @@ class SkipFilesVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+
+class NumpyVariable(VariableTracker):
+    """
+    Wrapper around `numpy.*` for better error messages.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        unimplemented("numpy")
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented("numpy")
