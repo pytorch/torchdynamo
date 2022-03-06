@@ -67,6 +67,9 @@ SKIP_DIRS = [
     )
 ]
 SKIP_DIRS_RE = None  # set in add() below
+FILENAME_ALLOWLIST = {
+    torch.nn.Sequential.__init__.__code__.co_filename,
+}
 
 
 def add(module: types.ModuleType):
@@ -80,6 +83,8 @@ def check(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return True
+    if filename in FILENAME_ALLOWLIST:
+        return False
     if allow_torch and is_torch(filename):
         return False
     return bool(SKIP_DIRS_RE.match(filename))
