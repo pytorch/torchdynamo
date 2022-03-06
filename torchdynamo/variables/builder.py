@@ -17,6 +17,7 @@ from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin
 from ..allowed_functions import is_numpy
 from ..guards import GuardBuilder
+from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import Source
@@ -255,12 +256,12 @@ class VariableBuilder:
                 value,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
-            if inspect.getattr_static(type(value), "__setattr__", None) not in (
-                object.__setattr__,
-            ):
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
-            return self.tx.output.side_effects.track_object(self.source, value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                self.source, value, result
+            )
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():

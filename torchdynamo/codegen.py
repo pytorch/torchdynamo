@@ -10,6 +10,7 @@ import torchdynamo
 
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
+from .source import AttrSource
 from .source import Source
 from .utils import is_safe_constant
 from .utils import istype
@@ -59,9 +60,13 @@ class PyCodegen(object):
             output.append(create_instruction("DUP_TOP"))
             return
 
-        if allow_cache and self.tempvars.get(value) is not None:
-            output.append(self.create_load(self.tempvars[value]))
-            return
+        if allow_cache:
+            if value.mutable_local and value.mutable_local in self.tempvars:
+                output.append(self.create_load(self.tempvars[value.mutable_local]))
+                return
+            if self.tempvars.get(value) is not None:
+                output.append(self.create_load(self.tempvars[value]))
+                return
 
         self.tx.output.guards.update(value.guards)
         if value.source is not None:
@@ -101,6 +106,8 @@ class PyCodegen(object):
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
+        if value.mutable_local:
+            self.tempvars[value.mutable_local] = var
         self._output.append(self.create_store(var))
 
     def foreach(self, items):
@@ -248,3 +255,10 @@ class PyCodegen(object):
             self.extend_output(arg.load(self))
 
         self.append_output(create_instruction("CALL_FUNCTION", len(graphargs)))
+
+    def load_import_from(self, module_name, object_name):
+        self.extend_output(
+            AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
+                self
+            )
+        )

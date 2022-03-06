@@ -33,6 +33,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from ..side_effects import SideEffects
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
         if is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)
@@ -44,6 +48,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
             )
+        elif (
+            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            var = tx.output.side_effects.track_object_new(
+                self.source, self.value, UserDefinedObjectVariable, options
+            )
+            return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+
         return super().call_function(tx, args, kwargs)
 
     def const_getattr(self, tx, name):

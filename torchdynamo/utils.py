@@ -353,6 +353,7 @@ odict_values = type(collections.OrderedDict().values())
 product = functools.partial(functools.reduce, operator.mul)
 tuple_iterator = type(iter(tuple()))
 tuple_iterator_len = tuple_iterator.__length_hint__
+object_new = object.__new__
 
 
 def tuple_iterator_getitem(it, index):

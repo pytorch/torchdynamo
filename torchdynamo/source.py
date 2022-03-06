@@ -2,6 +2,7 @@ import collections
 import dataclasses
 from typing import Any
 
+from . import utils
 from .bytecode_transformation import create_instruction
 from .guards import Guard
 from .guards import GuardSource
@@ -99,17 +100,11 @@ class GetItemSource(Source):
 @dataclasses.dataclass
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
-        tuple_iterator_getitem = AttrSource(
-            codegen.tx.import_source("torchdynamo.utils"), "tuple_iterator_getitem"
-        )
-        return (
-            tuple_iterator_getitem.reconstruct(codegen)
-            + self.base.reconstruct(codegen)
-            + [
-                codegen.create_load_const(self.index),
-                create_instruction("CALL_FUNCTION", 2),
-            ]
-        )
+        codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
+        return self.base.reconstruct(codegen) + [
+            codegen.create_load_const(self.index),
+            create_instruction("CALL_FUNCTION", 2),
+        ]
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
@@ -120,12 +115,8 @@ class TypeSource(Source):
     base: Source
 
     def reconstruct(self, codegen):
-        type_fn = AttrSource(codegen.tx.import_source("builtins"), "type")
-        return (
-            type_fn.reconstruct(codegen)
-            + self.base.reconstruct(codegen)
-            + [create_instruction("CALL_FUNCTION", 1)]
-        )
+        codegen.load_import_from("builtins", "type")
+        return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
 
     def guard_source(self):
         return self.base.guard_source()

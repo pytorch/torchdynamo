@@ -1,11 +1,15 @@
 import collections
 import dataclasses
+import inspect
 from typing import Any
 
+from . import utils
 from . import variables
 from .bytecode_transformation import create_instruction
 from .codegen import PyCodegen
+from .source import LocalSource
 from .source import Source
+from .utils import object_new
 from .variables.base import VariableTracker
 
 
@@ -20,6 +24,12 @@ class MutableSideEffects:
     source: Source
     is_modified: bool = False
 
+    def __hash__(self):
+        return id(self)
+
+    def __eq__(self, other):
+        return self is other
+
 
 @dataclasses.dataclass
 class AttributeMutation:
@@ -28,6 +38,19 @@ class AttributeMutation:
     """
 
     source: Source
+
+
+class AttributeMutationExisting(AttributeMutation):
+    def __hash__(self):
+        return id(self)
+
+    def __eq__(self, other):
+        return self is other
+
+
+@dataclasses.dataclass
+class AttributeMutationNew(AttributeMutation):
+    cls_source: Source
 
     def __hash__(self):
         return id(self)
@@ -75,6 +98,10 @@ class SideEffects(object):
         assert self.is_attribute_mutation(item)
         return self.store_attr_mutations[item.mutable_local][name]
 
+    @staticmethod
+    def cls_supports_mutation_side_effects(cls):
+        return inspect.getattr_static(cls, "__setattr__", None) in (object.__setattr__,)
+
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
 
@@ -99,13 +126,30 @@ class SideEffects(object):
     track_list = _track_obj
     track_dict = _track_obj
 
-    def track_object(
+    def track_object_existing(
         self,
         source: Source,
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(source, item, variable, mutable_cls=AttributeMutation)
+        return self._track_obj(
+            source, item, variable, mutable_cls=AttributeMutationExisting
+        )
+
+    def track_object_new(
+        self,
+        cls_source: Source,
+        user_cls: Any,
+        variable_cls: Any,
+        options,
+    ):
+        obj = object_new(user_cls)
+        variable = variable_cls(
+            obj, mutable_local=AttributeMutationNew(None, cls_source), **options
+        )
+        self.id_to_variable[id(obj)] = variable
+        self.keepalive.append(obj)
+        return variable
 
     def mutation(self, oldvar, newvar):
         return newvar.clone(
@@ -123,8 +167,14 @@ class SideEffects(object):
         ]
 
         for var in modified_vars:
-            assert cg.tempvars.get(var) is None
-            if var in cg.tempvars:
+            if isinstance(var.mutable_local, AttributeMutationNew):
+                cg.load_import_from(utils.__name__, "object_new")
+                cg(var.mutable_local.cls_source)
+                cg.extend_output([create_instruction("CALL_FUNCTION", 1)])
+                cg.add_cache(var)
+                var.mutable_local.source = LocalSource(cg.tempvars[var])
+            elif var in cg.tempvars:
+                assert cg.tempvars.get(var) is None
                 # subsequent usage should point to the original variable
                 cg(var.mutable_local.source)
                 cg.add_cache(var)
