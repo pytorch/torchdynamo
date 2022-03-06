@@ -1,6 +1,7 @@
 import functools
 import weakref
 
+import torch.nn
 from torch.nn import Module
 
 from .utils import ExactWeakKeyDictionary
@@ -55,10 +56,16 @@ def ensure_patched(cls):
 class GenerationTracker:
     generation = 0
     db = ExactWeakKeyDictionary()
+    dynamic_classes = ExactWeakKeyDictionary()
 
     @classmethod
     def tag(cls, obj):
         cls.db[obj] = cls.generation
+
+    @staticmethod
+    def mark_class_dynamic(cls):
+        assert issubclass(cls, torch.nn.Module)
+        GenerationTracker.dynamic_classes[cls] = True
 
     @classmethod
     def check(cls, obj):
@@ -71,7 +78,11 @@ def generation_tagging_new(cls, *args, **kwargs):
     return obj
 
 
-is_current_generation = GenerationTracker.check
+def is_dynamic_nn_module(obj):
+    """Check for nn.Modules() created dynamically or mutated"""
+    return GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
+        obj
+    )
 
 
 def install_generation_tagging_new():

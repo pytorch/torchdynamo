@@ -15,6 +15,13 @@ _GUARD_SOURCE_NN_MODULE = {
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
 }
 
+_GUARD_SOURCE_NOT_NN_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL,
+    GuardSource.GLOBAL: GuardSource.GLOBAL,
+    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL,
+    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL,
+}
+
 
 @dataclasses.dataclass
 class Source:
@@ -32,6 +39,12 @@ class Source:
 
     def make_guard(self, fn):
         return Guard(self.name(), self.guard_source(), fn)
+
+    def is_nn_module(self):
+        return self.guard_source() in (
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.GLOBAL_NN_MODULE,
+        )
 
 
 @dataclasses.dataclass
@@ -159,3 +172,8 @@ class NNModuleSource(Source):
 
     def name(self):
         return self.inner.name()
+
+
+class NotNNModuleSource(NNModuleSource):
+    def guard_source(self):
+        return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]

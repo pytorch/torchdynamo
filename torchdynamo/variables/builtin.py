@@ -456,6 +456,8 @@ class BuiltinVariable(VariableTracker):
             unimplemented(
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
             )
+        elif isinstance(obj, variables.NNModuleVariable):
+            obj.convert_to_unspecialized(tx)
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder

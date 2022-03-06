@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import importlib
 import inspect
 import types
 from typing import Dict
@@ -104,6 +105,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
+
+            if method is object.__init__:
+                return ConstantVariable(None, **options)
 
             if method is collections.OrderedDict.keys and self.source:
                 # subclass of OrderedDict
@@ -226,7 +230,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and not callable(value)
         ):
             if not source:
-                source = AttrSource(tx.import_source(type(value).__module__), name)
+                assert getattr(
+                    importlib.import_module(type(value).__module__),
+                    type(value).__name__,
+                ) is type(value)
+                source = AttrSource(
+                    AttrSource(
+                        tx.import_source(type(value).__module__), type(value).__name__
+                    ),
+                    name,
+                )
             return VariableBuilder(tx, source)(subobj).add_options(options)
 
         if isinstance(
@@ -237,7 +250,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.distributions.constraints.Constraint,
             ),
         ):
-            return UserDefinedObjectVariable(subobj, **options)
+            return UserDefinedObjectVariable(subobj, source=source, **options)
+
+        if name == "__class__":
+            return UserDefinedClassVariable(type(self.value), source=source, **options)
 
         return variables.GetAttrVariable(self, name, source=source, **options)
 

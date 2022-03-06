@@ -37,6 +37,7 @@ from .codegen import PyCodegen
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
+from .utils import RestartAnalysis
 from .utils import Unsupported
 from .utils import counters
 from .utils import istype
@@ -271,7 +272,7 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except Unsupported:
+        except (Unsupported, RestartAnalysis):
             raise
         except Exception as e:
             sys.stderr.write(

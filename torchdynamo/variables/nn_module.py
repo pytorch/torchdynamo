@@ -12,9 +12,12 @@ from .. import skipfiles
 from .. import variables
 from ..allowed_functions import is_allowed
 from ..guards import GuardBuilder
+from ..mutation_guard import GenerationTracker
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import NNModuleSource
+from ..source import NotNNModuleSource
+from ..utils import RestartAnalysis
 from ..utils import istype
 from ..utils import proxy_args_kwargs
 from ..utils import unimplemented
@@ -36,21 +39,29 @@ class NNModuleVariable(VariableTracker):
     def python_type(self):
         return self.module_type
 
+    def _wrap_submodule(self, tx, source, submod, *key_extra, **options):
+        return
+
     def unpack_var_sequence(self, tx):
         # implement list/iter/tuple/etc calls
-        key = self.module_key
         base = tx.output.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
         assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
         ), typestr(base)
         assert self.source
-        return [
-            tx.output.add_submodule(
-                submod, key, idx, source=GetItemSource(self.source, idx), **options
+        result = []
+        for idx, submod in enumerate(base):
+            result.append(
+                tx.output.add_submodule(
+                    submod,
+                    self.module_key,
+                    idx,
+                    source=NNModuleSource(GetItemSource(self.source, idx)),
+                    **options,
+                )
             )
-            for idx, submod in enumerate(base)
-        ]
+        return result
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         options = VariableTracker.propagate(self)
@@ -65,6 +76,13 @@ class NNModuleVariable(VariableTracker):
     def is_training(self, tx):
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
+
+    def convert_to_unspecialized(self, tx):
+        """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
+        mod = tx.output.get_submodule(self.module_key)
+        GenerationTracker.tag(mod)
+        # GenerationTracker.mark_class_dynamic(type(mod))
+        raise RestartAnalysis()
 
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
@@ -279,6 +297,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     defined objects and will pass parameters into the FX graph as inputs.
     Giving one graph per module class.
     """
+
+    def __init__(self, value, **kwargs):
+        super(UnspecializedNNModuleVariable, self).__init__(value=value, **kwargs)
+        if self.source and self.source.is_nn_module():
+            # force guard checks even when `not config.guard_nn_modules``
+            self.source = NotNNModuleSource(self.source)
 
     @staticmethod
     @functools.lru_cache(None)

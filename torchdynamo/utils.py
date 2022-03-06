@@ -99,6 +99,10 @@ def make_cell(val):
     return f.__closure__[0]
 
 
+class RestartAnalysis(RuntimeError):
+    pass
+
+
 class Unsupported(RuntimeError):
     def __init__(self, msg):
         super(Unsupported, self).__init__(msg)

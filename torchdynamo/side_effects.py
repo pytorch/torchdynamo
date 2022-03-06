@@ -3,6 +3,8 @@ import dataclasses
 import inspect
 from typing import Any
 
+import torch.nn
+
 from . import utils
 from . import variables
 from .bytecode_transformation import create_instruction
@@ -100,7 +102,10 @@ class SideEffects(object):
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
-        return inspect.getattr_static(cls, "__setattr__", None) in (object.__setattr__,)
+        return inspect.getattr_static(cls, "__setattr__", None) in (
+            object.__setattr__,
+            torch.nn.Module.__setattr__,
+        )
 
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)

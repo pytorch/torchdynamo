@@ -781,3 +781,14 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
+
+    def test_user_defined_class_name(self):
+        class MyClassFoo:
+            pass
+
+        def fn1(a, b, c):
+            tmp = MyClassFoo()
+            if tmp.__class__.__name__ == "MyClassFoo":
+                return a - b / c
+
+        torchdynamo.testing.standard_test(self, fn=fn1, nargs=3, expected_ops=2)

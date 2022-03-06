@@ -1,6 +1,7 @@
 import dis
 import functools
 import inspect
+import itertools
 import os
 import sys
 import traceback
@@ -22,6 +23,7 @@ from .bytecode_transformation import transform_code_object
 from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
+from .utils import RestartAnalysis
 from .utils import Unsupported
 from .utils import counters
 from .utils import unimplemented
@@ -140,7 +142,13 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
         try:
-            code = transform_code_object(frame.f_code, transform)
+            for attempt in itertools.count():
+                try:
+                    code = transform_code_object(frame.f_code, transform)
+                    break
+                except RestartAnalysis:
+                    if attempt > 100:
+                        unimplemented("100+ RestartAnalysis() calls")
             output_codes.add(code)
             if config.debug:
                 print(

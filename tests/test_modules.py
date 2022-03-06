@@ -480,6 +480,18 @@ class ModuleNameString(torch.nn.Module):
         return 11
 
 
+class SelfMutatingModule(torch.nn.Module):
+    def __init__(self, layer):
+        super().__init__()
+        self.layer = layer
+        self.counter = 0
+
+    def forward(self, x):
+        result = self.layer(x) + self.counter
+        self.counter += 1
+        return F.relu(result)
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -545,3 +557,18 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             r = m(i)
         self.assertTrue(torchdynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
+
+    def test_self_mutating1(self):
+        m1 = torch.nn.Linear(10, 10)
+        m2 = SelfMutatingModule(m1)
+        m3 = SelfMutatingModule(m1)
+        m4 = SelfMutatingModule(m1)
+        i = torch.randn(10)
+        out2 = [m2(i), m2(i), m2(i)]
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnt):
+            out3 = [m3(i), m3(i), m3(i)]
+            out4 = [m4(i), m4(i), m4(i)]
+        self.assertTrue(torchdynamo.testing.same(out2, out3))
+        self.assertTrue(torchdynamo.testing.same(out2, out4))
+        self.assertEqual(cnt.frame_count, 3)

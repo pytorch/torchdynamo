@@ -164,10 +164,16 @@ class VariableBuilder:
                 )
             return result
         elif isinstance(value, torch.nn.Module):
-            if mutation_guard.is_current_generation(value):
+            if mutation_guard.is_dynamic_nn_module(value):
                 # created dynamically, don't specialize on it
-                return UnspecializedNNModuleVariable(
+                result = UnspecializedNNModuleVariable(
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                )
+                if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                    # don't allow STORE_ATTR mutation with custom __setattr__
+                    return result
+                return self.tx.output.side_effects.track_object_existing(
+                    self.source, value, result
                 )
             else:
                 return self.tx.output.add_submodule(

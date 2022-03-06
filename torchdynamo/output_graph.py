@@ -14,11 +14,13 @@ import torch.nn
 from torch import fx
 
 from . import config
+from . import variables
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
 from .guards import GuardBuilder
+from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import LocalSource
 from .source import Source
@@ -149,6 +151,9 @@ class OutputGraph(fx.Tracer):
             )
 
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
+        if is_dynamic_nn_module(mod):
+            return variables.UnspecializedNNModuleVariable(mod, **options)
+
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
         source: Source = options["source"]
