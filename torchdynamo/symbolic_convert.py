@@ -105,7 +105,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
-
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
@@ -121,6 +120,10 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
+        elif value.has_unpack_var_sequence(self):
+            if truth_fn(len(value.unpack_var_sequence(self))):
+                push and self.push(value)
+                self.jump(inst)
         else:
             unimplemented(f"generic_jump {typestr(value)}")
 
@@ -1042,14 +1045,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(f"inline with __closure__ {func}")
         if func.has_self():
             unimplemented("inline with __self__")
-        if skipfiles.check(func.get_filename()) and not skipfiles.is_torch_nn(
+        if skipfiles.check(
             func.get_filename()
-        ):
+        ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
                 f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
             )
 
-        sub_locals = func.bind_args(parent, args, kwargs)
+        try:
+            sub_locals = func.bind_args(parent, args, kwargs)
+        except TypeError as exc:
+            print(func.get_filename(), func.get_function(), args, kwargs, exc)
+            unimplemented("arg mismatch inlining")
+
         sub_locals.update(func.closure_vars(parent))
         for v in sub_locals.values():
             if not isinstance(v, VariableTracker):

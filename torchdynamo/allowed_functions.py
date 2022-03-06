@@ -24,6 +24,7 @@ def _disallowed_function_ids():
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
         torch.clear_autocast_cache,
+        torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
         torch.set_anomaly_enabled,
@@ -43,9 +44,12 @@ def _allowed_function_ids():
     Walk torch.* and get the ids of all the stuff in it
     """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
+    torch.distributions.Distribution.set_default_validate_args(False)
     torch_object_ids = dict()
 
     def _find_torch_objects(module):
+        if module.__name__.startswith("torch.distributions"):
+            return
         torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:

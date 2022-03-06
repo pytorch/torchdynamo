@@ -469,3 +469,16 @@ class FunctionTests(torchdynamo.testing.TestCase):
         output = (x, x + 1, x + 2, x + 3)
         output = (None,) + output + (None,)
         return output[2] + output[3]
+
+    @make_test
+    def test_list_truth(a, b):
+        tmp = [1, 2, 3]
+        if tmp:
+            return a + b
+        else:
+            return a - b
+
+    @make_test
+    def test_list_reversed(a, b):
+        tmp = [a + 1, a + 2, a + 3]
+        return a + b + next(iter(reversed(tmp)))

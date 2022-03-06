@@ -11,9 +11,9 @@ from ..guards import Guard
 from ..guards import GuardBuilder
 from ..guards import GuardSource
 from ..source import AttrSource
+from ..utils import identity
 from ..utils import unimplemented
 from .base import VariableTracker
-from .base import typestr
 
 
 class SuperVariable(VariableTracker):
@@ -48,8 +48,10 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn = self.const_getattr(self, name)
+        if inner_fn is object.__init__:
+            return LambdaVariable(identity, **options)
         if not isinstance(inner_fn, types.FunctionType):
-            unimplemented(f"non-function super: {typestr(inner_fn)}")
+            unimplemented(f"non-function super: {inner_fn}")
         return variables.UserFunctionVariable(inner_fn, **options).call_function(
             tx, [self.objvar] + args, kwargs
         )

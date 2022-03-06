@@ -207,9 +207,37 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             name in getattr(value, "__dict__", {})
             or ConstantVariable.is_literal(subobj)
-            or isinstance(subobj, (torch.Tensor, torch.nn.Module))
+            or isinstance(
+                subobj,
+                (
+                    torch.Tensor,
+                    torch.nn.Module,
+                ),
+            )
         ):
+            if source:
+                return VariableBuilder(tx, source)(subobj).add_options(options)
+            elif ConstantVariable.is_literal(subobj):
+                return ConstantVariable(subobj, **options)
+
+        if (
+            name not in getattr(value, "__dict__", {})
+            and type(value).__module__.startswith("torch.")
+            and not callable(value)
+        ):
+            if not source:
+                source = AttrSource(tx.import_source(type(value).__module__), name)
             return VariableBuilder(tx, source)(subobj).add_options(options)
+
+        if isinstance(
+            subobj,
+            (
+                torch.distributions.constraints._Interval,
+                torch.distributions.constraints._Real,
+                torch.distributions.constraints.Constraint,
+            ),
+        ):
+            return UserDefinedObjectVariable(subobj, **options)
 
         return variables.GetAttrVariable(self, name, source=source, **options)
 

@@ -1,4 +1,5 @@
 import functools
+import inspect
 import itertools
 import math
 import operator
@@ -7,6 +8,7 @@ from typing import List
 
 import torch
 
+from .. import config
 from .. import variables
 from ..allowed_functions import is_disallowed
 from ..source import AttrSource
@@ -187,14 +189,20 @@ class BuiltinVariable(VariableTracker):
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
+
+        if handler:
+            try:
+                inspect.signature(handler).bind(tx, *args, **kwargs)
+            except TypeError as exc:
+                if config.debug:
+                    print("WARN: incorrect arg count", handler, exc)
+                handler = None
+
         if handler:
             try:
                 result = handler(tx, *args, **kwargs)
                 if result is not None:
                     return result.add_options(options)
-            except TypeError as exc:
-                # args aren't what we expect
-                assert "argument" in str(exc), str(exc)
             except Unsupported as exc:
                 if not has_constant_handler:
                     raise
@@ -466,3 +474,10 @@ class BuiltinVariable(VariableTracker):
             )
 
         unimplemented(f"type({obj})")
+
+    def call_reversed(self, tx, obj: VariableTracker):
+        if obj.has_unpack_var_sequence(tx):
+            items = list(reversed(obj.unpack_var_sequence(tx)))
+            return variables.TupleVariable(
+                items, **VariableTracker.propagate(self, obj)
+            )

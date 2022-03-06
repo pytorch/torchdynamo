@@ -186,7 +186,7 @@ class NNModuleVariable(VariableTracker):
         if name == "forward":
             return self.call_function(tx, args, kwargs)
 
-        if name == "_check_input_dim" and skipfiles.is_torch_nn(
+        if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
             return ConstantVariable(True, **options)

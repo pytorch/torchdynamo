@@ -1,6 +1,8 @@
 from typing import Dict
 from typing import List
 
+import torch
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..utils import namedtuple_fields
@@ -14,9 +16,10 @@ class BaseListVariable(VariableTracker):
     def cls_for(obj):
         return {
             iter: ListIteratorVariable,
-            tuple: TupleVariable,
             list: ListVariable,
             slice: SliceVariable,
+            torch.Size: SizeVariable,
+            tuple: TupleVariable,
         }[obj]
 
     def __init__(self, items, **kwargs):
@@ -219,6 +222,12 @@ class TupleVariable(BaseListVariable):
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+class SizeVariable(TupleVariable):
+    """torch.Size(...)"""
+
+    pass
 
 
 class NamedTupleVariable(TupleVariable):

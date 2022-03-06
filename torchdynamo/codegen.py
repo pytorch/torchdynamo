@@ -169,7 +169,7 @@ class PyCodegen(object):
     def create_load_global(self, name, add=False):
         if add:
             self.tx.output.update_co_names(name)
-        assert name in self.code_options["co_names"]
+        assert name in self.code_options["co_names"], f"{name} not in co_names"
         return create_instruction(
             "LOAD_GLOBAL", self.code_options["co_names"].index(name), name
         )

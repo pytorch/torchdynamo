@@ -110,8 +110,10 @@ for _name in (
         pass
 
 
-def is_torch_nn(filename):
-    return filename.startswith(os.path.dirname(torch.nn.__file__))
+def is_torch_inline_allowed(filename):
+    return filename.startswith(
+        os.path.dirname(torch.nn.__file__)
+    ) or filename.startswith(os.path.dirname(torch.distributions.__file__))
 
 
 def is_torch(filename):

@@ -53,7 +53,7 @@ class GlobalSource(Source):
     global_name: str
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.global_name)]
+        return [codegen.create_load_global(self.global_name, add=True)]
 
     def guard_source(self):
         return GuardSource.GLOBAL
