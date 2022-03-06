@@ -857,7 +857,7 @@ class InstructionTranslatorBase(object):
     BINARY_MODULO = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-    BINARY_SUBSCR = stack_op(operator.getitem)
+    BINARY_SUBSCR = break_graph_if_unsupported(stack_op(operator.getitem))
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
