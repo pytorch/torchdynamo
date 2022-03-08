@@ -31,11 +31,16 @@ from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.optimizations.inference import fixed_strategy2
 from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
+from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
+from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
+from torchdynamo.testing import collect_results
 from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
+from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.testing import same
+from torchdynamo.utils import clone_inputs
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 torchbench_dir = abspath(
@@ -73,7 +78,7 @@ def iter_models(args):
     for model_name in iter_model_names(args):
         for device in args.devices:
             try:
-                yield load_model(device, model_name)
+                yield load_model(device, model_name, args.training, args.check_accuracy)
             except NotImplementedError:
                 continue  # bad benchmark implementation
 
@@ -93,14 +98,20 @@ def iter_model_names(args):
         yield model_name
 
 
-def load_model(device, model_name):
+def load_model(device, model_name, is_training, check_accuracy):
     module = importlib.import_module(f"torchbenchmark.models.{model_name}")
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
-    benchmark = benchmark_cls(test="eval", device=device, jit=False)
+    if is_training:
+        benchmark = benchmark_cls(test="train", device=device, jit=False)
+    else:
+        benchmark = benchmark_cls(test="eval", device=device, jit=False)
     model, example_inputs = benchmark.get_module()
-    model.eval()
+    if is_training and not check_accuracy:
+        model.train()
+    else:
+        model.eval()
     gc.collect()
     global current_name, current_device
     current_device = device
@@ -108,16 +119,17 @@ def load_model(device, model_name):
     return device, current_name, model, example_inputs
 
 
-def timed(model, example_inputs, times=1):
+def timed(model, model_iter_fn, example_inputs, times=1):
     synchronize()
     gc.collect()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
+    # Dont collect outputs to correctly measure timing
     for _ in range(times):
-        result = model(*example_inputs)
+        model_iter_fn(model, example_inputs, collect_outputs=False)
         synchronize()
     t1 = time.perf_counter()
-    return result, t1 - t0
+    return t1 - t0
 
 
 class Stats:
@@ -155,7 +167,7 @@ def output_csv(headers, row):
     output.writerow([(f"{x:.4f}" if isinstance(x, float) else x) for x in row])
 
 
-def coverage_experiment(args, model, example_inputs):
+def coverage_experiment(args, model_iter_fn, model, example_inputs):
     """
     Test operator/model coverage of TorchDynamo and record statistics
     taken from a profiler.  This target is mainly intended to check
@@ -165,7 +177,7 @@ def coverage_experiment(args, model, example_inputs):
     """
     profiler = Profiler()
     with profiler.prof, torchdynamo.run():
-        model(*example_inputs)
+        model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
     output_csv(
         (
@@ -187,7 +199,7 @@ def coverage_experiment(args, model, example_inputs):
     return coverage_result
 
 
-def speedup_experiment(args, model, example_inputs):
+def speedup_experiment(args, model_iter_fn, model, example_inputs):
     """
     Measure speedups over eager using the autotuning inference backend.  To use this:
         1) First run once to record graphs that need autotuning
@@ -199,9 +211,9 @@ def speedup_experiment(args, model, example_inputs):
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        _, timings[rep, 0] = timed(model, example_inputs)
+        timings[rep, 0] = timed(model, model_iter_fn, example_inputs)
         with torchdynamo.run():
-            _, timings[rep, 1] = timed(model, example_inputs)
+            timings[rep, 1] = timed(model, model_iter_fn, example_inputs)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -211,27 +223,27 @@ def speedup_experiment(args, model, example_inputs):
     return format_speedup(speedup, pvalue)
 
 
-def overhead_experiment(*args):
+def overhead_experiment(*args, model_iter_fn):
     """
     Measure overheads of TorchDynamo by running with no backend (only
     eager+FX), and reporting speedup/slowdown over eager.
 
     Writes to ./overheads.csv
     """
-    return speedup_experiment(*args)
+    return speedup_experiment(*args, model_iter_fn)
 
 
-def baselines(models, example_inputs, args):
+def baselines(models, model_iter_fn, example_inputs, args):
     """
     Common measurement code across all baseline experiments.
     """
     models = list(models)
     for idx, (name, model) in enumerate(models):
         if idx == 0:
-            result0, _ = timed(model, example_inputs)
+            result0 = model_iter_fn(model, example_inputs)
         elif model is not None:
             try:
-                result, _ = timed(model, example_inputs)
+                result = model_iter_fn(model, example_inputs)
                 if same(result0, result):
                     continue
                 print(name, "is INCORRECT")
@@ -243,7 +255,7 @@ def baselines(models, example_inputs, args):
     for rep in range(args.repeat):
         for idx, (name, model) in enumerate(models):
             if model is not None:
-                _, timings[rep, idx] = timed(model, example_inputs)
+                timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
         for i in range(1, timings.shape[1])
@@ -273,7 +285,7 @@ def try_script(model, example_inputs):
         return None
 
 
-def speedup_experiment_ts(args, model, example_inputs):
+def speedup_experiment_ts(args, model_iter_fn, model, example_inputs):
     """
     Measure baseline performance (without using TorchDynamo) of TorchScript and optimize_for_inference.
 
@@ -290,12 +302,13 @@ def speedup_experiment_ts(args, model, example_inputs):
             # ("nnc", backends.nnc(try_script(model, example_inputs), example_inputs)),
             # ("nvfuser", backends.nvfuser(try_script(model, example_inputs), example_inputs)),
         ],
+        model_iter_fn,
         example_inputs,
         args,
     )
 
 
-def speedup_experiment_sr(args, model, example_inputs):
+def speedup_experiment_sr(args, model_iter_fn, model, example_inputs):
     """
     Measure baseline performance (without using TorchDynamo) of static runtime.
 
@@ -315,12 +328,13 @@ def speedup_experiment_sr(args, model, example_inputs):
                 sr,
             ),
         ],
+        model_iter_fn,
         example_inputs,
         args,
     )
 
 
-def speedup_experiment_onnx(args, model, example_inputs):
+def speedup_experiment_onnx(args, model_iter_fn, model, example_inputs):
     """
     Measure baseline performance (without using TorchDynamo) of ONNXRT and TensorFlow.
 
@@ -347,12 +361,13 @@ def speedup_experiment_onnx(args, model, example_inputs):
             ("onnxrt", m_onnxrt),
             ("onnx2tf", m_onnx2tf),
         ],
+        model_iter_fn,
         example_inputs,
         args,
     )
 
 
-def speedup_experiment_trt(args, model, example_inputs):
+def speedup_experiment_trt(args, model_iter_fn, model, example_inputs):
     """
     Measure baseline performance (without using TorchDynamo) of TensorRT.
 
@@ -377,12 +392,13 @@ def speedup_experiment_trt(args, model, example_inputs):
             ("torch2trt", m_torch2trt),
             ("fx2trt", m_fx2trt),
         ],
+        model_iter_fn,
         example_inputs,
         args,
     )
 
 
-def null_experiment(args, model, example_inputs):
+def null_experiment(args, model_iter_fn, model, example_inputs):
     """
     A no-op experiment useful for making sure TorchBenchark alone works properly.
     """
@@ -390,8 +406,8 @@ def null_experiment(args, model, example_inputs):
     return []
 
 
-def pick_grad(name):
-    if name in ("maml",):
+def pick_grad(name, is_training):
+    if is_training or name in ("maml",):
         return torch.enable_grad()
     else:
         return torch.no_grad()
@@ -399,6 +415,21 @@ def pick_grad(name):
 
 def help(fn):
     return fn.__doc__
+
+
+def forward_pass(mod, inputs, collect_outputs=True):
+    return mod(*inputs)
+
+
+def forward_and_backward_pass(mod, inputs, collect_outputs=True):
+    cloned_inputs = clone_inputs(inputs)
+    mod.zero_grad(True)
+    pred = mod(*cloned_inputs)
+    loss = reduce_to_scalar_loss(pred)
+    loss.backward()
+    if collect_outputs:
+        return collect_results(mod, pred, loss, cloned_inputs)
+    return None
 
 
 def main():
@@ -436,6 +467,16 @@ def main():
     parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
         "--minimum-call-count", type=int, help="filter out graphs with too few ops"
+    )
+    parser.add_argument(
+        "--training",
+        action="store_true",
+        help="Performs training",
+    )
+    parser.add_argument(
+        "--check-accuracy",
+        action="store_true",
+        help="sets model.eval() to reduce randomness",
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -483,13 +524,22 @@ def main():
     group.add_argument(
         "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
     )
+    group.add_argument(
+        "--accuracy-aot-nop",
+        action="store_true",
+        help="Accuracy testing for AOT vs Eager",
+    )
+    group.add_argument(
+        "--speedup-aot-efficient-fusion",
+        action="store_true",
+        help="speedup using experimental fixed_strategy backend",
+    )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
     group.add_argument(
         "--nops",
         action="store_true",
         help="Test that bytecode rewriting works properly.",
     )
-
     args = parser.parse_args()
 
     # defaults
@@ -521,6 +571,11 @@ def main():
 
     if args.verbose:
         torchdynamo.config.debug = True
+
+    if args.training:
+        model_iter_fn = forward_and_backward_pass
+    else:
+        model_iter_fn = forward_pass
 
     experiment = null_experiment
     optimize_ctx = NullContext()
@@ -576,6 +631,22 @@ def main():
     elif args.speedup_trt:
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
+    elif args.accuracy_aot_nop:
+        optimize_ctx = torchdynamo.optimize(
+            aot_autograd_debug_strategy1, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        output_filename = "accuracy_aot_nop.csv"
+        args.check_accuracy = True
+        args.isolate = True
+    elif args.speedup_aot_efficient_fusion:
+        optimize_ctx = torchdynamo.optimize(
+            aot_autograd_speedup_strategy, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        output_filename = "speedups_aot_efficient_fusion.csv"
+        args.check_accuracy = False
+        args.isolate = True
     elif args.nothing:
         pass
     elif args.nops:
@@ -587,7 +658,7 @@ def main():
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 
-    experiment = functools.partial(experiment, args)
+    experiment = functools.partial(experiment, args, model_iter_fn)
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
@@ -598,10 +669,20 @@ def main():
     if args.only:
         for device in args.devices:
             try:
-                device, name, model, example_inputs = load_model(device, args.only)
+                device, name, model, example_inputs = load_model(
+                    device, args.only, args.training, args.check_accuracy
+                )
             except NotImplementedError:
                 continue  # bad benchmark implementation
-            run_one_model(name, model, example_inputs, optimize_ctx, experiment)
+            run_one_model(
+                name,
+                model,
+                args.training,
+                model_iter_fn,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+            )
     elif args.isolate:
         os.path.exists(output_filename) and os.unlink(output_filename)
         os.chdir(torchdynamo.config.base_dir)
@@ -618,7 +699,15 @@ def main():
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
-            run_one_model(name, model, example_inputs, optimize_ctx, experiment)
+            run_one_model(
+                name,
+                model,
+                args.training,
+                model_iter_fn,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+            )
 
         Stats.print_summary()
         print_summary(output_filename)
@@ -647,19 +736,26 @@ def print_summary(filename):
             pass
 
 
-def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
-    with pick_grad(name):
+def run_one_model(
+    name, model, is_training, model_iter_fn, example_inputs, optimize_ctx, experiment
+):
+    with pick_grad(name, is_training):
         sys.stdout.write(f"{current_device:4} {current_name:34} ")
         sys.stdout.flush()
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
         torch.manual_seed(1337)
-        correct_result = copy.deepcopy(model)(*example_inputs)
+        correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
+        correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
+        if not same(correct_result, correct_rerun_result):
+            print("INCORRECT - Variation in Eager runs itself")
+            return sys.exit(-1)
+
         torchdynamo.reset()
         try:
             with optimize_ctx:
-                new_result = model(*example_inputs)
+                new_result = model_iter_fn(model, example_inputs)
         except Exception:
             logging.exception("unhandled error")
             print("ERROR")
@@ -677,12 +773,12 @@ def run_one_model(name, model, example_inputs, optimize_ctx, experiment):
 
         # run one more time to see if we reached a fixed point
         with optimize_ctx:
-            model(*example_inputs)
+            model_iter_fn(model, example_inputs)
         _, frames_second_pass = Stats.reset_counters()  # should be 0
 
         if frames_second_pass > 0:
             with optimize_ctx:
-                model(*example_inputs)
+                model_iter_fn(model, example_inputs)
             _, frames_third_pass = Stats.reset_counters()  # should be 0
             assert frames_third_pass == 0
 
