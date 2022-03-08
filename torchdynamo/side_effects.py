@@ -165,6 +165,10 @@ class SideEffects(object):
         self.id_to_variable = collections.OrderedDict(
             (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
         )
+        self.store_attr_mutations = collections.OrderedDict(
+            (k, VariableTracker.apply(fn, v))
+            for k, v in self.store_attr_mutations.items()
+        )
 
     def codegen(self, cg: PyCodegen):
         modified_vars = [
