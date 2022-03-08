@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import re
 import sys
 import types
@@ -19,6 +20,16 @@ from .utils import unimplemented
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+
+
+@dataclasses.dataclass
+class GraphOutputEntry:
+    index: int
+    variable: VariableTracker
+
+    def merge(self, other: VariableTracker):
+        # merge in any extra guards
+        self.variable = self.variable.add_options(other)
 
 
 class PyCodegen(object):
@@ -44,6 +55,9 @@ class PyCodegen(object):
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
+
+    def graph_output_vars(self):
+        return [x.variable for x in self.graph_outputs.values()]
 
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
@@ -76,10 +90,18 @@ class PyCodegen(object):
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorVariable):
-            if value not in graph_outputs:
-                graph_outputs[value] = len(graph_outputs)
+            graph_outputs_key = id(value.proxy)
+            if graph_outputs_key not in graph_outputs:
+                graph_outputs[graph_outputs_key] = GraphOutputEntry(
+                    len(graph_outputs), value
+                )
+            else:
+                graph_outputs[graph_outputs_key].merge(value)
+
             output.append(self.create_load(self.graph_output_var))
-            output.append(self._create_load_const(graph_outputs[value]))
+            output.append(
+                self._create_load_const(graph_outputs[graph_outputs_key].index)
+            )
             output.append(create_instruction("BINARY_SUBSCR"))
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")

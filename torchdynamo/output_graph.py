@@ -255,9 +255,7 @@ class OutputGraph(fx.Tracer):
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(
-                        tx, list(pass2.graph_outputs.keys()), root
-                    )
+                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
 
                 if len(pass2.graph_outputs) != 0:
