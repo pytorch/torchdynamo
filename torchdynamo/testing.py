@@ -21,22 +21,45 @@ unsupported = torchdynamo._eval_frame.unsupported
 three = 3
 
 
-def reduce_out(out):
+def clone_me(x):
+    if x is None:
+        return None
+    return x.detach().clone().requires_grad_(x.requires_grad)
+
+
+def collect_results(model, prediction, loss, example_inputs):
+    results = []
+    results.append(prediction)
+    results.append(loss)
+    grads = dict()
+    for name, param in model.named_parameters():
+        grads[name] = clone_me(param.grad)
+    results.append(grads)
+    for example in example_inputs:
+        if isinstance(example, list):
+            for inp in example:
+                results.append(clone_me(inp.grad))
+        else:
+            results.append(clone_me(example.grad))
+    return results
+
+
+def reduce_to_scalar_loss(out):
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         return out.sum()
     elif isinstance(out, tuple):
-        return sum([reduce_out(x) for x in out])
+        return sum([reduce_to_scalar_loss(x) for x in out])
     elif type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
         "CausalLMOutputWithCrossAttentions",
     ):
-        return reduce_out(out.logits)
+        return reduce_to_scalar_loss(out.logits)
     elif type(out).__name__ == "SquashedNormal":
-        return out.mean
+        return reduce_to_scalar_loss(out.mean)
     elif isinstance(out, dict):
-        return sum([reduce_out(value) for value in out.values()])
+        return sum([reduce_to_scalar_loss(value) for value in out.values()])
     raise NotImplementedError("Don't know how to reduce")
 
 
@@ -54,7 +77,11 @@ def same(a, b):
         assert set(a.keys()) == set(
             b.keys()
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
-        return all(same(a[k], b[k]) for k in a.keys())
+        for k in a.keys():
+            if not (same(a[k], b[k])):
+                print("Accuracy failed for key name", k)
+                return False
+        return True
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
