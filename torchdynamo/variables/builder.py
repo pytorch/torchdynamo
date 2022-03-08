@@ -33,6 +33,7 @@ from .base import MutableLocal
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
+from .dicts import DataClassVariable
 from .functions import UserFunctionVariable
 from .lists import ListIteratorVariable
 from .lists import ListVariable
@@ -210,12 +211,6 @@ class VariableBuilder:
                 _dataclasses_fields_lambda,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, (type, types.FunctionType)) and skipfiles.check(
-            getfile(value), allow_torch=True
-        ):
-            return SkipFilesVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
         elif is_numpy(value):
             return NumpyVariable(
                 value,
@@ -224,6 +219,12 @@ class VariableBuilder:
                     if callable(value)
                     else GuardBuilder.TYPE_MATCH
                 ),
+            )
+        elif istype(value, (type, types.FunctionType)) and skipfiles.check(
+            getfile(value), allow_torch=True
+        ):
+            return SkipFilesVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif istype(value, type):
             return UserDefinedClassVariable(
@@ -257,6 +258,10 @@ class VariableBuilder:
             ),
         ):
             return self._wrap(int(value))
+        elif DataClassVariable.is_matching_object(value):
+            return DataClassVariable.wrap(self, value).add_guards(
+                make_guards(GuardBuilder.TYPE_MATCH)
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,

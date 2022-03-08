@@ -16,6 +16,7 @@ from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
 from ..utils import unimplemented
+from .base import MutableLocal
 from .base import VariableTracker
 
 
@@ -58,6 +59,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self.source, self.value, UserDefinedObjectVariable, options
             )
             return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+        elif variables.DataClassVariable.is_matching_cls(self.value):
+            options["mutable_local"] = MutableLocal()
+            return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
         return super().call_function(tx, args, kwargs)
 

@@ -112,6 +112,11 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             and os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION") != code.co_name
         ):
             return None
+        if code.co_name == "<genexpr>" and code.co_filename.endswith(
+            "transformers/file_utils.py"
+        ):
+            # not needed, but cleans up torchbench error stats
+            return None
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:

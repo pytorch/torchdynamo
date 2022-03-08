@@ -69,7 +69,7 @@ def exc_bytecode_offset():
 
 def same(a, b):
     """Check correctness to see if a and b match"""
-    if isinstance(a, (list, tuple, torch.nn.ParameterList)):
+    if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return len(a) == len(b) and all(same(ai, bi) for ai, bi in zip(a, b))
     elif isinstance(a, dict):

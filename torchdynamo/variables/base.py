@@ -168,9 +168,12 @@ class VariableTracker:
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
+        value = self.const_getattr(tx, name)
+        if not variables.ConstantVariable.is_literal(value):
+            raise NotImplementedError()
         if self.source:
             options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable(self.const_getattr(tx, name), **options)
+        return variables.ConstantVariable(value, **options)
 
     def is_proxy(self):
         try:
