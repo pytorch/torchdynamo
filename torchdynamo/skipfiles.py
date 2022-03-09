@@ -75,7 +75,12 @@ FILENAME_ALLOWLIST = {
 def add(module: types.ModuleType):
     assert isinstance(module, types.ModuleType)
     global SKIP_DIRS_RE
-    SKIP_DIRS.append(os.path.dirname(module.__file__) + "/")
+    name = module.__file__
+    if name is None:
+        return
+    if name.endswith("__init__.py"):
+        name = os.path.dirname(name) + "/"
+    SKIP_DIRS.append(name)
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
@@ -92,8 +97,8 @@ def check(filename, allow_torch=False):
 
 # skip common third party libs
 for _name in (
-    "intel_extension_for_pytorch",
     "functorch",
+    "intel_extension_for_pytorch",
     "networkx",
     "numpy",
     "omegaconf",
@@ -102,11 +107,12 @@ for _name in (
     "onnx_tf",
     "pandas",
     "sklearn",
+    "tabulate",
     "tensorflow",
     "tensorrt",
     "torch2trt",
-    "tree",
     "tqdm",
+    "tree",
     "tvm",
 ):
     try:

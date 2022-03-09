@@ -168,6 +168,15 @@ class BuiltinVariable(VariableTracker):
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
 
+        if (
+            self.fn is operator.getitem
+            and len(args) == 2
+            and isinstance(args[1], variables.TensorVariable)
+            and args[1].dtype == torch.bool
+            and not config.dynamic_shapes
+        ):
+            unimplemented("dynamic Tensor.__getitem__(bool[])")
+
         if self.can_insert_in_graph() and tensor_args:
             try:
                 fn = self.fn
@@ -263,7 +272,7 @@ class BuiltinVariable(VariableTracker):
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
-            )
+            ).add_options(self, obj)
 
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list

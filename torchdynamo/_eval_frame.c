@@ -58,6 +58,7 @@ static PyObject *eval_frame_callback = NULL;
 static PyObject *noargs = NULL;     /* cached empty tuple */
 static PyObject *dotzerokey = NULL; /* ".0" */
 static PyObject *guard_fail_hook = NULL;
+static PyObject *guard_error_hook = NULL;
 
 size_t extra_index = -1;
 
@@ -110,6 +111,18 @@ inline static const char *name(PyFrameObject *frame) {
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
 
+static void call_guard_fail_hook(PyObject *hook, CacheEntry *e,
+                                 PyObject *f_locals) {
+  // call debugging logic when a guard fails
+  PyObject *args = PyTuple_Pack(4, e->check_fn, e->code, f_locals,
+                                (e->next == NULL ? Py_True : Py_False));
+  NULL_CHECK(args);
+  PyObject *result = PyObject_CallObject(hook, args);
+  NULL_CHECK(result);
+  Py_DECREF(result);
+  Py_DECREF(args);
+}
+
 static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
   if (e == NULL) {
     return NULL;
@@ -125,20 +138,19 @@ static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
   } else {
     valid = PyObject_Call(e->check_fn, noargs, f_locals);
   }
-  NULL_CHECK(valid);
+  if (unlikely(valid == NULL)) {
+    PyErr_Print();
+    if (guard_error_hook != NULL) {
+      call_guard_fail_hook(guard_error_hook, e, f_locals);
+    }
+    NULL_CHECK(valid);
+  }
   Py_DECREF(valid);
   if (valid == Py_True) {
     return e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    // call debugging logic when a guard fails
-    PyObject *args = PyTuple_Pack(4, e->check_fn, e->code, f_locals,
-                                  (e->next == NULL ? Py_True : Py_False));
-    NULL_CHECK(args);
-    PyObject *result = PyObject_CallObject(guard_fail_hook, args);
-    NULL_CHECK(result);
-    Py_DECREF(result);
-    Py_DECREF(args);
+    call_guard_fail_hook(guard_fail_hook, e, f_locals);
   }
   return lookup(e->next, f_locals);
 }
@@ -389,6 +401,21 @@ static PyObject *set_guard_fail_hook(PyObject *dummy, PyObject *args) {
   Py_RETURN_NONE;
 }
 
+static PyObject *set_guard_error_hook(PyObject *dummy, PyObject *args) {
+  PyObject *obj = NULL;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return NULL;
+  }
+  Py_XDECREF(guard_error_hook);
+  if (obj == Py_None) {
+    guard_error_hook = NULL;
+  } else {
+    guard_error_hook = obj;
+    Py_INCREF(guard_error_hook);
+  }
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
@@ -396,6 +423,7 @@ static PyMethodDef _methods[] = {
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_VARARGS, NULL},
     {"set_guard_fail_hook", set_guard_fail_hook, METH_VARARGS, NULL},
+    {"set_guard_error_hook", set_guard_error_hook, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

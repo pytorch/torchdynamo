@@ -984,6 +984,13 @@ class InstructionTranslator(InstructionTranslatorBase):
             if k in f_locals
         )
 
+        # TODO(jansel): figure out why the following is needed for maskrcnn
+        for val in self.symbolic_locals.values():
+            if isinstance(
+                val, (ConstDictVariable, BaseListVariable, ListIteratorVariable)
+            ):
+                self.output.guards.update(val.guards)
+
     def should_compile_partial_graph(self):
         return all(b.can_restore() for b in self.block_stack) and not self.one_graph
 

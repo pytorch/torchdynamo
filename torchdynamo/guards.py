@@ -18,6 +18,7 @@ import torch
 
 from . import config
 from . import mutation_guard
+from ._eval_frame import set_guard_error_hook
 from ._eval_frame import set_guard_fail_hook
 from ._guards import TensorGuards
 from ._guards import check_obj_id
@@ -392,6 +393,18 @@ def guard_fail_hook(
             reasons.append(part)
             break
     print(f"Failed guards {reasons} (code={id(code)}, last={last})")
+
+
+def guard_error_hook(
+    guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
+):
+    print(
+        f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
+    )
+    print(" ", " and\n  ".join(guard_fn.code_parts))
+
+
+set_guard_error_hook(guard_error_hook)
 
 
 def unique(seq):

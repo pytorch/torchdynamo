@@ -747,10 +747,11 @@ def run_one_model(
         torch.manual_seed(1337)
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
-        correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
-        if not same(correct_result, correct_rerun_result):
-            print("INCORRECT - Variation in Eager runs itself")
-            return sys.exit(-1)
+        if current_name != "pyhpc_turbulent_kinetic_energy":
+            correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
+            if not same(correct_result, correct_rerun_result):
+                print("INCORRECT - Variation in Eager runs itself")
+                return sys.exit(-1)
 
         torch.manual_seed(1337)
         torchdynamo.reset()
@@ -761,7 +762,7 @@ def run_one_model(
             logging.exception("unhandled error")
             print("ERROR")
             return sys.exit(-1)
-        if current_name == "pyhpc_turbulent_k...":
+        if current_name == "pyhpc_turbulent_kinetic_energy":
             # This model has non-deterministic output so we cant
             # check correctness.
             # TODO(jansel): submit upstream fix for this
@@ -781,10 +782,11 @@ def run_one_model(
             with optimize_ctx:
                 model_iter_fn(model, example_inputs)
             _, frames_third_pass = Stats.reset_counters()  # should be 0
-            assert frames_third_pass == 0
+        else:
+            frames_third_pass = 0
 
         if "coverage" in output_filename:
-            results.append(f"{ok:3}/{total:3} frames")
+            results.append(f"{ok:3}/{total:3} +{frames_third_pass} frames")
 
         results.append(experiment(model, example_inputs))
         print(" ".join(map(str, results)))
