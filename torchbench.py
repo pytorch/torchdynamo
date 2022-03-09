@@ -752,6 +752,7 @@ def run_one_model(
             print("INCORRECT - Variation in Eager runs itself")
             return sys.exit(-1)
 
+        torch.manual_seed(1337)
         torchdynamo.reset()
         try:
             with optimize_ctx:
