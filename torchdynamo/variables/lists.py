@@ -22,14 +22,11 @@ class BaseListVariable(VariableTracker):
             tuple: TupleVariable,
         }[obj]
 
-    def __init__(self, items, **kwargs):
+    def __init__(self, items: List[VariableTracker], **kwargs):
         super(BaseListVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
-        self.items = items
-        self.guards = set(self.guards)
-        for item in self.items:
-            self.guards.update(item.guards)
+        self.items: List[VariableTracker] = items
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -43,13 +40,15 @@ class BaseListVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
         if isinstance(index, slice):
-            return self.clone(items=self.items[index]).add_options(arg)
+            return self.clone(items=self.items[index], mutable_local=None).add_options(
+                arg, self
+            )
         else:
             assert isinstance(index, int)
-            return self.items[index].add_options(self).add_options(arg)
+            return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
-        return list(self.items)
+        return [x.add_options(self) for x in self.items]
 
     def call_method(
         self,

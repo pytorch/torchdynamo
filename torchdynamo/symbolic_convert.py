@@ -984,11 +984,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             if k in f_locals
         )
 
-        # TODO(jansel): figure out why the following is needed for maskrcnn
+        # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
         for val in self.symbolic_locals.values():
-            if isinstance(
-                val, (ConstDictVariable, BaseListVariable, ListIteratorVariable)
-            ):
+            if isinstance(val, ListIteratorVariable):
                 self.output.guards.update(val.guards)
 
     def should_compile_partial_graph(self):
