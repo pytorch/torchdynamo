@@ -525,6 +525,9 @@ def main():
         "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
     )
     group.add_argument(
+        "--speedup-fx2trt", action="store_true", help=help(speedup_experiment)
+    )
+    group.add_argument(
         "--accuracy-aot-nop",
         action="store_true",
         help="Accuracy testing for AOT vs Eager",
@@ -631,6 +634,12 @@ def main():
     elif args.speedup_trt:
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
+    elif args.speedup_fx2trt:
+        optimize_ctx = torchdynamo.optimize(
+            backends.fx2trt_compiler, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        output_filename = "speedups_fx2trt.csv"
     elif args.accuracy_aot_nop:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_debug_strategy1, nopython=args.nopython

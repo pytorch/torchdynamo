@@ -295,10 +295,12 @@ def fx2trt(subgraph):
         # TensorRT fails violently with an abort() on this
         return None
 
-    import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-    from torch.fx.experimental.fx2trt.fx2trt import InputTensorSpec
-    from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter
-    from torch.fx.experimental.fx2trt.trt_module import TRTModule
+    import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
+    from fx2trt_oss.fx.fx2trt import (
+        TRTInterpreter,
+        InputTensorSpec,
+    )
+    from fx2trt_oss.fx.trt_module import TRTModule
 
     signal.signal(signal.SIGALRM, _raise_timeout)
     signal.alarm(120)  # fx2trt infinite loops sometimes
@@ -309,7 +311,6 @@ def fx2trt(subgraph):
 
         model = subgraph.model
         inputs = subgraph.example_inputs
-
         model = acc_tracer.trace(model, inputs)
         input_specs = InputTensorSpec.from_tensors(inputs)
         interp = TRTInterpreter(model, input_specs, explicit_precision=True)
@@ -620,3 +621,18 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
         return out
 
     return ltc_model
+
+
+
+def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
+    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs)
+    if trt_compiled is not None:
+        print("=== example output=", trt_compiled(*example_inputs))
+        return trt_compiled
+
+    # try to make a copy of input?
+    # def run(*new_inputs):
+    #     copy_inputs = [copy.deepcopy(i) for i in new_inputs]
+    #     output = trt_compiled(*copy_inputs)
+    #     return output
+    # return run
