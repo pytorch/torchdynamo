@@ -219,7 +219,9 @@ class PyCodegen(object):
     def create_load_attr(self, name):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] = self.code_options["co_names"] + (name,)
-        return create_instruction("LOAD_ATTR", self.code_options["co_names"], name)
+        return create_instruction(
+            "LOAD_ATTR", self.code_options["co_names"].index(name), name
+        )
 
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]

@@ -482,3 +482,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_list_reversed(a, b):
         tmp = [a + 1, a + 2, a + 3]
         return a + b + next(iter(reversed(tmp)))
+
+    @make_test
+    def test_list_clear(a, b):
+        tmp = [a + 1, a + 2]
+        tmp.clear()
+        tmp.append(a + b)
+        return tmp

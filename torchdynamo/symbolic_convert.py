@@ -19,6 +19,7 @@ from unittest.mock import patch
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
+from torchdynamo.source import GetItemSource
 from torchdynamo.source import GlobalSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
@@ -339,9 +340,15 @@ class InstructionTranslatorBase(object):
         if self.output.root_globals is self.f_globals:
             source = GlobalSource(inst.argval)
         else:
-            source = AttrSource(
-                self.import_source(self.f_globals["__name__"]), inst.argval
-            )
+            if "__name__" in self.f_globals:
+                source = AttrSource(
+                    self.import_source(self.f_globals["__name__"]), inst.argval
+                )
+            else:
+                name = f"___unnamed_scope_{id(self.f_globals)}"
+                if name not in self.output.root_globals:
+                    self.output.install_global(name, self.f_globals)
+                source = GetItemSource(GlobalSource(name), inst.argval)
         self.push(VariableBuilder(self, source)(value))
 
     def import_source(self, module_name):

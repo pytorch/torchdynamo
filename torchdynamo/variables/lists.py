@@ -173,6 +173,12 @@ class ListVariable(BaseListVariable):
                 ListVariable(items, **options),
             )
             return result
+        elif name == "clear" and self.mutable_local:
+            assert not kwargs and not args
+            return tx.replace_all(
+                self,
+                ListVariable([], **options),
+            )
         elif (
             name == "__setitem__"
             and self.mutable_local
