@@ -27,6 +27,8 @@ import _collections_abc
 import _weakrefset
 import torch
 
+from ._eval_frame import skip_code
+
 SKIP_DIRS = [
     # torch.*
     os.path.dirname(torch.__file__) + "/",
@@ -129,3 +131,7 @@ def is_torch_inline_allowed(filename):
 
 def is_torch(filename):
     return filename.startswith(os.path.dirname(torch.__file__))
+
+
+# not needed, but avoid some spam in the stats
+skip_code(torch.nn.ModuleList.__getitem__.__code__)
