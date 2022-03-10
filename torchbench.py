@@ -211,9 +211,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0] = timed(model, model_iter_fn, example_inputs)
+        timings[rep, 0] = timed(model, model_iter_fn, example_inputs, times=30)
         with torchdynamo.run():
-            timings[rep, 1] = timed(model, model_iter_fn, example_inputs)
+            timings[rep, 1] = timed(model, model_iter_fn, example_inputs, times=30)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -754,6 +754,9 @@ def run_one_model(
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
         torch.manual_seed(1337)
+        # print("example_input dtype=",example_inputs[0].dtype,example_inputs[0].device)
+        # for param in model.parameters():
+        #     print(param.dtype, param.device)
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
         if current_name != "pyhpc_turbulent_kinetic_energy":
@@ -767,6 +770,14 @@ def run_one_model(
         try:
             with optimize_ctx:
                 new_result = model_iter_fn(model, example_inputs)
+            # print("=====new_results=", new_result, new_result.dtype)
+            # print("=====correct_result=", correct_result, correct_result.dtype)
+            # new_tensor = new_result[0].flatten().to(torch.float32)
+            # correct_tensor = correct_result[0].flatten().to(torch.float32)
+            # cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)
+            # output = cos(new_tensor, correct_tensor)
+            # print("=== similarity score=", output)
+            # print("=== Top 10 abs diff=", torch.sort(torch.abs(new_tensor - correct_tensor),descending=True)[0][:10])
         except Exception:
             logging.exception("unhandled error")
             print("ERROR")
