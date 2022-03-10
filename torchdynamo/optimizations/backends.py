@@ -301,7 +301,11 @@ def fx2trt(subgraph):
         InputTensorSpec,
     )
     from fx2trt_oss.fx.trt_module import TRTModule
-
+    from fx2trt_oss.fx import lower_to_trt
+    from fx2trt_oss.fx.tools.trt_splitter import (
+        TRTSplitter,
+        TRTSplitterSetting,
+    )
     signal.signal(signal.SIGALRM, _raise_timeout)
     signal.alarm(120)  # fx2trt infinite loops sometimes
     try:
@@ -311,12 +315,71 @@ def fx2trt(subgraph):
 
         model = subgraph.model
         inputs = subgraph.example_inputs
-        model = acc_tracer.trace(model, inputs)
-        input_specs = InputTensorSpec.from_tensors(inputs)
-        interp = TRTInterpreter(model, input_specs, explicit_batch_dimension=True)
-        result = interp.run(fp16_mode=True, max_batch_size=len(inputs[0]))
-        trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
-        return subgraph.wrap_returns(trt_mod)
+
+        # model = acc_tracer.trace(model, inputs)
+        # input_specs = InputTensorSpec.from_tensors(inputs)
+        # interp = TRTInterpreter(model, input_specs, explicit_batch_dimension=True)
+        # result = interp.run(fp16_mode=True, max_batch_size=len(inputs[0]))
+        # trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
+        # return subgraph.wrap_returns(trt_mod)
+
+        #==== new method1
+        acc_model = acc_tracer.trace(model, inputs)
+        # Split out unsupported ops
+        splitter_setting = TRTSplitterSetting()
+        splitter_setting.use_implicit_batch_dim = False
+        splitter = TRTSplitter(acc_model, inputs, settings=splitter_setting)
+        splitter.node_support_preview()
+        split_mod = splitter()
+        for name, _ in split_mod.named_children():
+            print(name)
+
+        def get_submod_inputs(mod, submod, inputs):
+            acc_inputs = None
+
+            def get_input(self, inputs):
+                nonlocal acc_inputs
+                acc_inputs = inputs
+
+            handle = submod.register_forward_pre_hook(get_input)
+            mod(*inputs)
+            handle.remove()
+            return acc_inputs
+
+
+        for name, _ in split_mod.named_children():
+            if "_run_on_acc" in name:
+                print("replace submod=", name)
+                submod = getattr(split_mod, name)
+                # Get submodule inputs for fx2trt
+                acc_inputs = get_submod_inputs(split_mod, submod, inputs)
+
+                # fx2trt replacement
+                interp = TRTInterpreter(
+                    submod,
+                    InputTensorSpec.from_tensors(acc_inputs),
+                    explicit_batch_dimension=True,
+                )
+                r = interp.run(
+                    max_workspace_size=20 << 30,
+                    strict_type_constraints=True,
+                )
+                trt_mod = TRTModule(*r)
+                setattr(split_mod, name, trt_mod)
+        return subgraph.wrap_returns(split_mod)
+
+        #==== new method2
+        # split_mod = lower_to_trt(
+        #     model,
+        #     inputs,
+        #     max_batch_size=len(inputs[0]),
+        #     fp16_mode=True,
+        #     explicit_batch_dimension=True,
+        #     max_workspace_size=20 << 30,
+        # )
+        # import pdb;pdb.set_trace()
+        # return subgraph.wrap_returns(split_mod)
+
     finally:
         signal.alarm(0)
 

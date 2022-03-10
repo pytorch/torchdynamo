@@ -681,6 +681,9 @@ def main():
                 device, name, model, example_inputs = load_model(
                     device, args.only, args.training, args.check_accuracy
                 )
+                model.half()
+                # import pdb;pdb.set_trace()
+                example_inputs = [i.half() if i.dtype == torch.float32 else i for i in example_inputs]
             except NotImplementedError:
                 continue  # bad benchmark implementation
             run_one_model(
@@ -754,9 +757,9 @@ def run_one_model(
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
         torch.manual_seed(1337)
-        # print("example_input dtype=",example_inputs[0].dtype,example_inputs[0].device)
-        # for param in model.parameters():
-        #     print(param.dtype, param.device)
+        print("example_input dtype=",example_inputs[0].dtype,example_inputs[0].shape, example_inputs[0].device)
+        for param in model.parameters():
+            print(param.dtype, param.device)
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
         if current_name != "pyhpc_turbulent_kinetic_energy":
