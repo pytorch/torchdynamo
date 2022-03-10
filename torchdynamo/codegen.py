@@ -66,6 +66,8 @@ class PyCodegen(object):
             self.clear_tos()
             return
 
+        self.tx.output.guards.update(value.guards)
+
         assert isinstance(value, VariableTracker)
         output = self._output
         graph_outputs = self.graph_outputs
@@ -82,8 +84,7 @@ class PyCodegen(object):
                 output.append(self.create_load(self.tempvars[value]))
                 return
 
-        self.tx.output.guards.update(value.guards)
-        if value.source is not None:
+        if value.source is not None and allow_cache:
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()

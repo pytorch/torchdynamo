@@ -27,6 +27,8 @@ import _collections_abc
 import _weakrefset
 import torch
 
+from ._eval_frame import skip_code
+
 SKIP_DIRS = [
     # torch.*
     os.path.dirname(torch.__file__) + "/",
@@ -82,14 +84,9 @@ def add(module: types.ModuleType):
         name = os.path.dirname(name) + "/"
     SKIP_DIRS.append(name)
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
-    # print("===SKIP DIRS RE=", SKIP_DIRS_RE)
-    # print("===SKIP DIRS=", SKIP_DIRS)
 
 
 def check(filename, allow_torch=False):
-    # print("====check filename=",filename)
-    # print("====check filename dirs=", SKIP_DIRS)
-    # import pdb;pdb.set_trace()
     """Should skip this file?"""
     if filename is None:
         return True
@@ -97,8 +94,6 @@ def check(filename, allow_torch=False):
         return False
     if allow_torch and is_torch(filename):
         return False
-    if is_fx2trt(filename):
-        return True
     return bool(SKIP_DIRS_RE.match(filename))
 
 
@@ -138,5 +133,5 @@ def is_torch_inline_allowed(filename):
 def is_torch(filename):
     return filename.startswith(os.path.dirname(torch.__file__))
 
-def is_fx2trt(filename):
-    return filename.startswith("/data/users/wwei6/miniconda3/envs/mypy38/lib/python3.8/site-packages/fx2trt_oss-0.1-py3.8.egg/fx2trt_oss/")
+# not needed, but avoid some spam in the stats
+skip_code(torch.nn.ModuleList.__getitem__.__code__)

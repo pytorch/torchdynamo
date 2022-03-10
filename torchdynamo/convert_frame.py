@@ -29,6 +29,23 @@ from .utils import counters
 from .utils import unimplemented
 
 
+class SkipContext:
+    enabled = False
+
+    @staticmethod
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*args):
+            prior = SkipContext.enabled
+            SkipContext.enabled = True
+            try:
+                return fn(*args)
+            finally:
+                SkipContext.enabled = prior
+
+        return inner
+
+
 class Tracker:
     def __init__(self):
         self.seen = []
@@ -105,12 +122,17 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
-        if code in output_codes:
+        if code in output_codes or SkipContext.enabled:
             return None
         if (
             os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")
             and os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION") != code.co_name
         ):
+            return None
+        if code.co_name == "<genexpr>" and code.co_filename.endswith(
+            "transformers/file_utils.py"
+        ):
+            # not needed, but cleans up torchbench error stats
             return None
         if is_generator(code):
             unimplemented("generator")

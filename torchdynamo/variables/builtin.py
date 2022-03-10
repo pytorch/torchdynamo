@@ -303,11 +303,15 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             a, (variables.ListVariable, variables.TupleVariable)
         ) and isinstance(b, variables.ConstantVariable):
-            return a.clone(items=a.items * b.as_python_constant())
+            return a.__class__(
+                items=a.items * b.as_python_constant(), mutable_local=MutableLocal()
+            ).add_options(self, a, b)
         elif isinstance(
             b, (variables.ListVariable, variables.TupleVariable)
         ) and isinstance(a, variables.ConstantVariable):
-            return b.clone(items=b.items * a.as_python_constant())
+            return b.__class__(
+                items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
+            ).add_options(self, a, b)
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
@@ -448,13 +452,18 @@ class BuiltinVariable(VariableTracker):
                 getattr(obj.fn, name), **VariableTracker.propagate(obj)
             )
         else:
-            return GetAttrVariable(obj, name, **options)
+            try:
+                return (
+                    obj.var_getattr(tx, name).clone(source=source).add_options(options)
+                )
+            except NotImplementedError:
+                return GetAttrVariable(obj, name, **options)
 
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        if isinstance(obj, variables.BlackHoleVariable):
-            return obj.call_method(self, "__setattr__", [name_var, val], {})
+        if isinstance(obj, (variables.BlackHoleVariable, variables.DataClassVariable)):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
