@@ -57,6 +57,23 @@ SKIP = {
     "detectron2_maskrcnn",
     "vision_maskrcnn",
 }
+
+# Additional models that are skipped in training
+SKIP_TRAIN = {
+    # not designed for training
+    "pyhpc_equation_of_state",
+    "pyhpc_isoneutral_mixing",
+    # Unusual training setup
+    "opacus_cifar10",
+    "maml",
+    # Known issues with training
+    "demucs",  # https://github.com/pytorch/benchmark/pull/639
+    "densenet121",  # https://github.com/pytorch/benchmark/issues/652
+    "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
+    # AOT Autograd known issues
+    "dlrm",  # No sparse support
+}
+
 current_name = ""
 current_device = ""
 output_filename = None
@@ -103,12 +120,16 @@ def load_model(device, model_name, is_training, check_accuracy):
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
-    if is_training:
+    MUST_HAVE_TEST_DATASET = {"yolov3"}
+    if is_training and model_name not in MUST_HAVE_TEST_DATASET:
         benchmark = benchmark_cls(test="train", device=device, jit=False)
     else:
         benchmark = benchmark_cls(test="eval", device=device, jit=False)
     model, example_inputs = benchmark.get_module()
-    if is_training and not check_accuracy:
+
+    # Models that must be in train mode while training
+    MUST_HAVE_TRAIN_MODE = {"tts_angular"}
+    if is_training and (not check_accuracy or model_name in MUST_HAVE_TRAIN_MODE):
         model.train()
     else:
         model.eval()
@@ -551,9 +572,6 @@ def main():
         global synchronize
         synchronize = torch.cuda.synchronize
 
-    if args.no_skip:
-        SKIP.clear()
-
     if args.nvfuser:
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
@@ -574,8 +592,12 @@ def main():
 
     if args.training:
         model_iter_fn = forward_and_backward_pass
+        SKIP.update(SKIP_TRAIN)
     else:
         model_iter_fn = forward_pass
+
+    if args.no_skip:
+        SKIP.clear()
 
     experiment = null_experiment
     optimize_ctx = NullContext()
@@ -740,7 +762,8 @@ def run_one_model(
     name, model, is_training, model_iter_fn, example_inputs, optimize_ctx, experiment
 ):
     with pick_grad(name, is_training):
-        sys.stdout.write(f"{current_device:4} {current_name:34} ")
+        mode = "train" if is_training else "infer"
+        sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
         sys.stdout.flush()
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)

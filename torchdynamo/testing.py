@@ -33,7 +33,7 @@ def collect_results(model, prediction, loss, example_inputs):
     results.append(loss)
     grads = dict()
     for name, param in model.named_parameters():
-        grads[name] = clone_me(param.grad)
+        grads[name + ".grad"] = clone_me(param.grad)
     results.append(grads)
     for example in example_inputs:
         if isinstance(example, list):
