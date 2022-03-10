@@ -684,7 +684,8 @@ def main():
                 experiment,
             )
     elif args.isolate:
-        os.path.exists(output_filename) and os.unlink(output_filename)
+        if output_filename and os.path.exists(output_filename):
+            os.unlink(output_filename)
         os.chdir(torchdynamo.config.base_dir)
         for name in iter_model_names(args):
             try:
@@ -714,7 +715,7 @@ def main():
 
 
 def print_summary(filename):
-    if not os.path.exists(filename):
+    if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
     width = max(map(len, data.columns))
@@ -785,7 +786,7 @@ def run_one_model(
         else:
             frames_third_pass = 0
 
-        if "coverage" in output_filename:
+        if output_filename and "coverage" in output_filename:
             results.append(f"{ok:3}/{total:3} +{frames_third_pass} frames")
 
         results.append(experiment(model, example_inputs))

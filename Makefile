@@ -69,13 +69,13 @@ build-deps: clone-deps
 	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
 	conda install -y -c pytorch magma-cuda113
 	make setup && pip uninstall -y torch
-	(cd ../pytorch     && python setup.py clean && env LDFLAGS="-lncurses" python setup.py develop)
+	(cd ../pytorch     && python setup.py clean && python setup.py develop)
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
 	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
-	(cd ../torchbenchmark && python install.py)
 	(cd ../functorch   && python setup.py clean && python setup.py develop)
+	(cd ../torchbenchmark && python install.py)
 
 offline-autotune-cpu: develop
 	rm -rf subgraphs
