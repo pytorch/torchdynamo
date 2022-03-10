@@ -63,11 +63,12 @@ pull-deps:
 	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	# conda create --prefix torchdynamo python=3.8
+	# conda env remove --name torchdynamo
+	# conda create --name torchdynamo python=3.8
 	# conda activate torchdynamo
 	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
 	conda install -y -c pytorch magma-cuda113
-	make setup
+	make setup && pip uninstall -y torch
 	(cd ../pytorch     && python setup.py clean && env LDFLAGS="-lncurses" python setup.py develop)
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)

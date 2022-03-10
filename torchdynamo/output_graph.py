@@ -13,6 +13,8 @@ from typing import List
 import torch.nn
 from torch import fx
 
+import torchdynamo
+
 from . import config
 from . import variables
 from .bytecode_transformation import Instruction
@@ -297,6 +299,7 @@ class OutputGraph(fx.Tracer):
         gm.recompile()
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
+        compiled_fn = torchdynamo.convert_frame.SkipContext.wrap(compiled_fn)
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
         if config.debug:

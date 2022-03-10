@@ -5,10 +5,10 @@ PyTorch programs faster. TorchDynamo hooks into the frame evaluation API
 in CPython ([PEP 523]) to dynamically modify Python bytecode right before
 it is executed. It rewrites Python bytecode in order to extract sequences
 of PyTorch operations into an [FX Graph] which is then just-in-time
-compiled with an ensemble of different backends and autotuning. It creates
-this FX Graph through bytecode analysis and is designed to generate
-smaller graph fragments that can be mixed with Python execution to get
-the best of both worlds: usability and performance.
+compiled with an ensemble of different backends and autotuning. It
+creates this FX Graph through bytecode analysis and is designed to mix
+Python execution with compiled backends to get the best of both worlds:
+usability and performance.
 
 [PEP 523]: https://www.python.org/dev/peps/pep-0523/
 [FX Graph]: https://pytorch.org/docs/stable/fx.html
@@ -20,6 +20,7 @@ For more information see progress updates posted on dev-discuss.pytorch.org:
 - [Update 2: 1.48x Geomean Speedup on TorchBench CPU Inference](https://dev-discuss.pytorch.org/t/torchdynamo-update-1-48x-geomean-speedup-on-torchbench-cpu-inference/397)
 - [Update 3: GPU Inference Edition](https://dev-discuss.pytorch.org/t/torchdynamo-update-3-gpu-inference-edition/460)
 - [Update 4: LazyTensor & nvFuser Experiments](https://dev-discuss.pytorch.org/t/torchdynamo-update-4-lazytensor-nvfuser-experiments/496)
+- [Update 5: Improved Capture & Bigger Graphs](https://dev-discuss.pytorch.org/t/torchdynamo-update-5-improved-capture-bigger-graphs/556)
 
 *TorchDynamo is experimental* and under active development.
 You are welcome to try it out and contribute, but should expect to find
