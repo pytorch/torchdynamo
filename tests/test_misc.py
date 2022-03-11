@@ -789,3 +789,11 @@ class MiscTests(torchdynamo.testing.TestCase):
                 return a - b / c
 
         torchdynamo.testing.standard_test(self, fn=fn1, nargs=3, expected_ops=2)
+
+    def test_manual_seed(self):
+        def fn(a, b):
+            x = a + b
+            torch.manual_seed(9000)
+            return x + 1
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)

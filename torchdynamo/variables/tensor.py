@@ -66,7 +66,7 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value.clone()
             options.update(TensorVariable.specialize(example_value))
             return TensorVariable(proxy, **options)
-        elif isinstance(example_value, tuple):
+        elif isinstance(example_value, (tuple, list)):
             unpacked = []
             for i, val in enumerate(example_value):
                 unpacked.append(
@@ -89,10 +89,12 @@ class TensorVariable(VariableTracker):
                 return variables.NamedTupleVariable(
                     unpacked, example_value.__class__, **options
                 )
+        elif example_value is None or proxy.node.target is torch.manual_seed:
+            return variables.ConstantVariable(None, **options)
         else:
             assert (
                 False
-            ), f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
 
     def __init__(
         self,
