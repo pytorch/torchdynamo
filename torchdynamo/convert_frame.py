@@ -29,6 +29,10 @@ from .utils import counters
 from .utils import unimplemented
 
 
+class InternalTorchDynamoError(RuntimeError):
+    pass
+
+
 class SkipContext:
     enabled = False
 
@@ -191,20 +195,17 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
-        except Exception as e:
-            traceback.print_stack(frame)
-            if config.debug:
-                print(
-                    "\nWONT CONVERT",
-                    e,
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                )
-                # print(dis.Bytecode(frame.f_code).info())
-                print(dis.Bytecode(frame.f_code).dis())
-                traceback.print_exc()
+        except Unsupported:
             raise
+        except Exception:
+            sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
+            traceback.print_exc()
+            sys.stderr.write(
+                "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
+            )
+            traceback.print_stack(frame)
+            sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+            raise InternalTorchDynamoError()
 
     return wrap_convert_context(_convert_frame_assert)
 
@@ -219,21 +220,9 @@ def convert_frame(compiler_fn: typing.Callable):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
-        except Unsupported:
-            pass
         except Exception:
-            sys.stderr.write("=" * 10 + " Stack Trace " + "=" * 10 + "\n")
-            traceback.print_exc()
-            if config.debug:
-                sys.stderr.write(
-                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
-                )
-                sys.stderr.write(
-                    dis.Bytecode(frame.f_code).info()
-                    + "\n"
-                    + dis.Bytecode(frame.f_code).dis()
-                )
-                sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+            pass
+
         return None
 
     return _convert_frame
