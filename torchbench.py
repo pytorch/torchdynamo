@@ -74,7 +74,7 @@ SKIP_TRAIN = {
     "dlrm",  # No sparse support
 }
 
-# Some models have bad train dataset. We read evel
+# Some models have bad train dataset. We read eval dataset.
 ONLY_EVAL_DATASET = {"yolov3"}
 
 # These models support only train mode. So accuracy checking can't be done in

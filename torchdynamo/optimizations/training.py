@@ -30,7 +30,7 @@ class AOTAutogradStrategy(object):
         self.original_example_inputs = example_inputs
         try:
             self.gm = normalize_ir(gm, self.example_inputs)
-        except:
+        except Exception:
             log.warn("TorchDynamo unable to remove mutation")
             self.gm = gm
             self.use_fallback = True
