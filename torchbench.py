@@ -577,6 +577,21 @@ def main():
         global synchronize
         synchronize = torch.cuda.synchronize
 
+    if (
+        args.devices == ["cuda"]
+        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
+    ):
+        # OOM errors on an RTX 3090 with 24gb RAM
+        SKIP.update(
+            {
+                "hf_Longformer",
+                "timm_nfnet",
+            }
+        )
+
+    if args.no_skip:
+        SKIP.clear()
+
     if args.nvfuser:
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)

@@ -147,31 +147,31 @@ class Profiler:
 
 
 def shapes_of(it):
-    return [tuple(x.shape) for x in it]
+    if it:
+        return [tuple(x.shape) for x in it]
 
 
 def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
     input_shapes = shapes_of(example_inputs)
     output_shapes = None
-    result = None
 
-    def debug_print():
+    def debug_print(extra):
         gm.graph.print_tabular()
-        return f"shape mismatch {input_shapes} {output_shapes} {shapes_of(result)}"
+        return f"shape mismatch in={input_shapes} out={output_shapes} got={extra}"
 
     def _wrapped(*args):
-        nonlocal output_shapes, result
+        nonlocal output_shapes
         with torch.profiler.record_function("TORCHDYNAMO"):
             assert (
                 shapes_of(args) == input_shapes or config.dynamic_shapes
-            ), debug_print()
+            ), debug_print(shapes_of(args))
             result = gm.forward(*args)
             if output_shapes is None:
                 output_shapes = shapes_of(result)
             else:
                 assert (
                     shapes_of(result) == output_shapes or config.dynamic_shapes
-                ), debug_print()
+                ), debug_print(shapes_of(result))
             return result
 
     Profiler.unique_graphs += 1
