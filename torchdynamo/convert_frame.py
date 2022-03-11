@@ -192,6 +192,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except Exception as e:
+            traceback.print_stack(frame)
             if config.debug:
                 print(
                     "\nWONT CONVERT",
