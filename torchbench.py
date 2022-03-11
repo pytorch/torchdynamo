@@ -74,6 +74,13 @@ SKIP_TRAIN = {
     "dlrm",  # No sparse support
 }
 
+# Some models have bad train dataset. We read evel
+ONLY_EVAL_DATASET = {"yolov3"}
+
+# These models support only train mode. So accuracy checking can't be done in
+# eval mode.
+ONLY_TRAINING_MODE = {"tts_angular"}
+
 current_name = ""
 current_device = ""
 output_filename = None
@@ -120,16 +127,14 @@ def load_model(device, model_name, is_training, check_accuracy):
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
-    MUST_HAVE_TEST_DATASET = {"yolov3"}
-    if is_training and model_name not in MUST_HAVE_TEST_DATASET:
+    if is_training and model_name not in ONLY_EVAL_DATASET:
         benchmark = benchmark_cls(test="train", device=device, jit=False)
     else:
         benchmark = benchmark_cls(test="eval", device=device, jit=False)
     model, example_inputs = benchmark.get_module()
 
     # Models that must be in train mode while training
-    MUST_HAVE_TRAIN_MODE = {"tts_angular"}
-    if is_training and (not check_accuracy or model_name in MUST_HAVE_TRAIN_MODE):
+    if is_training and (not check_accuracy or model_name in ONLY_TRAINING_MODE):
         model.train()
     else:
         model.eval()
@@ -762,7 +767,7 @@ def run_one_model(
     name, model, is_training, model_iter_fn, example_inputs, optimize_ctx, experiment
 ):
     with pick_grad(name, is_training):
-        mode = "train" if is_training else "infer"
+        mode = "train" if is_training else "eval"
         sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
         sys.stdout.flush()
         for submod in itertools.chain([model], model.modules()):
