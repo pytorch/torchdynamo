@@ -323,7 +323,7 @@ def fx2trt(subgraph):
         # trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
         # return subgraph.wrap_returns(trt_mod)
 
-        #==== new method1
+        #==== new method1 #the recursive compile behavior is gone
         acc_model = acc_tracer.trace(model, inputs)
         # Split out unsupported ops
         splitter_setting = TRTSplitterSetting()
@@ -368,7 +368,7 @@ def fx2trt(subgraph):
                 setattr(split_mod, name, trt_mod)
         return subgraph.wrap_returns(split_mod)
 
-        #==== new method2
+        #==== new method2 #infinite recursive behavior
         # split_mod = lower_to_trt(
         #     model,
         #     inputs,
@@ -689,6 +689,7 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
     trt_compiled = BACKENDS["fx2trt"](gm, example_inputs)
+    print("===fx2trt_compiler: gm graph=",gm.graph)
     if trt_compiled is not None:
         print("=== return trt_mod")
         return trt_compiled
