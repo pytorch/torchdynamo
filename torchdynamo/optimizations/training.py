@@ -26,12 +26,37 @@ class AOTAutogradStrategy(object):
         # TODO - Look why restore fails with train() even after restoring.
         # self.restore = checkpoint_params(gm)
         # self.correct = gm.forward(*self.example_inputs)
-        self.original_example_inputs = example_inputs
-        self.gm = normalize_ir(gm, self.example_inputs)
         self.use_fallback = False
+        self.original_example_inputs = example_inputs
+        try:
+            self.gm = normalize_ir(gm, self.example_inputs)
+        except Exception:
+            log.warn("TorchDynamo unable to remove mutation")
+            self.gm = gm
+            self.use_fallback = True
+            pass
+
         gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
 
-        if has_mutation(self.gm, self.example_inputs) or len(gm_inputs) == 0:
+        has_param_as_input = False
+        for ex in example_inputs:
+            if isinstance(ex, torch.nn.parameter.Parameter):
+                has_param_as_input = True
+
+        # gather_backward has inplace ops, which AOT can't handle correctly
+        # Issue tracked here - https://github.com/pytorch/functorch/issues/591
+        for node in self.gm.graph.nodes:
+            if node.target == torch.gather:
+                log.warn(
+                    "Graph has gather op. AOT Autograd does not handle gather correctly. Using fallback."
+                )
+                self.use_fallback = True
+
+        if (
+            has_mutation(self.gm, self.example_inputs)
+            or len(gm_inputs) == 0
+            or has_param_as_input
+        ):
             self.use_fallback = True
 
     @property

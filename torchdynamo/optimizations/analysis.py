@@ -1,3 +1,4 @@
+import copy
 import itertools
 import weakref
 
@@ -96,9 +97,11 @@ class ShapeAliasingAndMutationProp(ShapeProp):
 
 def has_mutation(gm, example_inputs):
     """Check if the graph module has any form of mutation"""
-    ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+    # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
+    new_gm = copy.deepcopy(gm)
+    ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
 
-    for node in gm.graph.nodes:
+    for node in new_gm.graph.nodes:
         if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
             return True
     return False

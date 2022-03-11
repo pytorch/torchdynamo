@@ -113,6 +113,8 @@ DONT_EXPAND_MODULES = {
     # These have internal control flow
     "ConvTranspose1d",
     "ConvTranspose2d",
+    "ConvBn2d",
+    "ConvBnReLU2d",
     "EmbeddingBag",
     "InstanceNorm2d",
     "LSTM",
