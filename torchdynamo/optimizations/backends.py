@@ -10,6 +10,7 @@ import tempfile
 import numpy as np
 import torch
 
+import torchdynamo.convert_frame
 from torchdynamo.optimizations.subgraph import SubGraph
 from torchdynamo.utils import identity
 
@@ -519,13 +520,32 @@ def cudagraphs_inner(model, inputs):
 
 @create_backend
 def aot_autograd(subgraph, **kwargs):
-    from functorch.compile import aot_module
-    from functorch.compile import memory_efficient_fusion
+    if not kwargs:
+        from functorch._src.aot_autograd import default_decompositions
+        from functorch._src.aot_autograd import static_argnums
+        from functorch.compile import min_cut_rematerialization_partition
+        from functorch.compile import ts_compile
 
-    # If kwargs is empty, we fallback to default of memory_efficient_fusion
-    if kwargs:
-        return subgraph.wrap_returns(aot_module(subgraph.model, **kwargs))
-    return subgraph.wrap_returns(memory_efficient_fusion(subgraph.model))
+        kwargs = {
+            # these are taken from memory_efficient_fusion()
+            "fw_compiler": ts_compile,
+            "bw_compiler": ts_compile,
+            "partition_fn": min_cut_rematerialization_partition,
+            "hasher_type": "StaticShapeHasher",
+            "decompositions": default_decompositions,
+            "static_argnums": static_argnums,
+        }
+
+    def _wrapped_bw_compiler(*args, **kwargs):
+        # stop TorchDynamo from trying to compile our generated backwards pass
+        return torchdynamo.convert_frame.SkipContext.wrap(bw_compiler(*args, **kwargs))
+
+    bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
+    kwargs["bw_compiler"] = _wrapped_bw_compiler
+
+    from functorch.compile import aot_module
+
+    return subgraph.wrap_returns(aot_module(subgraph.model, **kwargs))
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):

@@ -32,7 +32,7 @@ base_dir = dirname(dirname(abspath(__file__)))
 dynamic_shapes = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = False
+guard_nn_modules = True
 
 # Run the FX graph as it is created to get better type information
 dynamic_propagation = True

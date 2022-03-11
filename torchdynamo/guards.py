@@ -97,10 +97,10 @@ def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
     """
-    m = re.match(r"^[a-z0-9_]+\(([^),]+)[),]", name)
+    m = re.search(r"[a-z0-9_]+\(([^(),]+)[^()]*\)", name)
     if m:
-        return strip_getattr_getitem(m.group(1))
-    return name
+        return strip_function_call(m.group(1))
+    return strip_getattr_getitem(name)
 
 
 def strip_getattr_getitem(name):

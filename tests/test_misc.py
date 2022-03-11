@@ -9,9 +9,6 @@ import numpy as np
 import torch
 
 import torchdynamo.testing
-from torchdynamo import eval_frame
-from torchdynamo.convert_frame import convert_frame
-from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
@@ -33,7 +30,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         correct2 = boolarg(a, b, False)
         correct3 = boolarg(a, b, None)
         counter = CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(counter)):
+        with torchdynamo.optimize_assert(counter):
             val1 = boolarg(a, b, True)
             val2 = boolarg(a, b, False)
             val3 = boolarg(a, b, None)
@@ -54,7 +51,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         b = torch.randn(10, 10)
         c = torch.randn(10, 10)
         correct = call_packed([a, b, c])
-        with eval_frame.optimize(convert_frame_assert(counter)):
+        with torchdynamo.optimize_assert(counter):
             val1 = call_packed([a, b, c])
             val2 = call_packed((a, b, c))
             val3 = call_packed([a, b, c])
@@ -74,7 +71,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         a = torch.randn(10, 10)
         b = torch.randn(10, 10)
         c = torch.randn(10, 10)
-        with eval_frame.optimize(convert_frame(counter)):
+        with torchdynamo.optimize(counter):
             self.assertRaises(AssertionError, lambda: fn(a, b, c, AssertionError))
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
@@ -146,7 +143,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i)
-        with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
+        with torchdynamo.optimize(lambda gm: gm.forward):
             r2 = fn(i)
         self.assertTrue(same(r1, r2))
 
@@ -157,7 +154,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i, [])
-        with eval_frame.optimize(convert_frame_assert(lambda gm: gm.forward)):
+        with torchdynamo.optimize(lambda gm: gm.forward):
             r2 = fn(i, [])
             r3 = fn(i, tuple())
         self.assertTrue(same(r1, r2))
@@ -179,7 +176,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         cfg2 = Cfg()
         v = torch.zeros(1)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             v = fn(v, cfg1)  # 3
             v = fn(v, cfg2)  # 4.5
             cfg2.count = 1
@@ -205,7 +202,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         cfg1 = Cfg()
         v = torch.zeros(1)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn(v, cfg1)[0], 5)
             self.assertEqual(fn(v, cfg1)[0], 5)
             cfg1.just_add_7 = True
@@ -223,7 +220,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         v = torch.zeros(10, 20)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn(v, v.size())[0, 0], -10)
             self.assertEqual(fn(v, (10, 20))[0, 0], -10)
             self.assertEqual(fn(v, [10, 20])[0, 0], -10)
@@ -238,7 +235,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         v = torch.Tensor([100])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertIsNone(fn(v, v))
             self.assertEqual(out[0], 1100)
         self.assertEqual(cnts.op_count, 2)
@@ -253,7 +250,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         v = torch.Tensor([100])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertIsNone(fn(v, v))
             self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
@@ -276,7 +273,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn(v1, v2)(1.5)[0], -459)
             self.assertEqual(out[0], 2100)
         self.assertEqual(cnts.frame_count, 2)
@@ -289,7 +286,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn({"a": v1, "b": v2})[0], -200)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -316,7 +313,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn1({"a": v1, "b": v2})[0], 300)
             self.assertEqual(fn2({"a": v1, "b": v2})[0], 300)
             self.assertEqual(fn3({"a": v1, "b": v2})[0], 300)
@@ -330,7 +327,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn1({"a": v1, "b": v2})["a"], 101)
             self.assertEqual(fn1({"a": v1, "b": v2})["b"], 201)
         self.assertEqual(cnts.frame_count, 1)
@@ -343,7 +340,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn2({"a": v1, "b": v2}), 302)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
@@ -399,7 +396,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnts)):
+        with torchdynamo.optimize((cnts)):
             self.assertEqual(fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -412,7 +409,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([10])
         v2 = torch.Tensor([20])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn(v1, v2).ab, 50)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -429,7 +426,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         v2 = torch.Tensor([2])
         v3 = torch.Tensor([3])
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn(mytuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -509,7 +506,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             return head_mask
 
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertEqual(fn(2), [None] * 4)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
@@ -525,7 +522,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         x = torch.randn(10)
         cfg = MyConfig(offset=5)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -546,7 +543,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         x = torch.randn(10)
         cfg = MyConfig()
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(cfg, x), x + 1 - 2 + 3))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -563,7 +560,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         x = torch.randn(10)
         cfg = MyConfig()
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -600,13 +597,13 @@ class MiscTests(torchdynamo.testing.TestCase):
         correct2 = fn(obj2)
 
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(obj1), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(obj2), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
@@ -619,7 +616,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         val = torch.randn([1, 1, 473, 768])
         correct = fn(val)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(val), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -631,7 +628,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         args = [torch.randn(10), 4096, np.int64(8)]
         correct = fn(*args)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(*args), correct))
             self.assertTrue(same(fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
@@ -646,7 +643,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         args2 = dict(args1)
         assert fn(args1) is args1
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertIs(fn(args2), args2)
             self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
@@ -674,10 +671,10 @@ class MiscTests(torchdynamo.testing.TestCase):
         correct1 = fn(m1, v)
         correct2 = fn(m2, v)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnts)):
+        with torchdynamo.optimize(cnts):
             for _ in range(10):
                 self.assertTrue(same(fn(m1, v), correct1))
-        with eval_frame.optimize(convert_frame(cnts)):
+        with torchdynamo.optimize(cnts):
             for _ in range(10):
                 self.assertTrue(same(fn(m2, v), correct2))
         self.assertEqual(cnts.frame_count, 1)
@@ -693,7 +690,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         correct1 = fn(args1)
         correct2 = fn(args2)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(args1), correct1))
             self.assertTrue(same(fn(args2), correct2))
             self.assertIsInstance(fn(args1), list)
@@ -722,7 +719,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         obj2 = MyObj(x1, x2)
         fn(obj2)
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             self.assertIs(fn(obj1), obj1)
         self.assertTrue(same(obj1.a, obj2.a))
         self.assertTrue(same(obj1.b, obj2.b))
@@ -748,7 +745,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         obj2 = fn(x1)
 
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             obj1 = fn(x1)
         self.assertTrue(same(obj1.a, obj2.a))
         self.assertTrue(same(obj1.b, obj2.b))
@@ -776,7 +773,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         obj2 = fn(x1)
 
         cnts = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnts)):
+        with torchdynamo.optimize(cnts):
             obj1 = fn(x1)
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)

@@ -80,6 +80,16 @@ class AttrSource(Source):
     base: Source
     member: str
 
+    def __init__(self, base, member):
+        super().__init__()
+        if "." in member:
+            member_parts = member.split(".")
+            self.base = AttrSource(base, ".".join(member_parts[:-1]))
+            self.member = member_parts[-1]
+        else:
+            self.base = base
+            self.member = member
+
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
 
