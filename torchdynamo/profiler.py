@@ -6,6 +6,8 @@ from typing import List
 import torch
 
 from . import config
+from .optimizations.normalize import normalize_ir
+from .utils import checkpoint_params
 from .utils import print_once
 
 
@@ -160,7 +162,13 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
         return f"shape mismatch {input_shapes} {output_shapes} {shapes_of(result)}"
 
     def _wrapped(*args):
-        nonlocal output_shapes, result
+        nonlocal output_shapes, result, gm
+
+        if config.normalize_ir:
+            restore = checkpoint_params(gm)
+            gm = normalize_ir(gm, example_inputs)
+            restore()
+
         with torch.profiler.record_function("TORCHDYNAMO"):
             assert (
                 shapes_of(args) == input_shapes or config.dynamic_shapes
