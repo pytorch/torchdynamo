@@ -57,6 +57,30 @@ SKIP = {
     "detectron2_maskrcnn",
     "vision_maskrcnn",
 }
+
+# Additional models that are skipped in training
+SKIP_TRAIN = {
+    # not designed for training
+    "pyhpc_equation_of_state",
+    "pyhpc_isoneutral_mixing",
+    # Unusual training setup
+    "opacus_cifar10",
+    "maml",
+    # Known issues with training
+    "demucs",  # https://github.com/pytorch/benchmark/pull/639
+    "densenet121",  # https://github.com/pytorch/benchmark/issues/652
+    "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
+    # AOT Autograd known issues
+    "dlrm",  # No sparse support
+}
+
+# Some models have bad train dataset. We read eval dataset.
+ONLY_EVAL_DATASET = {"yolov3"}
+
+# These models support only train mode. So accuracy checking can't be done in
+# eval mode.
+ONLY_TRAINING_MODE = {"tts_angular"}
+
 current_name = ""
 current_device = ""
 output_filename = None
@@ -103,12 +127,14 @@ def load_model(device, model_name, is_training, check_accuracy):
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
-    if is_training:
+    if is_training and model_name not in ONLY_EVAL_DATASET:
         benchmark = benchmark_cls(test="train", device=device, jit=False)
     else:
         benchmark = benchmark_cls(test="eval", device=device, jit=False)
     model, example_inputs = benchmark.get_module()
-    if is_training and not check_accuracy:
+
+    # Models that must be in train mode while training
+    if is_training and (not check_accuracy or model_name in ONLY_TRAINING_MODE):
         model.train()
     else:
         model.eval()
@@ -554,6 +580,18 @@ def main():
         global synchronize
         synchronize = torch.cuda.synchronize
 
+    if (
+        args.devices == ["cuda"]
+        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
+    ):
+        # OOM errors on an RTX 3090 with 24gb RAM
+        SKIP.update(
+            {
+                "hf_Longformer",
+                "timm_nfnet",
+            }
+        )
+
     if args.no_skip:
         SKIP.clear()
 
@@ -577,8 +615,12 @@ def main():
 
     if args.training:
         model_iter_fn = forward_and_backward_pass
+        SKIP.update(SKIP_TRAIN)
     else:
         model_iter_fn = forward_pass
+
+    if args.no_skip:
+        SKIP.clear()
 
     experiment = null_experiment
     optimize_ctx = NullContext()
@@ -693,7 +735,8 @@ def main():
                 experiment,
             )
     elif args.isolate:
-        os.path.exists(output_filename) and os.unlink(output_filename)
+        if output_filename and os.path.exists(output_filename):
+            os.unlink(output_filename)
         os.chdir(torchdynamo.config.base_dir)
         for name in iter_model_names(args):
             try:
@@ -723,7 +766,7 @@ def main():
 
 
 def print_summary(filename):
-    if not os.path.exists(filename):
+    if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
     width = max(map(len, data.columns))
@@ -749,7 +792,8 @@ def run_one_model(
     name, model, is_training, model_iter_fn, example_inputs, optimize_ctx, experiment
 ):
     with pick_grad(name, is_training):
-        sys.stdout.write(f"{current_device:4} {current_name:34} ")
+        mode = "train" if is_training else "eval"
+        sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
         sys.stdout.flush()
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
@@ -794,7 +838,7 @@ def run_one_model(
         else:
             frames_third_pass = 0
 
-        if "coverage" in output_filename:
+        if output_filename and "coverage" in output_filename:
             results.append(f"{ok:3}/{total:3} +{frames_third_pass} frames")
 
         results.append(experiment(model, example_inputs))

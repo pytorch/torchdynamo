@@ -11,9 +11,6 @@ from torch.nn import functional as F
 
 import torchdynamo.testing
 import torchdynamo.utils
-from torchdynamo import eval_frame
-from torchdynamo.convert_frame import convert_frame
-from torchdynamo.convert_frame import convert_frame_assert
 from torchdynamo.testing import same
 
 
@@ -657,7 +654,7 @@ def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
-        with eval_frame.optimize(convert_frame(torchdynamo.testing.CompileCounter())):
+        with torchdynamo.optimize(torchdynamo.testing.CompileCounter()):
             _do_paste_mask(
                 torch.randn(1, 1, 28, 28),
                 torch.tensor([[0.0, 1, 2, 4]]) * 1,
@@ -711,7 +708,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         correct1 = convert_boxes_to_pooler_format(boxes1)
         correct2 = convert_boxes_to_pooler_format(boxes2)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnt)):
+        with torchdynamo.optimize(cnt):
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes1), correct1))
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes2), correct2))
 
@@ -724,32 +721,32 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         boxes1 = Boxes(torch.arange(0, 8).reshape((2, 4)))
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(same(fn(boxes1), boxes1.tensor + 4.0))
 
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    def _reformer(self, cf=convert_frame):
+    def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
         model = ReformerEncoder()
         torch.manual_seed(1337)
         correct = copy.deepcopy(model)(input)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(cf(cnt)):
+        with torchdynamo.optimize(cnt, nopython=nopython):
             torch.manual_seed(1337)
             self.assertTrue(same(model(input), correct))
         return cnt
 
     def test_reformer_eval(self):
         with torch.no_grad():
-            cnt = self._reformer(cf=convert_frame_assert)
+            cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 10)
 
     def test_reformer_train(self):
         with torch.enable_grad():
-            cnt = self._reformer()
+            cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
         self.assertEqual(cnt.frame_count, 4)
         self.assertEqual(cnt.op_count, 10)
@@ -760,7 +757,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         correct1 = longformer_chunk(input1)
         correct2 = longformer_chunk(input2)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(same(longformer_chunk(input1), correct1))
             self.assertTrue(same(longformer_chunk(input2), correct2))
             self.assertTrue(same(longformer_chunk(input1), correct1))
@@ -774,7 +771,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = PartialT5()
         correct = model(input)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(same(model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
@@ -785,7 +782,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = ChunkReformerFeedForward()
         correct = model(input)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(same(model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
@@ -799,7 +796,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = PartialMaml()
         correct = model(a, b, c, d)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame(cnt)):
+        with torchdynamo.optimize(cnt):
             for _ in range(10):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
@@ -823,7 +820,7 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         for fn in (fn1, fn2, fn3, fn4):
             cnt = torchdynamo.testing.CompileCounter()
-            with eval_frame.optimize(convert_frame_assert(cnt)):
+            with torchdynamo.optimize_assert(cnt):
                 self.assertTrue(same(fn(ex), ex.a + 1))
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
@@ -842,7 +839,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         correct = create_rand_mask_from_inputs(*args)
 
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(same(create_rand_mask_from_inputs(*args), correct))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
@@ -860,7 +857,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         l2 = [x]
         correct, _ = model(x, l1)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             result, l3 = model(x, l2)
             self.assertTrue(same(result, correct))
         self.assertTrue(same(l1, l2))
@@ -873,7 +870,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = BatchNormAct2d(1).eval()
         correct = model(a)
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(same(model(a), correct))
 
         self.assertEqual(cnt.frame_count, 1)
@@ -889,7 +886,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             return x + torch.randn(10, dtype=get_parameter_dtype(model))
 
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertEqual(test_fn(model, torch.randn(10)).dtype, torch.float32)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
@@ -902,7 +899,7 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         cfg = DummyConfig()
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertEqual(test_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 3)
@@ -912,7 +909,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         correct = _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(x)
 
         cnt = torchdynamo.testing.CompileCounter()
-        with eval_frame.optimize(convert_frame_assert(cnt)):
+        with torchdynamo.optimize_assert(cnt):
             self.assertTrue(
                 same(_get_sorted_bucket_idx_and_undo_sorted_bucket_idx(x), correct)
             )

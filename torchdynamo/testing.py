@@ -9,12 +9,10 @@ from torch import fx
 
 import torchdynamo
 
-from . import eval_frame
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
-from .convert_frame import convert_frame_assert
 from .guards import GuardedCode
 
 unsupported = torchdynamo._eval_frame.unsupported
@@ -33,7 +31,7 @@ def collect_results(model, prediction, loss, example_inputs):
     results.append(loss)
     grads = dict()
     for name, param in model.named_parameters():
-        grads[name] = clone_me(param.grad)
+        grads[name + ".grad"] = clone_me(param.grad)
     results.append(grads)
     for example in example_inputs:
         if isinstance(example, list):
@@ -164,7 +162,7 @@ def standard_test(self, fn, nargs, expected_ops=None):
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
     correct1 = fn(*args1)
     correct2 = fn(*args2)
-    with eval_frame.optimize(convert_frame_assert(actual)):
+    with torchdynamo.optimize_assert(actual):
         val1a = fn(*args1)
         val2a = fn(*args2)
         val1b = fn(*args1)
