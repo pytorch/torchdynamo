@@ -342,6 +342,8 @@ class BuiltinVariable(VariableTracker):
             val, next_iter = arg.next_variables()
             tx.replace_all(arg, next_iter)
             return val
+        elif isinstance(arg, variables.BaseListVariable):
+            return arg.items[0].add_options(self, arg)
 
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
@@ -500,4 +502,24 @@ class BuiltinVariable(VariableTracker):
             items = list(reversed(obj.unpack_var_sequence(tx)))
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, obj)
+            )
+
+    def call_chain(self, tx, *args):
+        if all(obj.has_unpack_var_sequence(tx) for obj in args):
+            items = []
+            for obj in args:
+                items.extend(obj.unpack_var_sequence(tx))
+            return variables.TupleVariable(
+                items, **VariableTracker.propagate(self, *args)
+            )
+
+    def call_islice(self, tx, iterable, *args):
+        if iterable.has_unpack_var_sequence(tx) and all(
+            x.is_python_constant() for x in args
+        ):
+            const_args = [x.as_python_constant() for x in args]
+            items = iterable.unpack_var_sequence(tx)
+            items = list(itertools.islice(items, *const_args))
+            return variables.TupleVariable(
+                items, **VariableTracker.propagate(self, iterable, *args)
             )

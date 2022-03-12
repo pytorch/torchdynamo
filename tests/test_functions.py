@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 import functools
 import inspect
+import itertools
 import operator
 
 import torch
@@ -489,3 +490,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         tmp.clear()
         tmp.append(a + b)
         return tmp
+
+    @make_test
+    def test_islice_chain(a, b):
+        tmp1 = [a + 1, a + 2]
+        tmp2 = [a + 3, a + 4]
+        a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
+        c = next(itertools.islice(tmp1, 1, None))
+        return a - b / c
