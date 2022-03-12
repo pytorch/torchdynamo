@@ -1,5 +1,6 @@
 import functools
 import logging
+import threading
 
 from . import config
 from . import convert_frame
@@ -13,6 +14,8 @@ def nothing():
 
 
 unset = object()
+
+compile_lock = threading.Lock()
 
 
 class _TorchDynamoContext:
@@ -77,7 +80,8 @@ def catch_errors_wrapper(callback):
             ):
                 # nametuple constructor
                 return None
-            return callback(frame, cache_size)
+            with compile_lock:
+                return callback(frame, cache_size)
         except Exception:
             logging.basicConfig()
             logging.exception("Error while processing frame")

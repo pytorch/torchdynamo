@@ -52,8 +52,7 @@
 // Flag to just run a frame normally
 #define SKIP_CODE ((void *)0x1)
 
-// TODO(jansel): make this threadlocal to support MT
-static PyObject *eval_frame_callback = NULL;
+static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
 static PyObject *noargs = NULL;     /* cached empty tuple */
 static PyObject *dotzerokey = NULL; /* ".0" */
@@ -61,6 +60,19 @@ static PyObject *guard_fail_hook = NULL;
 static PyObject *guard_error_hook = NULL;
 
 size_t extra_index = -1;
+
+inline static PyObject *eval_frame_callback_get(void) {
+  void *result = PyThread_tss_get(&eval_frame_callback_key);
+  if (unlikely(result == NULL)) {
+    Py_RETURN_NONE;
+  } else {
+    return (PyObject *)result;
+  }
+}
+
+inline static void eval_frame_callback_set(PyObject *obj) {
+  PyThread_tss_set(&eval_frame_callback_key, obj);
+}
 
 static void ignored(void *obj) {}
 
@@ -306,8 +318,12 @@ static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
 }
 
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
-  PyObject *old_callback = eval_frame_callback;
-  eval_frame_callback = new_callback;
+  // Change the eval frame callback and return the old one
+  //  - None: disables TorchDynamo
+  //  - False: run-only mode (reuse existing compiles)
+  //  - Python callable(): enables TorchDynamo
+  PyObject *old_callback = eval_frame_callback_get();
+  eval_frame_callback_set(new_callback);
   if (new_callback == Py_None) {
     // disable eval frame hook
     DEBUG_TRACE0("disable");
@@ -429,7 +445,8 @@ PyMODINIT_FUNC PyInit__eval_frame(void) {
   CHECK(sizeof(unsigned long) == sizeof(void *));
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
   Py_INCREF(Py_None);
-  eval_frame_callback = Py_None;
+  int result = PyThread_tss_create(&eval_frame_callback_key);
+  CHECK(result == 0);
   noargs = PyTuple_New(0);
   dotzerokey = PyUnicode_InternFromString(".0");
   return PyModule_Create(&_module);
