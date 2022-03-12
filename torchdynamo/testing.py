@@ -1,4 +1,5 @@
 import dis
+import functools
 import os.path
 import sys
 import types
@@ -145,7 +146,10 @@ class CompileCounter:
         return gm.forward
 
 
-def standard_test(self, fn, nargs, expected_ops=None):
+def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
+    if torchdynamo.config.dynamic_shapes and expected_ops_dynamic is not None:
+        expected_ops = expected_ops_dynamic
+
     actual = CompileCounter()
     if expected_ops is None:
         expected = CompileCounter()
@@ -207,3 +211,13 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     if pvalue > pvalue_threshold:
         return f"{speedup:.3f}x SAME"
     return f"{speedup:.3f}x p={pvalue:.2f}"
+
+
+def requires_static_shapes(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if torchdynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("requires static shapes")
+        return fn(*args, **kwargs)
+
+    return _fn

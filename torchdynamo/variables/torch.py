@@ -210,12 +210,14 @@ class TorchVariable(VariableTracker):
                     list(value.unpack_var_sequence(tx)),
                     **VariableTracker.propagate(self, value, args, kwargs.values()),
                 )
-            else:
+            elif value.is_python_constant():
                 # constant prop through it
                 return variables.ConstantVariable(
                     torch.nn.modules.utils._ntuple(count)(value.as_python_constant()),
                     **VariableTracker.propagate(self, value, args, kwargs.values()),
                 )
+            else:
+                unimplemented(f"torch.nn.modules.utils._ntuple({value})")
 
         if self.value is torch.nn.modules.utils._ntuple:
             return variables.LambdaVariable(handle_ntuple, **options)

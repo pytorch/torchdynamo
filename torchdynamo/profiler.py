@@ -148,7 +148,7 @@ class Profiler:
 
 def shapes_of(it):
     if it:
-        return [tuple(x.shape) for x in it]
+        return [tuple(getattr(x, "shape", [])) for x in it]
 
 
 def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):

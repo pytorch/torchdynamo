@@ -10,6 +10,7 @@ import torch
 
 import torchdynamo.testing
 from torchdynamo.testing import CompileCounter
+from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
 
@@ -94,7 +95,9 @@ class MiscTests(torchdynamo.testing.TestCase):
             o.copy_(a / b)
             return o
 
-        torchdynamo.testing.standard_test(self, unpack4, 2, expected_ops=5)
+        torchdynamo.testing.standard_test(
+            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=8
+        )
 
     def test_unpack5(self):
         def unpack5(a, b):
@@ -105,7 +108,9 @@ class MiscTests(torchdynamo.testing.TestCase):
             o.copy_(a / b)
             return o
 
-        torchdynamo.testing.standard_test(self, unpack5, 2, expected_ops=5)
+        torchdynamo.testing.standard_test(
+            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=8
+        )
 
     def test_matmul1(self):
         def matmul_op1(a, b):
@@ -376,7 +381,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         def fn(a):
             return a + a.numel() + torch.numel(a)
 
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=2)
+        return torchdynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=2, expected_ops_dynamic=4
+        )
 
     def test_pair(self):
         def fn(a):
@@ -386,7 +393,9 @@ class MiscTests(torchdynamo.testing.TestCase):
                 + torch.ones(torch.nn.modules.utils._ntuple(3)(3)).sum()
             )
 
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=5)
+        return torchdynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=8
+        )
 
     def test_tensor_item(self):
         def fn(a, b):
@@ -608,6 +617,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    @requires_static_shapes
     def test_tensor_build_list_unpack(self):
         def fn(x):
             # seen in fastNLP_Bert

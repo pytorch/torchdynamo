@@ -9,6 +9,7 @@ from torch import sub
 from torch.nn import functional as F
 
 import torchdynamo.testing
+from torchdynamo.testing import requires_static_shapes
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -272,11 +273,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
 
+    @requires_static_shapes
     @make_test
     def test_shape1(x):
         if x.shape[0] == 10:
             return x + 1
 
+    @requires_static_shapes
     @make_test
     def test_shape2(x):
         if x.size(1) == 10:
@@ -289,6 +292,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
         del c, a
         return b + d
 
+    @requires_static_shapes
     @make_test
     def test_chunks1(x):
         chunk_size = 5

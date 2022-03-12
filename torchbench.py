@@ -589,6 +589,16 @@ def main():
             }
         )
 
+    if torchdynamo.config.dynamic_shapes:
+        # TODO(jansel): fix bugs in these
+        SKIP.update(
+            {
+                "demucs",
+                "hf_Bart",
+                "timm_nfnet",
+            }
+        )
+
     if args.no_skip:
         SKIP.clear()
 

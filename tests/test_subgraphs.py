@@ -5,6 +5,7 @@ from unittest.mock import patch
 import torch
 
 import torchdynamo.testing
+from torchdynamo import config
 from torchdynamo.testing import unsupported
 
 globalmod = torch.nn.ReLU()
@@ -305,7 +306,10 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        self._common(fn, 2, 4)
+        if config.dynamic_shapes:
+            self._common(fn, 2, 5)
+        else:
+            self._common(fn, 2, 4)
 
     def test_restore_range(self):
         def fn(a, b):
