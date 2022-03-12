@@ -594,7 +594,6 @@ def main():
         SKIP.update(
             {
                 "demucs",
-                "hf_Bart",
                 "timm_nfnet",
             }
         )

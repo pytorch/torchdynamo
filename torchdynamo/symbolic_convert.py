@@ -986,7 +986,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
         for val in self.symbolic_locals.values():
-            if isinstance(val, ListIteratorVariable):
+            if isinstance(val, (ListIteratorVariable, BaseListVariable)):
                 self.output.guards.update(val.guards)
 
     def should_compile_partial_graph(self):
