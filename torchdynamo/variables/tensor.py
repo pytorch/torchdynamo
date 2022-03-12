@@ -28,6 +28,7 @@ class TensorVariable(VariableTracker):
         "size",
         "stride",
         "requires_grad",
+        "is_quantized",
     ]
 
     @staticmethod
@@ -105,6 +106,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         requires_grad=None,
+        is_quantized=None,
         **kwargs,
     ):
         assert dtype is not None or not config.dynamic_propagation
@@ -116,6 +118,7 @@ class TensorVariable(VariableTracker):
         self.size = size
         self.stride = stride
         self.requires_grad = requires_grad
+        self.is_quantized = is_quantized
 
     def as_proxy(self):
         return self.proxy
@@ -130,6 +133,7 @@ class TensorVariable(VariableTracker):
             "device": value.device,
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
+            "is_quantized": value.is_quantized,
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
@@ -154,6 +158,8 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.size, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
+        elif name == "is_quantized" and self.is_quantized is not None:
+            result = ConstantVariable(self.is_quantized, **options)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:

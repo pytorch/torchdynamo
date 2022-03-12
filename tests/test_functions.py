@@ -498,3 +498,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_is_quantized(a, b):
+        if not a.is_quantized:
+            return a + b
