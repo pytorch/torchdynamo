@@ -7,12 +7,12 @@ import torch._C
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
+from ..exc import unimplemented
 from ..guards import Guard
 from ..guards import GuardBuilder
 from ..guards import GuardSource
 from ..source import AttrSource
 from ..utils import identity
-from ..utils import unimplemented
 from .base import VariableTracker
 
 

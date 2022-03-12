@@ -35,14 +35,14 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
+from .exc import RestartAnalysis
+from .exc import Unsupported
+from .exc import unimplemented
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
-from .utils import RestartAnalysis
-from .utils import Unsupported
 from .utils import counters
 from .utils import istype
-from .utils import unimplemented
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr

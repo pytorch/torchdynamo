@@ -211,7 +211,7 @@ Which will trigger the following error in the example program above:
 ```py
 Traceback (most recent call last):
   ...
-torchdynamo.utils.Unsupported: generic_jump TensorVariable()
+torchdynamo.exc.Unsupported: generic_jump TensorVariable()
 Processing original code:
   File "example.py", line 7, in toy_example
     if b.sum() < 0:

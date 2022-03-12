@@ -11,13 +11,13 @@ import torch
 from .. import config
 from .. import variables
 from ..allowed_functions import is_disallowed
+from ..exc import Unsupported
+from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
-from ..utils import Unsupported
 from ..utils import check_constant_args
 from ..utils import istype
 from ..utils import proxy_args_kwargs
-from ..utils import unimplemented
 from .base import MutableLocal
 from .base import VariableTracker
 

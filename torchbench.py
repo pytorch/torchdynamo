@@ -692,7 +692,7 @@ def main():
     elif args.nothing:
         pass
     elif args.nops:
-        optimize_ctx = torchdynamo.eval_frame.optimize(
+        optimize_ctx = torchdynamo.eval_frame._optimize_catch_errors(
             torchdynamo.testing.debug_insert_nops, nopython=args.nopython
         )
     else:

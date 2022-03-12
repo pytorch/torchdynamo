@@ -1,32 +1,24 @@
-import torchdynamo.convert_frame
-import torchdynamo.resume_execution
+from . import _eval_frame
+from . import convert_frame
+from . import resume_execution
+from .eval_frame import disable
+from .eval_frame import optimize
+from .eval_frame import optimize_assert
+from .eval_frame import run
 
-from . import eval_frame
-
-
-def optimize(fx_compile_fn, nopython=False):
-    if nopython:
-        return optimize_assert(fx_compile_fn)
-    return eval_frame.optimize(torchdynamo.convert_frame.convert_frame(fx_compile_fn))
-
-
-def optimize_assert(fx_compile_fn):
-    return eval_frame.optimize(
-        torchdynamo.convert_frame.convert_frame_assert(fx_compile_fn)
-    )
-
-
-run = eval_frame.run
+__all__ = [
+    "optimize",
+    "optimize_assert",
+    "run",
+    "disable",
+    "reset",
+]
 
 
 def reset():
-    from torchdynamo._eval_frame import reset_code
-
-    for code in (
-        torchdynamo.convert_frame.input_codes.seen
-        + torchdynamo.convert_frame.output_codes.seen
-    ):
-        reset_code(code)
-    torchdynamo.convert_frame.input_codes.clear()
-    torchdynamo.convert_frame.output_codes.clear()
-    torchdynamo.resume_execution.ContinueExecutionCache.cache.clear()
+    """Clear all compile caches and restore initial state"""
+    for code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
+        _eval_frame.reset_code(code)
+    convert_frame.input_codes.clear()
+    convert_frame.output_codes.clear()
+    resume_execution.ContinueExecutionCache.cache.clear()

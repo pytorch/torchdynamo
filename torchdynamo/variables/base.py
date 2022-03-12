@@ -7,13 +7,13 @@ from typing import Optional
 from typing import Set
 
 from .. import variables
+from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import Source
 from ..utils import dict_values
 from ..utils import identity
 from ..utils import istype
 from ..utils import odict_values
-from ..utils import unimplemented
 
 
 class MutableLocal:

@@ -11,12 +11,12 @@ import torchdynamo
 
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
+from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
 from .utils import is_safe_constant
 from .utils import istype
 from .utils import rot_n_helper
-from .utils import unimplemented
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable

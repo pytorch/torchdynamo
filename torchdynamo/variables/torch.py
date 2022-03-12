@@ -9,11 +9,11 @@ import torch.nn
 from .. import config
 from .. import variables
 from ..allowed_functions import _allowed_function_ids
+from ..exc import unimplemented
 from ..utils import check_constant_args
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
-from ..utils import unimplemented
 from .base import VariableTracker
 
 

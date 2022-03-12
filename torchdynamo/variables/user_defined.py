@@ -9,13 +9,13 @@ from typing import List
 import torch.nn
 
 from .. import variables
+from ..exc import unimplemented
 from ..guards import Guard
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
-from ..utils import unimplemented
 from .base import MutableLocal
 from .base import VariableTracker
 

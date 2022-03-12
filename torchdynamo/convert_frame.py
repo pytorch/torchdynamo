@@ -20,34 +20,14 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .exc import InternalTorchDynamoError
+from .exc import RestartAnalysis
+from .exc import Unsupported
+from .exc import unimplemented
 from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
-from .utils import RestartAnalysis
-from .utils import Unsupported
 from .utils import counters
-from .utils import unimplemented
-
-
-class InternalTorchDynamoError(RuntimeError):
-    pass
-
-
-class SkipContext:
-    enabled = False
-
-    @staticmethod
-    def wrap(fn):
-        @functools.wraps(fn)
-        def inner(*args):
-            prior = SkipContext.enabled
-            SkipContext.enabled = True
-            try:
-                return fn(*args)
-            finally:
-                SkipContext.enabled = prior
-
-        return inner
 
 
 class Tracker:
@@ -126,7 +106,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
-        if code in output_codes or SkipContext.enabled:
+        if code in output_codes:
             return None
         if (
             os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")

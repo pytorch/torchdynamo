@@ -9,10 +9,10 @@ import torch.random
 
 from .. import config
 from .. import variables
+from ..exc import unimplemented
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
-from ..utils import unimplemented
 from .base import VariableTracker
 from .base import typestr
 
@@ -79,7 +79,7 @@ class TensorVariable(VariableTracker):
                         **options,
                     )
                 )
-            if istype(example_value, tuple):
+            if istype(example_value, (tuple, list)):
                 return variables.TupleVariable(unpacked, **options)
             else:
                 assert (

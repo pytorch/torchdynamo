@@ -19,8 +19,8 @@ from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
 from torchdynamo.utils import timed
-from torchdynamo.utils import warning
 
+from ..exc import warning
 from .backends import BACKENDS
 from .normalize import long_name
 from .normalize import normalize_ir

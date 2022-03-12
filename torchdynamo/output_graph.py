@@ -21,6 +21,7 @@ from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
+from .exc import unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -29,7 +30,6 @@ from .source import Source
 from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
-from .utils import unimplemented
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 
@@ -299,7 +299,7 @@ class OutputGraph(fx.Tracer):
         gm.recompile()
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
-        compiled_fn = torchdynamo.convert_frame.SkipContext.wrap(compiled_fn)
+        compiled_fn = torchdynamo.disable(compiled_fn)
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
         if config.debug:

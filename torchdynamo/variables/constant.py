@@ -2,8 +2,8 @@ from typing import Dict
 from typing import List
 
 from .. import variables
+from ..exc import unimplemented
 from ..utils import istype
-from ..utils import unimplemented
 from .base import VariableTracker
 from .base import typestr
 

@@ -312,7 +312,10 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
     // disable eval frame hook
     DEBUG_TRACE0("disable");
     tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-  } else if (old_callback == Py_None) {
+  } else if (new_callback == Py_False) {
+    DEBUG_TRACE0("run_only");
+    tstate->interp->eval_frame = &custom_eval_frame_run_only;
+  } else {
     // enable eval frame hook
     DEBUG_TRACE0("enable");
     tstate->interp->eval_frame = &custom_eval_frame;
@@ -326,23 +329,16 @@ static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
     DEBUG_TRACE0("arg error");
     return NULL;
   }
-  if (callback != Py_None && !PyCallable_Check(callback)) {
+  if (callback != Py_None && callback != Py_False &&
+      !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
     return NULL;
   }
   Py_INCREF(callback);
-  DEBUG_TRACE("python enabled=%d", callback != Py_None);
+  DEBUG_TRACE("python enabled=%d run_only=%d", callback != Py_None,
+              callable != Py_False);
   return set_eval_frame(callback, PyThreadState_GET());
-}
-
-static PyObject *set_eval_frame_run_only(PyObject *dummy, PyObject *args) {
-  DEBUG_TRACE0("enable: run_only");
-  PyThreadState_GET()->interp->eval_frame = &custom_eval_frame_run_only;
-  PyObject *old_callback = eval_frame_callback;
-  Py_INCREF(Py_None);
-  eval_frame_callback = Py_None;
-  return old_callback;
 }
 
 static PyObject *reset_code(PyObject *dummy, PyObject *args) {
@@ -418,7 +414,6 @@ static PyObject *set_guard_error_hook(PyObject *dummy, PyObject *args) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
-    {"set_eval_frame_run_only", set_eval_frame_run_only, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_VARARGS, NULL},

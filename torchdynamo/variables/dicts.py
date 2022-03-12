@@ -8,8 +8,8 @@ from typing import List
 from .. import variables
 from .._eval_frame import skip_code
 from ..bytecode_transformation import create_instruction
+from ..exc import unimplemented
 from ..source import AttrSource
-from ..utils import unimplemented
 from .base import VariableTracker
 
 
