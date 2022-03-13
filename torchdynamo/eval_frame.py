@@ -5,8 +5,19 @@ import threading
 from . import config
 from . import convert_frame
 from . import skipfiles
-from ._eval_frame import set_eval_frame
 from .mutation_guard import install_generation_tagging_new
+
+try:
+    from . import _eval_frame
+except (ModuleNotFoundError, ImportError) as e:
+    raise RuntimeError("run `python setup.py develop` to compile C extensions") from e
+
+set_eval_frame = _eval_frame.set_eval_frame
+reset_code = _eval_frame.reset_code
+unsupported = _eval_frame.unsupported
+skip_code = _eval_frame.skip_code
+set_guard_fail_hook = _eval_frame.set_guard_fail_hook
+set_guard_error_hook = _eval_frame.set_guard_error_hook
 
 
 def nothing():

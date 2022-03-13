@@ -6,8 +6,8 @@ from typing import Dict
 from typing import List
 
 from .. import variables
-from .._eval_frame import skip_code
 from ..bytecode_transformation import create_instruction
+from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource
 from .base import VariableTracker

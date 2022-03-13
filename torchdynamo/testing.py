@@ -16,7 +16,7 @@ from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
 from .guards import GuardedCode
 
-unsupported = torchdynamo._eval_frame.unsupported
+unsupported = torchdynamo.eval_frame.unsupported
 three = 3
 
 

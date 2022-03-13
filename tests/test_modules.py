@@ -4,7 +4,7 @@ import torch
 from torch.nn import functional as F
 
 import torchdynamo.testing
-from torchdynamo._eval_frame import unsupported
+from torchdynamo.eval_frame import unsupported
 
 from . import test_functions
 

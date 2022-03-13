@@ -18,11 +18,11 @@ import torch
 
 from . import config
 from . import mutation_guard
-from ._eval_frame import set_guard_error_hook
-from ._eval_frame import set_guard_fail_hook
 from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
+from .eval_frame import set_guard_error_hook
+from .eval_frame import set_guard_fail_hook
 from .utils import istype
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
