@@ -331,7 +331,11 @@ class Functionalization(Transformer):
         args, kwargs = self.fetch_args_kwargs_from_env(n)
         kwargs = dict(kwargs)
 
-        if not n.meta["is_input_mutation"] and issubclass(n.meta["type"], torch.Tensor):
+        if (
+            not n.meta["is_input_mutation"]
+            and not n.meta["indirect_mutation"]
+            and issubclass(n.meta["type"], torch.Tensor)
+        ):
             if "inplace" in n.kwargs:
                 if kwargs["inplace"]:
                     patches.append(n.args[0])

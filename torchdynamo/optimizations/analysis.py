@@ -1,6 +1,6 @@
+import collections
 import copy
 import itertools
-import weakref
 
 import torch
 from torch.fx.node import map_aggregate
@@ -13,7 +13,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         super(ShapeAliasingAndMutationProp, self).__init__(*args, **kwargs)
         self.input_alias_groups = set()
         self.data_ptr_to_alias_group = dict()
-        self.storage_cleanup_hooks = []
+        self.storage_keepalive = []
         self.make_alias_group = itertools.count(1)
 
     def tensor_alias_group(self, value: torch.Tensor):
@@ -23,14 +23,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         if alias_group is None:
             alias_group = next(self.make_alias_group)
             self.data_ptr_to_alias_group[storage_data_ptr] = alias_group
-
-            def cleanup_callback(ref):
-                if storage_data_ptr in self.data_ptr_to_alias_group:
-                    del self.data_ptr_to_alias_group[storage_data_ptr]
-
-            self.storage_cleanup_hooks.append(
-                weakref.ref(value.storage(), cleanup_callback)
-            )
+            self.storage_keepalive.append(value.storage())
         return alias_group
 
     def placeholder(self, target, args, kwargs):
@@ -47,10 +40,18 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         result = getattr(self, n.op)(n.target, args, kwargs)
         versions2 = [obj._version for obj in tensor_args]
 
+        input_alias_groups = set()
+
+        def visit_arg(arg: torch.fx.Node):
+            input_alias_groups.update(arg.meta["alias_groups"])
+
+        torch.fx.map_arg((n.args, n.kwargs), visit_arg)
+
         n.meta["type"] = type(result)
         n.meta["alias_groups"] = {
             self.tensor_alias_group(obj) for obj in self.extract_tensors(result)
         }
+        n.meta["input_alias_groups"] = input_alias_groups
         n.meta["mutates_alias_groups"] = {
             self.tensor_alias_group(tensor)
             for tensor, v1, v2 in zip(tensor_args, versions1, versions2)
@@ -86,12 +87,29 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         map_aggregate(result, visit)
         return tensors
 
+    def tag_indirect_mutation(self):
+        checks = collections.defaultdict(set)
+        for n in self.module.graph.nodes:
+
+            def visit_arg(arg: torch.fx.Node):
+                for group in arg.meta["alias_groups"]:
+                    if group in checks:
+                        for other_node in checks[group]:
+                            if other_node is not arg:
+                                other_node.meta["indirect_mutation"] = True
+
+            torch.fx.map_arg((n.args, n.kwargs), visit_arg)
+            n.meta["indirect_mutation"] = False
+            for group in n.meta["mutates_alias_groups"]:
+                checks[group].add(n)
+
     def run(self, *args):
         try:
-            return super().run(*args)
+            super().run(*args)
+            self.tag_indirect_mutation()
         finally:
             # cleanup
-            self.storage_cleanup_hooks.clear()
+            self.storage_keepalive.clear()
             self.env.clear()
 
 
