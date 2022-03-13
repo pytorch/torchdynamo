@@ -829,3 +829,26 @@ class MiscTests(torchdynamo.testing.TestCase):
             return Foo.bar(a, b) - 1
 
         torchdynamo.testing.standard_test(self, fn=fn, nargs=2)
+
+    def test_dunder_methods(self):
+        class Foo:
+            def __init__(self, val):
+                super().__init__()
+                self.val = val
+
+            def __add__(self, other):
+                return Foo(self.val + other.val)
+
+            def __mul__(self, other):
+                return Foo(self.val * other.val)
+
+            def __truediv__(self, other):
+                return Foo(self.val / other.val)
+
+            def __sub__(self, other):
+                return Foo(self.val - other.val)
+
+        def fn(a, b, c):
+            return Foo(a) + Foo(b) * Foo(c) / Foo(a) - Foo(b)
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=3, expected_ops=4)

@@ -5,6 +5,7 @@ from typing import List
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
+from ..exc import unimplemented
 from ..utils import make_cell
 from .base import VariableTracker
 from .base import typestr
@@ -53,26 +54,24 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self):
         return types.FunctionType
 
-    def has_closure(self):
-        if getattr(self.fn, "__closure__", None) is not None:
-            if len(self.fn.__closure__) == 1 and self.fn.__code__.co_freevars == (
-                "__class__",
-            ):
-                # not a real closure, just a usage of `super()`
-                return False
-            return True
-        return False
-
     def closure_vars(self, tx):
-        if self.fn.__code__.co_freevars and "__class__" in self.fn.__code__.co_freevars:
-            assert len(self.fn.__closure__) == len(self.fn.__code__.co_freevars)
-            cls = self.fn.__closure__[
-                self.fn.__code__.co_freevars.index("__class__")
-            ].cell_contents
-            return {
-                "__class__": variables.UserDefinedClassVariable(cls).add_options(self)
-            }
-        return super().closure_vars(tx)
+        if not (self.fn.__code__.co_freevars or getattr(self.fn, "__closure__", None)):
+            return {}
+
+        options = VariableTracker.propagate(self)
+        assert len(self.fn.__closure__) == len(self.fn.__code__.co_freevars)
+        result = {}
+        for name, cell in zip(self.fn.__code__.co_freevars, self.fn.__closure__):
+            if name == "__class__":
+                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
+            else:
+                var = tx.output.root_tx.match_nested_cell(name, cell)
+                if var is not None:
+                    result[name] = var
+                else:
+                    # this case could be supported, but requires adding a guard
+                    unimplemented("inline with __closure__")
+        return {k: v.add_options(options) for k, v in result.items()}
 
     def has_self(self):
         return getattr(self.fn, "__self__", None) is not None

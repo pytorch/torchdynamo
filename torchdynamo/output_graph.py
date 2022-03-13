@@ -57,6 +57,7 @@ class OutputGraph(fx.Tracer):
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: Callable,
+        root_tx: "torchdynamo.symbolic_convert.InstructionTranslator",
     ):
         super(OutputGraph, self).__init__()
 
@@ -72,6 +73,7 @@ class OutputGraph(fx.Tracer):
         # Not checkpointed
         self.compiler_fn = compiler_fn
         self.root_globals = f_globals
+        self.root_tx = root_tx
         self.cleanups = []
         self.should_exit = False
 

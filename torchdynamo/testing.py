@@ -1,7 +1,6 @@
 import dis
 import functools
 import os.path
-import sys
 import types
 import unittest
 
@@ -62,10 +61,6 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce")
 
 
-def exc_bytecode_offset():
-    dis.Bytecode.from_traceback(sys.exc_info()[2]).current_offset
-
-
 def same(a, b):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
@@ -96,6 +91,7 @@ def same(a, b):
         "Boxes",
         "Normal",
         "TanhTransform",
+        "Foo",
     ):
         assert type(a) is type(b)
         return all(same(getattr(a, key), getattr(b, key)) for key in a.__dict__.keys())

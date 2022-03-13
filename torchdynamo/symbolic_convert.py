@@ -173,6 +173,7 @@ class InstructionTranslatorBase(object):
         self.symbolic_locals = collections.OrderedDict(
             [(k, v) for k, v in self.symbolic_locals.items() if k in reads]
         )
+        self.output.side_effects.prune_dead_object_new(self)
 
     def call_function(
         self,
@@ -967,7 +968,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
     ):
         super(InstructionTranslator, self).__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn),
+            output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
             f_globals=f_globals,
             f_builtins=f_builtins,
@@ -988,6 +989,19 @@ class InstructionTranslator(InstructionTranslatorBase):
         for val in self.symbolic_locals.values():
             if isinstance(val, (ListIteratorVariable, BaseListVariable)):
                 self.output.guards.update(val.guards)
+
+        self._freevars_ids = dict()
+        for name in self.code_options["co_freevars"]:
+            if name in f_locals:
+                self._freevars_ids[name] = id(f_locals[name])
+
+    def match_nested_cell(self, name, cell):
+        """Match a cell in this method to one in a function we are inlining"""
+        value = cell.cell_contents
+        # TODO(jansel): check the id of the cell rather than the contents
+        if id(value) != self._freevars_ids.get(name):
+            return None
+        return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
         return all(b.can_restore() for b in self.block_stack) and not self.one_graph
@@ -1054,8 +1068,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
         assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
-        if func.has_closure() and isinstance(func, UserFunctionVariable):
-            unimplemented(f"inline with __closure__ {func}")
         if func.has_self():
             unimplemented("inline with __self__")
         if skipfiles.check(

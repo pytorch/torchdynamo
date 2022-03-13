@@ -84,6 +84,15 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
+    def apply(self, fn):
+        self.id_to_variable = collections.OrderedDict(
+            (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
+        )
+        self.store_attr_mutations = collections.OrderedDict(
+            (k, VariableTracker.apply(fn, v))
+            for k, v in self.store_attr_mutations.items()
+        )
+
     def __contains__(self, item):
         return id(item) in self.id_to_variable
 
@@ -156,18 +165,43 @@ class SideEffects(object):
         self.keepalive.append(obj)
         return variable
 
+    def prune_dead_object_new(self, tx):
+        live_new_objects = set()
+        skip_obj = None
+
+        def visit(var: VariableTracker):
+            if (
+                isinstance(var.mutable_local, AttributeMutationNew)
+                and var.mutable_local is not skip_obj
+            ):
+                live_new_objects.add(var.mutable_local)
+            return var
+
+        def is_live(var: VariableTracker):
+            if isinstance(var, AttributeMutationNew):
+                return var in live_new_objects
+            if isinstance(var, VariableTracker):
+                return is_live(var.mutable_local)
+            return True
+
+        VariableTracker.apply(visit, (tx.stack, tx.symbolic_locals))
+        for var in self.id_to_variable.values():
+            if not isinstance(var.mutable_local, AttributeMutationNew):
+                VariableTracker.apply(visit, var)
+
+        for skip_obj, setattrs in self.store_attr_mutations.items():
+            VariableTracker.apply(visit, setattrs)
+
+        self.id_to_variable = collections.OrderedDict(
+            (k, v) for k, v in self.id_to_variable.items() if is_live(v)
+        )
+        self.store_attr_mutations = collections.OrderedDict(
+            (k, v) for k, v in self.store_attr_mutations.items() if is_live(k)
+        )
+
     def mutation(self, oldvar, newvar):
         return newvar.clone(
             mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
-
-    def apply(self, fn):
-        self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v))
-            for k, v in self.store_attr_mutations.items()
         )
 
     def codegen(self, cg: PyCodegen):
