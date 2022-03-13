@@ -798,7 +798,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             if tmp.__class__.__name__ == "MyClassFoo":
                 return a - b / c
 
-        torchdynamo.testing.standard_test(self, fn=fn1, nargs=3, expected_ops=2)
+        torchdynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
     def test_manual_seed(self):
         def fn(a, b):
@@ -807,3 +807,25 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x + 1
 
         torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
+
+    def test_usr_cls_staticmethod(self):
+        class Foo:
+            @staticmethod
+            def bar(a, b):
+                return a + b
+
+        def fn(a, b):
+            return Foo.bar(a, b) - 1
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=2)
+
+    def test_usr_cls_classmethod(self):
+        class Foo:
+            @classmethod
+            def bar(cls, a, b):
+                return a + b
+
+        def fn(a, b):
+            return Foo.bar(a, b) - 1
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=2)
