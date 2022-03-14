@@ -261,9 +261,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             flags |= 0x02
             codegen(self.kwdefaults)
-        if self.annotations:
+        if isinstance(self.annotations, variables.ConstDictVariable):
             flags |= 0x04
-            codegen(self.annotations)
+            try:
+                annotations = {
+                    k: v.as_python_constant() for k, v in self.annotations.items.items()
+                }
+                codegen.extend_output([codegen._create_load_const(annotations)])
+            except NotImplementedError:
+                codegen(self.annotations)
         if self.closure:
             flags |= 0x08
             codegen(self.closure)

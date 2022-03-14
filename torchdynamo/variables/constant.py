@@ -17,6 +17,7 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
+        # return f"ConstantVariable({self.value})"
         return f"ConstantVariable({type(self.value).__name__})"
 
     def python_type(self):

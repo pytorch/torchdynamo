@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import functools
 import math
+import typing
 
 import numpy as np
 import torch
@@ -852,3 +853,25 @@ class MiscTests(torchdynamo.testing.TestCase):
             return Foo(a) + Foo(b) * Foo(c) / Foo(a) - Foo(b)
 
         torchdynamo.testing.standard_test(self, fn=fn, nargs=3, expected_ops=4)
+
+    def test_function_annotation(self):
+        class Variable:
+            pass
+
+        def fn(x):
+            x = x / 3.0
+
+            def inner(y: typing.List[Variable]):
+                return x + 1
+
+            return inner
+
+        x1 = torch.randn(10)
+        obj2 = fn(x1)([])
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            obj1 = fn(x1)([])
+        self.assertTrue(same(obj1, obj2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)

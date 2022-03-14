@@ -147,6 +147,18 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+        def debug_print(prefix):
+            if not config.debug:
+                return
+            print(
+                f"\n{prefix}",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+            )
+            # print(dis.Bytecode(frame.f_code).info())
+            print(dis.Bytecode(frame.f_code).dis())
+
         try:
             for attempt in itertools.count():
                 try:
@@ -157,14 +169,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                         unimplemented("100+ RestartAnalysis() calls")
             output_codes.add(code)
             if config.debug:
-                print(
-                    "\nORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                )
-                # print(dis.Bytecode(frame.f_code).info())
-                print(dis.Bytecode(frame.f_code).dis())
+                debug_print("ORIGINAL BYTECODE")
                 print("MODIFIED BYTECODE")
                 # print(dis.Bytecode(code).info())
                 print(dis.Bytecode(code).dis())
@@ -176,8 +181,10 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except Unsupported:
+            debug_print("WONT CONVERT")
             raise
         except Exception:
+            debug_print("WONT CONVERT")
             sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
             traceback.print_exc()
             sys.stderr.write(
@@ -202,7 +209,6 @@ def convert_frame(compiler_fn: typing.Callable):
             return result
         except Exception:
             pass
-
         return None
 
     return _convert_frame
