@@ -79,7 +79,7 @@ def same(a, b):
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-    elif isinstance(a, (int, float, type(None), bool, torch.device)):
+    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
         return a == b
     elif type(a).__name__ in (
         "MaskedLMOutput",
@@ -92,6 +92,7 @@ def same(a, b):
         "Normal",
         "TanhTransform",
         "Foo",
+        "Variable",
     ):
         assert type(a) is type(b)
         return all(same(getattr(a, key), getattr(b, key)) for key in a.__dict__.keys())

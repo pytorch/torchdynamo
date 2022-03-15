@@ -1156,7 +1156,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            unimplemented("write to closure while inlining")
+            unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:

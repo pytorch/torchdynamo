@@ -1,5 +1,6 @@
 import functools
 import inspect
+import itertools
 import types
 from typing import Dict
 from typing import List
@@ -9,6 +10,8 @@ import torchdynamo.side_effects
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
+from ..source import AttrSource
+from ..source import GetItemSource
 from ..utils import make_cell
 from .base import VariableTracker
 from .base import typestr
@@ -91,25 +94,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self):
         return types.FunctionType
 
-    def closure_vars(self, tx):
-        if not (self.fn.__code__.co_freevars or getattr(self.fn, "__closure__", None)):
-            return {}
-
-        options = VariableTracker.propagate(self)
-        assert len(self.fn.__closure__) == len(self.fn.__code__.co_freevars)
-        result = {}
-        for name, cell in zip(self.fn.__code__.co_freevars, self.fn.__closure__):
-            if name == "__class__":
-                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
-            else:
-                var = tx.output.root_tx.match_nested_cell(name, cell)
-                if var is not None:
-                    result[name] = var
-                else:
-                    # this case could be supported, but requires adding a guard
-                    unimplemented("inline with __closure__")
-        return {k: v.add_options(options) for k, v in result.items()}
-
     def has_self(self):
         return getattr(self.fn, "__self__", None) is not None
 
@@ -139,18 +123,30 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         wrap_args_kwargs(result, options)
         closure_cells = init_cellvars(parent, result, fn.__code__)
+        closure = self.fn.__closure__ or ()
+        assert len(closure) == len(self.fn.__code__.co_freevars)
+        for idx, name, cell in zip(
+            itertools.count(), self.fn.__code__.co_freevars, closure
+        ):
+            if name == "__class__":
+                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
+            else:
+                var = parent.output.root_tx.match_nested_cell(name, cell)
+                if var is not None:
+                    # optimization for cleaner codegen
+                    result[name] = var
+                elif self.source:
+                    from .builder import VariableBuilder
 
-        result.update(self.closure_vars(parent))
-
-        # handled above
-        # for idx, name in enumerate(fn.__code__.co_freevars):
-        #     assert self.closure.items[idx].name == name
-        #     assert name not in result
-        #     closure_cells[name] = self.closure.items[idx]
+                    source = AttrSource(
+                        GetItemSource(AttrSource(self.source, "__closure__"), idx),
+                        "cell_contents",
+                    )
+                    result[name] = VariableBuilder(parent, source)(cell.cell_contents)
+                else:
+                    unimplemented("inline with __closure__")
 
         return result, closure_cells
-
-        return result
 
     def export_freevars(self, parent, child):
         pass
