@@ -86,7 +86,7 @@ def print_once(*args):
     print(*args)
 
 
-def make_cell(val):
+def make_cell(val=None):
     """Some black magic to create a cell object that usually only exists in a closure"""
     x = val
 

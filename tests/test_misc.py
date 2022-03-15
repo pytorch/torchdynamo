@@ -875,3 +875,70 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_nested_closure(self):
+        v0 = torch.randn(10)
+
+        def fn1():
+            v1 = torch.randn(10)
+
+            def fn2(*args, **kwargs):
+                assert len(args) == 1
+                assert len(kwargs) == 1
+                v2 = torch.randn(10) + args[0] + kwargs["b"]
+
+                def fn3(v3=torch.randn(10)):
+                    def fn4():
+                        return v0 + v1 + v2 + v3 + 1
+
+                    return fn4
+
+                return fn3
+
+            return fn2(1, b=2)()
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            tmp1 = fn1()
+            tmp2 = fn1()
+            self.assertTrue(tmp1().shape, (10,))
+            self.assertTrue(same(tmp1(), tmp1()))
+            self.assertFalse(same(tmp1(), tmp2()))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    def test_nested_closure_mutation(self):
+        def fn1():
+            v1 = torch.randn(10)
+
+            def fn2():
+                v2 = torch.randn(10)
+
+                def fn3():
+                    nonlocal v1, v2
+                    v1 += 1
+                    v2 += 2
+                    return v1 + v2
+
+                return fn3
+
+            rv = fn2()
+            rv()
+            rv()
+            return rv
+
+        torch.manual_seed(9000)
+        counter1 = fn1()
+        result1 = [counter1(), counter1(), counter1()]
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            torch.manual_seed(9000)
+            counter2 = fn1()
+            result2 = [counter2(), counter2(), counter2()]
+            result1.append(counter1())
+        result2.append(counter2())
+
+        self.assertTrue(same(result1, result2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 11)

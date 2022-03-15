@@ -1,7 +1,10 @@
+import functools
 import inspect
 import types
 from typing import Dict
 from typing import List
+
+import torchdynamo.side_effects
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -9,6 +12,40 @@ from ..exc import unimplemented
 from ..utils import make_cell
 from .base import VariableTracker
 from .base import typestr
+
+
+def wrap_bound_arg(val, options):
+    if isinstance(val, dict):
+        return variables.ConstDictVariable(
+            {k: wrap_bound_arg(v, options) for k, v in val.items()}, **options
+        )
+    elif isinstance(val, (tuple, list)):
+        cls = variables.BaseListVariable.cls_for(type(val))
+        return cls([wrap_bound_arg(x, options) for x in val], **options)
+    elif variables.ConstantVariable.is_literal(val):
+        return variables.ConstantVariable(val, **options)
+    else:
+        assert isinstance(val, VariableTracker), typestr(val)
+        return val
+
+
+def wrap_args_kwargs(result, options):
+    for k, v in list(result.items()):
+        if isinstance(v, (tuple, dict)):
+            # args/kwargs
+            result[k] = wrap_bound_arg(v, options)
+
+
+def init_cellvars(parent, result, code):
+    closure_cells = dict()
+    side_effects: torchdynamo.side_effects.SideEffects = parent.output.side_effects
+
+    for name in code.co_cellvars:
+        closure_cells[name] = side_effects.track_cell_new()
+        if name in result:
+            side_effects.store_cell(closure_cells[name], result.pop(name))
+
+    return closure_cells
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -80,25 +117,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def bind_args(self, parent, args, kwargs):
-        from . import BaseListVariable
-        from . import ConstantVariable
-        from . import ConstDictVariable
-
         options = VariableTracker.propagate([self])
-
-        def wrap(val):
-            if isinstance(val, dict):
-                return ConstDictVariable(
-                    {k: wrap(v) for k, v in val.items()}, **options
-                )
-            elif isinstance(val, (tuple, list)):
-                cls = BaseListVariable.cls_for(type(val))
-                return cls(list(map(wrap, val)), **options)
-            elif ConstantVariable.is_literal(val):
-                return ConstantVariable(val, **options)
-            else:
-                assert isinstance(val, VariableTracker), typestr(val)
-                return val
+        wrap = functools.partial(wrap_bound_arg, options=options)
 
         fn: types.FunctionType = self.fn
         fake_func = types.FunctionType(
@@ -117,10 +137,18 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        for k, v in list(result.items()):
-            if isinstance(v, (tuple, dict)):
-                # args/kwargs
-                result[k] = wrap(v)
+        wrap_args_kwargs(result, options)
+        closure_cells = init_cellvars(parent, result, fn.__code__)
+
+        result.update(self.closure_vars(parent))
+
+        # handled above
+        # for idx, name in enumerate(fn.__code__.co_freevars):
+        #     assert self.closure.items[idx].name == name
+        #     assert name not in result
+        #     closure_cells[name] = self.closure.items[idx]
+
+        return result, closure_cells
 
         return result
 
@@ -219,19 +247,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        closure_items = []
-        if self.closure:
-            closure_items = [
-                self.closure_scope.symbolic_locals[c.name] for c in self.closure.items
-            ]
-
         code = self.get_code()
         func = types.FunctionType(
             code,
             self.f_globals,
             self.fn_name.as_python_constant(),
-            self.defaults.items if self.defaults else None,
-            tuple(map(make_cell, closure_items)),
+            tuple(self.defaults.items) if self.defaults else None,
+            tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
@@ -240,12 +262,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        for idx, var in enumerate(code.co_freevars):
-            assert self.closure.items[idx].name == var
-            assert var not in result
-            result[var] = closure_items[idx]
+        wrap_args_kwargs(result, VariableTracker.propagate(self))
+        closure_cells = init_cellvars(parent, result, code)
 
-        return result
+        for idx, name in enumerate(code.co_freevars):
+            assert getattr(self.closure.items[idx], name, name) == name
+            assert name not in result
+            closure_cells[name] = self.closure.items[idx]
+
+        return result, closure_cells
 
     def export_freevars(self, parent, child):
         code = self.get_code()

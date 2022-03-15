@@ -72,6 +72,11 @@ class ClosureVariable(UnknownVariable):
         return [codegen.create_load_closure(self.name)]
 
 
+class NewCellVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super(NewCellVariable, self).__init__(**kwargs)
+
+
 class ContextManagerVariable(VariableTracker):
     pass
 

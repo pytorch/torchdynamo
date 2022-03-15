@@ -1078,13 +1078,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
         try:
-            sub_locals = func.bind_args(parent, args, kwargs)
+            sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as exc:
             print(func.get_filename(), func.get_function(), args, kwargs, exc)
             unimplemented("arg mismatch inlining")
 
-        sub_locals.update(func.closure_vars(parent))
-        for v in sub_locals.values():
+        for v in itertools.chain(sub_locals.values(), closure_cells.values()):
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")
 
@@ -1099,11 +1098,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, func.get_globals()
+                parent, code, sub_locals, closure_cells, func
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, func.get_globals()
+                parent, code, sub_locals, closure_cells, func
             )
 
         tracer.run()
@@ -1126,9 +1125,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self,
         parent: InstructionTranslatorBase,
         code: types.CodeType,
-        symbolic_locals,
-        f_globals,
+        symbolic_locals: Dict[str, VariableTracker],
+        closure_cells: Dict[str, VariableTracker],
+        funcvar: BaseUserFunctionVariable,
     ):
+        f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
@@ -1142,6 +1143,34 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_code=code,
         )
         self.symbolic_result = None
+        self.closure_cells = closure_cells
+        # self.funcvar = funcvar
+        # self.parent = parent
+
+    def STORE_DEREF(self, inst):
+        if inst.argval in self.closure_cells:
+            cell = self.closure_cells[inst.argval]
+            val = self.pop()
+            if isinstance(cell, ClosureVariable):
+                self.output.root_tx.symbolic_locals[cell.name] = val
+            else:
+                self.output.side_effects.store_cell(cell, val)
+        else:
+            unimplemented("write to closure while inlining")
+
+    def LOAD_DEREF(self, inst):
+        if inst.argval in self.closure_cells:
+            cell = self.closure_cells[inst.argval]
+            if isinstance(cell, ClosureVariable):
+                self.push(self.output.root_tx.symbolic_locals[cell.name])
+            else:
+                self.push(self.output.side_effects.load_cell(cell))
+        else:
+            super().LOAD_DEREF(inst)
+
+    def LOAD_CLOSURE(self, inst):
+        assert inst.argval in self.cell_and_freevars()
+        self.push(self.closure_cells[inst.argval])
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
