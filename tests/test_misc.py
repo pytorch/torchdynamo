@@ -942,3 +942,17 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(result1, result2))
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 11)
+
+    def test_top_package_import(self):
+        def fn(x):
+            import torch.fx
+
+            assert not isinstance(x, torch.fx.Proxy)
+            return torch.sin(x)
+
+        x = torch.randn(4, 5)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            res = fn(x)
+        self.assertTrue(same(ref, res))

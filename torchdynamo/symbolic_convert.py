@@ -366,9 +366,13 @@ class InstructionTranslatorBase(object):
         level, fromlist = self.popn(2)
         if level.as_python_constant() != 0:
             unimplemented("IMPORT_NAME with level")
+        if fromlist.as_python_constant() is not None:
+            unimplemented("IMPORT_NAME with fromlist")
 
-        value = importlib.import_module(inst.argval)
-        source = self.import_source(inst.argval)
+        # Import name imports the top level package
+        module_name = inst.argval.split(".")[0]
+        value = importlib.import_module(module_name)
+        source = self.import_source(module_name)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
