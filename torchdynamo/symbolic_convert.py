@@ -366,8 +366,6 @@ class InstructionTranslatorBase(object):
         level, fromlist = self.popn(2)
         if level.as_python_constant() != 0:
             unimplemented("IMPORT_NAME with level")
-        if fromlist.as_python_constant() is not None:
-            unimplemented("IMPORT_NAME with fromlist")
 
         # Import name imports the top level package
         module_name = inst.argval.split(".")[0]
