@@ -10,6 +10,7 @@
 #undef Py_BUILD_CORE
 #endif
 
+//#define TORCHDYNAMO_MULTI_THREAD
 //#define TORCHDYNAMO_DEBUG
 #define bool char
 #define false 0
@@ -52,14 +53,16 @@
 // Flag to just run a frame normally
 #define SKIP_CODE ((void *)0x1)
 
-static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-
 static PyObject *noargs = NULL;     /* cached empty tuple */
 static PyObject *dotzerokey = NULL; /* ".0" */
 static PyObject *guard_fail_hook = NULL;
 static PyObject *guard_error_hook = NULL;
 
 size_t extra_index = -1;
+
+#ifdef TORCHDYNAMO_MULTI_THREAD
+
+static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
 inline static PyObject *eval_frame_callback_get(void) {
   void *result = PyThread_tss_get(&eval_frame_callback_key);
@@ -74,9 +77,36 @@ inline static void eval_frame_callback_set(PyObject *obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-static void ignored(void *obj) {}
+#else
 
-static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate);
+static PyObject *eval_frame_callback_ = NULL;
+
+inline static PyObject *eval_frame_callback_get(void) {
+  return eval_frame_callback_;
+}
+
+inline static void eval_frame_callback_set(PyObject *obj) {
+  eval_frame_callback_ = obj;
+}
+
+#endif
+
+static void ignored(void *obj) {}
+static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag);
+static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
+                                            int throw_flag);
+
+inline static void enable_eval_frame(PyThreadState *tstate) {
+  tstate->interp->eval_frame = &custom_eval_frame;
+}
+
+inline static void disable_eval_frame(PyThreadState *tstate) {
+  tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
+}
+
+inline static void enable_run_only_eval_frame(PyThreadState *tstate) {
+  tstate->interp->eval_frame = &custom_eval_frame_run_only;
+}
 
 static inline PyObject *call_callback(PyObject *callable, PyObject *frame,
                                       long cache_len) {
@@ -256,14 +286,16 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
   PyThreadState *tstate = PyThreadState_GET();
+
   // don't run custom_eval_frame() for guard function
-  PyObject *callback = set_eval_frame(Py_None, tstate);
+  PyObject *callback = eval_frame_callback_get();
+  disable_eval_frame(tstate);
 
   PyCodeObject *cached_code = lookup(extra, frame->f_locals);
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    set_eval_frame(callback, tstate);
+    enable_eval_frame(tstate);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
@@ -280,13 +312,13 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
     set_extra(frame->f_code, extra);
-    set_eval_frame(callback, tstate);
+    enable_eval_frame(tstate);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     set_extra(frame->f_code, SKIP_CODE);
-    set_eval_frame(callback, tstate);
+    enable_eval_frame(tstate);
     return _PyEval_EvalFrameDefault(frame, throw_flag);
   }
 }
@@ -322,21 +354,43 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
   //  - Python callable(): enables TorchDynamo
-  PyObject *old_callback = eval_frame_callback_get();
-  eval_frame_callback_set(new_callback);
-  if (new_callback == Py_None) {
-    // disable eval frame hook
-    DEBUG_TRACE0("disable");
-    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-  } else if (new_callback == Py_False) {
-    DEBUG_TRACE0("run_only");
-    tstate->interp->eval_frame = &custom_eval_frame_run_only;
+
+  PyObject *old_callback;
+  void *old_eval_frame = tstate->interp->eval_frame;
+  if (old_eval_frame == &custom_eval_frame) {
+    old_callback = eval_frame_callback_get();
+  } else if (old_eval_frame == &custom_eval_frame_run_only) {
+    old_callback = Py_False;
+  } else if (old_eval_frame == &_PyEval_EvalFrameDefault) {
+    old_callback = Py_None;
   } else {
-    // enable eval frame hook
-    DEBUG_TRACE0("enable");
-    tstate->interp->eval_frame = &custom_eval_frame;
+    CHECK(false);
   }
-  return old_callback;
+
+  // owned by caller
+  Py_INCREF(old_callback);
+
+  if (new_callback == Py_None) {
+    disable_eval_frame(tstate);
+  } else if (new_callback == Py_False) {
+    enable_run_only_eval_frame(tstate);
+  } else {
+    enable_eval_frame(tstate);
+#ifdef TORCHDYNAMO_MULTI_THREAD
+  } // callback is private, so always clear it
+#endif
+
+  Py_INCREF(new_callback);
+  Py_DECREF(eval_frame_callback_get());
+  eval_frame_callback_set(new_callback);
+
+#ifndef TORCHDYNAMO_MULTI_THREAD
+  // only actually set the global variable if we are enabled, otherwise don't
+  // mess with other threads
+}
+#endif
+
+return old_callback;
 }
 
 static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
@@ -351,7 +405,6 @@ static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
     PyErr_SetString(PyExc_TypeError, "expected a callable");
     return NULL;
   }
-  Py_INCREF(callback);
   DEBUG_TRACE("python enabled=%d run_only=%d", callback != Py_None,
               callable != Py_False);
   return set_eval_frame(callback, PyThreadState_GET());
@@ -444,9 +497,15 @@ static struct PyModuleDef _module = {
 PyMODINIT_FUNC PyInit__eval_frame(void) {
   CHECK(sizeof(unsigned long) == sizeof(void *));
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
-  Py_INCREF(Py_None);
+
+#ifdef TORCHDYNAMO_MULTI_THREAD
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);
+#endif
+
+  Py_INCREF(Py_None);
+  eval_frame_callback_set(Py_None);
+
   noargs = PyTuple_New(0);
   dotzerokey = PyUnicode_InternFromString(".0");
   return PyModule_Create(&_module);
