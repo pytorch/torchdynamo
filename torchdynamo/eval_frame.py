@@ -59,6 +59,12 @@ class _TorchDynamoContext:
             finally:
                 set_eval_frame(prior)
 
+        # hooks to properly handle inlining
+        if isinstance(self, DisableContext):
+            _fn._torchdynamo_disable = True
+        else:
+            _fn._torchdynamo_inline = fn
+
         return _fn
 
 
@@ -105,14 +111,41 @@ def _optimize_catch_errors(compile_fn):
     return OptimizeContext(catch_errors_wrapper(compile_fn))
 
 
-def optimize(fx_compile_fn, nopython=False):
+def optimize(backend, nopython=False):
+    """
+    The main entrypoint of TorchDynamo.  Do graph capture and call
+    backend() to optimize extracted graphs.
+
+    Args:
+        backend: One of two things:
+            - Either, a function taking a torch.fx.GraphModule and
+            example_inputs and returning a python callable that runs the
+            graph faster.
+            - Or, a string backend name in `torchdynamo.list_backends()`
+        nopython: If True, graph breaks will be errors and there will
+            be a single whole-program graph.
+
+    Example Usage:
+
+        @torchdynamo.optimize("ofi")
+        def toy_example(a, b):
+            ...
+
+        or
+
+        with torchdynamo.optimize(my_compiler):
+           ...
+    """
     if nopython:
-        return optimize_assert(fx_compile_fn)
-    return _optimize_catch_errors(convert_frame.convert_frame(fx_compile_fn))
+        return optimize_assert(backend)
+    return _optimize_catch_errors(convert_frame.convert_frame(backend))
 
 
-def optimize_assert(fx_compile_fn):
-    return _optimize_catch_errors(convert_frame.convert_frame_assert(fx_compile_fn))
+def optimize_assert(backend):
+    """
+    The same as `torchdynamo.optimize(backend, nopython=True)`
+    """
+    return _optimize_catch_errors(convert_frame.convert_frame_assert(backend))
 
 
 def run(fn=None):
@@ -124,7 +157,7 @@ def run(fn=None):
 
 
 def disable(fn=None):
-    """context manager to disable TorchDynamo"""
+    """Decorator and context manager to disable TorchDynamo"""
     if fn is not None:
         assert callable(fn)
         return DisableContext()(fn)

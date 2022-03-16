@@ -300,6 +300,14 @@ class SkipFilesVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            unimplemented("call torchdynamo.disable() wrapped function")
+        else:
+            unimplemented("call_function in skip_files " + inspect.getfile(self.value))
+
 
 class NumpyVariable(VariableTracker):
     """

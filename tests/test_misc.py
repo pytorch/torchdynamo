@@ -956,3 +956,54 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize_assert(cnts):
             res = fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_nested_optimize_decorator(self):
+        cnts2 = torchdynamo.testing.CompileCounter()
+        cnts3 = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.run()
+        def fn1(x):
+            return torch.sin(x) * 10
+
+        @torchdynamo.optimize(cnts2, nopython=True)
+        def fn2(x):
+            return fn1(x) + 1
+
+        @torchdynamo.optimize(cnts3, nopython=True)
+        def fn3(x):
+            return torch.relu(fn2(x))
+
+        fn3(torch.randn(4, 5))
+        self.assertEqual(cnts2.frame_count, 0)
+        self.assertEqual(cnts3.frame_count, 1)
+        self.assertEqual(cnts3.op_count, 4)
+
+    def test_nested_disable_decorator(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.disable()
+        def fn1(x):
+            return torch.sin(x) * 10
+
+        @torchdynamo.optimize(cnts)
+        def fn2(x):
+            x = x + 1
+            x = x + 1
+            x = fn1(x)  # graph break
+            x = x + 1
+            x = x + 1
+            return x
+
+        @torchdynamo.optimize(cnts, nopython=True)
+        def fn3(x):
+            return fn2(x)
+
+        fn2(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+        try:
+            fn3(torch.randn(4, 5))
+            self.assertFalse(True)
+        except torchdynamo.exc.Unsupported as e:
+            self.assertIn("call torchdynamo.disable() wrapped function", str(e))

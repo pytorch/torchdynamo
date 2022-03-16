@@ -221,8 +221,10 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
-        elif istype(value, (type, types.FunctionType)) and skipfiles.check(
-            getfile(value), allow_torch=True
+        elif (
+            istype(value, (type, types.FunctionType))
+            and skipfiles.check(getfile(value), allow_torch=True)
+            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
