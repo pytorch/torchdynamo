@@ -79,7 +79,7 @@ ONLY_EVAL_DATASET = {"yolov3"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular"}
+ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
 
 current_name = ""
 current_device = ""
