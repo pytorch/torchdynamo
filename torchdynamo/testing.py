@@ -34,20 +34,23 @@ def collect_results(model, prediction, loss, example_inputs):
         grads[name + ".grad"] = clone_me(param.grad)
     results.append(grads)
     for example in example_inputs:
-        if isinstance(example, list):
+        if isinstance(example, (tuple, list)):
             for inp in example:
-                results.append(clone_me(inp.grad))
+                if isinstance(inp, torch.Tensor):
+                    results.append(clone_me(inp.grad))
         else:
-            results.append(clone_me(example.grad))
+            if isinstance(example, torch.Tensor):
+                results.append(clone_me(example.grad))
     return results
 
 
 def reduce_to_scalar_loss(out):
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
-        return out.sum()
-    elif isinstance(out, tuple):
-        return sum([reduce_to_scalar_loss(x) for x in out])
+        # Mean does not work on float tensors
+        return out.sum() / out.numel()
+    elif isinstance(out, (list, tuple)):
+        return sum([reduce_to_scalar_loss(x) for x in out]) / len(out)
     elif type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -55,9 +58,11 @@ def reduce_to_scalar_loss(out):
     ):
         return reduce_to_scalar_loss(out.logits)
     elif type(out).__name__ == "SquashedNormal":
-        return reduce_to_scalar_loss(out.mean)
+        return out.mean.sum()
     elif isinstance(out, dict):
-        return sum([reduce_to_scalar_loss(value) for value in out.values()])
+        return sum([reduce_to_scalar_loss(value) for value in out.values()]) / len(
+            out.keys()
+        )
     raise NotImplementedError("Don't know how to reduce")
 
 

@@ -79,7 +79,7 @@ ONLY_EVAL_DATASET = {"yolov3"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular"}
+ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
 
 current_name = ""
 current_device = ""
@@ -579,7 +579,7 @@ def main():
 
     if (
         args.devices == ["cuda"]
-        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
+        and torch.cuda.get_device_properties(0).total_memory < 25 * 2 ** 30
     ):
         # OOM errors on an RTX 3090 with 24gb RAM
         SKIP.update(
