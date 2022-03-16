@@ -126,9 +126,11 @@ def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
 ```
 
 TorchDynamo also includes many backends, which can be found in
-[backends.py].  You can combine these backends together with code like:
+[backends.py] or `torchdynamo.list_backends()`.  Note many backends
+require installing additional packages.  You can combine these backends
+together with code like:
 ```py
-from torchdynamo.optimizations.backends import BACKENDS
+from torchdynamo.optimizations import BACKENDS
 
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     trt_compiled = BACKENDS["tensorrt"](gm, example_inputs)
@@ -143,13 +145,19 @@ def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     return gm.forward
 ```
 
-If you are adding new backends, you may need to add them to [skipfiles.py]
-to avoid an infinite loop where TorchDynamo tries to compile the backend
-with the backend.
+If you just want to use an existing backend, you can pass a
+string containing the backend name to `torchdynamo.optimize()`.
+`torchdynamo.optimize()` can also be used as a decorator on functions,
+methods, or nn.Modules().  So a shorter version of using [optimize_for_inference] on `toy_example` would be:
+
+```py
+@torchdynamo.optimize("ofi")
+def toy_example(a, b):
+    ...
+```
 
 [optimize_for_inference]: https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html
 [backends.py]: https://github.com/jansel/torchdynamo/blob/main/torchdynamo/optimizations/backends.py
-[skipfiles.py]: https://github.com/jansel/torchdynamo/blob/main/torchdynamo/skipfiles.py
 
 ## Guards
 

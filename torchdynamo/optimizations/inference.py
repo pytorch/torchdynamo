@@ -309,3 +309,6 @@ class OnlineAutotuner(TorchScriptStrategy):
 
 
 online_autotuner = OnlineAutotuner.compile_fn
+
+
+BACKENDS["autotune"] = online_autotuner

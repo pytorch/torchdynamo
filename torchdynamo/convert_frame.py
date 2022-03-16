@@ -62,8 +62,12 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 
 
 def wrap_compiler_fn(compiler_fn):
-    """Shim to convert 1 arg to 2 arg compiler_fn"""
-    if len(inspect.signature(compiler_fn).parameters) == 1:
+    """Shim to convert 1 arg to 2 arg compiler_fn and resolve strings"""
+    if isinstance(compiler_fn, str):
+        from .optimizations import BACKENDS
+
+        return wrap_compiler_fn(BACKENDS[compiler_fn])
+    elif len(inspect.signature(compiler_fn).parameters) == 1:
         # older 1-arg version
 
         @functools.wraps(compiler_fn)

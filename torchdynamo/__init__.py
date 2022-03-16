@@ -12,6 +12,7 @@ __all__ = [
     "run",
     "disable",
     "reset",
+    "list_backends",
 ]
 
 
@@ -22,3 +23,15 @@ def reset():
     convert_frame.input_codes.clear()
     convert_frame.output_codes.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
+
+
+def list_backends():
+    """
+    Return valid strings that can be passed to:
+        @torchdynamo.optimize(<backend>)
+        def foo(...):
+           ....
+    """
+    from .optimizations import BACKENDS
+
+    return list(sorted(BACKENDS.keys()))
