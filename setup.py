@@ -22,6 +22,7 @@ setup(
         CppExtension(
             name="torchdynamo._guards",
             sources=["torchdynamo/_guards.cpp"],
+            extra_compile_args=["-std=c++14"]
         ),
     ],
 )
