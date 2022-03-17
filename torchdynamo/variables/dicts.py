@@ -208,14 +208,16 @@ class DataClassVariable(ConstDictVariable):
         excluded = []
         items = collections.OrderedDict()
         for key in keys:
-            val = getattr(obj, key)
-            var = builder.__class__(
-                tx=builder.tx, source=AttrSource(builder.source, key)
-            )(val)
-            if val is not None or cls.include_none:
-                items[key] = var
-            else:
-                excluded.append(var)
+            # __init__ function of a dataclass might not have yet defined the key
+            if hasattr(obj, key):
+                val = getattr(obj, key)
+                var = builder.__class__(
+                    tx=builder.tx, source=AttrSource(builder.source, key)
+                )(val)
+                if val is not None or cls.include_none:
+                    items[key] = var
+                else:
+                    excluded.append(var)
         return cls(
             user_cls, items, **VariableTracker.propagate(excluded, items.values())
         )
