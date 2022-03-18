@@ -1,11 +1,8 @@
 #!/usr/bin/env python
-import sys
-
 from setuptools import Extension
+from setuptools import find_packages
 from setuptools import setup
 from torch.utils.cpp_extension import CppExtension
-
-assert (3, 7) <= sys.version_info < (3, 9), "requires python 3.7 or 3.8"
 
 long_description = """
 TorchDynamo is a Python-level JIT compiler designed to make unmodified
@@ -27,14 +24,14 @@ setup(
     author_email="jansel@fb.com",
     license="BSD-3",
     keywords="pytorch machine learning compilers",
-    python_requires=">=3.8, <3.9",
-    install_requires=["torch>=1.11.0", "tabulate"],
-    packages=["torchdynamo"],
+    python_requires=">=3.7, <3.9",
+    install_requires=["torch>=1.11.0", "numpy", "tabulate"],
+    packages=find_packages(include=["torchdynamo", "torchdynamo.*"]),
     ext_modules=[
         Extension(
             "torchdynamo._eval_frame",
             ["torchdynamo/_eval_frame.c"],
-            extra_compile_args=["-Werror"],
+            extra_compile_args=["-Wall"],
         ),
         CppExtension(
             name="torchdynamo._guards",
