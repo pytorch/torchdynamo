@@ -66,7 +66,7 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce")
 
 
-def same(a, b):
+def same(a, b, cos_similarity=False):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
@@ -83,8 +83,18 @@ def same(a, b):
         return True
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
-        return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
+        if cos_similarity:
+            # TRT will bring error loss larger than current threshold. Use cosine similarity for a solution
+            print("=== accuracy diff passed=",torch.allclose(a, b, atol=1e-4, rtol=1e-4))
+            a = a.flatten().to(torch.float32)
+            b = b.flatten().to(torch.float32)
+            res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
+            print("=== similarity score=", res)
+            print("=== Top 10 abs diff=", torch.sort(torch.abs(a - b),descending=True)[0][:10])
+            return res >= 0.99
+        else:
+            return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
+    elif isinstance(a, (int, float, type(None), bool, torch.device)):
         return a == b
     elif type(a).__name__ in (
         "MaskedLMOutput",

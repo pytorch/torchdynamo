@@ -238,9 +238,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0] = timed(model, model_iter_fn, example_inputs)
+        timings[rep, 0] = timed(model, model_iter_fn, example_inputs, times=30)
         with torchdynamo.run():
-            timings[rep, 1] = timed(model, model_iter_fn, example_inputs)
+            timings[rep, 1] = timed(model, model_iter_fn, example_inputs, times=30)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -744,13 +744,17 @@ def main():
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
-
     if args.only:
         for device in args.devices:
             try:
                 device, name, model, example_inputs = load_model(
                     device, args.only, args.training, args.check_accuracy
                 )
+                model.half()
+                from torch.utils._pytree import tree_map
+                # import pdb;pdb.set_trace()
+                example_inputs = tuple(tree_map(lambda x: x.to(torch.float16) if getattr(x,"dtype", None) == torch.float32 or getattr(x,"dtype", None) == torch.float64 else x, example_inputs))
+
             except NotImplementedError:
                 continue  # bad benchmark implementation
             run_one_model(
@@ -826,6 +830,10 @@ def run_one_model(
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
         torch.manual_seed(1337)
+        # print("example_input dtype=",example_inputs[0].dtype,example_inputs[0].shape, example_inputs[0].device)
+        print("example_input =",example_inputs)
+        for param in model.parameters():
+            print("model param=", param.dtype, param.device)
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
         if current_name != "pyhpc_turbulent_kinetic_energy":
@@ -839,6 +847,24 @@ def run_one_model(
         try:
             with optimize_ctx:
                 new_result = model_iter_fn(model, example_inputs)
+            # hack to test
+            # t0 = time.perf_counter()
+            # cnter = 0
+            # while cnter < 1000:
+            #     with optimize_ctx:
+            #         model_iter_fn(model, example_inputs)
+            #     cnter+=1
+            # t1 = time.perf_counter()
+            # print("exp1 time=", t1-t0)
+            # import pdb;pdb.set_trace()
+            # print("=====new_results=", new_result, new_result.dtype)
+            # print("=====correct_result=", correct_result, correct_result.dtype)
+            # new_tensor = new_result[0].flatten().to(torch.float32)
+            # correct_tensor = correct_result[0].flatten().to(torch.float32)
+            # cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)
+            # output = cos(new_tensor, correct_tensor)
+            # print("=== similarity score=", output)
+            # print("=== Top 10 abs diff=", torch.sort(torch.abs(new_tensor - correct_tensor),descending=True)[0][:10])
         except Exception:
             logging.exception("unhandled error")
             print("ERROR")
