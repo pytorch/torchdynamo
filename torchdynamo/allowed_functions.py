@@ -24,6 +24,7 @@ def _disallowed_function_ids():
         copy.deepcopy,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
+        torch.autograd.grad,
         torch.clear_autocast_cache,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,

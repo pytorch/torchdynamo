@@ -2,6 +2,7 @@ import builtins
 import dataclasses
 import functools
 import itertools
+import logging
 import math
 import operator
 
@@ -16,6 +17,8 @@ from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import counters
 
 from .analysis import ShapeAliasingAndMutationProp
+
+log = logging.getLogger(__name__)
 
 VIEW_OPS = {
     # list taken from https://pytorch.org/docs/stable/tensor_view.html
@@ -113,6 +116,8 @@ DONT_EXPAND_MODULES = {
     # These have internal control flow
     "ConvTranspose1d",
     "ConvTranspose2d",
+    "Conv2d",
+    "ConvReLU2d",
     "ConvBn2d",
     "ConvBnReLU2d",
     "EmbeddingBag",
@@ -417,7 +422,11 @@ def normalize_ir(gm, example_inputs):
     if config.normalize_ir:
         example_inputs = clone_inputs(example_inputs)
         normalize(gm)
-        gm = NormalizeOperators(gm).transform()
+        try:
+            gm = NormalizeOperators(gm).transform()
+        except AttributeError:
+            # log.exception("NormalizeOperators() failed")
+            pass
         ShapeAliasingAndMutationProp(gm).run(*example_inputs)
         gm = Functionalization(gm).transform()
     gm.recompile()
