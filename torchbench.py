@@ -505,7 +505,9 @@ def main():
         action="store_true",
         help="sets model.eval() to reduce randomness",
     )
-
+    parser.add_argument(
+        "--fp16", action="store_true", help="enable fp16 on model and inputs"
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -571,6 +573,7 @@ def main():
         action="store_true",
         help="Test that bytecode rewriting works properly.",
     )
+
     args = parser.parse_args()
 
     # defaults
@@ -739,6 +742,11 @@ def main():
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 
+    if args.speedup_fx2trt:
+        cos_similarity = True
+    else:
+        cos_similarity = False
+
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
 
@@ -750,10 +758,11 @@ def main():
                 device, name, model, example_inputs = load_model(
                     device, args.only, args.training, args.check_accuracy
                 )
-                model.half()
-                from torch.utils._pytree import tree_map
-                # import pdb;pdb.set_trace()
-                example_inputs = tuple(tree_map(lambda x: x.to(torch.float16) if getattr(x,"dtype", None) == torch.float32 or getattr(x,"dtype", None) == torch.float64 else x, example_inputs))
+
+                if args.fp16:
+                    model.half()
+                    from torch.utils._pytree import tree_map
+                    example_inputs = tuple(tree_map(lambda x: x.to(torch.float16) if getattr(x,"dtype", None) == torch.float32 or getattr(x,"dtype", None) == torch.float64 else x, example_inputs))
 
             except NotImplementedError:
                 continue  # bad benchmark implementation
@@ -765,6 +774,7 @@ def main():
                 example_inputs,
                 optimize_ctx,
                 experiment,
+                cos_similarity,
             )
     elif args.isolate:
         if output_filename and os.path.exists(output_filename):
@@ -791,6 +801,7 @@ def main():
                 example_inputs,
                 optimize_ctx,
                 experiment,
+                cos_similarity,
             )
 
         Stats.print_summary()
@@ -821,7 +832,7 @@ def print_summary(filename):
 
 
 def run_one_model(
-    name, model, is_training, model_iter_fn, example_inputs, optimize_ctx, experiment
+    name, model, is_training, model_iter_fn, example_inputs, optimize_ctx, experiment, cos_similarity=False
 ):
     with pick_grad(name, is_training):
         mode = "train" if is_training else "eval"
@@ -847,24 +858,6 @@ def run_one_model(
         try:
             with optimize_ctx:
                 new_result = model_iter_fn(model, example_inputs)
-            # hack to test
-            # t0 = time.perf_counter()
-            # cnter = 0
-            # while cnter < 1000:
-            #     with optimize_ctx:
-            #         model_iter_fn(model, example_inputs)
-            #     cnter+=1
-            # t1 = time.perf_counter()
-            # print("exp1 time=", t1-t0)
-            # import pdb;pdb.set_trace()
-            # print("=====new_results=", new_result, new_result.dtype)
-            # print("=====correct_result=", correct_result, correct_result.dtype)
-            # new_tensor = new_result[0].flatten().to(torch.float32)
-            # correct_tensor = correct_result[0].flatten().to(torch.float32)
-            # cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)
-            # output = cos(new_tensor, correct_tensor)
-            # print("=== similarity score=", output)
-            # print("=== Top 10 abs diff=", torch.sort(torch.abs(new_tensor - correct_tensor),descending=True)[0][:10])
         except Exception:
             logging.exception("unhandled error")
             print("ERROR")
@@ -874,7 +867,7 @@ def run_one_model(
             # check correctness.
             # TODO(jansel): submit upstream fix for this
             pass
-        elif not same(correct_result, new_result):
+        elif not same(correct_result, new_result, cos_similarity):
             print("INCORRECT")
             return sys.exit(-1)
         ok, total = Stats.reset_counters()
