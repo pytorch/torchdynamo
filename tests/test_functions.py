@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 import functools
 import inspect
+import itertools
 import operator
 
 import torch
@@ -8,6 +9,7 @@ from torch import sub
 from torch.nn import functional as F
 
 import torchdynamo.testing
+from torchdynamo.testing import requires_static_shapes
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -271,11 +273,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
 
+    @requires_static_shapes
     @make_test
     def test_shape1(x):
         if x.shape[0] == 10:
             return x + 1
 
+    @requires_static_shapes
     @make_test
     def test_shape2(x):
         if x.size(1) == 10:
@@ -288,6 +292,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
         del c, a
         return b + d
 
+    @requires_static_shapes
     @make_test
     def test_chunks1(x):
         chunk_size = 5
@@ -489,3 +494,16 @@ class FunctionTests(torchdynamo.testing.TestCase):
         tmp.clear()
         tmp.append(a + b)
         return tmp
+
+    @make_test
+    def test_islice_chain(a, b):
+        tmp1 = [a + 1, a + 2]
+        tmp2 = [a + 3, a + 4]
+        a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
+        c = next(itertools.islice(tmp1, 1, None))
+        return a - b / c
+
+    @make_test
+    def test_is_quantized(a, b):
+        if not a.is_quantized:
+            return a + b

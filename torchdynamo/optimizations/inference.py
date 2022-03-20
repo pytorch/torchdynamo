@@ -12,15 +12,14 @@ from collections import defaultdict
 import numpy as np
 import torch
 
-from torchdynamo import config
-from torchdynamo.utils import check_is_cuda
-from torchdynamo.utils import checkpoint_params
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import count_calls
-from torchdynamo.utils import counters
-from torchdynamo.utils import timed
-from torchdynamo.utils import warning
-
+from .. import config
+from ..exc import warning
+from ..utils import check_is_cuda
+from ..utils import checkpoint_params
+from ..utils import clone_inputs
+from ..utils import count_calls
+from ..utils import counters
+from ..utils import timed
 from .backends import BACKENDS
 from .normalize import long_name
 from .normalize import normalize_ir
@@ -309,3 +308,4 @@ class OnlineAutotuner(TorchScriptStrategy):
 
 
 online_autotuner = OnlineAutotuner.compile_fn
+BACKENDS["autotune"] = online_autotuner

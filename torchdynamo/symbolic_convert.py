@@ -35,14 +35,14 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
+from .exc import RestartAnalysis
+from .exc import Unsupported
+from .exc import unimplemented
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
-from .utils import RestartAnalysis
-from .utils import Unsupported
 from .utils import counters
 from .utils import istype
-from .utils import unimplemented
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
@@ -173,6 +173,7 @@ class InstructionTranslatorBase(object):
         self.symbolic_locals = collections.OrderedDict(
             [(k, v) for k, v in self.symbolic_locals.items() if k in reads]
         )
+        self.output.side_effects.prune_dead_object_new(self)
 
     def call_function(
         self,
@@ -366,8 +367,10 @@ class InstructionTranslatorBase(object):
         if level.as_python_constant() != 0:
             unimplemented("IMPORT_NAME with level")
 
-        value = importlib.import_module(inst.argval)
-        source = self.import_source(inst.argval)
+        # Import name imports the top level package
+        module_name = inst.argval.split(".")[0]
+        value = importlib.import_module(module_name)
+        source = self.import_source(module_name)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
@@ -967,7 +970,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
     ):
         super(InstructionTranslator, self).__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn),
+            output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
             f_globals=f_globals,
             f_builtins=f_builtins,
@@ -986,8 +989,21 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
         for val in self.symbolic_locals.values():
-            if isinstance(val, ListIteratorVariable):
+            if isinstance(val, (ListIteratorVariable, BaseListVariable)):
                 self.output.guards.update(val.guards)
+
+        self._freevars_ids = dict()
+        for name in self.code_options["co_freevars"]:
+            if name in f_locals:
+                self._freevars_ids[name] = id(f_locals[name])
+
+    def match_nested_cell(self, name, cell):
+        """Match a cell in this method to one in a function we are inlining"""
+        value = cell.cell_contents
+        # TODO(jansel): check the id of the cell rather than the contents
+        if id(value) != self._freevars_ids.get(name):
+            return None
+        return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
         return all(b.can_restore() for b in self.block_stack) and not self.one_graph
@@ -1054,8 +1070,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
         assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
-        if func.has_closure() and isinstance(func, UserFunctionVariable):
-            unimplemented(f"inline with __closure__ {func}")
         if func.has_self():
             unimplemented("inline with __self__")
         if skipfiles.check(
@@ -1066,13 +1080,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
         try:
-            sub_locals = func.bind_args(parent, args, kwargs)
+            sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as exc:
             print(func.get_filename(), func.get_function(), args, kwargs, exc)
             unimplemented("arg mismatch inlining")
 
-        sub_locals.update(func.closure_vars(parent))
-        for v in sub_locals.values():
+        for v in itertools.chain(sub_locals.values(), closure_cells.values()):
             if not isinstance(v, VariableTracker):
                 unimplemented(f"unconverted arg {v}")
 
@@ -1087,11 +1100,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, func.get_globals()
+                parent, code, sub_locals, closure_cells, func
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, func.get_globals()
+                parent, code, sub_locals, closure_cells, func
             )
 
         tracer.run()
@@ -1114,9 +1127,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self,
         parent: InstructionTranslatorBase,
         code: types.CodeType,
-        symbolic_locals,
-        f_globals,
+        symbolic_locals: Dict[str, VariableTracker],
+        closure_cells: Dict[str, VariableTracker],
+        funcvar: BaseUserFunctionVariable,
     ):
+        f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
@@ -1130,6 +1145,34 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_code=code,
         )
         self.symbolic_result = None
+        self.closure_cells = closure_cells
+        # self.funcvar = funcvar
+        # self.parent = parent
+
+    def STORE_DEREF(self, inst):
+        if inst.argval in self.closure_cells:
+            cell = self.closure_cells[inst.argval]
+            val = self.pop()
+            if isinstance(cell, ClosureVariable):
+                self.output.root_tx.symbolic_locals[cell.name] = val
+            else:
+                self.output.side_effects.store_cell(cell, val)
+        else:
+            unimplemented("write to __closure__ while inlining")
+
+    def LOAD_DEREF(self, inst):
+        if inst.argval in self.closure_cells:
+            cell = self.closure_cells[inst.argval]
+            if isinstance(cell, ClosureVariable):
+                self.push(self.output.root_tx.symbolic_locals[cell.name])
+            else:
+                self.push(self.output.side_effects.load_cell(cell))
+        else:
+            super().LOAD_DEREF(inst)
+
+    def LOAD_CLOSURE(self, inst):
+        assert inst.argval in self.cell_and_freevars()
+        self.push(self.closure_cells[inst.argval])
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing

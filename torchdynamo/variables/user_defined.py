@@ -9,13 +9,13 @@ from typing import List
 import torch.nn
 
 from .. import variables
+from ..exc import unimplemented
 from ..guards import Guard
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..source import ODictGetItemSource
 from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
-from ..utils import unimplemented
 from .base import MutableLocal
 from .base import VariableTracker
 
@@ -31,6 +31,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def as_python_constant(self):
         return self.value
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            obj = None
+
+        if isinstance(obj, staticmethod):
+            return variables.UserFunctionVariable(obj.__get__(self.value), **options)
+        elif isinstance(obj, classmethod):
+            return variables.UserMethodVariable(obj.__func__, self, **options)
+
+        return super(UserDefinedClassVariable, self).var_getattr(tx, name)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

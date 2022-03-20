@@ -31,6 +31,7 @@ from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.optimizations.inference import fixed_strategy2
 from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
+from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
 from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.profiler import Profiler
@@ -79,7 +80,7 @@ ONLY_EVAL_DATASET = {"yolov3"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular"}
+ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
 
 current_name = ""
 current_device = ""
@@ -550,6 +551,7 @@ def main():
     group.add_argument(
         "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
     )
+    group.add_argument("--python-key", action="store_true")
     group.add_argument(
         "--speedup-fx2trt", action="store_true", help=help(speedup_experiment)
     )
@@ -588,6 +590,15 @@ def main():
         SKIP.update(
             {
                 "hf_Longformer",
+                "timm_nfnet",
+            }
+        )
+
+    if torchdynamo.config.dynamic_shapes:
+        # TODO(jansel): fix bugs in these
+        SKIP.update(
+            {
+                "demucs",
                 "timm_nfnet",
             }
         )
@@ -640,6 +651,23 @@ def main():
         experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
+    elif args.python_key:
+        optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "pythonkey.csv"
+        SKIP.update(
+            [
+                # requires training mode
+                "maml",
+                # RuntimeError: toIValue() cannot handle converting to type: QScheme
+                "mobilenet_v2_quantized_qat",
+                "resnet50_quantized_qat",
+                # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
+                "hf_BigBird",
+                # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
+                "hf_Reformer",
+            ]
+        )
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
@@ -701,7 +729,7 @@ def main():
     elif args.nothing:
         pass
     elif args.nops:
-        optimize_ctx = torchdynamo.eval_frame.optimize(
+        optimize_ctx = torchdynamo.eval_frame._optimize_catch_errors(
             torchdynamo.testing.debug_insert_nops, nopython=args.nopython
         )
     else:

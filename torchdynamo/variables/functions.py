@@ -1,13 +1,54 @@
+import functools
 import inspect
+import itertools
 import types
 from typing import Dict
 from typing import List
 
+import torchdynamo.side_effects
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
+from ..exc import unimplemented
+from ..source import AttrSource
+from ..source import GetItemSource
 from ..utils import make_cell
 from .base import VariableTracker
 from .base import typestr
+
+
+def wrap_bound_arg(val, options):
+    if isinstance(val, dict):
+        return variables.ConstDictVariable(
+            {k: wrap_bound_arg(v, options) for k, v in val.items()}, **options
+        )
+    elif isinstance(val, (tuple, list)):
+        cls = variables.BaseListVariable.cls_for(type(val))
+        return cls([wrap_bound_arg(x, options) for x in val], **options)
+    elif variables.ConstantVariable.is_literal(val):
+        return variables.ConstantVariable(val, **options)
+    else:
+        assert isinstance(val, VariableTracker), typestr(val)
+        return val
+
+
+def wrap_args_kwargs(result, options):
+    for k, v in list(result.items()):
+        if isinstance(v, (tuple, dict)):
+            # args/kwargs
+            result[k] = wrap_bound_arg(v, options)
+
+
+def init_cellvars(parent, result, code):
+    closure_cells = dict()
+    side_effects: torchdynamo.side_effects.SideEffects = parent.output.side_effects
+
+    for name in code.co_cellvars:
+        closure_cells[name] = side_effects.track_cell_new()
+        if name in result:
+            side_effects.store_cell(closure_cells[name], result.pop(name))
+
+    return closure_cells
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -39,6 +80,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, types.FunctionType
         ), f"expected FunctionType {typestr(fn)} {fn}"
+        # unpack @torchdynamo.optimize()(fn) wrapped function
+        fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
 
     def self_args(self):
@@ -53,27 +96,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self):
         return types.FunctionType
 
-    def has_closure(self):
-        if getattr(self.fn, "__closure__", None) is not None:
-            if len(self.fn.__closure__) == 1 and self.fn.__code__.co_freevars == (
-                "__class__",
-            ):
-                # not a real closure, just a usage of `super()`
-                return False
-            return True
-        return False
-
-    def closure_vars(self, tx):
-        if self.fn.__code__.co_freevars and "__class__" in self.fn.__code__.co_freevars:
-            assert len(self.fn.__closure__) == len(self.fn.__code__.co_freevars)
-            cls = self.fn.__closure__[
-                self.fn.__code__.co_freevars.index("__class__")
-            ].cell_contents
-            return {
-                "__class__": variables.UserDefinedClassVariable(cls).add_options(self)
-            }
-        return super().closure_vars(tx)
-
     def has_self(self):
         return getattr(self.fn, "__self__", None) is not None
 
@@ -81,25 +103,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def bind_args(self, parent, args, kwargs):
-        from . import BaseListVariable
-        from . import ConstantVariable
-        from . import ConstDictVariable
-
         options = VariableTracker.propagate([self])
-
-        def wrap(val):
-            if isinstance(val, dict):
-                return ConstDictVariable(
-                    {k: wrap(v) for k, v in val.items()}, **options
-                )
-            elif isinstance(val, (tuple, list)):
-                cls = BaseListVariable.cls_for(type(val))
-                return cls(list(map(wrap, val)), **options)
-            elif ConstantVariable.is_literal(val):
-                return ConstantVariable(val, **options)
-            else:
-                assert isinstance(val, VariableTracker), typestr(val)
-                return val
+        wrap = functools.partial(wrap_bound_arg, options=options)
 
         fn: types.FunctionType = self.fn
         fake_func = types.FunctionType(
@@ -118,12 +123,32 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        for k, v in list(result.items()):
-            if isinstance(v, (tuple, dict)):
-                # args/kwargs
-                result[k] = wrap(v)
+        wrap_args_kwargs(result, options)
+        closure_cells = init_cellvars(parent, result, fn.__code__)
+        closure = self.fn.__closure__ or ()
+        assert len(closure) == len(self.fn.__code__.co_freevars)
+        for idx, name, cell in zip(
+            itertools.count(), self.fn.__code__.co_freevars, closure
+        ):
+            if name == "__class__":
+                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
+            else:
+                var = parent.output.root_tx.match_nested_cell(name, cell)
+                if var is not None:
+                    # optimization for cleaner codegen
+                    result[name] = var
+                elif self.source:
+                    from .builder import VariableBuilder
 
-        return result
+                    source = AttrSource(
+                        GetItemSource(AttrSource(self.source, "__closure__"), idx),
+                        "cell_contents",
+                    )
+                    result[name] = VariableBuilder(parent, source)(cell.cell_contents)
+                else:
+                    unimplemented("inline with __closure__")
+
+        return result, closure_cells
 
     def export_freevars(self, parent, child):
         pass
@@ -220,19 +245,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        closure_items = []
-        if self.closure:
-            closure_items = [
-                self.closure_scope.symbolic_locals[c.name] for c in self.closure.items
-            ]
-
         code = self.get_code()
         func = types.FunctionType(
             code,
             self.f_globals,
             self.fn_name.as_python_constant(),
-            self.defaults.items if self.defaults else None,
-            tuple(map(make_cell, closure_items)),
+            tuple(self.defaults.items) if self.defaults else None,
+            tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
@@ -241,12 +260,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        for idx, var in enumerate(code.co_freevars):
-            assert self.closure.items[idx].name == var
-            assert var not in result
-            result[var] = closure_items[idx]
+        wrap_args_kwargs(result, VariableTracker.propagate(self))
+        closure_cells = init_cellvars(parent, result, code)
 
-        return result
+        for idx, name in enumerate(code.co_freevars):
+            assert getattr(self.closure.items[idx], name, name) == name
+            assert name not in result
+            closure_cells[name] = self.closure.items[idx]
+
+        return result, closure_cells
 
     def export_freevars(self, parent, child):
         code = self.get_code()
@@ -262,9 +284,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             flags |= 0x02
             codegen(self.kwdefaults)
-        if self.annotations:
+        if isinstance(self.annotations, variables.ConstDictVariable):
             flags |= 0x04
-            codegen(self.annotations)
+            try:
+                annotations = {
+                    k: v.as_python_constant() for k, v in self.annotations.items.items()
+                }
+                codegen.extend_output([codegen._create_load_const(annotations)])
+            except NotImplementedError:
+                codegen(self.annotations)
         if self.closure:
             flags |= 0x08
             codegen(self.closure)

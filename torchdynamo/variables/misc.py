@@ -7,12 +7,12 @@ import torch._C
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
+from ..exc import unimplemented
 from ..guards import Guard
 from ..guards import GuardBuilder
 from ..guards import GuardSource
 from ..source import AttrSource
 from ..utils import identity
-from ..utils import unimplemented
 from .base import VariableTracker
 
 
@@ -70,6 +70,11 @@ class ClosureVariable(UnknownVariable):
 
     def reconstruct(self, codegen):
         return [codegen.create_load_closure(self.name)]
+
+
+class NewCellVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super(NewCellVariable, self).__init__(**kwargs)
 
 
 class ContextManagerVariable(VariableTracker):
@@ -294,6 +299,14 @@ class SkipFilesVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            unimplemented("call torchdynamo.disable() wrapped function")
+        else:
+            unimplemented("call_function in skip_files " + inspect.getfile(self.value))
 
 
 class NumpyVariable(VariableTracker):

@@ -1,3 +1,4 @@
+import os
 from os.path import abspath
 from os.path import dirname
 
@@ -28,11 +29,11 @@ constant_functions = {
 # root folder of the project
 base_dir = dirname(dirname(abspath(__file__)))
 
-# Also need to remove SPECIALIZE_SHAPES_AND_STRIDES from _guards.cpp
-dynamic_shapes = False
+# don't specialize on shapes and strides and put shape ops in graph
+dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = True
+guard_nn_modules = False
 
 # Run the FX graph as it is created to get better type information
 dynamic_propagation = True

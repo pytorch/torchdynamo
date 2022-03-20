@@ -9,10 +9,10 @@ import torch.random
 
 from .. import config
 from .. import variables
+from ..exc import unimplemented
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
-from ..utils import unimplemented
 from .base import VariableTracker
 from .base import typestr
 
@@ -28,6 +28,7 @@ class TensorVariable(VariableTracker):
         "size",
         "stride",
         "requires_grad",
+        "is_quantized",
     ]
 
     @staticmethod
@@ -66,7 +67,15 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value.clone()
             options.update(TensorVariable.specialize(example_value))
             return TensorVariable(proxy, **options)
-        elif isinstance(example_value, tuple):
+        elif (
+            istype(example_value, (torch.Size, int, bool, float))
+            and config.dynamic_shapes
+        ):
+            proxy.node.meta["example_value"] = example_value
+            if isinstance(example_value, torch.Size):
+                options["dyn_shape_len"] = len(example_value)
+            return DynamicShapeVariable(proxy, type(example_value), **options)
+        elif isinstance(example_value, (tuple, list)):
             unpacked = []
             for i, val in enumerate(example_value):
                 unpacked.append(
@@ -79,7 +88,7 @@ class TensorVariable(VariableTracker):
                         **options,
                     )
                 )
-            if istype(example_value, tuple):
+            if istype(example_value, (tuple, list)):
                 return variables.TupleVariable(unpacked, **options)
             else:
                 assert (
@@ -89,10 +98,12 @@ class TensorVariable(VariableTracker):
                 return variables.NamedTupleVariable(
                     unpacked, example_value.__class__, **options
                 )
+        elif example_value is None or proxy.node.target is torch.manual_seed:
+            return variables.ConstantVariable(None, **options)
         else:
             assert (
                 False
-            ), f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
 
     def __init__(
         self,
@@ -103,9 +114,9 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         requires_grad=None,
+        is_quantized=None,
         **kwargs,
     ):
-        assert dtype is not None or not config.dynamic_propagation
         super(TensorVariable, self).__init__(**kwargs)
         self.proxy = proxy
         self.dtype = dtype
@@ -114,6 +125,7 @@ class TensorVariable(VariableTracker):
         self.size = size
         self.stride = stride
         self.requires_grad = requires_grad
+        self.is_quantized = is_quantized
 
     def as_proxy(self):
         return self.proxy
@@ -128,6 +140,7 @@ class TensorVariable(VariableTracker):
             "device": value.device,
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
+            "is_quantized": value.is_quantized,
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
@@ -152,6 +165,8 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.size, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
+        elif name == "is_quantized" and self.is_quantized is not None:
+            result = ConstantVariable(self.is_quantized, **options)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -248,3 +263,23 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+
+
+class DynamicShapeVariable(TensorVariable):
+    def __init__(self, proxy, dyn_shape_cls, dyn_shape_len=None, **kwargs):
+        super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
+        self.dyn_shape_cls = dyn_shape_cls
+        self.dyn_shape_len = dyn_shape_len
+
+    def python_type(self):
+        return self.dyn_shape_cls
+
+    def unpack_var_sequence(self, tx):
+        if self.dyn_shape_len is not None:
+            return [
+                variables.BuiltinVariable(
+                    operator.getitem, **VariableTracker.propagate(self)
+                ).call_function(tx, [self, variables.ConstantVariable(i)], {})
+                for i in range(self.dyn_shape_len)
+            ]
+        super(DynamicShapeVariable, self).unpack_var_sequence(tx)

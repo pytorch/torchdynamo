@@ -2,6 +2,7 @@ import builtins
 import collections
 import copy
 import functools
+import itertools
 import math
 import operator
 import types
@@ -23,6 +24,7 @@ def _disallowed_function_ids():
         copy.deepcopy,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
+        torch.autograd.grad,
         torch.clear_autocast_cache,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
@@ -93,6 +95,9 @@ def _builtin_function_ids():
             for k, v in operator.__dict__.items()
             if not k.startswith("_") and callable(v)
         }
+    )
+    rv.update(
+        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
     rv[id(functools.reduce)] = "functools.reduce"
     return rv

@@ -4,12 +4,14 @@ import copy
 import dataclasses
 import functools
 import math
+import typing
 
 import numpy as np
 import torch
 
 import torchdynamo.testing
 from torchdynamo.testing import CompileCounter
+from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
 
@@ -94,7 +96,9 @@ class MiscTests(torchdynamo.testing.TestCase):
             o.copy_(a / b)
             return o
 
-        torchdynamo.testing.standard_test(self, unpack4, 2, expected_ops=5)
+        torchdynamo.testing.standard_test(
+            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=8
+        )
 
     def test_unpack5(self):
         def unpack5(a, b):
@@ -105,7 +109,9 @@ class MiscTests(torchdynamo.testing.TestCase):
             o.copy_(a / b)
             return o
 
-        torchdynamo.testing.standard_test(self, unpack5, 2, expected_ops=5)
+        torchdynamo.testing.standard_test(
+            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=8
+        )
 
     def test_matmul1(self):
         def matmul_op1(a, b):
@@ -376,7 +382,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         def fn(a):
             return a + a.numel() + torch.numel(a)
 
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=2)
+        return torchdynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=2, expected_ops_dynamic=4
+        )
 
     def test_pair(self):
         def fn(a):
@@ -386,7 +394,9 @@ class MiscTests(torchdynamo.testing.TestCase):
                 + torch.ones(torch.nn.modules.utils._ntuple(3)(3)).sum()
             )
 
-        return torchdynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=5)
+        return torchdynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=8
+        )
 
     def test_tensor_item(self):
         def fn(a, b):
@@ -608,6 +618,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    @requires_static_shapes
     def test_tensor_build_list_unpack(self):
         def fn(x):
             # seen in fastNLP_Bert
@@ -788,4 +799,211 @@ class MiscTests(torchdynamo.testing.TestCase):
             if tmp.__class__.__name__ == "MyClassFoo":
                 return a - b / c
 
-        torchdynamo.testing.standard_test(self, fn=fn1, nargs=3, expected_ops=2)
+        torchdynamo.testing.standard_test(self, fn=fn1, nargs=3)
+
+    def test_manual_seed(self):
+        def fn(a, b):
+            x = a + b
+            torch.manual_seed(9000)
+            return x + 1
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
+
+    def test_usr_cls_staticmethod(self):
+        class Foo:
+            @staticmethod
+            def bar(a, b):
+                return a + b
+
+        def fn(a, b):
+            return Foo.bar(a, b) - 1
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=2)
+
+    def test_usr_cls_classmethod(self):
+        class Foo:
+            @classmethod
+            def bar(cls, a, b):
+                return a + b
+
+        def fn(a, b):
+            return Foo.bar(a, b) - 1
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=2)
+
+    def test_dunder_methods(self):
+        class Foo:
+            def __init__(self, val):
+                super().__init__()
+                self.val = val
+
+            def __add__(self, other):
+                return Foo(self.val + other.val)
+
+            def __mul__(self, other):
+                return Foo(self.val * other.val)
+
+            def __truediv__(self, other):
+                return Foo(self.val / other.val)
+
+            def __sub__(self, other):
+                return Foo(self.val - other.val)
+
+        def fn(a, b, c):
+            return Foo(a) + Foo(b) * Foo(c) / Foo(a) - Foo(b)
+
+        torchdynamo.testing.standard_test(self, fn=fn, nargs=3, expected_ops=4)
+
+    def test_function_annotation(self):
+        class Variable:
+            pass
+
+        def fn(x):
+            x = x / 3.0
+
+            def inner(y: typing.List[Variable]):
+                return x + 1
+
+            return inner
+
+        x1 = torch.randn(10)
+        obj2 = fn(x1)([])
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            obj1 = fn(x1)([])
+        self.assertTrue(same(obj1, obj2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_nested_closure(self):
+        v0 = torch.randn(10)
+
+        def fn1():
+            v1 = torch.randn(10)
+
+            def fn2(*args, **kwargs):
+                assert len(args) == 1
+                assert len(kwargs) == 1
+                v2 = torch.randn(10) + args[0] + kwargs["b"]
+
+                def fn3(v3=torch.randn(10)):
+                    def fn4():
+                        return v0 + v1 + v2 + v3 + 1
+
+                    return fn4
+
+                return fn3
+
+            return fn2(1, b=2)()
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            tmp1 = fn1()
+            tmp2 = fn1()
+            self.assertTrue(tmp1().shape, (10,))
+            self.assertTrue(same(tmp1(), tmp1()))
+            self.assertFalse(same(tmp1(), tmp2()))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    def test_nested_closure_mutation(self):
+        def fn1():
+            v1 = torch.randn(10)
+
+            def fn2():
+                v2 = torch.randn(10)
+
+                def fn3():
+                    nonlocal v1, v2
+                    v1 += 1
+                    v2 += 2
+                    return v1 + v2
+
+                return fn3
+
+            rv = fn2()
+            rv()
+            rv()
+            return rv
+
+        torch.manual_seed(9000)
+        counter1 = fn1()
+        result1 = [counter1(), counter1(), counter1()]
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            torch.manual_seed(9000)
+            counter2 = fn1()
+            result2 = [counter2(), counter2(), counter2()]
+            result1.append(counter1())
+        result2.append(counter2())
+
+        self.assertTrue(same(result1, result2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 11)
+
+    def test_top_package_import(self):
+        def fn(x):
+            import torch.fx
+
+            assert not isinstance(x, torch.fx.Proxy)
+            return torch.sin(x)
+
+        x = torch.randn(4, 5)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize_assert(cnts):
+            res = fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_nested_optimize_decorator(self):
+        cnts2 = torchdynamo.testing.CompileCounter()
+        cnts3 = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.run()
+        def fn1(x):
+            return torch.sin(x) * 10
+
+        @torchdynamo.optimize(cnts2, nopython=True)
+        def fn2(x):
+            return fn1(x) + 1
+
+        @torchdynamo.optimize(cnts3, nopython=True)
+        def fn3(x):
+            return torch.relu(fn2(x))
+
+        fn3(torch.randn(4, 5))
+        self.assertEqual(cnts2.frame_count, 0)
+        self.assertEqual(cnts3.frame_count, 1)
+        self.assertEqual(cnts3.op_count, 4)
+
+    def test_nested_disable_decorator(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.disable()
+        def fn1(x):
+            return torch.sin(x) * 10
+
+        @torchdynamo.optimize(cnts)
+        def fn2(x):
+            x = x + 1
+            x = x + 1
+            x = fn1(x)  # graph break
+            x = x + 1
+            x = x + 1
+            return x
+
+        @torchdynamo.optimize(cnts, nopython=True)
+        def fn3(x):
+            return fn2(x)
+
+        fn2(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+        try:
+            fn3(torch.randn(4, 5))
+            self.assertFalse(True)
+        except torchdynamo.exc.Unsupported as e:
+            self.assertIn("call torchdynamo.disable() wrapped function", str(e))

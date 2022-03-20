@@ -11,13 +11,13 @@ import torch
 from .. import config
 from .. import variables
 from ..allowed_functions import is_disallowed
+from ..exc import Unsupported
+from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
-from ..utils import Unsupported
 from ..utils import check_constant_args
 from ..utils import istype
 from ..utils import proxy_args_kwargs
-from ..utils import unimplemented
 from .base import MutableLocal
 from .base import VariableTracker
 
@@ -312,12 +312,23 @@ class BuiltinVariable(VariableTracker):
             return b.__class__(
                 items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
             ).add_options(self, a, b)
+        else:
+            return a.call_method(tx, "__mul__", [b], {})
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
     def call_add(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__add__", args[1:], kwargs)
+
+    def call_sub(self, tx, *args, **kwargs):
+        return args[0].call_method(tx, "__sub__", args[1:], kwargs)
+
+    def call_truediv(self, tx, *args, **kwargs):
+        return args[0].call_method(tx, "__truediv__", args[1:], kwargs)
+
+    def call_floordiv(self, tx, *args, **kwargs):
+        return args[0].call_method(tx, "__floordiv__", args[1:], kwargs)
 
     def call_iadd(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
@@ -342,6 +353,8 @@ class BuiltinVariable(VariableTracker):
             val, next_iter = arg.next_variables()
             tx.replace_all(arg, next_iter)
             return val
+        elif isinstance(arg, variables.BaseListVariable):
+            return arg.items[0].add_options(self, arg)
 
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
@@ -500,4 +513,24 @@ class BuiltinVariable(VariableTracker):
             items = list(reversed(obj.unpack_var_sequence(tx)))
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, obj)
+            )
+
+    def call_chain(self, tx, *args):
+        if all(obj.has_unpack_var_sequence(tx) for obj in args):
+            items = []
+            for obj in args:
+                items.extend(obj.unpack_var_sequence(tx))
+            return variables.TupleVariable(
+                items, **VariableTracker.propagate(self, *args)
+            )
+
+    def call_islice(self, tx, iterable, *args):
+        if iterable.has_unpack_var_sequence(tx) and all(
+            x.is_python_constant() for x in args
+        ):
+            const_args = [x.as_python_constant() for x in args]
+            items = iterable.unpack_var_sequence(tx)
+            items = list(itertools.islice(items, *const_args))
+            return variables.TupleVariable(
+                items, **VariableTracker.propagate(self, iterable, *args)
             )

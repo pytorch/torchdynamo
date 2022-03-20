@@ -40,7 +40,7 @@ setup:
 
 clean:
 	python setup.py clean
-	rm -rf build torchdynamo.egg-info torchdynamo/*.so __pycache__ .pytest_cache .benchmarks *.csv
+	rm -rf build torchdynamo.egg-info torchdynamo/*.so __pycache__ .pytest_cache .benchmarks *.csv dist
 
 clone-deps:
 	(cd .. \

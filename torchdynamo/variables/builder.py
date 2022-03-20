@@ -16,6 +16,7 @@ from .. import skipfiles
 from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin
 from ..allowed_functions import is_numpy
+from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
@@ -220,8 +221,10 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
-        elif istype(value, (type, types.FunctionType)) and skipfiles.check(
-            getfile(value), allow_torch=True
+        elif (
+            istype(value, (type, types.FunctionType))
+            and skipfiles.check(getfile(value), allow_torch=True)
+            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
@@ -296,9 +299,14 @@ class VariableBuilder:
 
 
 def _dataclasses_fields_lambda(obj):
-    assert isinstance(obj, UserDefinedObjectVariable)
+    if isinstance(obj, UserDefinedObjectVariable):
+        value = obj.value
+    elif isinstance(obj, DataClassVariable):
+        value = obj.user_cls
+    else:
+        unimplemented(f"Dataclass fields handling fails for type {obj}")
     items = []
-    for field in dataclasses.fields(obj.value):
+    for field in dataclasses.fields(value):
         source = None
         if obj.source:
             source = GetItemSource(

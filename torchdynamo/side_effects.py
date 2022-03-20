@@ -84,6 +84,15 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
+    def apply(self, fn):
+        self.id_to_variable = collections.OrderedDict(
+            (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
+        )
+        self.store_attr_mutations = collections.OrderedDict(
+            (k, VariableTracker.apply(fn, v))
+            for k, v in self.store_attr_mutations.items()
+        )
+
     def __contains__(self, item):
         return id(item) in self.id_to_variable
 
@@ -100,6 +109,15 @@ class SideEffects(object):
         assert self.is_attribute_mutation(item)
         return self.store_attr_mutations[item.mutable_local][name]
 
+    def store_cell(self, cellvar, value):
+        assert isinstance(cellvar, variables.NewCellVariable)
+        assert isinstance(value, variables.VariableTracker)
+        self.store_attr(cellvar, "cell_contents", value)
+
+    def load_cell(self, cellvar):
+        assert isinstance(cellvar, variables.NewCellVariable)
+        return self.load_attr(cellvar, "cell_contents")
+
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
         return inspect.getattr_static(cls, "__setattr__", None) in (
@@ -111,6 +129,8 @@ class SideEffects(object):
         return isinstance(item.mutable_local, AttributeMutation)
 
     def is_modified(self, item):
+        if isinstance(item.mutable_local, AttributeMutationNew):
+            return True
         if self.is_attribute_mutation(item):
             return item.mutable_local in self.store_attr_mutations
         return item.mutable_local.is_modified
@@ -156,18 +176,54 @@ class SideEffects(object):
         self.keepalive.append(obj)
         return variable
 
+    def track_cell_new(
+        self,
+    ):
+        obj = object()
+        variable = variables.NewCellVariable(
+            mutable_local=AttributeMutationNew(None, None),
+        )
+        self.id_to_variable[id(obj)] = variable
+        self.keepalive.append(obj)
+        return variable
+
+    def prune_dead_object_new(self, tx):
+        live_new_objects = set()
+        skip_obj = None
+
+        def visit(var: VariableTracker):
+            if (
+                isinstance(var.mutable_local, AttributeMutationNew)
+                and var.mutable_local is not skip_obj
+            ):
+                live_new_objects.add(var.mutable_local)
+            return var
+
+        def is_live(var: VariableTracker):
+            if isinstance(var, AttributeMutationNew):
+                return var in live_new_objects
+            if isinstance(var, VariableTracker):
+                return is_live(var.mutable_local)
+            return True
+
+        VariableTracker.apply(visit, (tx.stack, tx.symbolic_locals))
+        for var in self.id_to_variable.values():
+            if not isinstance(var.mutable_local, AttributeMutationNew):
+                VariableTracker.apply(visit, var)
+
+        for skip_obj, setattrs in self.store_attr_mutations.items():
+            VariableTracker.apply(visit, setattrs)
+
+        self.id_to_variable = collections.OrderedDict(
+            (k, v) for k, v in self.id_to_variable.items() if is_live(v)
+        )
+        self.store_attr_mutations = collections.OrderedDict(
+            (k, v) for k, v in self.store_attr_mutations.items() if is_live(k)
+        )
+
     def mutation(self, oldvar, newvar):
         return newvar.clone(
             mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
-
-    def apply(self, fn):
-        self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v))
-            for k, v in self.store_attr_mutations.items()
         )
 
     def codegen(self, cg: PyCodegen):
@@ -176,7 +232,14 @@ class SideEffects(object):
         ]
 
         for var in modified_vars:
-            if isinstance(var.mutable_local, AttributeMutationNew):
+            if isinstance(var.mutable_local, AttributeMutationNew) and isinstance(
+                var, variables.NewCellVariable
+            ):
+                cg.load_import_from(utils.__name__, "make_cell")
+                cg.extend_output([create_instruction("CALL_FUNCTION", 0)])
+                cg.add_cache(var)
+                var.mutable_local.source = LocalSource(cg.tempvars[var])
+            elif isinstance(var.mutable_local, AttributeMutationNew):
                 cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
                 cg.extend_output([create_instruction("CALL_FUNCTION", 1)])
@@ -222,7 +285,9 @@ class SideEffects(object):
                     ]
                 )
             elif self.is_attribute_mutation(var):
-                for name, value in self.store_attr_mutations[var.mutable_local].items():
+                for name, value in self.store_attr_mutations.get(
+                    var.mutable_local, {}
+                ).items():
                     cg.tx.output.update_co_names(name)
                     cg(value)
                     cg(var.mutable_local.source)

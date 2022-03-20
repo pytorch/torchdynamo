@@ -2,8 +2,8 @@ from typing import Dict
 from typing import List
 
 from .. import variables
+from ..exc import unimplemented
 from ..utils import istype
-from ..utils import unimplemented
 from .base import VariableTracker
 from .base import typestr
 
@@ -17,6 +17,7 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
+        # return f"ConstantVariable({self.value})"
         return f"ConstantVariable({type(self.value).__name__})"
 
     def python_type(self):

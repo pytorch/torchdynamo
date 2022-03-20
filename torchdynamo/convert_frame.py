@@ -15,39 +15,19 @@ from torch import fx
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
-from ._eval_frame import skip_code
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .eval_frame import skip_code
+from .exc import InternalTorchDynamoError
+from .exc import RestartAnalysis
+from .exc import Unsupported
+from .exc import unimplemented
 from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
-from .utils import RestartAnalysis
-from .utils import Unsupported
 from .utils import counters
-from .utils import unimplemented
-
-
-class InternalTorchDynamoError(RuntimeError):
-    pass
-
-
-class SkipContext:
-    enabled = False
-
-    @staticmethod
-    def wrap(fn):
-        @functools.wraps(fn)
-        def inner(*args):
-            prior = SkipContext.enabled
-            SkipContext.enabled = True
-            try:
-                return fn(*args)
-            finally:
-                SkipContext.enabled = prior
-
-        return inner
 
 
 class Tracker:
@@ -82,8 +62,12 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 
 
 def wrap_compiler_fn(compiler_fn):
-    """Shim to convert 1 arg to 2 arg compiler_fn"""
-    if len(inspect.signature(compiler_fn).parameters) == 1:
+    """Shim to convert 1 arg to 2 arg compiler_fn and resolve strings"""
+    if isinstance(compiler_fn, str):
+        from .optimizations import BACKENDS
+
+        return wrap_compiler_fn(BACKENDS[compiler_fn])
+    elif len(inspect.signature(compiler_fn).parameters) == 1:
         # older 1-arg version
 
         @functools.wraps(compiler_fn)
@@ -126,7 +110,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
-        if code in output_codes or SkipContext.enabled:
+        if code in output_codes:
             return None
         if (
             os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")
@@ -167,6 +151,18 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+        def debug_print(prefix):
+            if not config.debug:
+                return
+            print(
+                f"\n{prefix}",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+            )
+            # print(dis.Bytecode(frame.f_code).info())
+            print(dis.Bytecode(frame.f_code).dis())
+
         try:
             for attempt in itertools.count():
                 try:
@@ -177,14 +173,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                         unimplemented("100+ RestartAnalysis() calls")
             output_codes.add(code)
             if config.debug:
-                print(
-                    "\nORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                )
-                # print(dis.Bytecode(frame.f_code).info())
-                print(dis.Bytecode(frame.f_code).dis())
+                debug_print("ORIGINAL BYTECODE")
                 print("MODIFIED BYTECODE")
                 # print(dis.Bytecode(code).info())
                 print(dis.Bytecode(code).dis())
@@ -196,8 +185,10 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except Unsupported:
+            debug_print("WONT CONVERT")
             raise
         except Exception:
+            debug_print("WONT CONVERT")
             sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
             traceback.print_exc()
             sys.stderr.write(
@@ -222,7 +213,6 @@ def convert_frame(compiler_fn: typing.Callable):
             return result
         except Exception:
             pass
-
         return None
 
     return _convert_frame

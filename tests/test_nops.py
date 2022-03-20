@@ -30,7 +30,9 @@ def fn3():
     yield 2
 
 
-with_debug_nops = eval_frame.optimize(torchdynamo.testing.debug_insert_nops)
+with_debug_nops = eval_frame._optimize_catch_errors(
+    torchdynamo.testing.debug_insert_nops
+)
 
 
 class NopTests(torchdynamo.testing.TestCase):

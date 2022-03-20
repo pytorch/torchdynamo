@@ -11,7 +11,15 @@ from torch.nn import functional as F
 
 import torchdynamo.testing
 import torchdynamo.utils
+from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
+
+
+def ifdyn(count1, count2):
+    if torchdynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
 
 
 def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True):
@@ -690,7 +698,7 @@ class ReproTests(torchdynamo.testing.TestCase):
                 640,
                 False,
             )
-        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 5)
+        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
         self.assertEqual(
             torchdynamo.utils.counters["frames"]["total"],
             torchdynamo.utils.counters["frames"]["ok"],
@@ -712,7 +720,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes1), correct1))
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes2), correct2))
 
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, ifdyn(1, 4))
         self.assertEqual(cnt.op_count, 10)
 
     def test_boxes_len(self):
@@ -725,7 +733,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(boxes1), boxes1.tensor + 4.0))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, ifdyn(6, 1))
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -763,8 +771,8 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(longformer_chunk(input1), correct1))
             self.assertTrue(same(longformer_chunk(input2), correct2))
 
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 4)
+        self.assertEqual(cnt.frame_count, ifdyn(1, 2))
+        self.assertEqual(cnt.op_count, ifdyn(19, 4))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -775,8 +783,9 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 11)
+        self.assertEqual(cnt.op_count, ifdyn(14, 11))
 
+    @requires_static_shapes
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
@@ -800,8 +809,8 @@ class ReproTests(torchdynamo.testing.TestCase):
             for _ in range(10):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, 29)
+        self.assertEqual(cnt.frame_count, ifdyn(5, 4))
+        self.assertEqual(cnt.op_count, ifdyn(36, 29))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -825,6 +834,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
 
+    @requires_static_shapes
     def test_create_rand_mask_from_inputs(self):
         args = [
             torch.randn([1, 64, 64]),
@@ -914,4 +924,4 @@ class ReproTests(torchdynamo.testing.TestCase):
                 same(_get_sorted_bucket_idx_and_undo_sorted_bucket_idx(x), correct)
             )
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 14)
+        self.assertEqual(cnt.op_count, ifdyn(28, 14))

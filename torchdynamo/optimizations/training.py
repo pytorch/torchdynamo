@@ -38,19 +38,25 @@ class AOTAutogradStrategy(object):
 
         gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
 
-        has_param_as_input = False
-        for ex in example_inputs:
-            if isinstance(ex, torch.nn.parameter.Parameter):
-                has_param_as_input = True
-
-        # gather_backward has inplace ops, which AOT can't handle correctly
-        # Issue tracked here - https://github.com/pytorch/functorch/issues/591
+        # TODO - AOT Autograd has some know issues. Here, we check for those and
+        # use fallback when necessary.
+        # 1) gather_backward (pytorch_struct) - https://github.com/pytorch/functorch/issues/591
         for node in self.gm.graph.nodes:
             if node.target == torch.gather:
                 log.warn(
                     "Graph has gather op. AOT Autograd does not handle gather correctly. Using fallback."
                 )
                 self.use_fallback = True
+
+        # 2) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+        for submod in self.gm.modules():
+            if submod.__class__.__name__ == "LSTM":
+                self.use_fallback = True
+
+        has_param_as_input = False
+        for ex in example_inputs:
+            if isinstance(ex, torch.nn.parameter.Parameter):
+                has_param_as_input = True
 
         if (
             has_mutation(self.gm, self.example_inputs)
