@@ -302,13 +302,12 @@ def fx2trt(subgraph):
         InputTensorSpec,
     )
     from fx2trt_oss.fx.trt_module import TRTModule
-    from fx2trt_oss.fx import lower_to_trt
     from fx2trt_oss.fx.tools.trt_splitter import (
         TRTSplitter,
         TRTSplitterSetting,
     )
-    signal.signal(signal.SIGALRM, _raise_timeout)
-    signal.alarm(120)  # fx2trt infinite loops sometimes
+    # signal.signal(signal.SIGALRM, _raise_timeout)
+    # signal.alarm(120)  # fx2trt infinite loops sometimes
     try:
         logging.getLogger("torch.fx.experimental.fx_acc.acc_tracer").setLevel(
             logging.ERROR
@@ -325,7 +324,10 @@ def fx2trt(subgraph):
         # return subgraph.wrap_returns(trt_mod)
 
         #==== new method1 #the recursive compile behavior is gone
+        # import pdb;pdb.set_trace()
         acc_model = acc_tracer.trace(model, inputs)
+        # print("acc model graph=", acc_model.graph)
+        # print("acc model code=", acc_model.code)
         # Split out unsupported ops
         splitter_setting = TRTSplitterSetting()
         splitter_setting.use_implicit_batch_dim = False
@@ -350,8 +352,9 @@ def fx2trt(subgraph):
 
         for name, _ in split_mod.named_children():
             if "_run_on_acc" in name:
-                print("replace submod=", name)
                 submod = getattr(split_mod, name)
+                print("acc submod graph=", submod.graph)
+                # print("submod code=", submod.code)
                 # Get submodule inputs for fx2trt
                 acc_inputs = get_submod_inputs(split_mod, submod, inputs)
 
@@ -367,19 +370,10 @@ def fx2trt(subgraph):
                 )
                 trt_mod = TRTModule(*r)
                 setattr(split_mod, name, trt_mod)
+            else:
+                submod = getattr(split_mod, name)
+                print("gpu submod graph=", submod.graph)
         return subgraph.wrap_returns(split_mod)
-
-        #==== new method2 #infinite recursive behavior
-        # split_mod = lower_to_trt(
-        #     model,
-        #     inputs,
-        #     max_batch_size=len(inputs[0]),
-        #     fp16_mode=True,
-        #     explicit_batch_dimension=True,
-        #     max_workspace_size=20 << 30,
-        # )
-        # import pdb;pdb.set_trace()
-        # return subgraph.wrap_returns(split_mod)
 
     finally:
         signal.alarm(0)
@@ -709,7 +703,8 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
     trt_compiled = BACKENDS["fx2trt"](gm, example_inputs)
-    print("===fx2trt_compiler: gm graph=",gm.graph)
+    # print("===fx2trt_compiler: gm graph=",gm.graph)
+    print("===fx2trt_compiler: gm code=",gm.code)
     if trt_compiled is not None:
         print("=== return trt_mod")
         return trt_compiled
