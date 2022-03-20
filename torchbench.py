@@ -505,9 +505,6 @@ def main():
         action="store_true",
         help="sets model.eval() to reduce randomness",
     )
-    parser.add_argument(
-        "--fp16", action="store_true", help="enable fp16 on model and inputs"
-    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -759,7 +756,8 @@ def main():
                     device, args.only, args.training, args.check_accuracy
                 )
 
-                if args.fp16:
+                if args.speedup_fx2trt:
+                    # cast model and inputs to fp16
                     model.half()
                     from torch.utils._pytree import tree_map
                     example_inputs = tuple(tree_map(lambda x: x.to(torch.float16) if getattr(x,"dtype", None) == torch.float32 or getattr(x,"dtype", None) == torch.float64 else x, example_inputs))
@@ -841,10 +839,7 @@ def run_one_model(
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
         torch.manual_seed(1337)
-        # print("example_input dtype=",example_inputs[0].dtype,example_inputs[0].shape, example_inputs[0].device)
-        print("example_input =",example_inputs)
-        for param in model.parameters():
-            print("model param=", param.dtype, param.device)
+
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
         if current_name != "pyhpc_turbulent_kinetic_energy":

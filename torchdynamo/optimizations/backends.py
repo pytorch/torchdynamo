@@ -318,7 +318,7 @@ def fx2trt(subgraph):
         splitter.node_support_preview()
         split_mod = splitter()
         for name, _ in split_mod.named_children():
-            print(name)
+            print(f"graph is split into {name}")
 
         def get_submod_inputs(mod, submod, inputs):
             acc_inputs = None
@@ -336,8 +336,6 @@ def fx2trt(subgraph):
         for name, _ in split_mod.named_children():
             if "_run_on_acc" in name:
                 submod = getattr(split_mod, name)
-                print("acc submod graph=", submod.graph)
-                # print("submod code=", submod.code)
                 # Get submodule inputs for fx2trt
                 acc_inputs = get_submod_inputs(split_mod, submod, inputs)
 
@@ -355,7 +353,6 @@ def fx2trt(subgraph):
                 setattr(split_mod, name, trt_mod)
             else:
                 submod = getattr(split_mod, name)
-                print("gpu submod graph=", submod.graph)
         return subgraph.wrap_returns(split_mod)
     except Exception:
             log.exception(f"FX2TRT conversion error")
@@ -686,11 +683,8 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
     trt_compiled = BACKENDS["fx2trt"](gm, example_inputs)
-    # print("===fx2trt_compiler: gm graph=",gm.graph)
-    print("===fx2trt_compiler: gm code=",gm.code)
     if trt_compiled is not None:
-        print("=== return trt_mod")
         return trt_compiled
     else:
-        print("=== return gm forward=")
+        print("FX2TRT conversion failed on the subgraph. Return GraphModule forward instead")
         return gm.forward

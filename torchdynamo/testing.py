@@ -84,13 +84,11 @@ def same(a, b, cos_similarity=False):
     elif isinstance(a, torch.Tensor):
         assert isinstance(b, torch.Tensor)
         if cos_similarity:
-            # TRT will bring error loss larger than current threshold. Use cosine similarity for a solution
-            print("=== accuracy diff passed=",torch.allclose(a, b, atol=1e-4, rtol=1e-4))
+            # TRT will bring error loss larger than current threshold. Use cosine similarity as replacement
             a = a.flatten().to(torch.float32)
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
-            print("=== similarity score=", res)
-            print("=== Top 10 abs diff=", torch.sort(torch.abs(a - b),descending=True)[0][:10])
+            print(f"Similarity score={res.cpu().numpy()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
