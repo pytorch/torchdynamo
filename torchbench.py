@@ -793,23 +793,20 @@ def main():
                     device, args.only, args.training, args.check_accuracy
                 )
                 # torchbench changed the default precison=fp16 on torchvision net
-                if name in (
-                    "alexnet",
-                    "resnet18",
-                    "resnet50",
-                    "mobilenet_v2",
-                    "mnasnet1_0",
-                    "squeezenet1_1",
-                    "shufflenetv2_x1_0",
-                    "vgg16",
-                    "resnext50_32x4d",
-                ):
-                    try:
-                        assert (
-                            args.speedup_fx2trt_fp16 is True
-                        ), "Do not test vision models in fp32 mode"
-                    except NotImplementedError:
-                        continue  # not supported benchmark implementation
+                if args.speedup_fx2trt:
+                    if name in (
+                        "alexnet",
+                        "resnet18",
+                        "resnet50",
+                        "mobilenet_v2",
+                        "mnasnet1_0",
+                        "squeezenet1_1",
+                        "shufflenetv2_x1_0",
+                        "vgg16",
+                        "resnext50_32x4d",
+                    ):
+                        print("Do not test vision models in fp32 mode")
+                        continue  # We need to cast model and inputs back to fp32 before we can enable it
                 if args.speedup_fx2trt_fp16:
                     model, example_inputs = cast_to_fp16(model, example_inputs)
 
