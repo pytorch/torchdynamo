@@ -806,7 +806,7 @@ def main():
                 ):
                     try:
                         assert (
-                            args.speedup_fx2trt_fp16 == True
+                            args.speedup_fx2trt_fp16 is True
                         ), "Do not test vision models in fp32 mode"
                     except NotImplementedError:
                         continue  # not supported benchmark implementation
