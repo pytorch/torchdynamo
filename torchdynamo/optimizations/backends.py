@@ -3,7 +3,6 @@ import functools
 import io
 import logging
 import os
-import signal
 import subprocess
 import tempfile
 
@@ -291,73 +290,7 @@ def _raise_timeout(signum, frame):
 
 
 @create_backend
-def fx2trt(subgraph):
-    if subgraph.will_tensorrt_barf():
-        # TensorRT fails violently with an abort() on this
-        return None
-
-    import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
-    from fx2trt_oss.fx.fx2trt import InputTensorSpec
-    from fx2trt_oss.fx.fx2trt import TRTInterpreter
-    from fx2trt_oss.fx.tools.trt_splitter import TRTSplitter
-    from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
-    from fx2trt_oss.fx.trt_module import TRTModule
-
-    try:
-        model = subgraph.model
-        inputs = subgraph.example_inputs
-        acc_model = acc_tracer.trace(model, inputs)
-        # Split out unsupported ops
-        splitter_setting = TRTSplitterSetting()
-        splitter_setting.use_implicit_batch_dim = False
-        splitter = TRTSplitter(acc_model, inputs, settings=splitter_setting)
-        splitter.node_support_preview()
-        split_mod = splitter()
-        for name, _ in split_mod.named_children():
-            print(f"graph is split into {name}")
-
-        def get_submod_inputs(mod, submod, inputs):
-            acc_inputs = None
-
-            def get_input(self, inputs):
-                nonlocal acc_inputs
-                acc_inputs = inputs
-
-            handle = submod.register_forward_pre_hook(get_input)
-            mod(*inputs)
-            handle.remove()
-            return acc_inputs
-
-        for name, _ in split_mod.named_children():
-            if "_run_on_acc" in name:
-                submod = getattr(split_mod, name)
-                # Get submodule inputs for fx2trt
-                acc_inputs = get_submod_inputs(split_mod, submod, inputs)
-
-                # fx2trt replacement
-                interp = TRTInterpreter(
-                    submod,
-                    InputTensorSpec.from_tensors(acc_inputs),
-                    explicit_batch_dimension=True,
-                    explicit_precision=True,
-                )
-                r = interp.run(
-                    max_workspace_size=20 << 30,
-                    strict_type_constraints=True,
-                    fp16_mode=False,
-                )
-                trt_mod = TRTModule(*r)
-                setattr(split_mod, name, trt_mod)
-            else:
-                submod = getattr(split_mod, name)
-        return subgraph.wrap_returns(split_mod)
-    except Exception:
-        log.exception(f"FX2TRT conversion error")
-        return None
-
-
-@create_backend
-def fx2trt_fp16(subgraph):
+def fx2trt(subgraph, **kwargs):
     if subgraph.will_tensorrt_barf():
         # TensorRT fails violently with an abort() on this
         return None
@@ -408,8 +341,7 @@ def fx2trt_fp16(subgraph):
                 )
                 r = interp.run(
                     max_workspace_size=20 << 30,
-                    strict_type_constraints=True,
-                    fp16_mode=True,
+                    fp16_mode=kwargs["fp16_mode"],
                 )
                 trt_mod = TRTModule(*r)
                 setattr(split_mod, name, trt_mod)
@@ -417,7 +349,7 @@ def fx2trt_fp16(subgraph):
                 submod = getattr(split_mod, name)
         return subgraph.wrap_returns(split_mod)
     except Exception:
-        log.exception(f"FX2TRT conversion error")
+        log.exception("FX2TRT conversion error")
         return None
 
 
@@ -743,7 +675,8 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
-    trt_compiled = BACKENDS["fx2trt_fp16"](gm, example_inputs)
+    kwargs_fx2trt = {"fp16_mode": True}
+    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
@@ -754,7 +687,8 @@ def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
 
 
 def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
-    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs)
+    kwargs_fx2trt = {"fp16_mode": False}
+    trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
         return trt_compiled
     else:
