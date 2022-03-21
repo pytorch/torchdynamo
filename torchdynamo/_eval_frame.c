@@ -148,10 +148,12 @@ static void destroy_cache_entry(CacheEntry *e) {
   free(e);
 }
 
+#ifdef TORCHDYNAMO_DEBUG
 inline static const char *name(PyFrameObject *frame) {
   DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
+#endif
 
 static void call_guard_fail_hook(PyObject *hook, CacheEntry *e,
                                  PyObject *f_locals) {

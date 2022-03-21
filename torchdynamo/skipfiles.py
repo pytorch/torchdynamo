@@ -114,6 +114,7 @@ for _name in (
     "tqdm",
     "tree",
     "tvm",
+    "fx2trt_oss",
 ):
     try:
         add(importlib.import_module(_name))
