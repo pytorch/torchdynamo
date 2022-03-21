@@ -92,7 +92,7 @@ def same(a, b, cos_similarity=False):
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=1e-4, rtol=1e-4)
-    elif isinstance(a, (int, float, type(None), bool, torch.device)):
+    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
         return a == b
     elif type(a).__name__ in (
         "MaskedLMOutput",

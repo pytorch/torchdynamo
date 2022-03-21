@@ -805,7 +805,9 @@ def main():
                     "resnext50_32x4d",
                 ):
                     try:
-                        assert args.speedup_fx2trt_fp16 == True, "Do not test vision models in fp32 mode"
+                        assert (
+                            args.speedup_fx2trt_fp16 == True
+                        ), "Do not test vision models in fp32 mode"
                     except NotImplementedError:
                         continue  # not supported benchmark implementation
                 if args.speedup_fx2trt_fp16:
