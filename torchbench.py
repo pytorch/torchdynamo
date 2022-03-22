@@ -686,19 +686,20 @@ def main():
         optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "pythonkey.csv"
-        SKIP.update(
-            [
-                # requires training mode
-                "maml",
-                # RuntimeError: toIValue() cannot handle converting to type: QScheme
-                "mobilenet_v2_quantized_qat",
-                "resnet50_quantized_qat",
-                # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
-                "hf_BigBird",
-                # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
-                "hf_Reformer",
-            ]
-        )
+        if not args.no_skip:
+            SKIP.update(
+                [
+                    # requires training mode
+                    "maml",
+                    # RuntimeError: toIValue() cannot handle converting to type: QScheme
+                    "mobilenet_v2_quantized_qat",
+                    "resnet50_quantized_qat",
+                    # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
+                    "hf_BigBird",
+                    # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
+                    "hf_Reformer",
+                ]
+            )
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
