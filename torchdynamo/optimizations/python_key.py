@@ -44,7 +44,7 @@ def debug_node(n: Node):
     return f"{n.op} {target} {n.args} {n.kwargs}"
 
 
-def python_key(gm: torch.fx.GraphModule, example_inputs):
+def python_key_normalize(gm: torch.fx.GraphModule, example_inputs):
     """
     Use AOT autograd for normalizing IR in inference mode.  This is useful
     for debugging and gives us a common IR for both eval and train modes.
@@ -108,6 +108,7 @@ def python_key(gm: torch.fx.GraphModule, example_inputs):
             gm, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             out = PatchingInterpreter(gm).run(*args[params_len:])
+        assert isinstance(out, (tuple, list)), "graph must output tuple()"
         return tuple(x.proxy for x in out)
 
     with pythonkey_decompose(aot_autograd_decompositions):
@@ -116,10 +117,18 @@ def python_key(gm: torch.fx.GraphModule, example_inputs):
         traced = GraphModule(tracer.root, graph, "python_key_traced")
 
     traced.recompile()
-    record_graph_stats(traced)
+    # record_graph_stats(traced)
 
-    def call_fn(*args):
-        with torch.no_grad():
-            return traced.forward(*(params_flat + args))
+    def make_wrapper(inner):
+        def call_fn(*args):
+            with torch.no_grad():
+                return inner(*params_flat, *args)
 
-    return call_fn
+        return call_fn
+
+    return traced, make_wrapper
+
+
+def python_key(gm: torch.fx.GraphModule, example_inputs):
+    gm, make_wrapper = python_key_normalize(gm, example_inputs)
+    return make_wrapper(gm.forward)
