@@ -619,6 +619,11 @@ def main():
         action="store_true",
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
     )
+    group.add_argument(
+        "--generate-aot-autograd-stats",
+        action="store_true",
+        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+    )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
     group.add_argument(
         "--nops",
@@ -799,9 +804,7 @@ def main():
         args.check_accuracy = True
         args.isolate = True
     elif args.accuracy_ts:
-        optimize_ctx = torchdynamo.optimize(
-            lambda x, _: torch.jit.script(x), nopython=args.nopython
-        )
+        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_{backend_str}.csv"
@@ -867,11 +870,12 @@ def main():
                 cos_similarity,
             )
         stats_file = output_filename.split(".csv")[0] + "_stats.csv"
-        output_csv(
-            stats_file,
-            ("dev", "name", "total_aot_graphs", "ok_aot_graphs"),
-            [current_device, current_name, *Stats.aot_summary()],
-        )
+        if args.generate_aot_autograd_stats:
+            output_csv(
+                stats_file,
+                ("dev", "name", "total_aot_graphs", "ok_aot_graphs"),
+                [current_device, current_name, *Stats.aot_summary()],
+            )
     elif args.isolate:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)

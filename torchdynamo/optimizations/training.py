@@ -12,10 +12,6 @@ from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
 
-counters["aot_autograd"]["total"] = 0
-counters["aot_autograd"]["not_ok"] = 0
-counters["aot_autograd"]["ok"] = 0
-
 
 class AOTAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
