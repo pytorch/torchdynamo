@@ -489,8 +489,8 @@ def cudagraphs_inner(model, inputs):
 @create_backend
 def aot_autograd(subgraph, **kwargs):
     if not kwargs:
-        from functorch._src.aot_autograd import default_decompositions
-        from functorch._src.aot_autograd import static_argnums
+        # from functorch._src.aot_autograd import static_argnums
+        from functorch.compile import default_decompositions
         from functorch.compile import min_cut_rematerialization_partition
         from functorch.compile import ts_compile
 
@@ -501,7 +501,7 @@ def aot_autograd(subgraph, **kwargs):
             "partition_fn": min_cut_rematerialization_partition,
             "hasher_type": "StaticShapeHasher",
             "decompositions": default_decompositions,
-            "static_argnums": static_argnums,
+            # "static_argnums": static_argnums,
         }
 
     def _wrapped_bw_compiler(*args, **kwargs):
