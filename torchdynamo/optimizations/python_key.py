@@ -1,5 +1,6 @@
 import logging
 import operator
+import os
 from itertools import chain
 
 import torch
@@ -10,7 +11,6 @@ from torch.nn.utils import _stateless
 from ..allowed_functions import _allowed_function_ids
 from ..utils import clone_inputs
 from ..utils import istype
-from .inference import record_graph_stats
 from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
@@ -89,8 +89,12 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs):
                         )
                     else:
                         # TODO(jansel): look into lstm getitem bug
-                        if n.target is not operator.getitem and "lstm" in repr(n.args):
-                            log.warning("returning real tensor %s", debug_node(n))
+                        if (
+                            n.target is not operator.getitem
+                            or "lstm" not in repr(n.args)
+                            or os.environ.get("PYTHONKEY_VERBOSE") == "1"
+                        ):
+                            log.warning("returning real tensor? %s", debug_node(n))
 
                 return result
 
