@@ -1,6 +1,6 @@
-import collections
 import copy
 import itertools
+import operator
 
 import torch
 from torch.fx.node import map_aggregate
@@ -36,27 +36,31 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         args, kwargs = self.fetch_args_kwargs_from_env(n)
         tensor_args = self.extract_tensors((args, kwargs))
 
-        versions1 = [obj._version for obj in tensor_args]
+        input_versions1 = [obj._version for obj in tensor_args]
         result = getattr(self, n.op)(n.target, args, kwargs)
-        versions2 = [obj._version for obj in tensor_args]
-
-        input_alias_groups = set()
-
-        def visit_arg(arg: torch.fx.Node):
-            input_alias_groups.update(arg.meta["alias_groups"])
-
-        torch.fx.map_arg((n.args, n.kwargs), visit_arg)
+        input_versions2 = [obj._version for obj in tensor_args]
 
         n.meta["type"] = type(result)
         n.meta["alias_groups"] = {
             self.tensor_alias_group(obj) for obj in self.extract_tensors(result)
         }
-        n.meta["input_alias_groups"] = input_alias_groups
         n.meta["mutates_alias_groups"] = {
             self.tensor_alias_group(tensor)
-            for tensor, v1, v2 in zip(tensor_args, versions1, versions2)
+            for tensor, v1, v2 in zip(tensor_args, input_versions1, input_versions2)
             if v1 != v2
         }
+        # Partial mutation refers to the mutation caused by getitem that can
+        # potentially result in changing only a slice of the original tensor
+        n.meta["partial_mutation"] = False
+
+        def visit_arg(arg: torch.fx.Node):
+            if (
+                arg.op == "call_function" and arg.target == operator.getitem
+            ) or arg.meta["partial_mutation"]:
+                if bool(n.meta["mutates_alias_groups"] & arg.meta["alias_groups"]):
+                    n.meta["partial_mutation"] = True
+
+        torch.fx.map_arg((n.args, n.kwargs), visit_arg)
         n.meta["is_input_alias"] = bool(
             self.input_alias_groups & n.meta["alias_groups"]
         )
@@ -71,6 +75,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         if tensors:
             n.meta["device"] = tensors[0].device
             n.meta["dtype"] = tensors[0].dtype
+
         return result
 
     @staticmethod
@@ -87,26 +92,9 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         map_aggregate(result, visit)
         return tensors
 
-    def tag_indirect_mutation(self):
-        checks = collections.defaultdict(set)
-        for n in self.module.graph.nodes:
-
-            def visit_arg(arg: torch.fx.Node):
-                for group in arg.meta["alias_groups"]:
-                    if group in checks:
-                        for other_node in checks[group]:
-                            if other_node is not arg:
-                                other_node.meta["indirect_mutation"] = True
-
-            torch.fx.map_arg((n.args, n.kwargs), visit_arg)
-            n.meta["indirect_mutation"] = False
-            for group in n.meta["mutates_alias_groups"]:
-                checks[group].add(n)
-
     def run(self, *args):
         try:
             super().run(*args)
-            self.tag_indirect_mutation()
         finally:
             # cleanup
             self.storage_keepalive.clear()
