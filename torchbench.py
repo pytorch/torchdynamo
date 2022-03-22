@@ -545,6 +545,11 @@ def main():
         action="store_true",
         help="sets model.eval() to reduce randomness",
     )
+    parser.add_argument(
+        "--generate-aot-autograd-stats",
+        action="store_true",
+        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -618,11 +623,6 @@ def main():
         "--accuracy-ts",
         action="store_true",
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
-    )
-    group.add_argument(
-        "--generate-aot-autograd-stats",
-        action="store_true",
-        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
     )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
     group.add_argument(
