@@ -148,7 +148,7 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -211,7 +211,7 @@ class TestCase(unittest.TestCase):
         torchdynamo.utils.counters.clear()
 
 
-def dummy_fx_compile(gm: fx.GraphModule):
+def dummy_fx_compile(gm: fx.GraphModule, example_inputs):
     return gm.forward
 
 

@@ -624,6 +624,11 @@ def main():
         action="store_true",
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
     )
+    group.add_argument(
+        "--backend",
+        choices=torchdynamo.list_backends(),
+        help="measure speedup with a given backend",
+    )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
     group.add_argument(
         "--nops",
@@ -816,6 +821,10 @@ def main():
         optimize_ctx = torchdynamo.eval_frame._optimize_catch_errors(
             torchdynamo.testing.debug_insert_nops, nopython=args.nopython
         )
+    elif args.backend:
+        optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = f"speedup_{args.backend}.csv"
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
