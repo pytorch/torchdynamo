@@ -1,83 +1,49 @@
 import collections
-import dataclasses
+import operator
+import textwrap
 from itertools import chain
-from typing import Dict
 from typing import List
-from typing import Optional
 
+import torch
 import torch.fx
-from sympy import Expr
 from sympy import Integer
-from sympy import Symbol
+
+from .ir import FixedLayout
+from .ir import InputBuffer
+from .ir import Loops
+from .ir import TensorBox
+from .shapes import SizeVarAllocator
+from .virtualized import prim
+
+lowerings = {}
+aten = torch.ops.aten
 
 
-class SizeVarAllocator(object):
-    def __init__(self, prefix="s", zero_one_const=True):
-        super().__init__()
-        self.prefix = prefix
-        self.val_to_var: Dict[int, Expr] = {0: Integer(0), 1: Integer(1)}
-        self.var_to_val: Dict[Expr, int] = collections.OrderedDict()
-        if not zero_one_const:
-            self.val_to_var.clear()
+def register_lowering(aten_fn, broadcast=True, type_promote=True):
+    def _reg(decomp_fn):
+        lowerings[aten_fn] = decomp_fn
+        return decomp_fn
 
-    def __getitem__(self, val):
-        if val in self.val_to_var:
-            return self.val_to_var[val]
-        var = Symbol(f"{self.prefix}{len(self.var_to_val)}")
-        self.val_to_var[val] = var
-        self.var_to_val[var] = val
-        return var
+    return _reg
 
 
-class Layout:
-    pass
+def register_pointwise(aten_fn, name=None):
+    name = name or aten_fn.__name__
+
+    @register_lowering(aten_fn, broadcast=True, type_promote=True)
+    def inner(*inputs: List[TensorBox]):
+        loaders = [x.make_loader() for x in inputs]
+        return TensorBox.create(
+            Loops(
+                inputs[0].get_ranges(),
+                lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
+            )
+        )
+
+    return inner
 
 
-@dataclasses.dataclass
-class FixedLayout(Layout):
-    """A Tensor layout we cannot change"""
-    stride: List[Expr]
-    offset: Expr = Integer(0)
-
-
-class FlexibleLayout(Layout):
-    """A Tensor layout we are allowed to change"""
-
-    pass
-
-
-class IRNode(object):
-    pass
-
-
-
-@dataclasses.dataclass
-class VData(IRNode):
-    dtype: torch.dtype
-
-
-@dataclasses.dataclass
-class VInputData(VData):
-    index: int
-    name: str
-    layout: Layout
-
-@dataclasses.dataclass
-class VReusedData(VData):
-    inner: VData
-
-@dataclasses.dataclass
-class VStorage(IRNode):
-    data: VData
-
-
-@dataclasses.dataclass
-class VTensor(IRNode):
-    storage: VStorage
-    size: List[Expr]
-
-    def mark_reuse(self, users):
-        self.storage.data = VReusedData(self.storage.data)
+register_pointwise(aten.add)
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -105,32 +71,35 @@ class GraphLowering(torch.fx.Interpreter):
                     candidates[ex.size(i) * ex.stride(i)] = size[i] * stride[i]
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
-                val, i = sorted([(ex.stride(i), i)
-                                 for i in range(len(stride))
-                                 if stride[i] is None
-                                 ])[0]
+                val, i = sorted(
+                    [(ex.stride(i), i) for i in range(len(stride)) if stride[i] is None]
+                )[0]
                 stride[i] = self.sizevars[val]
 
-        print(f"{ex.size()} = {size}, {ex.stride()} = {stride}")
+        # print(f"{ex.size()} = {size}, {ex.stride()} = {stride}")
         return size, stride
 
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
         self.sizevars = SizeVarAllocator("s")
-        self.graph_inputs = []
+        self.graph_inputs = collections.OrderedDict()
+        self.graph_outputs = []
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        # TODO(jansel): handle input aliasing
-        data = VInputData(example.dtype, len(self.graph_inputs), target)
-        storage = VStorage(data)
         sizes, strides = self.symbolic_sizes_strides(example)
-        tensor = VTensor(storage, FixedLayout(strides), sizes)
-        self.graph_inputs.append(tensor)
+        # TODO(jansel): handle input aliasing
+        data = InputBuffer(
+            FixedLayout(example.dtype, sizes, strides),
+            len(self.graph_inputs),
+            target,
+        )
+        tensor = TensorBox.create(data)
+        self.graph_inputs[target] = tensor
         return tensor
 
     def call_function(self, target, args, kwargs):
-        pass
+        return lowerings[target](*args, **kwargs)
 
     def get_attr(self, target, args, kwargs):
         assert False
@@ -139,14 +108,23 @@ class GraphLowering(torch.fx.Interpreter):
         assert False
 
     def output(self, target, args, kwargs):
-        assert False
+        self.graph_outputs = super().output(target, args, kwargs)
+        return self.graph_outputs
 
-    def run_node(self, n : torch.fx.Node):
+    def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
         num_users = len(set(n.users))
         if num_users > 0:
             result.mark_reuse(n.users)
         return result
 
-
-
+    def cpp(self):
+        args = ", ".join(self.graph_inputs.keys())
+        code = "\n".join([x.cpp() for x in self.graph_outputs])
+        return textwrap.dedent(
+            """
+        void kernel({args}) {{
+        {code}
+        }}
+        """
+        ).format(args=args, code=code)

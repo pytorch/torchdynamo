@@ -17,21 +17,24 @@ class MyModel1(torch.nn.Module):
 
     def forward(self, input):
         # return (self.model(input) + 1,)
-        return self.model(input),
+        return (self.model(input),)
 
 
 class MyModel2(torch.nn.Module):
     def forward(self, x):
         # return x / (torch.abs(x) + 1.0),
-        return x + x,
+        return (x + x,)
 
 
 model = MyModel2().eval()
 
-inputs = (torch.rand(32, 64, 1024).transpose(0,1),)
+inputs = (torch.rand(32, 64, 1024).transpose(0, 1),)
 
 gm, wrap = python_key_normalize(fx.symbolic_trace(model), inputs)
 
 gm.graph.print_tabular()
 
-wrap(GraphLowering(gm).run)(*inputs)
+graph = GraphLowering(gm)
+wrap(graph.run)(*inputs)
+
+print(graph.cpp())
