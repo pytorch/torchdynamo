@@ -8,10 +8,12 @@ import torch
 import torch.fx
 from sympy import Integer
 
+from .codegen import CppPointwiseKernel
+from .codegen import TritonPointwiseKernel
 from .ir import FixedLayout
 from .ir import InputBuffer
-from .ir import Loops
 from .ir import TensorBox
+from .ir import UnrealizedBuffer
 from .shapes import SizeVarAllocator
 from .virtualized import prim
 
@@ -33,11 +35,9 @@ def register_pointwise(aten_fn, name=None):
     @register_lowering(aten_fn, broadcast=True, type_promote=True)
     def inner(*inputs: List[TensorBox]):
         loaders = [x.make_loader() for x in inputs]
-        return TensorBox.create(
-            Loops(
-                inputs[0].get_ranges(),
-                lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
-            )
+        return UnrealizedBuffer.create(
+            inputs[0].get_ranges(),
+            lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
         )
 
     return inner
@@ -115,16 +115,18 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().run_node(n)
         num_users = len(set(n.users))
         if num_users > 0:
+            # TODO(jansel): introduce a store vs inline choice
             result.mark_reuse(n.users)
         return result
 
+    def codegen(self, cls):
+        with cls() as kernel:
+            for node in self.graph_outputs:
+                node.codegen(kernel)
+        return kernel.getvalue()
+
     def cpp(self):
-        args = ", ".join(self.graph_inputs.keys())
-        code = "\n".join([x.cpp() for x in self.graph_outputs])
-        return textwrap.dedent(
-            """
-        void kernel({args}) {{
-        {code}
-        }}
-        """
-        ).format(args=args, code=code)
+        return self.codegen(CppPointwiseKernel)
+
+    def triton(self):
+        return self.codegen(TritonPointwiseKernel)

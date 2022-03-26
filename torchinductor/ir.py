@@ -3,12 +3,15 @@ import textwrap
 from typing import Callable
 from typing import List
 
+import sympy
 import torch
 from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from .codegen import PointwiseKernel
 from .virtualized import prim
+
 
 class IRNode(object):
     pass
@@ -38,6 +41,21 @@ class FixedLayout(Layout):
 
         return indexer
 
+    @staticmethod
+    def default_strides(sizes):
+        if len(sizes) == 0:
+            return []
+        reversed_strides = [sympy.Integer(1)]
+        for size in reversed(sizes[1:]):
+            reversed_strides.append(size * reversed_strides[-1])
+        return list(reversed(reversed_strides))
+
+    @staticmethod
+    def indexer_from_sizes(sizes):
+        return FixedLayout(
+            None, sizes, FixedLayout.default_strides(sizes)
+        ).make_indexer()
+
 
 class FlexibleLayout(Layout):
     """A Tensor layout we are allowed to change"""
@@ -50,24 +68,16 @@ class Loops(IRNode):
     ranges: List[Expr]
     inner_fn: Callable
 
-    def cpp(self):
-        loop_headers = []
-        vars = [Symbol(f"i{n}") for n in range(len(self.ranges))]
-        for var, size in zip(vars, self.ranges):
-            loop_headers.append(f"for(int {var}=0; {var}<{size}; ++{var})")
-        inner = self.inner_fn(vars)
-        return textwrap.dedent(
-            """
-        {}
-        {{
-        {}
-        }}
-        """
-        ).format("\n".join(loop_headers), inner)
+    @classmethod
+    def create(cls, *args, **kwargs):
+        return TensorBox.create(cls(*args, **kwargs))
+
 
 class UnrealizedBuffer(Loops):
-    pass
-
+    def codegen(self, kernel: PointwiseKernel, output_name="out"):
+        vars = kernel.set_ranges(self.ranges)
+        indexer = FixedLayout.indexer_from_sizes(self.ranges)
+        prim.store(output_name, indexer(vars), self.inner_fn(vars))
 
 
 @dataclasses.dataclass
@@ -95,7 +105,6 @@ class InputBuffer(Buffer):
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     contents = IRNode
-
 
 
 @dataclasses.dataclass
