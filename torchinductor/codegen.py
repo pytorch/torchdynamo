@@ -1,14 +1,19 @@
 import code
 import collections
 import contextlib
+import functools
 import itertools
+import operator
 import textwrap
 from io import StringIO
 from itertools import chain
 
 import sympy
+import torch
 
 from . import virtualized
+
+product = functools.partial(functools.reduce, operator.mul)
 
 
 class IndentedBuffer:
@@ -85,6 +90,13 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
+    def inner_names(self):
+        return chain(
+            self.input_buffers.values(),
+            self.output_buffers.values(),
+            self.sizevars.values(),
+        )
+
 
 class CSE:
     """Common subexpression elimination"""
@@ -154,6 +166,8 @@ class PointwiseKernel:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index):
+        if isinstance(index, (list, tuple)):
+            return [self.rename_indexing(x) for x in index]
         subs = {
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
         }
@@ -165,62 +179,165 @@ class PointwiseKernel:
         self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
         return self.itervars
 
+    def codegen_outputs(self, code, graph):
+        for outer, inner in self.args.output_buffers.items():
+            dtype = graph.graph_outputs[outer].get_dtype()
+            shape = self.rename_indexing(graph.graph_outputs[outer].get_size())
+            code.writeline(
+                f"{inner} = torch.empty([{', '.join(map(str, shape))}], device='cuda', dtype={dtype})"
+            )
+
+    def codegen_sizevars(self, code, graph):
+        needed_sizevars = dict(self.args.sizevars)
+        for outer, inner in self.args.input_buffers.items():
+            shapes = graph.graph_inputs[outer].get_size()
+            for dim, shape in enumerate(shapes):
+                shape = str(shape)
+                if shape in needed_sizevars:
+                    code.writeline(f"{needed_sizevars[shape]} = {inner}.size({dim})")
+                    del needed_sizevars[shape]
+        assert not needed_sizevars
+
 
 class CppPointwiseKernel(PointwiseKernel):
     newvar_prefix = "auto "
     suffix = ";"
     load_format = "{var}[{index}]"
     store_format = "{var}[{index}] = {value}"
+    index_type = "uint64_t"
+    dtype_to_cpp = {torch.float32: "float32_t"}
 
-    def getvalue(self):
+    def generate(self, graph):
+
+        args = []
+        for outer, inner in self.args.input_buffers.items():
+            dtype = graph.graph_inputs[outer].get_dtype()
+            args.append(f"const {self.dtype_to_cpp[dtype]}* __restrict__ {inner}")
+        for outer, inner in self.args.output_buffers.items():
+            dtype = graph.graph_outputs[outer].get_dtype()
+            args.append(f"{self.dtype_to_cpp[dtype]}* __restrict__ {inner}")
+        for outer, inner in self.args.sizevars.items():
+            args.append(f"const {self.index_type} {inner}")
+
         code = BracesBuffer()
         with contextlib.ExitStack() as stack:
-            code.writeline(f"void kernel({', '.join(self.args.call_names())})")
+            fargs = ",\n            ".join(args)
+            code.writeline(f"void kernel({fargs})")
             stack.enter_context(code.indent())
             for var, size in zip(self.itervars, self.ranges):
                 # TODO(jansel): add parallel
                 code.writeline(f"#pragma GCC ivdep")
-                code.writeline(f"for(int {var}=0; {var}<{size}; ++{var})")
+                code.writeline(f"for({self.index_type} {var}=0; {var}<{size}; ++{var})")
                 stack.enter_context(code.indent())
             code.splice(self.loads.getvalue())
             code.splice(self.compute.getvalue())
             code.splice(self.stores.getvalue())
-        return code.getvalue()
+
+        wrapper = IndentedBuffer()
+        wrapper.writelines(
+            [
+                "from ctypes import c_void_p, c_uint64",
+                "",
+                "CPP_SOURCE = '''",
+            ]
+        )
+        wrapper.splice(code.getvalue())
+        wrapper.writelines(
+            [
+                "'''",
+                "",
+                f"def call({', '.join(chain(self.args.input_buffers.values()))}):",
+            ]
+        )
+        with wrapper.indent():
+            self.codegen_sizevars(wrapper, graph)
+            self.codegen_outputs(wrapper, graph)
+
+            call_args = []
+            for name in chain(
+                self.args.input_buffers.values(), self.args.output_buffers.values()
+            ):
+                call_args.append(f"c_void_p({name}.data_ptr())")
+            for name in self.args.sizevars.values():
+                call_args.append(f"c_uint64({name})")
+
+            wrapper.writelines(
+                [
+                    "kernel({})".format(",\n           ".join(call_args)),
+                    f"return ({', '.join(self.args.output_buffers.values())}, )",
+                ]
+            )
+
+        return wrapper.getvalue()
 
 
 class TritonPointwiseKernel(PointwiseKernel):
     load_format = "tl.load({var} + {index}, mask=mask)"
     store_format = "tl.store({var} + {index}, {value}, mask=mask)"
 
-    def set_ranges(self, lengths):
-        super().set_ranges(lengths)
-        self.blockvars = [sympy.Symbol(f"BLOCK{n}") for n in range(len(self.ranges))]
-        return self.itervars
-
-    def getvalue(self):
-        blockargs = [f"{var}: tl.constexpr" for var in self.blockvars]
+    def generate(self, graph):
+        blockargs = [f"BLOCK_SIZE: tl.constexpr"]
         code = IndentedBuffer()
         code.writeline("import triton")
         code.writeline("import triton.language as tl")
         code.writeline("")
         code.writeline("@triton.jit")
         code.writeline(
-            f"def kernel({', '.join(chain(self.args.call_names(), blockargs))}):"
+            f"def kernel({', '.join(chain(self.args.inner_names(), blockargs))}):"
         )
         with code.indent():
-            for axis, var, size, block_size in zip(
-                itertools.count(), self.itervars, self.ranges, self.blockvars
-            ):
-                code.writeline(
-                    f"{var} = tl.program_id(axis={axis}) * {block_size} + tl.arange(0, {block_size})"
-                )
-                code.writeline(f"mask{axis} = {var} < {size}")
-            code.writeline(
-                "mask = " + " & ".join(f"mask{i}" for i in range(len(self.itervars)))
+            # multi-dimensional blocks:
+            # for axis, var, size, block_size in zip(
+            #     itertools.count(), self.itervars, self.ranges, self.blockvars
+            # ):
+            #     code.writeline(
+            #         f"{var} = tl.program_id(axis={axis}) * {block_size} + tl.arange(0, {block_size})"
+            #     )
+            #     code.writeline(f"mask{axis} = {var} < {size}")
+            # code.writeline(
+            #     "mask = " + " & ".join(f"mask{i}" for i in range(len(self.itervars)))
+            # )
+
+            code.writelines(
+                [
+                    f"indices = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)",
+                    f"mask = indices < {product(self.ranges)}",
+                ]
             )
+            for axis, var, size in reversed(
+                tuple(zip(itertools.count(), self.itervars, self.ranges))
+            ):
+                if axis > 0:
+                    code.writelines(
+                        [
+                            f"{var} = indices % {size}",
+                            f"indices = indices // {size}",
+                        ]
+                    )
+                else:
+                    code.writeline(f"{var} = indices")
+
             code.splice(self.loads.getvalue())
             code.splice(self.compute.getvalue())
             code.splice(self.stores.getvalue())
-        return code.getvalue()
 
-    pass
+        code.writeline("")
+        code.writeline("")
+        code.writeline(
+            f"def call({', '.join(chain(self.args.input_buffers.values()))}):"
+        )
+        with code.indent():
+            self.codegen_sizevars(code, graph)
+            self.codegen_outputs(code, graph)
+
+            call_args = list(self.args.inner_names()) + ["BLOCK_SIZE=1024"]
+            code.writelines(
+                [
+                    f"n_elements = {product(self.ranges)}",
+                    "grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )",
+                    f"kernel[grid]({', '.join(call_args)})",
+                    f"return ({', '.join(self.args.output_buffers.values())}, )",
+                ]
+            )
+
+        return code.getvalue()

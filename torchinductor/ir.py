@@ -1,5 +1,4 @@
 import dataclasses
-import textwrap
 from typing import Callable
 from typing import List
 
@@ -7,7 +6,6 @@ import sympy
 import torch
 from sympy import Expr
 from sympy import Integer
-from sympy import Symbol
 
 from .codegen import PointwiseKernel
 from .virtualized import prim
@@ -73,19 +71,55 @@ class Loops(IRNode):
         return TensorBox.create(cls(*args, **kwargs))
 
 
+@dataclasses.dataclass
 class UnrealizedBuffer(Loops):
-    def codegen(self, kernel: PointwiseKernel, output_name="out"):
-        vars = kernel.set_ranges(self.ranges)
-        indexer = FixedLayout.indexer_from_sizes(self.ranges)
-        prim.store(output_name, indexer(vars), self.inner_fn(vars))
+    dtype: torch.dtype
+
+    def get_size(self):
+        return self.ranges
+
+    def get_dtype(self):
+        return self.dtype
+
+
+@dataclasses.dataclass
+class BaseView(IRNode):
+    data: IRNode
+
+
+@dataclasses.dataclass
+class ExpandView(BaseView):
+    size: List[Expr]
+
+    def get_size(self):
+        return self.size
+
+    def make_indexer(self):
+        target = self.get_size()
+        actual = self.data.get_size()
+        skip = len(target) - len(actual)
+        inner = self.data.make_indexer()
+
+        def indexer(index):
+            index = list(index[skip:])
+            assert len(index) == len(actual)
+            for i in len(actual):
+                if actual[i] == 1:
+                    index[i] = sympy.Integer(0)
+            return inner(index)
+
+        return indexer
 
 
 @dataclasses.dataclass
 class Buffer(IRNode):
     layout: Layout
 
-    def get_ranges(self):
+    def get_size(self):
         return self.layout.size
+
+    def get_dtype(self):
+        return self.layout.dtype
 
     def make_loader(self):
         indexer = self.layout.make_indexer()
@@ -100,11 +134,6 @@ class Buffer(IRNode):
 class InputBuffer(Buffer):
     index: int
     name: str
-
-
-@dataclasses.dataclass
-class ComputedBuffer(Buffer):
-    contents = IRNode
 
 
 @dataclasses.dataclass
@@ -125,6 +154,11 @@ class TensorBox(MutableBox):
 
     def mark_reuse(self, users):
         pass
+
+    def codegen(self, kernel: PointwiseKernel, output_name):
+        vars = kernel.set_ranges(self.get_size())
+        indexer = FixedLayout.indexer_from_sizes(self.get_size())
+        prim.store(output_name, indexer(vars), self.inner_fn(vars))
 
 
 class StorageBox(MutableBox):
