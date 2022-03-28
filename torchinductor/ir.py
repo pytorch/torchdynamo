@@ -94,21 +94,22 @@ class ExpandView(BaseView):
     def get_size(self):
         return self.size
 
-    def make_indexer(self):
+    def make_loader(self):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
-        inner = self.data.make_indexer()
+        inner = self.data.make_loader()
 
-        def indexer(index):
+        def load(index):
             index = list(index[skip:])
             assert len(index) == len(actual)
             for i in len(actual):
                 if actual[i] == 1:
+                    # zero out broadcast dimension
                     index[i] = sympy.Integer(0)
             return inner(index)
 
-        return indexer
+        return load
 
 
 @dataclasses.dataclass

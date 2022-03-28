@@ -21,14 +21,14 @@ class MyModel1(torch.nn.Module):
 
 
 class MyModel2(torch.nn.Module):
-    def forward(self, x):
+    def forward(self, x, y):
         # return x / (torch.abs(x) + 1.0),
-        return (x + x,)
+        return (x + y,)
 
 
 model = MyModel2().eval()
 
-inputs = (torch.rand(32, 64, 1024).transpose(0, 1),)
+inputs = (torch.rand(10, 10), torch.rand(10, 10))
 
 gm, wrap = python_key_normalize(fx.symbolic_trace(model), inputs)
 

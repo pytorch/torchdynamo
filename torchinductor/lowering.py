@@ -13,6 +13,7 @@ from sympy import Integer
 
 from .codegen import CppPointwiseKernel
 from .codegen import TritonPointwiseKernel
+from .ir import ExpandView
 from .ir import FixedLayout
 from .ir import InputBuffer
 from .ir import TensorBox
@@ -24,24 +25,34 @@ lowerings = {}
 aten = torch.ops.aten
 
 
-def _register_lowering(aten_fn, decomp_fn, broadcast=False, type_promote=True):
+def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
+    """
+    Add a lowering to lowerings dict
+
+    Arguments:
+        aten_fn: torch.ops.aten.* fn we are lowering
+        decomp_fn: alternate implementation on our IR
+        broadcast: True to apply broadcasting to tensor inputs
+        type_promote: True to apply type promotion to tensor inputs
+    """
+
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
         args = list(args)
-        tensor_args = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+        # Only look at args that are Tensors
+        indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+        # kwargs tensors not supported yet
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
-        if type_promote and tensor_args:
+        if type_promote and indices:
             dtype = functools.reduce(
-                torch.promote_types, [args[i].get_dtype() for i in tensor_args]
+                torch.promote_types, [args[i].get_dtype() for i in indices]
             )
-            for i in tensor_args:
+            for i in indices:
                 args[i] = to_dtype(args[i], dtype)
 
-        if broadcast and tensor_args:
-            for i, x in zip(
-                tensor_args, broadcast_tensors(*[args[i] for i in tensor_args])
-            ):
+        if broadcast and indices:
+            for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
 
         return decomp_fn(*args, **kwargs)
@@ -50,31 +61,71 @@ def _register_lowering(aten_fn, decomp_fn, broadcast=False, type_promote=True):
     return wrapped
 
 
-def register_lowering(aten_fn, broadcast=True, type_promote=True):
+def register_lowering(aten_fn, broadcast=False, type_promote=True):
+    """
+    Shim to support decorator syntax.
+    """
     return functools.partial(
         _register_lowering, aten_fn, broadcast=broadcast, type_promote=type_promote
     )
 
 
-def broadcast_shapes(a, b):
+def broadcast_symbolic_shapes(a, b):
+    """
+    Broadcasting logic based on symbolic shapes.
+
+    We give the shapes 0 and 1 concrete values, while all other shapes
+    are symbolic sympy formulas.
+    """
     output = []
     for a, b in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if a == 1:
-            output.append(b)
-        elif b == 1:
+        if b == 1:
             output.append(a)
-        elif len(str(b)) < len(str(a)):
+        elif a == 1:
             output.append(b)
         else:
-            output.append(a)
+            guard_shape_equal(a, b)
+            if len(str(b)) < len(str(a)):
+                output.append(b)  # prefer shorter formula
+            else:
+                output.append(a)
     return tuple(reversed(output))
+
+
+def guard_shape_equal(a, b):
+    if a != b:
+        assert False
+        pass  # TODO(jansel): implement guarding
+
+
+def to_dtype(x: TensorBox, dtype: torch.dtype):
+    assert x.get_dtype() == dtype, "TODO(jansel): type promotion"
+    return x
+
+
+def register_pointwise(aten_fn, name=None, broadcast=True, type_promote=True):
+    """A pointwise function that maps prim.{name} to inputs"""
+    name = name or aten_fn.__name__
+
+    @register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)
+    def inner(*inputs: List[TensorBox]):
+        loaders = [x.make_loader() for x in inputs]
+        return UnrealizedBuffer.create(
+            inputs[0].get_size(),
+            lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
+            dtype=inputs[0].get_dtype(),
+        )
+
+    return inner
 
 
 @register_lowering(aten.broadcast_tensors, broadcast=False, type_promote=False)
 def broadcast_tensors(*inputs):
-    target = functools.reduce(broadcast_shapes, [x.get_size() for x in inputs], ())
+    target = functools.reduce(
+        broadcast_symbolic_shapes, [x.get_size() for x in inputs], ()
+    )
     outputs = []
     for x in inputs:
         sizes = x.get_size()
@@ -88,27 +139,9 @@ def broadcast_tensors(*inputs):
 
 @register_lowering(aten.expand, type_promote=False, broadcast=False)
 def expand(x, sizes):
-    assert False
-
-
-def to_dtype(x: TensorBox, dtype: torch.dtype):
-    assert x.get_dtype() == dtype, "TODO(jansel): type promotion"
-    return x
-
-
-def register_pointwise(aten_fn, name=None):
-    name = name or aten_fn.__name__
-
-    @register_lowering(aten_fn, broadcast=True, type_promote=True)
-    def inner(*inputs: List[TensorBox]):
-        loaders = [x.make_loader() for x in inputs]
-        return UnrealizedBuffer.create(
-            inputs[0].get_size(),
-            lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
-            dtype=inputs[0].get_dtype(),
-        )
-
-    return inner
+    assert isinstance(x, TensorBox)
+    assert isinstance(sizes, (list, tuple))
+    return TensorBox(ExpandView(x.data, tuple(sizes)))
 
 
 register_pointwise(aten.add)

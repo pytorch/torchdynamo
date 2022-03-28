@@ -1,4 +1,3 @@
-import code
 import collections
 import contextlib
 import functools
@@ -204,8 +203,16 @@ class CppPointwiseKernel(PointwiseKernel):
     suffix = ";"
     load_format = "{var}[{index}]"
     store_format = "{var}[{index}] = {value}"
-    index_type = "uint64_t"
-    dtype_to_cpp = {torch.float32: "float32_t"}
+    index_type = "long"
+    dtype_to_cpp = {
+        torch.float32: "float",
+        torch.float64: "double",
+        torch.int64: "long",
+        torch.int32: "int",
+        torch.int16: "short",
+        torch.int8: "signed char",
+        torch.uint8: "unsigned char",
+    }
 
     def generate(self, graph):
 
@@ -222,7 +229,7 @@ class CppPointwiseKernel(PointwiseKernel):
         code = BracesBuffer()
         with contextlib.ExitStack() as stack:
             fargs = ",\n            ".join(args)
-            code.writeline(f"void kernel({fargs})")
+            code.writeline(f'extern "C" void kernel({fargs})')
             stack.enter_context(code.indent())
             for var, size in zip(self.itervars, self.ranges):
                 # TODO(jansel): add parallel
@@ -236,7 +243,7 @@ class CppPointwiseKernel(PointwiseKernel):
         wrapper = IndentedBuffer()
         wrapper.writelines(
             [
-                "from ctypes import c_void_p, c_uint64",
+                "from ctypes import c_void_p, c_long",
                 "",
                 "CPP_SOURCE = '''",
             ]
@@ -259,7 +266,7 @@ class CppPointwiseKernel(PointwiseKernel):
             ):
                 call_args.append(f"c_void_p({name}.data_ptr())")
             for name in self.args.sizevars.values():
-                call_args.append(f"c_uint64({name})")
+                call_args.append(f"c_long({name})")
 
             wrapper.writelines(
                 [
