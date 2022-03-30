@@ -496,6 +496,15 @@ def cast_to_fp16(model, inputs):
             inputs,
         )
     )
+    # TRT does not support int64. Some model need to down level precison
+    inputs = tuple(
+        tree_map(
+            lambda x: x.to(torch.int32)
+            if getattr(x, "dtype", None) == torch.int64
+            else x,
+            inputs,
+        )
+    )
     return model, inputs
 
 
