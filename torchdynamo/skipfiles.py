@@ -27,16 +27,21 @@ import _collections_abc
 import _weakrefset
 import torch
 
+
+def _module_dir(m: types.ModuleType):
+    return re.sub(r"__init__.py$", "", m.__file__)
+
+
 SKIP_DIRS = [
     # torch.*
-    os.path.dirname(torch.__file__) + "/",
+    _module_dir(torch),
     # torchdynamo.*
     os.path.dirname(__file__) + "/",
     "<frozen importlib",
     "<__array_function__ internals>",
 ] + [
     # skip some standard libs
-    re.sub(r"__init__.py$", "", m.__file__)
+    _module_dir(m)
     for m in (
         abc,
         collections,
@@ -78,9 +83,7 @@ def add(module: types.ModuleType):
     name = module.__file__
     if name is None:
         return
-    if name.endswith("__init__.py"):
-        name = os.path.dirname(name) + "/"
-    SKIP_DIRS.append(name)
+    SKIP_DIRS.append(_module_dir(module))
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
@@ -123,10 +126,10 @@ for _name in (
 
 
 def is_torch_inline_allowed(filename):
-    return filename.startswith(
-        os.path.dirname(torch.nn.__file__)
-    ) or filename.startswith(os.path.dirname(torch.distributions.__file__))
+    return filename.startswith(_module_dir(torch.nn)) or filename.startswith(
+        _module_dir(torch.distributions)
+    )
 
 
 def is_torch(filename):
-    return filename.startswith(os.path.dirname(torch.__file__))
+    return filename.startswith(_module_dir(torch))
