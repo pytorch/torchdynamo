@@ -1,6 +1,7 @@
 black==22.1.0
 flake8==4.0.1
 isort==5.10.1
+click==8.0.4  # 8.1.0 breaks black
 ninja
 onnxruntime-gpu
 onnx-tf
