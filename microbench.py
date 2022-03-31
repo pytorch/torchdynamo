@@ -1,6 +1,7 @@
 import torch
 import torchinductor
 from torch import fx
+from torchinductor.codecache import PyCodeCache
 from torchinductor.lowering import GraphLowering
 
 import torchdynamo
@@ -26,22 +27,25 @@ class MyModel2(torch.nn.Module):
         return (x + y,)
 
 
-model = MyModel2().eval()
+def test_model(model, example_inputs):
+    print("\n\nBEGIN\n")
+    gm, wrap = python_key_normalize(fx.symbolic_trace(model), example_inputs)
+    gm.graph.print_tabular()
+    print()
 
-inputs = (torch.rand(10, 10), torch.rand(10, 10))
+    graph = GraphLowering(gm)
+    wrap(graph.run)(*example_inputs)
 
-gm, wrap = python_key_normalize(fx.symbolic_trace(model), inputs)
+    code = graph.codegen()
+    print(code)
+    (actual,) = PyCodeCache.load(code).call(*example_inputs)
+    (correct,) = model(*example_inputs)
+    torch.testing.assert_close(actual, correct)
+    print("correct!")
 
-gm.graph.print_tabular()
 
-graph = GraphLowering(gm)
-wrap(graph.run)(*inputs)
-
-print()
-print()
-print(graph.cpp())
-print()
-print()
-print(graph.triton())
-print()
-print()
+mod1 = MyModel2().eval()
+inputs1 = (torch.rand(10, 10), torch.rand(10, 10))
+inputs2 = (torch.rand(10, 10, device="cuda"), torch.rand(10, 10, device="cuda"))
+test_model(mod1, inputs1)
+test_model(mod1, inputs2)

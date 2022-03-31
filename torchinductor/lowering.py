@@ -12,6 +12,7 @@ import torch.fx
 from sympy import Integer
 
 from .codegen import CppPointwiseKernel
+from .codegen import ScheduleCodeGen
 from .codegen import TritonPointwiseKernel
 from .ir import ExpandView
 from .ir import FixedLayout
@@ -115,6 +116,7 @@ def register_pointwise(aten_fn, name=None, broadcast=True, type_promote=True):
         return UnrealizedBuffer.create(
             inputs[0].get_size(),
             lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
+            device=inputs[0].get_device(),
             dtype=inputs[0].get_dtype(),
         )
 
@@ -184,14 +186,18 @@ class GraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
         self.sizevars = SizeVarAllocator("s")
         self.graph_inputs = collections.OrderedDict()
-        self.graph_outputs = []
+        self.graph_outputs = None
+        self.device = None
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
+        if self.device is None:
+            self.device = example.device
+        assert example.device == self.device
         sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
         data = InputBuffer(
-            FixedLayout(example.dtype, sizes, strides),
+            FixedLayout(example.device, example.dtype, sizes, strides),
             len(self.graph_inputs),
             target,
         )
@@ -223,15 +229,18 @@ class GraphLowering(torch.fx.Interpreter):
             result.mark_reuse(n.users)
         return result
 
-    def codegen(self, cls):
-        with cls() as kernel:
+    def codegen(self):
+        from .codegen import CppPointwiseKernel
+        from .codegen import TritonPointwiseKernel
+
+        backends = {"cpu": CppPointwiseKernel, "cuda": TritonPointwiseKernel}
+        backend_cls = backends[self.device.type]
+
+        with backend_cls() as kernel:
             for name, node in self.graph_outputs.items():
                 node.codegen(kernel, name)
 
-        return kernel.generate(self)
-
-    def cpp(self):
-        return self.codegen(CppPointwiseKernel)
-
-    def triton(self):
-        return self.codegen(TritonPointwiseKernel)
+        schedule = ScheduleCodeGen(self)
+        schedule.define_kernel("kernel0", kernel)
+        schedule.call_kernel("kernel0", kernel)
+        return schedule.generate()

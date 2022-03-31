@@ -17,6 +17,7 @@ class IRNode(object):
 
 @dataclasses.dataclass
 class Layout(IRNode):
+    device: torch.device
     dtype: torch.dtype
     size: List[Expr]
 
@@ -51,7 +52,7 @@ class FixedLayout(Layout):
     @staticmethod
     def indexer_from_sizes(sizes):
         return FixedLayout(
-            None, sizes, FixedLayout.default_strides(sizes)
+            None, None, sizes, FixedLayout.default_strides(sizes)
         ).make_indexer()
 
 
@@ -73,6 +74,7 @@ class Loops(IRNode):
 
 @dataclasses.dataclass
 class UnrealizedBuffer(Loops):
+    device: torch.device
     dtype: torch.dtype
 
     def get_size(self):
@@ -80,6 +82,9 @@ class UnrealizedBuffer(Loops):
 
     def get_dtype(self):
         return self.dtype
+
+    def get_device(self):
+        return self.device
 
 
 @dataclasses.dataclass
@@ -122,6 +127,9 @@ class Buffer(IRNode):
     def get_dtype(self):
         return self.layout.dtype
 
+    def get_device(self):
+        return self.layout.device
+
     def make_loader(self):
         indexer = self.layout.make_indexer()
 
@@ -135,6 +143,9 @@ class Buffer(IRNode):
 class InputBuffer(Buffer):
     index: int
     name: str
+
+    def get_stride(self):
+        return self.layout.stride
 
 
 @dataclasses.dataclass

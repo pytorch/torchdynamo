@@ -22,3 +22,22 @@ class SizeVarAllocator(object):
         self.val_to_var[val] = var
         self.var_to_val[var] = val
         return var
+
+    def codegen(self, code, graph_inputs):
+        """Assign all symbolic shapes to locals"""
+        needed = set(map(str, self.var_to_val.keys()))
+        for name, value in graph_inputs.items():
+            shapes = value.get_size()
+            for dim, shape in enumerate(shapes):
+                shape = str(shape)
+                if shape in needed:
+                    needed.remove(shape)
+                    code.writeline(f"{shape} = {name}.size({dim})")
+        for name, value in graph_inputs.items():
+            shapes = value.get_stride()
+            for dim, shape in enumerate(shapes):
+                shape = str(shape)
+                if shape in needed:
+                    needed.remove(shape)
+                    code.writeline(f"{shape} = {name}.stride({dim})")
+        assert not needed

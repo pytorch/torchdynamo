@@ -7,12 +7,30 @@ import textwrap
 from io import StringIO
 from itertools import chain
 
+from sympy.printing.printer import Printer
+
 import sympy
 import torch
+from sympy.printing.cxx import CXX11CodePrinter
 
+from . import codecache
 from . import virtualized
 
 product = functools.partial(functools.reduce, operator.mul)
+
+class TritonPrinter(Printer):
+    def _print(self, expr, **kwargs):
+        assert not kwargs, kwargs
+        if isinstance(expr, sympy.Pow):
+            # Pow() confuses triton
+            assert len(expr.args) == 2
+            count = int(expr.args[1])
+            inner = super()._print(expr.args[0], **kwargs)
+            return "*".join([inner]*count)
+        return super()._print(expr, **kwargs)
+
+texpr = TritonPrinter().doprint
+cexpr = CXX11CodePrinter().doprint
 
 
 class IndentedBuffer:
@@ -113,7 +131,20 @@ class CSE:
         return self.cache[expr]
 
 
-class PointwiseKernel:
+class CodeGen:
+    def __init__(self):
+        super().__init__()
+        self.exit_stack = contextlib.ExitStack()
+
+    def __enter__(self):
+        self.exit_stack.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+
+class PointwiseKernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
 
@@ -123,7 +154,6 @@ class PointwiseKernel:
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
-        self.exit_stack = contextlib.ExitStack()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.ranges = None
         self.itervars = None
@@ -144,7 +174,7 @@ class PointwiseKernel:
                 var = self.args.input(name)
                 index = self.rename_indexing(index)
                 return self.cse.generate(
-                    self.loads, self.load_format.format(var=var, index=index)
+                    self.loads, self.load_format.format(var=var, index=self.sexpr(index))
                 )
 
             @staticmethod
@@ -152,17 +182,14 @@ class PointwiseKernel:
                 var = self.args.output(name)
                 index = self.rename_indexing(index)
                 self.stores.writeline(
-                    self.store_format.format(var=var, index=index, value=value)
+                    self.store_format.format(var=var, index=self.sexpr(index), value=value)
                     + self.suffix
                 )
 
-        self.exit_stack.__enter__()
+        super().__enter__()
         parent_handler = virtualized.prim.get_handler()
         self.exit_stack.enter_context(virtualized.prim.set_handler(CSEProxy()))
         return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index):
         if isinstance(index, (list, tuple)):
@@ -178,27 +205,9 @@ class PointwiseKernel:
         self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
         return self.itervars
 
-    def codegen_outputs(self, code, graph):
-        for outer, inner in self.args.output_buffers.items():
-            dtype = graph.graph_outputs[outer].get_dtype()
-            shape = self.rename_indexing(graph.graph_outputs[outer].get_size())
-            code.writeline(
-                f"{inner} = torch.empty([{', '.join(map(str, shape))}], device='cuda', dtype={dtype})"
-            )
-
-    def codegen_sizevars(self, code, graph):
-        needed_sizevars = dict(self.args.sizevars)
-        for outer, inner in self.args.input_buffers.items():
-            shapes = graph.graph_inputs[outer].get_size()
-            for dim, shape in enumerate(shapes):
-                shape = str(shape)
-                if shape in needed_sizevars:
-                    code.writeline(f"{needed_sizevars[shape]} = {inner}.size({dim})")
-                    del needed_sizevars[shape]
-        assert not needed_sizevars
-
 
 class CppPointwiseKernel(PointwiseKernel):
+    sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
     load_format = "{var}[{index}]"
@@ -215,7 +224,6 @@ class CppPointwiseKernel(PointwiseKernel):
     }
 
     def generate(self, graph):
-
         args = []
         for outer, inner in self.args.input_buffers.items():
             dtype = graph.graph_inputs[outer].get_dtype()
@@ -228,59 +236,41 @@ class CppPointwiseKernel(PointwiseKernel):
 
         code = BracesBuffer()
         with contextlib.ExitStack() as stack:
-            fargs = ",\n            ".join(args)
+            fargs = ",\n".ljust(25).join(args)
             code.writeline(f'extern "C" void kernel({fargs})')
             stack.enter_context(code.indent())
             for var, size in zip(self.itervars, self.ranges):
                 # TODO(jansel): add parallel
                 code.writeline(f"#pragma GCC ivdep")
-                code.writeline(f"for({self.index_type} {var}=0; {var}<{size}; ++{var})")
+                code.writeline(f"for({self.index_type} {var}=0; {var}<{cexpr(size)}; ++{var})")
                 stack.enter_context(code.indent())
             code.splice(self.loads.getvalue())
             code.splice(self.compute.getvalue())
             code.splice(self.stores.getvalue())
 
         wrapper = IndentedBuffer()
-        wrapper.writelines(
-            [
-                "from ctypes import c_void_p, c_long",
-                "",
-                "CPP_SOURCE = '''",
-            ]
-        )
+        wrapper.writeline("CppCodeCache.load('''")
         wrapper.splice(code.getvalue())
-        wrapper.writelines(
-            [
-                "'''",
-                "",
-                f"def call({', '.join(chain(self.args.input_buffers.values()))}):",
-            ]
-        )
-        with wrapper.indent():
-            self.codegen_sizevars(wrapper, graph)
-            self.codegen_outputs(wrapper, graph)
-
-            call_args = []
-            for name in chain(
-                self.args.input_buffers.values(), self.args.output_buffers.values()
-            ):
-                call_args.append(f"c_void_p({name}.data_ptr())")
-            for name in self.args.sizevars.values():
-                call_args.append(f"c_long({name})")
-
-            wrapper.writelines(
-                [
-                    "kernel({})".format(",\n           ".join(call_args)),
-                    f"return ({', '.join(self.args.output_buffers.values())}, )",
-                ]
-            )
-
+        wrapper.writeline("''').kernel")
         return wrapper.getvalue()
+
+    def call_kernel(self, code: IndentedBuffer, kernel_name: str):
+        call_args = []
+        for name in chain(
+            self.args.input_buffers.keys(), self.args.output_buffers.keys()
+        ):
+            call_args.append(f"{name}_ptr")
+        for name in self.args.sizevars.keys():
+            call_args.append(f"c_long({name})")
+        code.writeline(
+            "{}({})".format(kernel_name, ", ".join(call_args)),
+        )
 
 
 class TritonPointwiseKernel(PointwiseKernel):
     load_format = "tl.load({var} + {index}, mask=mask)"
     store_format = "tl.store({var} + {index}, {value}, mask=mask)"
+    sexpr = texpr
 
     def generate(self, graph):
         blockargs = [f"BLOCK_SIZE: tl.constexpr"]
@@ -308,7 +298,7 @@ class TritonPointwiseKernel(PointwiseKernel):
             code.writelines(
                 [
                     f"indices = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)",
-                    f"mask = indices < {product(self.ranges)}",
+                    f"mask = indices < {texpr(product(self.ranges))}",
                 ]
             )
             for axis, var, size in reversed(
@@ -317,8 +307,8 @@ class TritonPointwiseKernel(PointwiseKernel):
                 if axis > 0:
                     code.writelines(
                         [
-                            f"{var} = indices % {size}",
-                            f"indices = indices // {size}",
+                            f"{var} = indices % {texpr(size)}",
+                            f"indices = indices // {texpr(size)}",
                         ]
                     )
                 else:
@@ -328,23 +318,75 @@ class TritonPointwiseKernel(PointwiseKernel):
             code.splice(self.compute.getvalue())
             code.splice(self.stores.getvalue())
 
-        code.writeline("")
-        code.writeline("")
+        wrapper = IndentedBuffer()
+        wrapper.writeline("PyCodeCache.load('''")
+        wrapper.splice(code.getvalue())
+        wrapper.writeline("''').kernel")
+        return wrapper.getvalue()
+
+    def call_kernel(self, code: IndentedBuffer, name: str):
+        call_args = list(chain(
+                self.args.input_buffers.keys(), self.args.output_buffers.keys(), self.args.sizevars.keys()
+        ))
+        call_args.append("1024")  # block size
         code.writeline(
-            f"def call({', '.join(chain(self.args.input_buffers.values()))}):"
-        )
+                    f"{name}[lambda meta: (triton.cdiv({product(self.ranges)}, meta['BLOCK_SIZE']), )](")
         with code.indent():
-            self.codegen_sizevars(code, graph)
-            self.codegen_outputs(code, graph)
+            code.writeline(", ".join(call_args))
+        code.writeline(")")
 
-            call_args = list(self.args.inner_names()) + ["BLOCK_SIZE=1024"]
-            code.writelines(
-                [
-                    f"n_elements = {product(self.ranges)}",
-                    "grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )",
-                    f"kernel[grid]({', '.join(call_args)})",
-                    f"return ({', '.join(self.args.output_buffers.values())}, )",
-                ]
+
+class ScheduleCodeGen(CodeGen):
+    """
+    The outer wrapper that calls the kernels above.
+    """
+
+    def __init__(self, graph):
+        super().__init__()
+        self.graph = graph
+        self.header = IndentedBuffer()
+        self.body = IndentedBuffer(initial_indent=1)
+        self.header.writelines(
+            [
+                "from ctypes import c_void_p, c_long",
+                "import torch",
+                "import triton",
+                f"from {codecache.__name__} import CppCodeCache, PyCodeCache",
+            ]
+        )
+        with self.body.indent(-1):
+            self.body.writelines(
+                [f"def call({', '.join(self.graph.graph_inputs.keys())}):"]
             )
+        self.graph.sizevars.codegen(self.body, self.graph.graph_inputs)
+        self.codegen_outputs()
 
-        return code.getvalue()
+    def codegen_outputs(self):
+        graph = self.graph
+        code = self.body
+        for name, value in self.graph.graph_outputs.items():
+            device = value.get_device()
+            dtype = value.get_dtype()
+            shape = value.get_size()
+            # TODO(jansel): strides?
+            code.writeline(
+                f"{name} = torch.empty([{', '.join(map(str, shape))}], device='{device.type}', dtype={dtype})"
+            )
+        for name, value in chain(
+            self.graph.graph_inputs.items(), self.graph.graph_outputs.items()
+        ):
+            device = value.get_device()
+            if device.type == "cpu":
+                code.writeline(f"{name}_ptr = c_void_p({name}.data_ptr())")
+
+    def generate(self):
+        self.body.writeline(
+            "return (" + ", ".join(self.graph.graph_outputs.keys()) + ", )"
+        )
+        return f"{self.header.getvalue()}\n\n{self.body.getvalue()}"
+
+    def define_kernel(self, name: str, kernel: PointwiseKernel):
+        self.header.splice(f"\n\n{name} = {kernel.generate(self.graph)}")
+
+    def call_kernel(self, name: str, kernel: PointwiseKernel):
+        kernel.call_kernel(self.body, name)
