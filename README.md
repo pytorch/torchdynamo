@@ -21,6 +21,7 @@ For more information see progress updates posted on dev-discuss.pytorch.org:
 - [Update 3: GPU Inference Edition](https://dev-discuss.pytorch.org/t/torchdynamo-update-3-gpu-inference-edition/460)
 - [Update 4: LazyTensor & nvFuser Experiments](https://dev-discuss.pytorch.org/t/torchdynamo-update-4-lazytensor-nvfuser-experiments/496)
 - [Update 5: Improved Capture & Bigger Graphs](https://dev-discuss.pytorch.org/t/torchdynamo-update-5-improved-capture-bigger-graphs/556)
+- [Update 6: Training support with AOTAutograd](https://dev-discuss.pytorch.org/t/torchdynamo-update-6-training-support-with-aotautograd/570)
 
 *TorchDynamo is experimental* and under active development.
 You are welcome to try it out and contribute, but should expect to find
