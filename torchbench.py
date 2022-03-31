@@ -57,6 +57,8 @@ SKIP = {
     "pyhpc_turbulent_kinetic_energy",
     # https://github.com/facebookresearch/torchdynamo/issues/82
     "tacotron2",
+    # https://github.com/facebookresearch/torchdynamo/issues/101
+    "detectron2_maskrcnn",
 }
 
 # Additional models that are skipped in training
@@ -906,7 +908,8 @@ def main():
                     output_csv(output_filename, [], [device, name, 0.0])
         print_summary(output_filename)
     else:
-        os.path.exists(output_filename) and os.unlink(output_filename)
+        if output_filename and os.path.exists(output_filename):
+            os.unlink(output_filename)
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
