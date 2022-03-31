@@ -908,8 +908,7 @@ def main():
                     output_csv(output_filename, [], [device, name, 0.0])
         print_summary(output_filename)
     else:
-        if output_filename and os.path.exists(output_filename):
-            os.unlink(output_filename)
+        os.path.exists(output_filename) and os.unlink(output_filename)
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
