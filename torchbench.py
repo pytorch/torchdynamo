@@ -55,9 +55,10 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # CUDA torchvision::nms build issues on AWS cluser
+    # https://github.com/facebookresearch/torchdynamo/issues/82
+    "tacotron2",
+    # https://github.com/facebookresearch/torchdynamo/issues/101
     "detectron2_maskrcnn",
-    "vision_maskrcnn",
 }
 
 # Additional models that are skipped in training
@@ -492,6 +493,15 @@ def cast_to_fp16(model, inputs):
             lambda x: x.to(torch.float16)
             if getattr(x, "dtype", None) == torch.float32
             or getattr(x, "dtype", None) == torch.float64
+            else x,
+            inputs,
+        )
+    )
+    # TRT does not support int64. Some model need to down level precison
+    inputs = tuple(
+        tree_map(
+            lambda x: x.to(torch.int32)
+            if getattr(x, "dtype", None) == torch.int64
             else x,
             inputs,
         )
