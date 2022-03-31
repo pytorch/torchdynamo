@@ -55,9 +55,10 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # CUDA torchvision::nms build issues on AWS cluser
+    # https://github.com/facebookresearch/torchdynamo/issues/82
+    "tacotron2",
+    # https://github.com/facebookresearch/torchdynamo/issues/101
     "detectron2_maskrcnn",
-    "vision_maskrcnn",
 }
 
 # Additional models that are skipped in training
