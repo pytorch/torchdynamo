@@ -3,13 +3,13 @@ import contextlib
 import functools
 import itertools
 import operator
+import re
 import textwrap
 from io import StringIO
 from itertools import chain
 
 import sympy
 import torch
-from sympy.printing.cxx import CXX11CodePrinter
 from sympy.printing.printer import Printer
 
 from . import codecache
@@ -18,20 +18,41 @@ from . import virtualized
 product = functools.partial(functools.reduce, operator.mul)
 
 
-class TritonPrinter(Printer):
-    def _print(self, expr, **kwargs):
-        assert not kwargs, kwargs
-        if isinstance(expr, sympy.Pow):
-            # Pow() confuses triton
-            assert len(expr.args) == 2
-            count = int(expr.args[1])
-            inner = super()._print(expr.args[0], **kwargs)
-            return "*".join([inner] * count)
-        return super()._print(expr, **kwargs)
+class ExprPrinter(Printer):
+    @staticmethod
+    def paren(string):
+        if re.match(r"^[a-z0-9_.]+$", string, re.I):
+            return string
+        return f"({string})"
+
+    def _print_Pow(self, expr):
+        # Pow() confuses triton
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp.is_integer
+        exp = int(exp)
+        return "*".join([self.paren(base)] * exp)
+
+    def _print_Mul(self, expr):
+        return "*".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_Add(self, expr):
+        return " + ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_Mod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+
+class TritonPrinter(ExprPrinter):
+    pass
+
+
+class CppPrinter(ExprPrinter):
+    pass
 
 
 texpr = TritonPrinter().doprint
-cexpr = CXX11CodePrinter().doprint
+cexpr = CppPrinter().doprint
 
 
 class PrimOverrides:
@@ -266,7 +287,7 @@ class CppPointwiseKernel(PointwiseKernel):
             stack.enter_context(code.indent())
             for var, size in zip(self.itervars, self.ranges):
                 # TODO(jansel): add parallel
-                code.writeline(f"#pragma GCC ivdep")
+                code.writeline("#pragma GCC ivdep")
                 code.writeline(
                     f"for({self.index_type} {var}=0; {var}<{cexpr(size)}; ++{var})"
                 )
@@ -303,11 +324,11 @@ class TritonPointwiseKernel(PointwiseKernel):
     def rename_indexing(self, index, load_store=False):
         index = super().rename_indexing(index, load_store)
         if load_store and index == 0:
-            return "(offset + tl.zeros((BLOCK_SIZE,), dtype=tl.int32))"
+            return "tl.zeros((BLOCK_SIZE,), dtype=tl.int32)"
         return index
 
     def generate(self, graph):
-        blockargs = [f"BLOCK_SIZE: tl.constexpr"]
+        blockargs = ["BLOCK_SIZE: tl.constexpr"]
         code = IndentedBuffer()
         code.writeline("import triton")
         code.writeline("import triton.language as tl")
@@ -331,8 +352,8 @@ class TritonPointwiseKernel(PointwiseKernel):
 
             code.writelines(
                 [
-                    f"offset = tl.program_id(0) * BLOCK_SIZE",
-                    f"indices = offset + tl.arange(0, BLOCK_SIZE)",
+                    "offset = tl.program_id(0) * BLOCK_SIZE",
+                    "indices = offset + tl.arange(0, BLOCK_SIZE)",
                     f"mask = indices < {texpr(product(self.ranges))}",
                 ]
             )

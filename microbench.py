@@ -1,10 +1,8 @@
 import torch
-import torchinductor
 from torch import fx
 from torchinductor.codecache import PyCodeCache
 from torchinductor.lowering import GraphLowering
 
-import torchdynamo
 from torchdynamo.optimizations.python_key import python_key_normalize
 
 

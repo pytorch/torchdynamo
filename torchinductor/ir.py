@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Any
 from typing import Callable
 from typing import List
 
@@ -36,7 +37,7 @@ class FixedLayout(Layout):
 
         def indexer(index):
             assert len(index) == len(stride)
-            return sum(l * r for l, r in zip(index, stride)) + offset
+            return sum(a * b for a, b in zip(index, stride)) + offset
 
         return indexer
 
@@ -124,6 +125,31 @@ class ExpandView(BaseView):
             return inner(index)
 
         return load
+
+
+@dataclasses.dataclass
+class Constant(IRNode):
+    value: Any
+    dtype: torch.dtype
+    device: torch.device
+
+    def get_size(self):
+        return ()
+
+    def get_dtype(self):
+        return self.dtype
+
+    def get_device(self):
+        return self.device
+
+    def make_loader(self):
+        def loader(index):
+            return repr(self.value)
+
+        return loader
+
+    # def mark_reuse(self):
+    #    pass
 
 
 @dataclasses.dataclass

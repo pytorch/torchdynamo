@@ -11,6 +11,7 @@ from sympy import Integer
 
 from . import config
 from .codegen import ScheduleCodeGen
+from .ir import Constant
 from .ir import ExpandView
 from .ir import FixedLayout
 from .ir import InputBuffer
@@ -219,7 +220,10 @@ class GraphLowering(torch.fx.Interpreter):
         return lowerings[target](*args, **kwargs)
 
     def get_attr(self, target, args, kwargs):
-        assert False
+        # this is a constant
+        value = getattr(self.module, target)
+        assert value.shape == ()
+        return Constant(value.item(), value.dtype, value.device)
 
     def call_module(self, target, args, kwargs):
         assert False
@@ -234,8 +238,9 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
         num_users = len(set(n.users))
-        if num_users > 0:
+        if num_users > 1:
             # TODO(jansel): introduce a store vs inline choice
+            print(n, set(n.users))
             result.mark_reuse(n.users)
         return result
 
