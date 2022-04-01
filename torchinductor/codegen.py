@@ -7,16 +7,16 @@ import textwrap
 from io import StringIO
 from itertools import chain
 
-from sympy.printing.printer import Printer
-
 import sympy
 import torch
 from sympy.printing.cxx import CXX11CodePrinter
+from sympy.printing.printer import Printer
 
 from . import codecache
 from . import virtualized
 
 product = functools.partial(functools.reduce, operator.mul)
+
 
 class TritonPrinter(Printer):
     def _print(self, expr, **kwargs):
@@ -26,11 +26,32 @@ class TritonPrinter(Printer):
             assert len(expr.args) == 2
             count = int(expr.args[1])
             inner = super()._print(expr.args[0], **kwargs)
-            return "*".join([inner]*count)
+            return "*".join([inner] * count)
         return super()._print(expr, **kwargs)
+
 
 texpr = TritonPrinter().doprint
 cexpr = CXX11CodePrinter().doprint
+
+
+class PrimOverrides:
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
+    def __getattr__(self, item):
+        return getattr(self._parent, item)
+
+
+class CppOverrides(PrimOverrides):
+    def to_dtype(self, x, dtype):
+        return f"static_cast<{CppPointwiseKernel.dtype_to_cpp[dtype]}>({x})"
+
+
+class TritonOverrides(PrimOverrides):
+    def to_dtype(self, x, dtype: torch.dtype):
+        triton_type_name = str(dtype).split(".")[-1]
+        return f"{x}.to(tl.{triton_type_name})"
 
 
 class IndentedBuffer:
@@ -172,26 +193,29 @@ class PointwiseKernel(CodeGen):
             @staticmethod
             def load(name: str, index: sympy.Expr):
                 var = self.args.input(name)
-                index = self.rename_indexing(index)
+                index = self.rename_indexing(index, load_store=True)
                 return self.cse.generate(
-                    self.loads, self.load_format.format(var=var, index=self.sexpr(index))
+                    self.loads,
+                    self.load_format.format(var=var, index=self.sexpr(index)),
                 )
 
             @staticmethod
             def store(name, index, value):
                 var = self.args.output(name)
-                index = self.rename_indexing(index)
+                index = self.rename_indexing(index, load_store=True)
                 self.stores.writeline(
-                    self.store_format.format(var=var, index=self.sexpr(index), value=value)
+                    self.store_format.format(
+                        var=var, index=self.sexpr(index), value=value
+                    )
                     + self.suffix
                 )
 
         super().__enter__()
-        parent_handler = virtualized.prim.get_handler()
+        parent_handler = self.prims(virtualized.prim.get_handler())
         self.exit_stack.enter_context(virtualized.prim.set_handler(CSEProxy()))
         return self
 
-    def rename_indexing(self, index):
+    def rename_indexing(self, index, load_store=False):
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         subs = {
@@ -207,6 +231,7 @@ class PointwiseKernel(CodeGen):
 
 
 class CppPointwiseKernel(PointwiseKernel):
+    prims = CppOverrides
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
@@ -242,7 +267,9 @@ class CppPointwiseKernel(PointwiseKernel):
             for var, size in zip(self.itervars, self.ranges):
                 # TODO(jansel): add parallel
                 code.writeline(f"#pragma GCC ivdep")
-                code.writeline(f"for({self.index_type} {var}=0; {var}<{cexpr(size)}; ++{var})")
+                code.writeline(
+                    f"for({self.index_type} {var}=0; {var}<{cexpr(size)}; ++{var})"
+                )
                 stack.enter_context(code.indent())
             code.splice(self.loads.getvalue())
             code.splice(self.compute.getvalue())
@@ -268,9 +295,16 @@ class CppPointwiseKernel(PointwiseKernel):
 
 
 class TritonPointwiseKernel(PointwiseKernel):
+    prims = TritonOverrides
     load_format = "tl.load({var} + {index}, mask=mask)"
     store_format = "tl.store({var} + {index}, {value}, mask=mask)"
     sexpr = texpr
+
+    def rename_indexing(self, index, load_store=False):
+        index = super().rename_indexing(index, load_store)
+        if load_store and index == 0:
+            return "(offset + tl.zeros((BLOCK_SIZE,), dtype=tl.int32))"
+        return index
 
     def generate(self, graph):
         blockargs = [f"BLOCK_SIZE: tl.constexpr"]
@@ -297,7 +331,8 @@ class TritonPointwiseKernel(PointwiseKernel):
 
             code.writelines(
                 [
-                    f"indices = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)",
+                    f"offset = tl.program_id(0) * BLOCK_SIZE",
+                    f"indices = offset + tl.arange(0, BLOCK_SIZE)",
                     f"mask = indices < {texpr(product(self.ranges))}",
                 ]
             )
@@ -325,12 +360,17 @@ class TritonPointwiseKernel(PointwiseKernel):
         return wrapper.getvalue()
 
     def call_kernel(self, code: IndentedBuffer, name: str):
-        call_args = list(chain(
-                self.args.input_buffers.keys(), self.args.output_buffers.keys(), self.args.sizevars.keys()
-        ))
+        call_args = list(
+            chain(
+                self.args.input_buffers.keys(),
+                self.args.output_buffers.keys(),
+                self.args.sizevars.keys(),
+            )
+        )
         call_args.append("1024")  # block size
         code.writeline(
-                    f"{name}[lambda meta: (triton.cdiv({product(self.ranges)}, meta['BLOCK_SIZE']), )](")
+            f"{name}[lambda meta: (triton.cdiv({product(self.ranges)}, meta['BLOCK_SIZE']), )]("
+        )
         with code.indent():
             code.writeline(", ".join(call_args))
         code.writeline(")")
@@ -362,7 +402,6 @@ class ScheduleCodeGen(CodeGen):
         self.codegen_outputs()
 
     def codegen_outputs(self):
-        graph = self.graph
         code = self.body
         for name, value in self.graph.graph_outputs.items():
             device = value.get_device()

@@ -86,6 +86,9 @@ class UnrealizedBuffer(Loops):
     def get_device(self):
         return self.device
 
+    def make_loader(self):
+        return self.inner_fn
+
 
 @dataclasses.dataclass
 class BaseView(IRNode):
@@ -99,6 +102,12 @@ class ExpandView(BaseView):
     def get_size(self):
         return self.size
 
+    def get_dtype(self):
+        return self.data.get_dtype()
+
+    def get_device(self):
+        return self.data.get_device()
+
     def make_loader(self):
         target = self.get_size()
         actual = self.data.get_size()
@@ -108,7 +117,7 @@ class ExpandView(BaseView):
         def load(index):
             index = list(index[skip:])
             assert len(index) == len(actual)
-            for i in len(actual):
+            for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
                     index[i] = sympy.Integer(0)

@@ -1,8 +1,6 @@
 import collections
 import functools
 import itertools
-import operator
-import textwrap
 from itertools import chain
 from typing import List
 
@@ -11,9 +9,8 @@ import torch
 import torch.fx
 from sympy import Integer
 
-from .codegen import CppPointwiseKernel
+from . import config
 from .codegen import ScheduleCodeGen
-from .codegen import TritonPointwiseKernel
 from .ir import ExpandView
 from .ir import FixedLayout
 from .ir import InputBuffer
@@ -101,9 +98,27 @@ def guard_shape_equal(a, b):
         pass  # TODO(jansel): implement guarding
 
 
+def make_pointwise(fn, override_dtype=None, override_device=None):
+    def inner(*inputs: List[TensorBox]):
+        loaders = [x.make_loader() for x in inputs]
+        return UnrealizedBuffer.create(
+            inputs[0].get_size(),
+            lambda index: fn(*[load(index) for load in loaders]),
+            device=override_device or inputs[0].get_device(),
+            dtype=override_dtype or inputs[0].get_dtype(),
+        )
+
+    return inner
+
+
 def to_dtype(x: TensorBox, dtype: torch.dtype):
-    assert x.get_dtype() == dtype, "TODO(jansel): type promotion"
-    return x
+    if x.get_dtype() == dtype:
+        return x
+
+    def _to_dtype(x):
+        return prim.to_dtype(x, dtype)
+
+    return make_pointwise(_to_dtype, override_dtype=dtype)(x)
 
 
 def register_pointwise(aten_fn, name=None, broadcast=True, type_promote=True):
@@ -111,16 +126,11 @@ def register_pointwise(aten_fn, name=None, broadcast=True, type_promote=True):
     name = name or aten_fn.__name__
 
     @register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)
-    def inner(*inputs: List[TensorBox]):
-        loaders = [x.make_loader() for x in inputs]
-        return UnrealizedBuffer.create(
-            inputs[0].get_size(),
-            lambda index: getattr(prim, name)(*[load(index) for load in loaders]),
-            device=inputs[0].get_device(),
-            dtype=inputs[0].get_dtype(),
-        )
+    @make_pointwise
+    def fn(*args, **kwargs):
+        return getattr(prim, name)(*args, **kwargs)
 
-    return inner
+    return fn
 
 
 @register_lowering(aten.broadcast_tensors, broadcast=False, type_promote=False)
@@ -244,3 +254,11 @@ class GraphLowering(torch.fx.Interpreter):
         schedule.define_kernel("kernel0", kernel)
         schedule.call_kernel("kernel0", kernel)
         return schedule.generate()
+
+    def compile_to_fn(self):
+        from .codecache import PyCodeCache
+
+        code = self.codegen()
+        if config.debug:
+            print(code)
+        return PyCodeCache.load(code).call

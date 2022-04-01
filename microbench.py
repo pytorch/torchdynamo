@@ -45,7 +45,7 @@ def test_model(model, example_inputs):
 
 
 mod1 = MyModel2().eval()
-inputs1 = (torch.rand(10, 10), torch.rand(10, 10))
-inputs2 = (torch.rand(10, 10, device="cuda"), torch.rand(10, 10, device="cuda"))
+inputs1 = (torch.rand(10, 20), torch.rand(10, 20))
+inputs2 = (torch.rand(10, 20, device="cuda"), torch.rand(10, 20, device="cuda"))
 test_model(mod1, inputs1)
 test_model(mod1, inputs2)
