@@ -18,6 +18,20 @@ from . import virtualized
 product = functools.partial(functools.reduce, operator.mul)
 
 
+@functools.lru_cache()
+def cpp_prefix():
+    _, filename = codecache.write(
+        textwrap.dedent(
+            """
+            #include <cmath>
+            #include <cstdlib>
+            """
+        ),
+        "h",
+    )
+    return f'#include "{filename}"'
+
+
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
@@ -63,16 +77,30 @@ class PrimOverrides:
     def __getattr__(self, item):
         return getattr(self._parent, item)
 
+    @staticmethod
+    def constant(value, dtype):
+        return repr(value)
+
 
 class CppOverrides(PrimOverrides):
-    def to_dtype(self, x, dtype):
+    @staticmethod
+    def to_dtype(x, dtype):
         return f"static_cast<{CppPointwiseKernel.dtype_to_cpp[dtype]}>({x})"
+
+    @staticmethod
+    def abs(x):
+        return f"std::abs({x})"
 
 
 class TritonOverrides(PrimOverrides):
-    def to_dtype(self, x, dtype: torch.dtype):
+    @staticmethod
+    def to_dtype(x, dtype: torch.dtype):
         triton_type_name = str(dtype).split(".")[-1]
         return f"{x}.to(tl.{triton_type_name})"
+
+    @staticmethod
+    def abs(x):
+        return f"tl.abs({x})"
 
 
 class IndentedBuffer:
@@ -283,7 +311,7 @@ class CppPointwiseKernel(PointwiseKernel):
         code = BracesBuffer()
         with contextlib.ExitStack() as stack:
             fargs = ",\n".ljust(25).join(args)
-            code.writeline(f'extern "C" void kernel({fargs})')
+            code.writelines([cpp_prefix(), "" f'extern "C" void kernel({fargs})'])
             stack.enter_context(code.indent())
             for var, size in zip(self.itervars, self.ranges):
                 # TODO(jansel): add parallel

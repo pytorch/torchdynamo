@@ -158,6 +158,8 @@ def expand(x, sizes):
 
 
 register_pointwise(aten.add)
+register_pointwise(aten.div)
+register_pointwise(aten.abs)
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -240,7 +242,6 @@ class GraphLowering(torch.fx.Interpreter):
         num_users = len(set(n.users))
         if num_users > 1:
             # TODO(jansel): introduce a store vs inline choice
-            print(n, set(n.users))
             result.mark_reuse(n.users)
         return result
 

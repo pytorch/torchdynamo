@@ -144,12 +144,12 @@ class Constant(IRNode):
 
     def make_loader(self):
         def loader(index):
-            return repr(self.value)
+            return prim.constant(self.value, self.dtype)
 
         return loader
 
-    # def mark_reuse(self):
-    #    pass
+    def mark_reuse(self, users):
+        pass
 
 
 @dataclasses.dataclass
@@ -185,6 +185,10 @@ class InputBuffer(Buffer):
 
 @dataclasses.dataclass
 class MutableBox(IRNode):
+    """
+    TensorBox / StorageBox allow in-place mutation of Tensors
+    """
+
     data: IRNode
 
     def __getattr__(self, name):

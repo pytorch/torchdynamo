@@ -9,3 +9,5 @@ pytest
 tabulate
 tensorflow-gpu
 torch
+sympy
+triton>=2.0

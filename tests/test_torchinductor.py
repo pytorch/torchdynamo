@@ -5,6 +5,7 @@ import unittest
 
 import torch
 from torch import fx
+from torchinductor import config
 from torchinductor.lowering import GraphLowering
 
 from torchdynamo.optimizations.python_key import python_key_normalize
@@ -17,6 +18,17 @@ if torch.cuda.is_available():
         HAS_CUDA = True
     except ImportError:
         pass
+
+
+class TestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.prior_debug = config.debug
+        config.debug = True
+
+    @classmethod
+    def tearDownClass(cls):
+        config.debug = cls.prior_debug
 
 
 @dataclasses.dataclass
@@ -51,7 +63,7 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
-def check_model(self: unittest.TestCase, model, example_inputs):
+def check_model(self: TestCase, model, example_inputs):
     gm, wrap = python_key_normalize(fx.symbolic_trace(model), example_inputs)
     gm.graph.print_tabular()
     graph = GraphLowering(gm)
@@ -63,7 +75,7 @@ def check_model(self: unittest.TestCase, model, example_inputs):
     self.assertTrue(same(actual, correct))
 
 
-def check_model_cuda(self: unittest.TestCase, model, example_inputs):
+def check_model_cuda(self: TestCase, model, example_inputs):
     if hasattr(model, "to"):
         model = model.to("cuda")
     example_inputs = tuple(x.to("cuda") for x in example_inputs)
@@ -110,15 +122,19 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
-class SweepInputsCpuTest(SweepInputs2, unittest.TestCase):
+class SweepInputsCpuTest(SweepInputs2, TestCase):
     gen = InputGen(10, "cpu")
 
 
 SweepInputsCpuTest.populate()
 
 
-class CpuTests(unittest.TestCase):
-    common = check_model
+class CommonTemplate:
+    @classmethod
+    def install(my_cls, other_cls, suffix):
+        for name, value in my_cls.__dict__.items():
+            if name.startswith("test_"):
+                setattr(other_cls, f"{name}_{suffix}", value)
 
     def test_add_const_int(self):
         def fn(a):
@@ -132,13 +148,27 @@ class CpuTests(unittest.TestCase):
 
         self.common(fn, (torch.randn(32),))
 
+    def test_abs(self):
+        def fn(a):
+            return (a / (torch.abs(a) + 1),)
+
+        self.common(fn, (torch.randn(17),))
+
+
+class CpuTests(TestCase):
+    common = check_model
+
+
+CommonTemplate.install(CpuTests, "cpu")
 
 if HAS_CUDA:
 
-    class SweepInputsCudaTest(SweepInputs2, unittest.TestCase):
+    class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
 
     SweepInputsCudaTest.populate()
 
-    class GpuTests(CpuTests):
+    class GpuTests(TestCase):
         common = check_model_cuda
+
+    CommonTemplate.install(GpuTests, "cuda")
