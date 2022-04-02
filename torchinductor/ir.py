@@ -81,6 +81,9 @@ class UnrealizedBuffer(Loops):
     def get_size(self):
         return self.ranges
 
+    def get_stride(self):
+        return FixedLayout.default_strides(self.get_size())
+
     def get_dtype(self):
         return self.dtype
 

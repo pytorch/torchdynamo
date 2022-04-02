@@ -9,7 +9,7 @@ from ctypes import cdll
 
 CPP_COMPILE_CMD = (
     "g++ -shared -fPIC -Wall -std=c++14 "
-    "-march=native -O3 -ffast-math "
+    "-march=native -O3 -ffast-math -fopenmp -lgomp "
     "-o{output} {input}"
 )
 

@@ -151,11 +151,11 @@ class BracesBuffer(IndentedBuffer):
 
 class KernelArgs:
     @staticmethod
-    def _lookup(odict, name):
+    def _lookup(prefix, odict, name):
         assert isinstance(name, (str, sympy.Symbol))
         name = str(name)
         if name not in odict:
-            odict[name] = name
+            odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
 
     def __init__(self):
@@ -164,13 +164,13 @@ class KernelArgs:
         self.sizevars = collections.OrderedDict()
 
     def input(self, name):
-        return self._lookup(self.input_buffers, name)
+        return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        return self._lookup(self.output_buffers, name)
+        return self._lookup("out_ptr", self.output_buffers, name)
 
     def size(self, name):
-        return self._lookup(self.sizevars, name)
+        return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):
         return chain(
@@ -274,6 +274,7 @@ class PointwiseKernel(CodeGen):
 
     def set_ranges(self, lengths):
         assert not self.ranges
+        self.call_ranges = lengths
         self.ranges = [self.rename_indexing(x) for x in lengths]
         self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
         return self.itervars
@@ -313,9 +314,9 @@ class CppPointwiseKernel(PointwiseKernel):
             fargs = ",\n".ljust(25).join(args)
             code.writelines([cpp_prefix(), "" f'extern "C" void kernel({fargs})'])
             stack.enter_context(code.indent())
+            code.writeline(self.omp_parallel_pragma(graph))
             for var, size in zip(self.itervars, self.ranges):
-                # TODO(jansel): add parallel
-                code.writeline("#pragma GCC ivdep")
+                # code.writeline("#pragma GCC ivdep")
                 code.writeline(
                     f"for({self.index_type} {var}=0; {var}<{cexpr(size)}; ++{var})"
                 )
@@ -329,6 +330,39 @@ class CppPointwiseKernel(PointwiseKernel):
         wrapper.splice(code.getvalue())
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
+
+    def omp_parallel_pragma(self, graph):
+        """
+        A haxcky heuristic to decide what openmp pragma to add.
+        """
+        seq_work = (
+            self.loads.getvalue().count("\n") +
+            self.compute.getvalue().count("\n") +
+            self.stores.getvalue().count("\n")
+        )
+
+        for expr in self.call_ranges:
+            seq_work *= graph.sizevars.size_hint(expr)
+
+        par_work = 1
+        depth = 0
+
+        for expr in self.call_ranges:
+            # TODO(jansel): these constants are total guesses without tuning
+            hint = graph.sizevars.size_hint(expr)
+            if par_work >= 128:
+                break
+            if (seq_work / hint) <= 512:
+                break
+            depth += 1
+            par_work *= hint
+            seq_work /= hint
+
+        if depth == 0:
+            return ""
+        if depth == 1:
+            return "#pragma omp parallel for"
+        return f"#pragma omp parallel for collapse({depth})"
 
     def call_kernel(self, code: IndentedBuffer, kernel_name: str):
         call_args = []
@@ -416,13 +450,17 @@ class TritonPointwiseKernel(PointwiseKernel):
                 self.args.sizevars.keys(),
             )
         )
-        call_args.append("1024")  # block size
+        block_size = str(self.block_size())
+        call_args.append(block_size)
         code.writeline(
-            f"{name}[lambda meta: (triton.cdiv({product(self.ranges)}, meta['BLOCK_SIZE']), )]("
+            f"{name}[(cdiv({product(self.call_ranges)}, {block_size}), )]("
         )
         with code.indent():
             code.writeline(", ".join(call_args))
         code.writeline(")")
+
+    def block_size(self):
+        return 256
 
 
 class ScheduleCodeGen(CodeGen):
@@ -439,7 +477,10 @@ class ScheduleCodeGen(CodeGen):
             [
                 "from ctypes import c_void_p, c_long",
                 "import torch",
+                "from torch import empty, empty_like",
+                # TODO(jansel): handle triton missing
                 "import triton",
+                "from triton import cdiv",
                 f"from {codecache.__name__} import CppCodeCache, PyCodeCache",
             ]
         )
@@ -452,14 +493,29 @@ class ScheduleCodeGen(CodeGen):
 
     def codegen_outputs(self):
         code = self.body
+        empty_like_cache = dict()
+        for name, value in self.graph.graph_inputs.items():
+            device = value.get_device()
+            dtype = value.get_dtype()
+            shape = tuple(value.get_size())
+            stride = tuple(value.get_stride())
+            empty_like_cache.setdefault((device, dtype, shape, stride), name)
+
         for name, value in self.graph.graph_outputs.items():
             device = value.get_device()
             dtype = value.get_dtype()
-            shape = value.get_size()
+            shape = tuple(value.get_size())
+            stride = tuple(value.get_stride())
+            key = (device, dtype, shape, stride)
             # TODO(jansel): strides?
-            code.writeline(
-                f"{name} = torch.empty([{', '.join(map(str, shape))}], device='{device.type}', dtype={dtype})"
-            )
+            if key in empty_like_cache:
+                code.writeline(
+                    f"{name} = empty_like({empty_like_cache[key]})"
+                )
+            else:
+                code.writeline(
+                    f"{name} = empty([{', '.join(map(str, shape))}], device='{device.type}', dtype={dtype})"
+                )
         for name, value in chain(
             self.graph.graph_inputs.items(), self.graph.graph_outputs.items()
         ):

@@ -1,4 +1,5 @@
 import collections
+import functools
 from typing import Dict
 
 from sympy import Expr
@@ -23,21 +24,38 @@ class SizeVarAllocator(object):
         self.var_to_val[var] = val
         return var
 
+    def size_hint(self, expr: Expr):
+        return int(expr.subs(self.var_to_val))
+
     def codegen(self, code, graph_inputs):
         """Assign all symbolic shapes to locals"""
+
+        @functools.lru_cache(None)
+        def sizeof(name):
+            code.writeline(f"{name}_size = {name}.size()")
+            return f"{name}_size"
+
+        @functools.lru_cache(None)
+        def strideof(name):
+            code.writeline(f"{name}_stride = {name}.stride()")
+            return f"{name}_stride"
+
         needed = set(map(str, self.var_to_val.keys()))
+
         for name, value in graph_inputs.items():
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = str(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    code.writeline(f"{shape} = {name}.size({dim})")
+                    code.writeline(f"{shape} = {sizeof(name)}[{dim}]")
+
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = str(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    code.writeline(f"{shape} = {name}.stride({dim})")
+                    code.writeline(f"{shape} = {strideof(name)}[{dim}]")
+
         assert not needed
