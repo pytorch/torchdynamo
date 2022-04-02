@@ -8,8 +8,8 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
-from .codegen import PointwiseKernel
-from .virtualized import prim
+from .codegen.common import PointwiseKernel
+from .virtualized_ops import ops
 
 
 class IRNode(object):
@@ -147,7 +147,7 @@ class Constant(IRNode):
 
     def make_loader(self):
         def loader(index):
-            return prim.constant(self.value, self.dtype)
+            return ops.constant(self.value, self.dtype)
 
         return loader
 
@@ -172,7 +172,7 @@ class Buffer(IRNode):
         indexer = self.layout.make_indexer()
 
         def loader(index):
-            return prim.load(self.name, indexer(index))
+            return ops.load(self.name, indexer(index))
 
         return loader
 
@@ -212,7 +212,7 @@ class TensorBox(MutableBox):
     def codegen(self, kernel: PointwiseKernel, output_name):
         vars = kernel.set_ranges(self.get_size())
         indexer = FixedLayout.indexer_from_sizes(self.get_size())
-        prim.store(output_name, indexer(vars), self.inner_fn(vars))
+        ops.store(output_name, indexer(vars), self.inner_fn(vars))
 
 
 class StorageBox(MutableBox):

@@ -10,7 +10,7 @@ import torch
 import torchinductor
 from torch import fx
 from torch.cuda import synchronize
-from torchinductor.lowering import GraphLowering
+from torchinductor.graph import GraphLowering
 
 from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same

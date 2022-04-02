@@ -6,7 +6,7 @@ import unittest
 import torch
 from torch import fx
 from torchinductor import config
-from torchinductor.lowering import GraphLowering
+from torchinductor.graph import GraphLowering
 
 from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same

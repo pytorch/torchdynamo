@@ -10,11 +10,14 @@ threadlocal = local()
 
 class Virtualized:
     """
-    A global variable that redirects via  thread local variable
+    A global variable that redirects via thread local variable
+
+    This allows us to swap in different op implementations in codegen.
     """
 
-    def __init__(self, vname):
+    def __init__(self, vname, default=None):
         self._key = f"__torchinductor_{vname}"
+        self._default = default or MockHandler
 
     def set_handler(self, value):
         prior = self.get_handler()
@@ -31,7 +34,7 @@ class Virtualized:
         try:
             return getattr(threadlocal, self._key)
         except AttributeError:
-            return MockHandler()
+            return self._default()
 
     def __getattr__(self, name):
         return getattr(self.get_handler(), name)
@@ -65,5 +68,4 @@ class MockHandler:
 
 
 MockHandler._init_cls()
-prim = Virtualized("prim")
 ops = Virtualized("ops")
