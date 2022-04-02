@@ -133,7 +133,8 @@ class IndentedBuffer:
         return ctx()
 
     def splice(self, other_code):
-        self.contents.write(textwrap.indent(textwrap.dedent(other_code), self.prefix()))
+        other_code = textwrap.dedent(other_code)
+        self.contents.write(textwrap.indent(other_code, self.prefix()))
 
 
 class BracesBuffer(IndentedBuffer):
@@ -326,7 +327,7 @@ class CppPointwiseKernel(PointwiseKernel):
 
     def omp_parallel_pragma(self, graph):
         """
-        A haxcky heuristic to decide what openmp pragma to add.
+        A hacky heuristic to decide what openmp pragma to add.
         """
         seq_work = (
             self.loads.getvalue().count("\n")
@@ -357,7 +358,7 @@ class CppPointwiseKernel(PointwiseKernel):
             return "#pragma omp parallel for"
         return f"#pragma omp parallel for collapse({depth})"
 
-    def call_kernel(self, code: IndentedBuffer, kernel_name: str):
+    def call_kernel(self, schedule, code: IndentedBuffer, kernel_name: str):
         call_args = []
         for name in chain(
             self.args.input_buffers.keys(), self.args.output_buffers.keys()
@@ -384,15 +385,15 @@ class TritonPointwiseKernel(PointwiseKernel):
 
     def generate(self, graph):
         code = IndentedBuffer()
-        code.writelines(
-            [
-                "import torch",
-                "import triton",
-                "import triton.language as tl",
-                "from triton.code_gen import _triton",
-                "",
-                "@triton.jit",
-            ]
+        code.splice(
+            f"""
+                import triton
+                import triton.language as tl
+                from {codecache.__name__} import pointwise_heuristics
+
+                @triton.heuristics(pointwise_heuristics())
+                @triton.jit
+            """
         )
 
         argdefs = [
@@ -402,28 +403,23 @@ class TritonPointwiseKernel(PointwiseKernel):
         for var in self.args.sizevars.values():
             # argdefs.append(f"{var}: tl.constexpr")
             argdefs.append(f"{var}")
-        argdefs += ["BLOCK_SIZE: tl.constexpr"]
+        argdefs += [
+            "numel",
+            "BLOCK_SIZE: tl.constexpr",
+            "NEED_MASK: tl.constexpr",
+        ]
 
         code.writeline(f"def kernel({', '.join(argdefs)}):")
         with code.indent():
-            # multi-dimensional blocks:
-            # for axis, var, size, block_size in zip(
-            #     itertools.count(), self.itervars, self.ranges, self.blockvars
-            # ):
-            #     code.writeline(
-            #         f"{var} = tl.program_id(axis={axis}) * {block_size} + tl.arange(0, {block_size})"
-            #     )
-            #     code.writeline(f"mask{axis} = {var} < {size}")
-            # code.writeline(
-            #     "mask = " + " & ".join(f"mask{i}" for i in range(len(self.itervars)))
-            # )
-
-            code.writelines(
-                [
-                    "offset = tl.program_id(0) * BLOCK_SIZE",
-                    "indices = offset + tl.arange(0, BLOCK_SIZE)",
-                    f"mask = indices < {texpr(product(self.ranges))}",
-                ]
+            code.splice(
+                """
+                    offset = tl.program_id(0) * BLOCK_SIZE
+                    indices = offset + tl.arange(0, BLOCK_SIZE)
+                    if NEED_MASK:
+                        mask = indices < numel
+                    else:
+                        mask = None
+                """
             )
             for axis, var, size in reversed(
                 tuple(zip(itertools.count(), self.itervars, self.ranges))
@@ -448,7 +444,7 @@ class TritonPointwiseKernel(PointwiseKernel):
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
-    def call_kernel(self, code: IndentedBuffer, name: str):
+    def call_kernel(self, schedule: "ScheduleCodeGen", code: IndentedBuffer, name: str):
         call_args = list(
             chain(
                 self.args.input_buffers.keys(),
@@ -456,16 +452,12 @@ class TritonPointwiseKernel(PointwiseKernel):
                 self.args.sizevars.keys(),
             )
         )
-        block_size = str(self.block_size())
-        call_args.append(f"{block_size}")
-        grid = f"lambda meta: (cdiv({texpr(product(self.call_ranges))}, meta['BLOCK_SIZE']), )"
-        code.writeline(f"{name}[{grid}](")
+        code.writeline(f"{name}_numel = {texpr(product(self.call_ranges))}")
+        call_args.append(f"{name}_numel")
+        code.writeline(f"{name}[grid({name}_numel)](")
         with code.indent():
             code.writeline(", ".join(call_args))
         code.writeline(")")
-
-    def block_size(self):
-        return 1024
 
 
 class ScheduleCodeGen(CodeGen):
@@ -478,17 +470,17 @@ class ScheduleCodeGen(CodeGen):
         self.graph = graph
         self.header = IndentedBuffer()
         self.body = IndentedBuffer(initial_indent=1)
-        self.header.writelines(
-            [
-                "from ctypes import c_void_p, c_long",
-                "import torch",
-                "from torch import empty, empty_like",
+        self.header.splice(
+            f"""
+                from ctypes import c_void_p, c_long
+                import torch
+                from torch import empty, empty_like
                 # TODO(jansel): handle triton missing
-                "import triton",
-                "from triton import cdiv",
-                "import triton.language as tl",
-                f"from {codecache.__name__} import CppCodeCache, TritonCodeCache",
-            ]
+                import triton
+                from triton import cdiv
+                import triton.language as tl
+                from {codecache.__name__} import CppCodeCache, TritonCodeCache, grid
+            """
         )
         with self.body.indent(-1):
             self.body.writelines(
@@ -537,4 +529,4 @@ class ScheduleCodeGen(CodeGen):
         self.header.splice(f"\n\n{name} = {kernel.generate(self.graph)}")
 
     def call_kernel(self, name: str, kernel: PointwiseKernel):
-        kernel.call_kernel(self.body, name)
+        kernel.call_kernel(self, self.body, name)

@@ -143,6 +143,9 @@ def patch_triton_hackery():
 
     Kernel.__call__ = faster_triton_kernel_call
 
+
+@functools.lru_cache(None)
+def patch_triton_dir():
     os.environ["TRITON_CACHE_DIR"] = os.environ.get(
         "TRITON_CACHE_DIR", os.path.join(cache_dir(), "triton")
     )
@@ -151,5 +154,42 @@ def patch_triton_hackery():
 class TritonCodeCache:
     @classmethod
     def load(cls, source_code):
+        patch_triton_dir()
         patch_triton_hackery()
         return PyCodeCache.load(source_code)
+
+
+def pointwise_heuristics():
+    """args to @triton.heuristics()"""
+
+    def need_mask(args):
+        return (args["numel"] % args["BLOCK_SIZE"]) > 0
+
+    def block_size(args):
+        n = args["numel"]
+        if n <= 65536:
+            return 128
+        return 1024
+
+    def num_warps(args):
+        n = args["numel"]
+        if n <= 65536:
+            return 2
+        return 8
+
+    return {
+        "num_warps": num_warps,
+        "BLOCK_SIZE": block_size,
+        "NEED_MASK": need_mask,
+    }
+
+
+def grid(numel):
+    """Helper function to compute triton grids for pointwise ops"""
+
+    def grid_fn(meta):
+        bs = meta["BLOCK_SIZE"]
+        # inlined triton.cdiv
+        return ((numel + bs - 1) // bs,)
+
+    return grid_fn
