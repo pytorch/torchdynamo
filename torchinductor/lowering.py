@@ -160,6 +160,7 @@ def expand(x, sizes):
 register_pointwise(aten.add)
 register_pointwise(aten.div)
 register_pointwise(aten.abs)
+register_pointwise(aten.sub)
 
 
 class GraphLowering(torch.fx.Interpreter):

@@ -177,13 +177,6 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
-    def inner_names(self):
-        return chain(
-            self.input_buffers.values(),
-            self.output_buffers.values(),
-            self.sizevars.values(),
-        )
-
 
 class CSE:
     """Common subexpression elimination"""
@@ -336,9 +329,9 @@ class CppPointwiseKernel(PointwiseKernel):
         A haxcky heuristic to decide what openmp pragma to add.
         """
         seq_work = (
-            self.loads.getvalue().count("\n") +
-            self.compute.getvalue().count("\n") +
-            self.stores.getvalue().count("\n")
+            self.loads.getvalue().count("\n")
+            + self.compute.getvalue().count("\n")
+            + self.stores.getvalue().count("\n")
         )
 
         for expr in self.call_ranges:
@@ -390,15 +383,28 @@ class TritonPointwiseKernel(PointwiseKernel):
         return index
 
     def generate(self, graph):
-        blockargs = ["BLOCK_SIZE: tl.constexpr"]
         code = IndentedBuffer()
-        code.writeline("import triton")
-        code.writeline("import triton.language as tl")
-        code.writeline("")
-        code.writeline("@triton.jit")
-        code.writeline(
-            f"def kernel({', '.join(chain(self.args.inner_names(), blockargs))}):"
+        code.writelines(
+            [
+                "import torch",
+                "import triton",
+                "import triton.language as tl",
+                "from triton.code_gen import _triton",
+                "",
+                "@triton.jit",
+            ]
         )
+
+        argdefs = [
+            *self.args.input_buffers.values(),
+            *self.args.output_buffers.values(),
+        ]
+        for var in self.args.sizevars.values():
+            # argdefs.append(f"{var}: tl.constexpr")
+            argdefs.append(f"{var}")
+        argdefs += ["BLOCK_SIZE: tl.constexpr"]
+
+        code.writeline(f"def kernel({', '.join(argdefs)}):")
         with code.indent():
             # multi-dimensional blocks:
             # for axis, var, size, block_size in zip(
@@ -437,7 +443,7 @@ class TritonPointwiseKernel(PointwiseKernel):
             code.splice(self.stores.getvalue())
 
         wrapper = IndentedBuffer()
-        wrapper.writeline("PyCodeCache.load('''")
+        wrapper.writeline("TritonCodeCache.load('''")
         wrapper.splice(code.getvalue())
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
@@ -451,16 +457,15 @@ class TritonPointwiseKernel(PointwiseKernel):
             )
         )
         block_size = str(self.block_size())
-        call_args.append(block_size)
-        code.writeline(
-            f"{name}[(cdiv({product(self.call_ranges)}, {block_size}), )]("
-        )
+        call_args.append(f"{block_size}")
+        grid = f"lambda meta: (cdiv({texpr(product(self.call_ranges))}, meta['BLOCK_SIZE']), )"
+        code.writeline(f"{name}[{grid}](")
         with code.indent():
             code.writeline(", ".join(call_args))
         code.writeline(")")
 
     def block_size(self):
-        return 256
+        return 1024
 
 
 class ScheduleCodeGen(CodeGen):
@@ -481,7 +486,8 @@ class ScheduleCodeGen(CodeGen):
                 # TODO(jansel): handle triton missing
                 "import triton",
                 "from triton import cdiv",
-                f"from {codecache.__name__} import CppCodeCache, PyCodeCache",
+                "import triton.language as tl",
+                f"from {codecache.__name__} import CppCodeCache, TritonCodeCache",
             ]
         )
         with self.body.indent(-1):
@@ -509,9 +515,7 @@ class ScheduleCodeGen(CodeGen):
             key = (device, dtype, shape, stride)
             # TODO(jansel): strides?
             if key in empty_like_cache:
-                code.writeline(
-                    f"{name} = empty_like({empty_like_cache[key]})"
-                )
+                code.writeline(f"{name} = empty_like({empty_like_cache[key]})")
             else:
                 code.writeline(
                     f"{name} = empty([{', '.join(map(str, shape))}], device='{device.type}', dtype={dtype})"

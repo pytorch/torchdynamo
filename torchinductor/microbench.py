@@ -143,15 +143,20 @@ def main():
         torchinductor.config.debug = True
 
     rows = []
-    for model in (MicroBenchmarks.abs_norm,):
+    for model in (MicroBenchmarks.scale,):
         for device in args.devices:
             for n in args.size:
+                n = int(n)
                 sys.stdout.write(f"{model.__name__:10} {device:4} {n:5} ")
                 sys.stdout.flush()
                 result = microbenchmark(
                     args,
                     model,
-                    (torch.rand((n, n), device=device),),
+                    (
+                        torch.rand((n, n), device=device),
+                        torch.rand((n, n), device=device),
+                        torch.rand((n, n), device=device),
+                    ),
                 )
                 rows.append([model.__name__, device, str(n)] + result)
                 print(" ".join(f"{v:.2f}x" for v in result))

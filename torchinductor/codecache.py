@@ -1,21 +1,17 @@
 import base64
+import functools
 import getpass
 import hashlib
 import os
 import random
+import re
 import subprocess
 import types
 from ctypes import cdll
 
-CPP_COMPILE_CMD = (
-    "g++ -shared -fPIC -Wall -std=c++14 "
-    "-march=native -O3 -ffast-math -fopenmp -lgomp "
-    "-o{output} {input}"
-)
-
 
 def cache_dir():
-    return f"/tmp/{getpass.getuser()}_torchinductor_cache"
+    return f"/tmp/torchinductor_{getpass.getuser()}"
 
 
 def code_hash(code):
@@ -45,6 +41,15 @@ def write(source_code, ext):
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
+    cpp_compile_cmd = re.sub(
+        r"[ \n]+",
+        " ",
+        """
+            g++ -shared -fPIC -Wall -std=c++14
+            -march=native -O3 -ffast-math -fopenmp -lgomp
+            -o{output} {input}
+        """,
+    ).strip()
 
     @classmethod
     def load(cls, source_code):
@@ -52,7 +57,7 @@ class CppCodeCache:
         if key not in cls.cache:
             output_path = input_path[:-3] + "so"
             if not os.path.exists(output_path):
-                cmd = CPP_COMPILE_CMD.format(
+                cmd = cls.cpp_compile_cmd.format(
                     input=input_path, output=output_path
                 ).split(" ")
                 subprocess.check_call(cmd)
@@ -76,3 +81,75 @@ class PyCodeCache:
                 cls.cache[key] = mod
                 cls.cache[key].key = key
         return cls.cache[key]
+
+
+@functools.lru_cache(None)
+def patch_triton_hackery():
+    """
+    The following is a copy and paste of triton.code_gen.Kernel.__call__,
+    with a bunch of stuff moved to a closure so it is only called once.
+
+    This makes tiny kernels run ~1.2x faster.
+    """
+    import torch
+    from triton.code_gen import Kernel
+    from triton.code_gen import _triton
+
+    # query device index and cuda stream
+    device = torch.cuda.current_device()
+    torch.cuda.set_device(device)
+    cc = torch.cuda.get_device_capability(device)
+    cc = str(cc[0]) + "-" + str(cc[1])
+    stream = torch.cuda.current_stream(device).cuda_stream
+
+    def faster_triton_kernel_call(
+        self, *wargs, grid, num_warps=4, num_stages=2, **kwargs
+    ):
+        # handle arguments passed by name
+        kwargs = {
+            self.fn.arg_names.index(name): value for name, value in kwargs.items()
+        }
+        wargs = list(wargs)
+        for i, pos in enumerate(sorted(kwargs)):
+            wargs.insert(pos + i, kwargs[pos])
+
+        if len(wargs) != len(self.fn.arg_names):
+            raise TypeError(
+                f"Function takes {len(self.fn.arg_names)} positional arguments but {len(wargs)} were given"
+            )
+
+        # handle annotations
+        for pos, _type in self.fn.annotations.items():
+            wargs[pos] = _type(wargs[pos])
+
+        # check that tensors are on GPU.
+        # for arg in wargs:
+        #     if hasattr(arg, 'data_ptr'):
+        #         assert arg.is_cuda, "All tensors must be on GPU!"
+
+        return _triton.runtime.launch(
+            wargs,
+            self.fn.do_not_specialize,
+            self.fn.cache_key + cc,
+            self.fn.arg_names,
+            device,
+            stream,
+            self.fn.bin_cache,
+            num_warps,
+            num_stages,
+            self.add_to_cache,
+            grid,
+        )
+
+    Kernel.__call__ = faster_triton_kernel_call
+
+    os.environ["TRITON_CACHE_DIR"] = os.environ.get(
+        "TRITON_CACHE_DIR", os.path.join(cache_dir(), "triton")
+    )
+
+
+class TritonCodeCache:
+    @classmethod
+    def load(cls, source_code):
+        patch_triton_hackery()
+        return PyCodeCache.load(source_code)
