@@ -1,5 +1,7 @@
 import collections
 import contextlib
+import functools
+import operator
 import re
 import textwrap
 from io import StringIO
@@ -9,6 +11,8 @@ import sympy
 from sympy.printing.printer import Printer
 
 from ..virtualized_ops import ops
+
+product = functools.partial(functools.reduce, operator.mul)
 
 
 class ExprPrinter(Printer):
@@ -78,8 +82,11 @@ class IndentedBuffer:
 
         return ctx()
 
-    def splice(self, other_code):
+    def splice(self, other_code, strip=False):
         other_code = textwrap.dedent(other_code)
+        if strip:
+            other_code = other_code.lstrip()
+        assert other_code.endswith("\n")
         self.contents.write(textwrap.indent(other_code, self.prefix()))
 
 
@@ -105,10 +112,10 @@ class KernelArgs:
             odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
 
-    def __init__(self):
+    def __init__(self, sizevars=None):
         self.input_buffers = collections.OrderedDict()
         self.output_buffers = collections.OrderedDict()
-        self.sizevars = collections.OrderedDict()
+        self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
         return self._lookup("in_ptr", self.input_buffers, name)
@@ -123,6 +130,21 @@ class KernelArgs:
         return chain(
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
+
+    def cpp_argdefs(self, graph):
+        from .cpp import DTYPE_TO_CPP
+        from .cpp import INDEX_TYPE
+
+        argdefs = []
+        for outer, inner in self.input_buffers.items():
+            dtype = graph.graph_inputs[outer].get_dtype()
+            argdefs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+        for outer, inner in self.output_buffers.items():
+            dtype = graph.graph_outputs[outer].get_dtype()
+            argdefs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+        for outer, inner in self.sizevars.items():
+            argdefs.append(f"const {INDEX_TYPE} {inner}")
+        return argdefs
 
 
 class CSE:
@@ -161,15 +183,13 @@ class PointwiseKernel(CodeGen):
     load_format = None
     store_format = None
 
-    def __init__(self):
+    def __init__(self, args=None):
         super().__init__()
-        self.args = KernelArgs()
+        self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
-        self.ranges = None
-        self.itervars = None
 
     def __enter__(self):
         class CSEProxy:
@@ -214,10 +234,3 @@ class PointwiseKernel(CodeGen):
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
         }
         return index.subs(subs)
-
-    def set_ranges(self, lengths):
-        assert not self.ranges
-        self.call_ranges = lengths
-        self.ranges = [self.rename_indexing(x) for x in lengths]
-        self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
-        return self.itervars

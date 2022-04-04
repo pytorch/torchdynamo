@@ -102,16 +102,12 @@ class GraphLowering(torch.fx.Interpreter):
         from torchinductor.codegen.cpp import CppPointwiseKernel
         from torchinductor.codegen.triton import TritonPointwiseKernel
 
+        schedule = ScheduleCodeGen(self)
+
         backends = {"cpu": CppPointwiseKernel, "cuda": TritonPointwiseKernel}
         backend_cls = backends[self.device.type]
-
-        with backend_cls() as kernel:
-            for name, node in self.graph_outputs.items():
-                node.codegen(kernel, name)
-
-        schedule = ScheduleCodeGen(self)
-        schedule.define_kernel("kernel0", kernel)
-        schedule.call_kernel("kernel0", kernel)
+        backend_cls.codegen(self, self.graph_outputs, schedule)
+        # TODO(jansel): manage a dependency graph
         return schedule.generate()
 
     def compile_to_fn(self):

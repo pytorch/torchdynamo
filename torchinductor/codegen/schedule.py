@@ -1,4 +1,5 @@
 from itertools import chain
+from itertools import count
 
 from torchinductor import codecache
 from torchinductor.codegen.common import CodeGen
@@ -13,6 +14,7 @@ class ScheduleCodeGen(CodeGen):
 
     def __init__(self, graph):
         super().__init__()
+        self._names_iter = count()
         self.graph = graph
         self.header = IndentedBuffer()
         self.body = IndentedBuffer(initial_indent=1)
@@ -34,6 +36,9 @@ class ScheduleCodeGen(CodeGen):
             )
         self.graph.sizevars.codegen(self.body, self.graph.graph_inputs)
         self.codegen_outputs()
+
+    def next_kernel_name(self):
+        return f"kernel{next(self._names_iter)}"
 
     def codegen_outputs(self):
         code = self.body
@@ -71,8 +76,8 @@ class ScheduleCodeGen(CodeGen):
         )
         return f"{self.header.getvalue()}\n\n{self.body.getvalue()}"
 
-    def define_kernel(self, name: str, kernel: PointwiseKernel):
-        self.header.splice(f"\n\n{name} = {kernel.generate(self.graph)}")
+    def define_kernel(self, name: str, kernel: str):
+        self.header.splice(f"\n\n{name} = {kernel}")
 
     def call_kernel(self, name: str, kernel: PointwiseKernel):
         kernel.call_kernel(self, self.body, name)

@@ -1,8 +1,8 @@
-import functools
+import collections
 import itertools
-import operator
 from itertools import chain
 
+import sympy
 import torch
 
 from .. import codecache
@@ -10,8 +10,7 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import OpOverrides
 from .common import PointwiseKernel
-
-product = functools.partial(functools.reduce, operator.mul)
+from .common import product
 
 
 class TritonPrinter(ExprPrinter):
@@ -22,6 +21,8 @@ texpr = TritonPrinter().doprint
 
 
 class TritonOverrides(OpOverrides):
+    """Map element-wise ops to Triton"""
+
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         triton_type_name = str(dtype).split(".")[-1]
@@ -31,6 +32,14 @@ class TritonOverrides(OpOverrides):
     def abs(x):
         return f"tl.abs({x})"
 
+    @staticmethod
+    def minimum(a, b):
+        return f"tl.minimum({a}, {b})"
+
+    @staticmethod
+    def maximum(a, b):
+        return f"tl.maximum({a}, {b})"
+
 
 class TritonPointwiseKernel(PointwiseKernel):
     overrides = TritonOverrides
@@ -38,13 +47,51 @@ class TritonPointwiseKernel(PointwiseKernel):
     store_format = "tl.store({var} + {index}, {value}, mask=mask)"
     sexpr = texpr
 
+    def __init__(self, numel):
+        super(TritonPointwiseKernel, self).__init__()
+        self.numel = numel
+        self.iter_range_tree = dict()
+        self.iter_vars_count = itertools.count()
+
+    def add_ranges(self, lengths):
+        # make sure needed vars in in call_args
+        self.rename_indexing(lengths[:-1])
+        itervars = []
+        tree = self.iter_range_tree
+        for sv in lengths:
+            if sv not in tree:
+                tree[sv] = (sympy.Symbol(f"i{next(self.iter_vars_count)}"), dict())
+            iv, tree = tree[sv]
+            itervars.append(iv)
+        return itervars
+
     def rename_indexing(self, index, load_store=False):
         index = super().rename_indexing(index, load_store)
         if load_store and index == 0:
             return "tl.zeros((BLOCK_SIZE,), dtype=tl.int32)"
         return index
 
-    def generate(self, graph):
+    @classmethod
+    def codegen(cls, graph, outputs, schedule):
+        kernels = []
+
+        # loop nests by number of elements
+        loop_nests = collections.defaultdict(list)
+        for output_name, node in outputs.items():
+            loop_nests[product(node.get_size())].append((output_name, node))
+
+        for numel, name_nodes in loop_nests.items():
+            with TritonPointwiseKernel(numel) as kernel:
+                for output_name, node in name_nodes:
+                    node.store_output(output_name, kernel.add_ranges(node.get_size()))
+                kernels.append(kernel)
+
+        for kernel in kernels:
+            kernel_name = schedule.next_kernel_name()
+            schedule.define_kernel(kernel_name, kernel.codegen_kernel())
+            kernel.call_kernel(schedule, kernel_name)
+
+    def codegen_kernel(self):
         code = IndentedBuffer()
         code.splice(
             f"""
@@ -75,25 +122,36 @@ class TritonPointwiseKernel(PointwiseKernel):
             code.splice(
                 """
                     offset = tl.program_id(0) * BLOCK_SIZE
-                    indices = offset + tl.arange(0, BLOCK_SIZE)
+                    indices0 = offset + tl.arange(0, BLOCK_SIZE)
                     if NEED_MASK:
-                        mask = indices < numel
+                        mask = indices0 < numel
                     else:
                         mask = None
-                """
+                """,
+                strip=True,
             )
-            for axis, var, size in reversed(
-                tuple(zip(itertools.count(), self.itervars, self.ranges))
-            ):
-                if axis > 0:
-                    code.writelines(
-                        [
-                            f"{var} = indices % {texpr(size)}",
-                            f"indices = indices // {texpr(size)}",
-                        ]
-                    )
-                else:
-                    code.writeline(f"{var} = indices")
+
+            def walk_indices(indices, tree):
+                """Splat out all our indexing math"""
+                nonlocal indices_count
+                indices_count += 1
+                subindices = f"indices{indices_count}"
+                for size, (var, subtree) in tree.items():
+                    if subtree:
+                        size = TritonPrinter.paren(texpr(self.rename_indexing(size)))
+                        code.splice(
+                            f"""
+                                {var} = {indices} % {size}
+                                {subindices} = {indices} // {size}
+                            """,
+                            strip=True,
+                        )
+                        walk_indices(subindices, subtree)
+                    else:
+                        code.writeline(f"{var} = {indices}")
+
+            indices_count = 0
+            walk_indices("indices0", self.iter_range_tree)
 
             code.splice(self.loads.getvalue())
             code.splice(self.compute.getvalue())
@@ -101,11 +159,12 @@ class TritonPointwiseKernel(PointwiseKernel):
 
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")
-        wrapper.splice(code.getvalue())
+        wrapper.splice(code.getvalue(), strip=True)
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
-    def call_kernel(self, schedule, code: IndentedBuffer, name: str):
+    def call_kernel(self, schedule, name: str):
+        code = schedule.body
         call_args = list(
             chain(
                 self.args.input_buffers.keys(),
@@ -113,7 +172,7 @@ class TritonPointwiseKernel(PointwiseKernel):
                 self.args.sizevars.keys(),
             )
         )
-        code.writeline(f"{name}_numel = {texpr(product(self.call_ranges))}")
+        code.writeline(f"{name}_numel = {texpr(self.numel)}")
         call_args.append(f"{name}_numel")
         code.writeline(f"{name}[grid({name}_numel)](")
         with code.indent():

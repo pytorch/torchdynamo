@@ -8,7 +8,6 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
-from .codegen.common import PointwiseKernel
 from .virtualized_ops import ops
 
 
@@ -83,6 +82,10 @@ class UnrealizedBuffer(Loops):
 
     def get_stride(self):
         return FixedLayout.default_strides(self.get_size())
+
+    def store_output(self, output_name, vars):
+        indexer = FixedLayout.indexer_from_sizes(self.get_size())
+        return ops.store(output_name, indexer(vars), self.inner_fn(vars))
 
     def get_dtype(self):
         return self.dtype
@@ -208,11 +211,6 @@ class TensorBox(MutableBox):
 
     def mark_reuse(self, users):
         pass
-
-    def codegen(self, kernel: PointwiseKernel, output_name):
-        vars = kernel.set_ranges(self.get_size())
-        indexer = FixedLayout.indexer_from_sizes(self.get_size())
-        ops.store(output_name, indexer(vars), self.inner_fn(vars))
 
 
 class StorageBox(MutableBox):

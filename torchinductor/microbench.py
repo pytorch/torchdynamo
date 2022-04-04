@@ -38,7 +38,8 @@ def timed(model, example_inputs, times=1):
 def compute_speedups(args, models, example_inputs):
     expected = models[0](*example_inputs)
     for model in models[1:]:
-        assert same(model(*example_inputs), expected)
+        actual = model(*example_inputs)
+        assert same(actual, expected), expected - actual
 
     timings = np.zeros((args.repeat, len(models)), np.float64)
     for rep in range(args.repeat):
@@ -87,7 +88,7 @@ class MicroBenchmarks:
 
     @staticmethod
     def scale(x, m, d):
-        return ((x - m) / d,)
+        return ((x - m) / torch.maximum(d, 1e-4),)
 
     @staticmethod
     def abs_norm(x):
@@ -138,6 +139,7 @@ def main():
 
     if args.threads:
         torch.set_num_threads(args.threads)
+        torchinductor.config.cpp.threads = args.threads
 
     if args.verbose:
         torchinductor.config.debug = True
