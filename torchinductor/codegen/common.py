@@ -191,6 +191,12 @@ class PointwiseKernel(CodeGen):
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
 
+    def load(self, name: str, index: sympy.Expr):
+        raise NotImplementedError()
+
+    def store(self, name, index, value):
+        raise NotImplementedError()
+
     def __enter__(self):
         class CSEProxy:
             @staticmethod
@@ -204,30 +210,18 @@ class PointwiseKernel(CodeGen):
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
-                var = self.args.input(name)
-                index = self.rename_indexing(index, load_store=True)
-                return self.cse.generate(
-                    self.loads,
-                    self.load_format.format(var=var, index=self.sexpr(index)),
-                )
+                return self.load(name, index)
 
             @staticmethod
             def store(name, index, value):
-                var = self.args.output(name)
-                index = self.rename_indexing(index, load_store=True)
-                self.stores.writeline(
-                    self.store_format.format(
-                        var=var, index=self.sexpr(index), value=value
-                    )
-                    + self.suffix
-                )
+                return self.store(name, index, value)
 
         super().__enter__()
         parent_handler = self.overrides(ops.get_handler())
         self.exit_stack.enter_context(ops.set_handler(CSEProxy()))
         return self
 
-    def rename_indexing(self, index, load_store=False):
+    def rename_indexing(self, index):
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         subs = {

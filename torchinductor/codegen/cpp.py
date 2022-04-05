@@ -78,14 +78,22 @@ class CppPointwiseKernel(PointwiseKernel):
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
-    load_format = "{var}[{index}]"
-    store_format = "{var}[{index}] = {value}"
 
     def __init__(self, args):
         super(CppPointwiseKernel, self).__init__(args)
         self.call_ranges = None
         self.ranges = None
         self.itervars = None
+
+    def load(self, name: str, index: sympy.Expr):
+        var = self.args.input(name)
+        index = self.rename_indexing(index)
+        return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
+
+    def store(self, name, index, value):
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+        self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
 
     def set_ranges(self, lengths):
         assert not self.ranges

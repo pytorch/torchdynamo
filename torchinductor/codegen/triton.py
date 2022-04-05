@@ -43,8 +43,6 @@ class TritonOverrides(OpOverrides):
 
 class TritonPointwiseKernel(PointwiseKernel):
     overrides = TritonOverrides
-    load_format = "tl.load({var} + {index}, mask=mask)"
-    store_format = "tl.store({var} + {index}, {value}, mask=mask)"
     sexpr = texpr
 
     def __init__(self, numel):
@@ -65,11 +63,23 @@ class TritonPointwiseKernel(PointwiseKernel):
             itervars.append(iv)
         return itervars
 
-    def rename_indexing(self, index, load_store=False):
-        index = super().rename_indexing(index, load_store)
-        if load_store and index == 0:
-            return "tl.zeros((BLOCK_SIZE,), dtype=tl.int32)"
-        return index
+    def load(self, name: str, index: sympy.Expr):
+        var = self.args.input(name)
+        index = self.rename_indexing(index)
+        if len(index.free_symbols) == 0:
+            broadcast = " + " + self.cse.generate(
+                self.loads, "tl.zeros((BLOCK_SIZE, ), tl.int32)"
+            )
+        else:
+            broadcast = ""
+        line = f"tl.load({var} + {texpr(index)}{broadcast}, mask=mask)"
+        return self.cse.generate(self.loads, line)
+
+    def store(self, name, index, value):
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+        line = f"tl.store({var} + {texpr(index)}, {value}, mask=mask)"
+        self.stores.writeline(line)
 
     @classmethod
     def codegen(cls, graph, outputs, schedule):
@@ -80,9 +90,9 @@ class TritonPointwiseKernel(PointwiseKernel):
         for output_name, node in outputs.items():
             loop_nests[product(node.get_size())].append((output_name, node))
 
-        for numel, name_nodes in loop_nests.items():
+        for numel, named_nodes in loop_nests.items():
             with TritonPointwiseKernel(numel) as kernel:
-                for output_name, node in name_nodes:
+                for output_name, node in named_nodes:
                     node.store_output(output_name, kernel.add_ranges(node.get_size()))
                 kernels.append(kernel)
 

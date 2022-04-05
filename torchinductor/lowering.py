@@ -7,6 +7,7 @@ import torch
 import torch.fx
 
 from .ir import ExpandView
+from .ir import Reduction
 from .ir import TensorBox
 from .ir import UnrealizedBuffer
 from .virtualized_ops import ops
@@ -148,6 +149,53 @@ def expand(x, sizes):
     return TensorBox(ExpandView(x.data, tuple(sizes)))
 
 
+def make_reduction(reduction_type: str):
+    def inner(x, axis):
+        axis = list(axis)
+        for i in range(len(axis)):
+            if axis[i] < 0:
+                axis[i] += len(axis)
+            assert 0 <= axis[i] < len(axis)
+        assert len(set(axis)) == len(axis), "reduction axis not unique"
+        axis = set(axis)
+
+        kept_sizes = []
+        kept_idx = []
+        reduced_sizes = []
+        reduced_idx = []
+        size = x.get_size()
+        for i in range(len(size)):
+            if i in axis:
+                reduced_idx.append(i)
+                reduced_sizes.append(size[i])
+            else:
+                kept_idx.append(i)
+                kept_sizes.append(size[i])
+
+        def loader(index, reduction_index):
+            assert len(index) == len(kept_idx)
+            assert len(reduction_index) == len(reduced_idx)
+            new_index = [None] * len(index)
+            for idx, var in itertools.chain(
+                zip(kept_idx, index), zip(reduced_idx, reduction_index)
+            ):
+                new_index[idx] = var
+            return inner_loader(new_index)
+
+        inner_loader = x.make_loader()
+        return Reduction.create(
+            kept_sizes,
+            loader,
+            device=x.get_device(),
+            dtype=x.get_dtype(),
+            reduction_size=reduced_sizes,
+            reduction_type=reduction_type,
+        )
+
+    return inner
+
+
+register_lowering(aten.sum)(make_reduction("sum"))
 register_pointwise(aten.add)
 register_pointwise(aten.div)
 register_pointwise(aten.abs)

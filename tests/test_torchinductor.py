@@ -174,6 +174,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    @unittest.skip("x")
+    def test_sum1(self):
+        def fn(a, b):
+            return ((a + b).sum(-1),)
+
+        self.common(fn, (torch.randn(16, 8), torch.randn(16, 8)))
+
 
 class CpuTests(TestCase):
     common = check_model

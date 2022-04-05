@@ -67,25 +67,18 @@ class Loops(IRNode):
     ranges: List[Expr]
     inner_fn: Callable
 
+    def get_size(self):
+        return self.ranges
+
     @classmethod
     def create(cls, *args, **kwargs):
         return TensorBox.create(cls(*args, **kwargs))
 
 
 @dataclasses.dataclass
-class UnrealizedBuffer(Loops):
+class TypedLoops(Loops):
     device: torch.device
     dtype: torch.dtype
-
-    def get_size(self):
-        return self.ranges
-
-    def get_stride(self):
-        return FixedLayout.default_strides(self.get_size())
-
-    def store_output(self, output_name, vars):
-        indexer = FixedLayout.indexer_from_sizes(self.get_size())
-        return ops.store(output_name, indexer(vars), self.inner_fn(vars))
 
     def get_dtype(self):
         return self.dtype
@@ -93,8 +86,41 @@ class UnrealizedBuffer(Loops):
     def get_device(self):
         return self.device
 
+    def get_stride(self):
+        return FixedLayout.default_strides(self.get_size())
+
+
+class UnrealizedBuffer(TypedLoops):
     def make_loader(self):
         return self.inner_fn
+
+    def get_reduction_size(self):
+        return []
+
+    def get_reduction_type(self):
+        return None
+
+    def store_output(self, output_name, vars):
+        indexer = FixedLayout.indexer_from_sizes(self.get_size())
+        return ops.store(output_name, indexer(vars), self.inner_fn(vars))
+
+
+@dataclasses.dataclass
+class Reduction(TypedLoops):
+    reduction_size: List[Expr]
+    reduction_type: str
+
+    def get_reduction_size(self):
+        return self.reduction_size
+
+    def get_reduction_type(self):
+        return self.reduction_type
+
+    def store_reduction(self, output_name, vars, reduction_vars):
+        indexer = FixedLayout.indexer_from_sizes(self.get_size())
+        return ops.store(
+            output_name, indexer(vars), self.inner_fn(vars, reduction_vars)
+        )
 
 
 @dataclasses.dataclass
