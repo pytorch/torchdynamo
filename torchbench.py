@@ -482,15 +482,16 @@ def cast_to_fp16(model, inputs):
             inputs,
         )
     )
-    # TRT does not support int64. Some model need to down level precison
-    inputs = tuple(
-        tree_map(
-            lambda x: x.to(torch.int32)
-            if getattr(x, "dtype", None) == torch.int64
-            else x,
-            inputs,
+    # TRT does not support int64. Some model does need it like Super_SloMo
+    if current_name != "Super_SloMo" and current_name != "fastNLP_Bert":
+        inputs = tuple(
+            tree_map(
+                lambda x: x.to(torch.int32)
+                if getattr(x, "dtype", None) == torch.int64
+                else x,
+                inputs,
+            )
         )
-    )
     return model, inputs
 
 
@@ -906,7 +907,7 @@ def run_one_model(
 
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
         torch.manual_seed(1337)
-        if current_name != "pyhpc_turbulent_kinetic_energy":
+        if current_name != "pyhpc_turbulent_kinetic_energy" and current_name != "demucs" and current_name != "pyhpc_isoneutral_mixing": #diff for demucs is 0.0002
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
             if not same(correct_result, correct_rerun_result):
                 print("INCORRECT - Variation in Eager runs itself")

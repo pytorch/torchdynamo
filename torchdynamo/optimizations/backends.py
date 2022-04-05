@@ -301,6 +301,7 @@ def fx2trt(subgraph, **kwargs):
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitter
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
     from fx2trt_oss.fx.trt_module import TRTModule
+    from fx2trt_oss.fx.utils import LowerPrecision
 
     try:
         model = subgraph.model
@@ -314,6 +315,11 @@ def fx2trt(subgraph, **kwargs):
         split_mod = splitter()
         for name, _ in split_mod.named_children():
             print(f"graph is split into {name}")
+
+        if kwargs["fp16_mode"]:
+            precision = LowerPrecision.FP16
+        else:
+            precision = LowerPrecision.FP32
 
         def get_submod_inputs(mod, submod, inputs):
             acc_inputs = None
@@ -341,7 +347,7 @@ def fx2trt(subgraph, **kwargs):
                 )
                 r = interp.run(
                     max_workspace_size=20 << 30,
-                    fp16_mode=kwargs["fp16_mode"],
+                    lower_precision=precision,
                 )
                 trt_mod = TRTModule(*r)
                 setattr(split_mod, name, trt_mod)
