@@ -4,6 +4,7 @@ import torch
 
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
+from torchdynamo.utils import counters
 
 from .analysis import has_mutation
 from .backends import BACKENDS
@@ -23,15 +24,13 @@ class AOTAutogradStrategy(object):
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
         super(AOTAutogradStrategy, self).__init__()
-        # TODO - Look why restore fails with train() even after restoring.
-        # self.restore = checkpoint_params(gm)
-        # self.correct = gm.forward(*self.example_inputs)
+        counters["aot_autograd"]["total"] += 1
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         try:
             self.gm = normalize_ir(gm, self.example_inputs)
         except Exception:
-            log.warn("TorchDynamo unable to remove mutation")
+            log.debug("TorchDynamo unable to remove mutation")
             self.gm = gm
             self.use_fallback = True
             pass
@@ -43,7 +42,7 @@ class AOTAutogradStrategy(object):
         # 1) gather_backward (pytorch_struct) - https://github.com/pytorch/functorch/issues/591
         for node in self.gm.graph.nodes:
             if node.target == torch.gather:
-                log.warn(
+                log.debug(
                     "Graph has gather op. AOT Autograd does not handle gather correctly. Using fallback."
                 )
                 self.use_fallback = True
@@ -71,9 +70,15 @@ class AOTAutogradStrategy(object):
 
     def verified_candidate(self):
         if self.use_fallback:
-            log.warn("Unable to use AOT Autograd because graph has mutation")
+            log.debug("Unable to use AOT Autograd because graph has mutation")
+            counters["aot_autograd"]["not_ok"] += 1
             return self.gm
-        return self.candidate()
+        cg = self.candidate()
+        if cg is None:
+            counters["aot_autograd"]["not_ok"] += 1
+            raise RuntimeError("AOT Autograd failed to compile")
+        counters["aot_autograd"]["ok"] += 1
+        return cg
 
     def candidate(self):
         raise NotImplementedError()
@@ -83,17 +88,24 @@ class AOTAutogradEagerStrategy(AOTAutogradStrategy):
     """Useful for debugging purpose"""
 
     def candidate(self):
-        from functorch.compile import print_compile
+        from functorch.compile import nop
 
-        cg = BACKENDS["aot_autograd"](
-            self.gm, self.example_inputs, fw_compiler=print_compile
-        )
-        if cg is None:
-            raise RuntimeError("AOT Autograd failed to compile")
-        return cg
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, fw_compiler=nop)
 
 
 aot_autograd_debug_strategy1 = AOTAutogradEagerStrategy.compile_fn
+
+
+class AOTAutogradNNCStrategy(AOTAutogradStrategy):
+    def candidate(self):
+        from functorch.compile import ts_compile
+
+        return BACKENDS["aot_autograd"](
+            self.gm, self.example_inputs, fw_compiler=ts_compile
+        )
+
+
+aot_autograd_nnc_strategy = AOTAutogradNNCStrategy.compile_fn
 
 # Global counter to differentiate between different graphs.
 graph_idx = 0
@@ -119,10 +131,7 @@ class AOTAutogradMemoryEfficientFusion(AOTAutogradStrategy):
     """Use Min cut rematerilization and NVFuser with AOT Autograd"""
 
     def candidate(self):
-        cg = BACKENDS["aot_autograd"](self.gm, self.example_inputs)
-        if cg is None:
-            raise RuntimeError("AOT Autograd failed to compile")
-        return cg
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs)
 
 
 aot_autograd_speedup_strategy = AOTAutogradMemoryEfficientFusion.compile_fn

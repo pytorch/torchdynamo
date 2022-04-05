@@ -21,6 +21,7 @@ For more information see progress updates posted on dev-discuss.pytorch.org:
 - [Update 3: GPU Inference Edition](https://dev-discuss.pytorch.org/t/torchdynamo-update-3-gpu-inference-edition/460)
 - [Update 4: LazyTensor & nvFuser Experiments](https://dev-discuss.pytorch.org/t/torchdynamo-update-4-lazytensor-nvfuser-experiments/496)
 - [Update 5: Improved Capture & Bigger Graphs](https://dev-discuss.pytorch.org/t/torchdynamo-update-5-improved-capture-bigger-graphs/556)
+- [Update 6: Training support with AOTAutograd](https://dev-discuss.pytorch.org/t/torchdynamo-update-6-training-support-with-aotautograd/570)
 
 *TorchDynamo is experimental* and under active development.
 You are welcome to try it out and contribute, but should expect to find
@@ -324,6 +325,56 @@ function to be executed in a new Python frame which recursively will
 trigger TorchDynamo to re-start its capture once execution reaches that
 point for the first time.
 
+## Minimal Developer Setup
+
+As background reading, I'd suggest looking at the
+[PyTorch](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md),
+[functorch](https://github.com/pytorch/functorch), and
+[TorchBench](https://github.com/pytorch/benchmark#installation)
+setup docs.  Since these projects work together in different ways.
+
+The following instructions use [Miniconda](https://docs.conda.io/en/latest/miniconda.html).
+
+```
+conda create --name=torchdynamo python=3.8
+conda activate torchdynamo
+
+# install pytorch nightlies
+# for CUDA version, replace `cpuonly` with `cudatoolkit=11.3`
+conda install pytorch torchvision torchaudio torchtext cpuonly -c pytorch-nightly
+
+git clone git@github.com:facebookresearch/torchdynamo.git
+cd torchdynamo
+pip install -r requirements.txt
+
+# check if everything works
+make test
+```
+
+If see errors about missing symbols from `guards.so`, that may mean your
+C++ compiler is incompatible CUDA and/or with the one used to compile
+PyTorch.  You may need to change your compiler version or build PyTorch
+from source.
+
+To add TorchBench, which is useful for benchmarking and more extensive
+testing:
+```
+# you should still be in the conda env from before
+
+cd ..  # if still in torchdynamo/
+
+# download everything
+git clone git@github.com:jansel/benchmark.git torchbenchmark
+python torchbenchmark/install.py
+
+cd torchdynamo
+
+# fix the version of black so `make format` / `make lint` work
+make lint-deps
+
+# make sure it works
+./torchbench.py
+```
 
 ## Tests
 

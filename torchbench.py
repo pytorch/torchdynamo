@@ -33,6 +33,7 @@ from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
 from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
+from torchdynamo.optimizations.training import aot_autograd_nnc_strategy
 from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
@@ -54,9 +55,10 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # CUDA torchvision::nms build issues on AWS cluser
+    # https://github.com/facebookresearch/torchdynamo/issues/82
+    "tacotron2",
+    # https://github.com/facebookresearch/torchdynamo/issues/101
     "detectron2_maskrcnn",
-    "vision_maskrcnn",
 }
 
 # Additional models that are skipped in training
@@ -71,8 +73,13 @@ SKIP_TRAIN = {
     "demucs",  # https://github.com/pytorch/benchmark/pull/639
     "densenet121",  # https://github.com/pytorch/benchmark/issues/652
     "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
+    "hf_Reformer",  # Can only be used in the training phase
     # AOT Autograd known issues
     "dlrm",  # No sparse support
+    "resnet50_quantized_qat",  # Con2DBnRelu
+    # Known TorchDynamo bug
+    "hf_GPT2",  # Hard to debug stashed tensor issue
+    "tacotron2",  # Model uses Variable
 }
 
 # Some models have bad train dataset. We read eval dataset.
@@ -177,13 +184,17 @@ class Stats:
             lines = "\n  ".join(map(str, v.most_common(50)))
             print(f"STATS {k}\n  {lines}")
 
+    @classmethod
+    def aot_summary(cls):
+        return [cls.totals["aot_autograd"]["total"], cls.totals["aot_autograd"]["ok"]]
 
-def output_csv(headers, row):
-    assert output_filename
-    existed = os.path.exists(output_filename)
+
+def output_csv(filename, headers, row):
+    assert filename
+    existed = os.path.exists(filename)
     output = csv.writer(
         io.TextIOWrapper(
-            open(output_filename, "ab", buffering=0),
+            open(filename, "ab", buffering=0),
             "utf-8",
             write_through=True,
         ),
@@ -207,6 +218,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs):
         model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
     output_csv(
+        output_filename,
         (
             "dev",
             "name",
@@ -254,7 +266,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     output_csv(
-        ("dev", "name", "speedup"), [current_device, current_name, float(speedup)]
+        output_filename,
+        ("dev", "name", "speedup"),
+        [current_device, current_name, float(speedup)],
     )
     return format_speedup(speedup, pvalue)
 
@@ -308,6 +322,7 @@ def baselines(models, model_iter_fn, example_inputs, args):
         ]
     )
     output_csv(
+        output_filename,
         ("dev", "name") + tuple(n for n, m in models[1:]),
         [current_device, current_name] + [f"{x:.4f}" for x in speedup],
     )
@@ -482,6 +497,15 @@ def cast_to_fp16(model, inputs):
             inputs,
         )
     )
+    # TRT does not support int64. Some model need to down level precison
+    inputs = tuple(
+        tree_map(
+            lambda x: x.to(torch.int32)
+            if getattr(x, "dtype", None) == torch.int64
+            else x,
+            inputs,
+        )
+    )
     return model, inputs
 
 
@@ -530,6 +554,11 @@ def main():
         "--check-accuracy",
         action="store_true",
         help="sets model.eval() to reduce randomness",
+    )
+    parser.add_argument(
+        "--generate-aot-autograd-stats",
+        action="store_true",
+        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -588,12 +617,27 @@ def main():
     group.add_argument(
         "--accuracy-aot-nop",
         action="store_true",
-        help="Accuracy testing for AOT vs Eager",
+        help="Accuracy testing and speedup for AOT vs Eager",
     )
     group.add_argument(
-        "--speedup-aot-efficient-fusion",
+        "--accuracy-aot-ts",
         action="store_true",
-        help="speedup using experimental fixed_strategy backend",
+        help="Accuracy testing and speedup for AOT with Torchscript(NNC/NVFuser) vs Eager",
+    )
+    group.add_argument(
+        "--accuracy-aot-ts-mincut",
+        action="store_true",
+        help="Accuracy testing and speedup for AOT with Torchscript(NNC/NVFuser) with mincut vs Eager",
+    )
+    group.add_argument(
+        "--accuracy-ts",
+        action="store_true",
+        help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
+    )
+    group.add_argument(
+        "--backend",
+        choices=torchdynamo.list_backends(),
+        help="measure speedup with a given backend",
     )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
     group.add_argument(
@@ -686,19 +730,20 @@ def main():
         optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "pythonkey.csv"
-        SKIP.update(
-            [
-                # requires training mode
-                "maml",
-                # RuntimeError: toIValue() cannot handle converting to type: QScheme
-                "mobilenet_v2_quantized_qat",
-                "resnet50_quantized_qat",
-                # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
-                "hf_BigBird",
-                # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
-                "hf_Reformer",
-            ]
-        )
+        if not args.no_skip:
+            SKIP.update(
+                [
+                    # requires training mode
+                    "maml",
+                    # RuntimeError: toIValue() cannot handle converting to type: QScheme
+                    "mobilenet_v2_quantized_qat",
+                    "resnet50_quantized_qat",
+                    # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
+                    "hf_BigBird",
+                    # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
+                    "hf_Reformer",
+                ]
+            )
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
@@ -755,13 +800,30 @@ def main():
         output_filename = "accuracy_aot_nop.csv"
         args.check_accuracy = True
         args.isolate = True
-    elif args.speedup_aot_efficient_fusion:
+    elif args.accuracy_aot_ts:
+        optimize_ctx = torchdynamo.optimize(
+            aot_autograd_nnc_strategy, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        backend_str = "nvfuser" if args.nvfuser else "nnc"
+        output_filename = f"accuracy_aot_{backend_str}.csv"
+        args.check_accuracy = True
+        args.isolate = True
+    elif args.accuracy_aot_ts_mincut:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_speedup_strategy, nopython=args.nopython
         )
         experiment = speedup_experiment
-        output_filename = "speedups_aot_efficient_fusion.csv"
-        args.check_accuracy = False
+        backend_str = "nvfuser" if args.nvfuser else "nnc"
+        output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
+        args.check_accuracy = True
+        args.isolate = True
+    elif args.accuracy_ts:
+        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
+        experiment = speedup_experiment
+        backend_str = "nvfuser" if args.nvfuser else "nnc"
+        output_filename = f"accuracy_{backend_str}.csv"
+        args.check_accuracy = True
         args.isolate = True
     elif args.nothing:
         pass
@@ -769,6 +831,10 @@ def main():
         optimize_ctx = torchdynamo.eval_frame._optimize_catch_errors(
             torchdynamo.testing.debug_insert_nops, nopython=args.nopython
         )
+    elif args.backend:
+        optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = f"speedup_{args.backend}.csv"
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
@@ -822,6 +888,13 @@ def main():
                 experiment,
                 cos_similarity,
             )
+        stats_file = output_filename.split(".csv")[0] + "_stats.csv"
+        if args.generate_aot_autograd_stats:
+            output_csv(
+                stats_file,
+                ("dev", "name", "total_aot_graphs", "ok_aot_graphs"),
+                [current_device, current_name, *Stats.aot_summary()],
+            )
     elif args.isolate:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
@@ -832,10 +905,11 @@ def main():
             except subprocess.SubprocessError:
                 print("ERROR")
                 for device in args.devices:
-                    output_csv([], [device, name, 0.0])
+                    output_csv(output_filename, [], [device, name, 0.0])
         print_summary(output_filename)
     else:
-        os.path.exists(output_filename) and os.unlink(output_filename)
+        if output_filename and os.path.exists(output_filename):
+            os.unlink(output_filename)
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()

@@ -1,6 +1,5 @@
 import dis
 import functools
-import inspect
 import itertools
 import os
 import sys
@@ -8,10 +7,8 @@ import traceback
 import types
 import typing
 from typing import Callable
-from typing import List
 
 import torch
-from torch import fx
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
@@ -62,19 +59,11 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 
 
 def wrap_compiler_fn(compiler_fn):
-    """Shim to convert 1 arg to 2 arg compiler_fn and resolve strings"""
+    """Expand backend strings to functions"""
     if isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
         return wrap_compiler_fn(BACKENDS[compiler_fn])
-    elif len(inspect.signature(compiler_fn).parameters) == 1:
-        # older 1-arg version
-
-        @functools.wraps(compiler_fn)
-        def inner(gm: fx.GraphModule, example_inputs: List):
-            return compiler_fn(gm)
-
-        return inner
     else:
         return compiler_fn
 

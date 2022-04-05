@@ -338,7 +338,7 @@ class Functionalization(Transformer):
 
         if (
             not n.meta["is_input_mutation"]
-            and not n.meta["indirect_mutation"]
+            and not n.meta["partial_mutation"]
             and issubclass(n.meta["type"], torch.Tensor)
         ):
             if "inplace" in n.kwargs:
