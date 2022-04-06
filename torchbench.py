@@ -110,7 +110,7 @@ def iter_models(args):
     for model_name in iter_model_names(args):
         for device in args.devices:
             try:
-                yield load_model(device, model_name, args.training, args.check_accuracy)
+                yield load_model(device, model_name, args.training, args.use_eval_mode)
             except NotImplementedError:
                 continue  # bad benchmark implementation
 
@@ -130,7 +130,7 @@ def iter_model_names(args):
         yield model_name
 
 
-def load_model(device, model_name, is_training, check_accuracy):
+def load_model(device, model_name, is_training, use_eval_mode):
     module = importlib.import_module(f"torchbenchmark.models.{model_name}")
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
@@ -142,7 +142,7 @@ def load_model(device, model_name, is_training, check_accuracy):
     model, example_inputs = benchmark.get_module()
 
     # Models that must be in train mode while training
-    if is_training and (not check_accuracy or model_name in ONLY_TRAINING_MODE):
+    if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
         model.train()
     else:
         model.eval()
@@ -552,9 +552,14 @@ def main():
         help="Performs training",
     )
     parser.add_argument(
-        "--check-accuracy",
+        "--use-eval-mode",
         action="store_true",
         help="sets model.eval() to reduce randomness",
+    )
+    parser.add_argument(
+        "--skip-accuracy-check",
+        action="store_true",
+        help="keeps running even when accuracy fails",
     )
     parser.add_argument(
         "--generate-aot-autograd-stats",
@@ -799,8 +804,6 @@ def main():
         )
         experiment = speedup_experiment
         output_filename = "accuracy_aot_nop.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.accuracy_aot_ts:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_nnc_strategy, nopython=args.nopython
@@ -808,8 +811,6 @@ def main():
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.accuracy_aot_ts_mincut:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_speedup_strategy, nopython=args.nopython
@@ -817,15 +818,11 @@ def main():
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.accuracy_ts:
         optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_{backend_str}.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.nothing:
         pass
     elif args.nops:
@@ -857,7 +854,7 @@ def main():
         for device in args.devices:
             try:
                 device, name, model, example_inputs = load_model(
-                    device, args.only, args.training, args.check_accuracy
+                    device, args.only, args.training, args.use_eval_mode
                 )
                 # torchbench changed the default precison=fp16 on torchvision net
                 if args.speedup_fx2trt:
@@ -888,6 +885,7 @@ def main():
                 optimize_ctx,
                 experiment,
                 cos_similarity,
+                args.skip_accuracy_check,
             )
         stats_file = output_filename.split(".csv")[0] + "_stats.csv"
         if args.generate_aot_autograd_stats:
@@ -923,6 +921,7 @@ def main():
                 optimize_ctx,
                 experiment,
                 cos_similarity,
+                args.skip_accuracy_check,
             )
 
         Stats.print_summary()
@@ -961,6 +960,7 @@ def run_one_model(
     optimize_ctx,
     experiment,
     cos_similarity=False,
+    skip_accuracy_check=False,
 ):
     with pick_grad(name, is_training):
         mode = "train" if is_training else "eval"
@@ -976,7 +976,8 @@ def run_one_model(
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
             if not same(correct_result, correct_rerun_result):
                 print("INCORRECT - Variation in Eager runs itself")
-                return sys.exit(-1)
+                if not skip_accuracy_check:
+                    return sys.exit(-1)
 
         torch.manual_seed(1337)
         torchdynamo.reset()
@@ -994,7 +995,8 @@ def run_one_model(
             pass
         elif not same(correct_result, new_result, cos_similarity):
             print("INCORRECT")
-            return sys.exit(-1)
+            if not skip_accuracy_check:
+                return sys.exit(-1)
         ok, total = Stats.reset_counters()
         results = []
 
