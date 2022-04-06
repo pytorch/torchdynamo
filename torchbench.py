@@ -63,23 +63,23 @@ SKIP = {
 
 # Additional models that are skipped in training
 SKIP_TRAIN = {
-    # not designed for training
-    "pyhpc_equation_of_state",
-    "pyhpc_isoneutral_mixing",
-    # Unusual training setup
-    "opacus_cifar10",
-    "maml",
-    # Known issues with training
-    "demucs",  # https://github.com/pytorch/benchmark/pull/639
-    "densenet121",  # https://github.com/pytorch/benchmark/issues/652
-    "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
-    "hf_Reformer",  # Can only be used in the training phase
-    # AOT Autograd known issues
-    "dlrm",  # No sparse support
-    "resnet50_quantized_qat",  # Con2DBnRelu
-    # Known TorchDynamo bug
-    "hf_GPT2",  # Hard to debug stashed tensor issue
-    "tacotron2",  # Model uses Variable
+    # # not designed for training
+    # "pyhpc_equation_of_state",
+    # "pyhpc_isoneutral_mixing",
+    # # Unusual training setup
+    # "opacus_cifar10",
+    # "maml",
+    # # Known issues with training
+    # "demucs",  # https://github.com/pytorch/benchmark/pull/639
+    # "densenet121",  # https://github.com/pytorch/benchmark/issues/652
+    # "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
+    # "hf_Reformer",  # Can only be used in the training phase
+    # # AOT Autograd known issues
+    # "dlrm",  # No sparse support
+    # "resnet50_quantized_qat",  # Con2DBnRelu
+    # # Known TorchDynamo bug
+    # "hf_GPT2",  # Hard to debug stashed tensor issue
+    # "tacotron2",  # Model uses Variable
 }
 
 # Some models have bad train dataset. We read eval dataset.
@@ -161,10 +161,15 @@ def load_model(device, model_name, is_training, use_eval_mode):
     return device, current_name, model, example_inputs
 
 
-def timed(model, model_iter_fn, example_inputs, times=1):
+def timed(model, model_iter_fn, example_inputs, times=1, measure_memory=False):
     synchronize()
     gc.collect()
     torch.manual_seed(1337)
+    if measure_memory:
+        model_iter_fn(model, example_inputs, collect_outputs=False)
+        return model_iter_fn(
+            model, example_inputs, collect_outputs=False, measure_memory=measure_memory
+        )
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
@@ -264,12 +269,17 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
 
     Writes to ./speedups.csv
     """
-    timings = np.zeros((args.repeat, 2), np.float64)
-    for rep in range(args.repeat):
+    repeat = 2 if args.measure_memory else args.repeat
+    timings = np.zeros((repeat, 2), np.float64)
+    for rep in range(repeat):
         # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0] = timed(model, model_iter_fn, example_inputs)
+        timings[rep, 0] = timed(
+            model, model_iter_fn, example_inputs, measure_memory=args.measure_memory
+        )
         with torchdynamo.run():
-            timings[rep, 1] = timed(model, model_iter_fn, example_inputs)
+            timings[rep, 1] = timed(
+                model, model_iter_fn, example_inputs, measure_memory=args.measure_memory
+            )
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -476,15 +486,30 @@ def help(fn):
     return fn.__doc__
 
 
-def forward_pass(mod, inputs, collect_outputs=True):
+
+def get_cur_memory():
+    torch.cuda.synchronize()
+    import gc
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    stats = torch.cuda.memory_stats()
+    peak_bytes_requirement = stats["allocated_bytes.all.current"] / 1024 ** 3
+    return peak_bytes_requirement
+
+
+def forward_pass(mod, inputs, collect_outputs=True, measure_memory=False):
     return mod(*inputs)
 
 
-def forward_and_backward_pass(mod, inputs, collect_outputs=True):
+def forward_and_backward_pass(mod, inputs, collect_outputs=True, measure_memory=False):
     cloned_inputs = clone_inputs(inputs)
     mod.zero_grad(True)
     pred = mod(*cloned_inputs)
     loss = reduce_to_scalar_loss(pred)
+    if measure_memory:
+        memory = get_cur_memory()
+        return memory
     loss.backward()
     if collect_outputs:
         return collect_results(mod, pred, loss, cloned_inputs)
@@ -573,6 +598,11 @@ def main():
         "--generate-aot-autograd-stats",
         action="store_true",
         help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+    )
+    parser.add_argument(
+        "--measure-memory",
+        action="store_true",
+        help="Measure memory",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
