@@ -89,6 +89,14 @@ ONLY_EVAL_DATASET = {"yolov3"}
 # eval mode.
 ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
 
+# Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
+REQUIRE_HIGHER_TOLERANCE = {
+    "alexnet",
+    "attention_is_all_you_need_pytorch",
+    "vgg16",
+    "mobilenet_v3_large",
+}
+
 current_name = ""
 current_device = ""
 output_filename = None
@@ -962,6 +970,11 @@ def run_one_model(
     cos_similarity=False,
     skip_accuracy_check=False,
 ):
+    tolerance = 1e-4
+    # Increase the tolerance for torch allclose
+    if is_training and current_device == "cuda" and name in REQUIRE_HIGHER_TOLERANCE:
+        tolerance = 1e-3
+
     with pick_grad(name, is_training):
         mode = "train" if is_training else "eval"
         sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
@@ -993,7 +1006,7 @@ def run_one_model(
             # check correctness.
             # TODO(jansel): submit upstream fix for this
             pass
-        elif not same(correct_result, new_result, cos_similarity):
+        elif not same(correct_result, new_result, cos_similarity, tolerance):
             print("INCORRECT")
             if not skip_accuracy_check:
                 return sys.exit(-1)
