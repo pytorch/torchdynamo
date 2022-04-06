@@ -517,9 +517,9 @@ def aot_autograd(subgraph, **kwargs):
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
 
-    from functorch.compile import aot_module
+    from functorch.compile import aot_module_simplified
 
-    return subgraph.wrap_returns(aot_module(subgraph.model, **kwargs))
+    return aot_module_simplified(subgraph.model, **kwargs)
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
