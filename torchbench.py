@@ -161,17 +161,17 @@ def load_model(device, model_name, is_training, use_eval_mode):
     return device, current_name, model, example_inputs
 
 
-def timed(model, model_iter_fn, example_inputs, times=1):
+def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
     gc.collect()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
-        model_iter_fn(model, example_inputs, collect_outputs=False)
+        result = model_iter_fn(model, example_inputs, collect_outputs=False)
         synchronize()
     t1 = time.perf_counter()
-    return t1 - t0
+    return (t1 - t0, result) if return_result else t1 - t0
 
 
 class Stats:
@@ -255,6 +255,30 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
     return speedup_experiment(args, model_iter_fn, model, example_inputs)
 
 
+def randomize_input(inputs):
+    if isinstance(inputs, (list, tuple)):
+        return type(inputs)([randomize_input(x) for x in inputs])
+    elif isinstance(inputs, torch.Tensor):
+        if inputs.dtype in (torch.float32, torch.float64):
+            torchdynamo.utils.counters["randomize_input"]["times"] += 1
+            return torch.randn_like(inputs)
+        elif inputs.dtype == torch.int64:
+            # Note: we can not simply tune integer tensors as follows
+            #   `return torch.randint_like(inputs, high=inputs.max().item())`
+            # This may break some invariants between tensors.
+            # E.g. in embedding lookup case, one tensor is the length
+            # and another is an indices tensor.
+            return inputs
+        else:
+            raise RuntimeError(
+                f"randomize_input need support tensor of type {inputs.dtype}"
+            )
+    else:
+        raise RuntimeError(
+            f"randomize_input can not handle input of type {type(inputs)}"
+        )
+
+
 def speedup_experiment(args, model_iter_fn, model, example_inputs):
     """
     Measure speedups over eager using the autotuning inference backend.  To use this:
@@ -265,11 +289,27 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     Writes to ./speedups.csv
     """
     timings = np.zeros((args.repeat, 2), np.float64)
+    # if we randomize the input, we should also check the result is correct
+    should_check_result = should_randomize_input = args.randomize_input
+    is_correct = True
+
     for rep in range(args.repeat):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+
         # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0] = timed(model, model_iter_fn, example_inputs)
+        timings[rep, 0], expected_output = timed(
+            model, model_iter_fn, inputs, return_result=True
+        )
         with torchdynamo.run():
-            timings[rep, 1] = timed(model, model_iter_fn, example_inputs)
+            timings[rep, 1], actual_output = timed(
+                model, model_iter_fn, inputs, return_result=True
+            )
+        if should_check_result:
+            is_correct = is_correct and same(expected_output, actual_output)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -278,7 +318,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         ("dev", "name", "speedup"),
         [current_device, current_name, float(speedup)],
     )
-    return format_speedup(speedup, pvalue)
+    return format_speedup(speedup, pvalue, is_correct=is_correct)
 
 
 def overhead_experiment(*args, model_iter_fn):
@@ -529,6 +569,11 @@ def main():
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
+    )
+    parser.add_argument(
+        "--randomize-input",
+        action="store_true",
+        help="Whether to randomize the input values. Dimensions will be kept the same.",
     )
     parser.add_argument(
         "--threads", "-t", type=int, help="number of threads to use for eager"
