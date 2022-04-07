@@ -71,19 +71,16 @@ SKIP_TRAIN = {
     "maml",
     # Known issues with training
     "demucs",  # https://github.com/pytorch/benchmark/pull/639
-    "densenet121",  # https://github.com/pytorch/benchmark/issues/652
-    "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
     "hf_Reformer",  # Can only be used in the training phase
-    # AOT Autograd known issues
-    "dlrm",  # No sparse support
-    "resnet50_quantized_qat",  # Con2DBnRelu
     # Known TorchDynamo bug
     "hf_GPT2",  # Hard to debug stashed tensor issue
     "tacotron2",  # Model uses Variable
 }
 
 # Some models have bad train dataset. We read eval dataset.
-ONLY_EVAL_DATASET = {"yolov3"}
+# yolov3 - seems to have different number of inputs between eval and train
+# densenet121 - OOM for train, using eval for now.
+ONLY_EVAL_DATASET = {"yolov3", "densenet121"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
@@ -93,6 +90,8 @@ ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
 REQUIRE_HIGHER_TOLERANCE = {
     "alexnet",
     "attention_is_all_you_need_pytorch",
+    "densenet121",
+    "hf_Albert",
     "vgg16",
     "mobilenet_v3_large",
 }
@@ -574,6 +573,11 @@ def main():
         action="store_true",
         help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
     )
+    parser.add_argument(
+        "--disable-functionalization",
+        action="store_true",
+        help="Disables functionalization",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -855,6 +859,9 @@ def main():
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
+
+    if args.disable_functionalization:
+        torchdynamo.config.normalize_ir = False
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
