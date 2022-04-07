@@ -507,3 +507,17 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_is_quantized(a, b):
         if not a.is_quantized:
             return a + b
+
+    @make_test
+    def test_fstrings1(a, b):
+        x = 1.229
+        tmp = f"{x:.2f} bar"
+        if tmp.startswith("1.23"):
+            return a + b
+
+    @requires_static_shapes
+    @make_test
+    def test_fstrings2(x):
+        tmp = f"{x.shape[0]} bar"
+        if tmp.startswith("10"):
+            return x + 1
