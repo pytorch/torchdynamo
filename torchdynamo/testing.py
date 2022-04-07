@@ -84,6 +84,10 @@ def same(a, b, cos_similarity=False, tol=1e-4):
                 return False
         return True
     elif isinstance(a, torch.Tensor):
+        if a.is_sparse:
+            assert b.is_sparse
+            a = a.to_dense()
+            b = b.to_dense()
         assert isinstance(b, torch.Tensor)
         if cos_similarity:
             # TRT will bring error loss larger than current threshold. Use cosine similarity as replacement

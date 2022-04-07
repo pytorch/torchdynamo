@@ -2,6 +2,7 @@ import logging
 
 import torch
 
+from torchdynamo import config
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
@@ -27,13 +28,14 @@ class AOTAutogradStrategy(object):
         counters["aot_autograd"]["total"] += 1
         self.use_fallback = False
         self.original_example_inputs = example_inputs
-        try:
-            self.gm = normalize_ir(gm, self.example_inputs)
-        except Exception:
-            log.debug("TorchDynamo unable to remove mutation")
-            self.gm = gm
-            self.use_fallback = True
-            pass
+        self.gm = gm
+        if config.normalize_ir:
+            try:
+                self.gm = normalize_ir(gm, self.example_inputs)
+            except Exception:
+                log.debug("TorchDynamo unable to remove mutation")
+                self.use_fallback = True
+                pass
 
         gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
 
