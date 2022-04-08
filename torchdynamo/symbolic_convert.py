@@ -871,7 +871,9 @@ class InstructionTranslatorBase(object):
         elif (flags & 0x03) == 0x03:
             value = BuiltinVariable(ascii).call_function(self, [value], {})
 
-        fmt_var = ConstantVariable("{:" + fmt_spec.as_python_constant() + "}").add_options(fmt_spec)
+        fmt_var = ConstantVariable(
+            "{:" + fmt_spec.as_python_constant() + "}"
+        ).add_options(fmt_spec)
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
