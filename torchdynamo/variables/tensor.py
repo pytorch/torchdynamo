@@ -172,6 +172,9 @@ class TensorVariable(VariableTracker):
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
 
+        if name == "__class__":
+            return TorchVariable(self.python_type(), **options)
+
         if result is None:
             raise NotImplementedError()
 
