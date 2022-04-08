@@ -521,3 +521,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
         tmp = f"{x.shape[0]} bar"
         if tmp.startswith("10"):
             return x + 1
+
+    @make_test
+    def test_fstrings3(x):
+        tmp = f"{x.__class__.__name__} foo"
+        if tmp.startswith("Tensor"):
+            return x + 1
