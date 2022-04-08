@@ -198,6 +198,7 @@ class Kernel(CodeGen):
     overrides = None
     load_format = None
     store_format = None
+    schedule_group_fn = None
 
     def __init__(self, args=None):
         super().__init__()
@@ -252,3 +253,25 @@ class Kernel(CodeGen):
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
         }
         return index.subs(subs)
+
+
+class Scheduler:
+    def __init__(self, group_fn):
+        super(Scheduler, self).__init__()
+        self.group_fn = group_fn
+        self.reduction_loop_nests = collections.defaultdict(list)
+        self.loop_nests = collections.defaultdict(list)
+
+    def enqueue(self, outputs):
+        for output_name, node in outputs.items():
+            if node.get_reduction_type():
+                self.reduction_loop_nests[
+                    (
+                        self.group_fn(node.get_size()),
+                        self.group_fn(node.get_reduction_size()),
+                    )
+                ].append((output_name, node))
+            else:
+                self.loop_nests[self.group_fn(node.get_size())].append(
+                    (output_name, node)
+                )

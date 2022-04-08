@@ -131,6 +131,12 @@ class Reduction(TypedLoops):
 class BaseView(IRNode):
     data: IRNode
 
+    def get_dtype(self):
+        return self.data.get_dtype()
+
+    def get_device(self):
+        return self.data.get_device()
+
 
 @dataclasses.dataclass
 class ExpandView(BaseView):
@@ -138,12 +144,6 @@ class ExpandView(BaseView):
 
     def get_size(self):
         return self.size
-
-    def get_dtype(self):
-        return self.data.get_dtype()
-
-    def get_device(self):
-        return self.data.get_device()
 
     def make_loader(self):
         target = self.get_size()
@@ -159,6 +159,26 @@ class ExpandView(BaseView):
                     # zero out broadcast dimension
                     index[i] = sympy.Integer(0)
             return inner(index)
+
+        return load
+
+
+class SqueezeView(BaseView):
+    def get_size(self):
+        return [s for s in self.data.get_size() if s != 1]
+
+    def make_loader(self):
+        inner = self.data.make_loader()
+        size = self.data.get_size()
+        not_one = [i for i, s in enumerate(size) if s != 1]
+        length = len(size)
+
+        def load(index):
+            assert len(index) == len(not_one)
+            new_index = [sympy.Integer(0)] * length
+            for idx, s in zip(not_one, index):
+                new_index[idx] = s
+            return inner(new_index)
 
         return load
 

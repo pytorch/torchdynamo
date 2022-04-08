@@ -8,6 +8,7 @@ import torch.fx
 
 from .ir import ExpandView
 from .ir import Reduction
+from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import UnrealizedBuffer
 from .virtualized_ops import ops
@@ -142,7 +143,19 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering(aten.expand, type_promote=False, broadcast=False)
+@register_lowering(aten.detach)
+def detach(x):
+    assert isinstance(x, TensorBox)
+    return x  # AOT autograd handles this for us
+
+
+@register_lowering(aten.squeeze)
+def squeeze(x):
+    assert isinstance(x, TensorBox)
+    return TensorBox(SqueezeView(x.data))
+
+
+@register_lowering(aten.expand)
 def expand(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
@@ -154,6 +167,8 @@ def make_reduction(reduction_type: str):
         size = x.get_size()
         if axis is None:
             axis = range(len(size))
+        else:
+            assert reduction_type == "sum", "min/max need to find index"
         axis = list(axis)
         for i in range(len(axis)):
             if axis[i] < 0:

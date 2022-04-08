@@ -1,4 +1,3 @@
-import collections
 import itertools
 from itertools import chain
 
@@ -10,6 +9,7 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+from .common import Scheduler
 from .common import product
 
 
@@ -44,9 +44,12 @@ class TritonOverrides(OpOverrides):
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
+    schedule_group_fn = product
 
-    def __init__(self, numel, reduction_numel=sympy.Integer(1)):
+    def __init__(self, numel, reduction_numel):
         super(TritonKernel, self).__init__()
+        if reduction_numel is None:
+            reduction_numel = sympy.Integer(1)
         self.numel = numel
         self.reduction_numel = reduction_numel
         self.iter_range_tree = dict()
@@ -76,6 +79,9 @@ class TritonKernel(Kernel):
         return self._add_ranges(
             lengths, self.reduction_vars, self.reduction_range_tree, "r"
         )
+
+    def set_ranges(self, lengths, reduction_lengths):
+        return self.add_ranges(lengths), self.add_reduction_ranges(reduction_lengths)
 
     def indexing(self, index: sympy.Expr, reductions=True):
         index = self.rename_indexing(index)
@@ -134,35 +140,11 @@ class TritonKernel(Kernel):
 
     @classmethod
     def codegen(cls, outputs, schedule):
-        kernels = []
+        kernels = cls.schedule_kernels(outputs, TritonKernel)
+        cls.codegen_define_and_call(kernels, schedule)
 
-        # loop nests by number of elements
-        reduction_loop_nests = collections.defaultdict(list)
-        loop_nests = collections.defaultdict(list)
-        for output_name, node in outputs.items():
-            if node.get_reduction_type():
-                reduction_loop_nests[
-                    (product(node.get_size()), product(node.get_reduction_size()))
-                ].append((output_name, node))
-            else:
-                loop_nests[product(node.get_size())].append((output_name, node))
-
-        for (numel, reduction_numel), named_nodes in reduction_loop_nests.items():
-            with TritonKernel(numel, reduction_numel) as kernel:
-                for output_name, node in named_nodes:
-                    node.store_reduction(
-                        output_name,
-                        kernel.add_ranges(node.get_size()),
-                        kernel.add_reduction_ranges(node.get_reduction_size()),
-                    )
-                kernels.append(kernel)
-
-        for numel, named_nodes in loop_nests.items():
-            with TritonKernel(numel) as kernel:
-                for output_name, node in named_nodes:
-                    node.store_output(output_name, kernel.add_ranges(node.get_size()))
-                kernels.append(kernel)
-
+    @classmethod
+    def codegen_define_and_call(cls, kernels, schedule):
         for kernel in kernels:
             kernel_name = schedule.next_kernel_name()
             schedule.define_kernel(kernel_name, kernel.codegen_kernel())
@@ -295,3 +277,60 @@ class TritonKernel(Kernel):
         with code.indent():
             code.writeline(", ".join(call_args))
         code.writeline(")")
+
+    @classmethod
+    def schedule_kernels(cls, outputs, make_kernel):
+        scheduler = Scheduler(cls.schedule_group_fn)
+        scheduler.enqueue(outputs)
+
+        kernels = []
+
+        # first schedule reductions, as we can fuse non-reductions into them
+        for (
+            group,
+            reduction_group,
+        ), named_nodes in scheduler.reduction_loop_nests.items():
+            with make_kernel(group, reduction_group) as kernel:
+                kernels.append(kernel)
+                for output_name, node in named_nodes:
+                    vars, reduction_vars = kernel.set_ranges(
+                        node.get_size(), node.get_reduction_size()
+                    )
+                    node.store_reduction(output_name, vars, reduction_vars)
+
+                # fuse compatible non-reductions
+                for output_name, node in scheduler.loop_nests.pop(
+                    group * reduction_group, []
+                ):
+                    sizes = node.get_size()
+                    split = split_sizes(sizes, group, reduction_group)
+                    if split is None:
+                        scheduler.enqueue({output_name: node})
+                        continue
+                    vars, reduction_vars = kernel.set_ranges(
+                        sizes[:split], sizes[split:]
+                    )
+                    node.store_output(output_name, vars + reduction_vars)
+
+                # fuse more compatible non-reductions
+                kernel.inside_reduction = False
+                for output_name, node in scheduler.loop_nests.pop(group, []):
+                    vars, _ = kernel.set_ranges(node.get_size(), [])
+                    node.store_output(output_name, vars)
+                kernel.inside_reduction = True
+
+        for group, named_nodes in scheduler.loop_nests.items():
+            with make_kernel(group, None) as kernel:
+                kernels.append(kernel)
+                for output_name, node in named_nodes:
+                    vars, _ = kernel.set_ranges(node.get_size(), [])
+                    node.store_output(output_name, vars)
+
+        return kernels
+
+
+def split_sizes(sizes, prod1, prod2):
+    for i in range(len(sizes)):
+        if product(sizes[:i]) == prod1 and product(sizes[i:]) == prod2:
+            return i
+    return None

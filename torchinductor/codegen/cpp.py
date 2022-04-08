@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import dataclasses
 import functools
@@ -20,6 +19,7 @@ from .common import IndentedBuffer
 from .common import Kernel
 from .common import KernelArgs
 from .common import OpOverrides
+from .common import Scheduler
 from .common import product
 
 DTYPE_TO_CPP = {
@@ -99,6 +99,7 @@ class CppKernel(Kernel):
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
+    schedule_group_fn = tuple
 
     def __init__(self, args):
         super(CppKernel, self).__init__(args)
@@ -134,50 +135,36 @@ class CppKernel(Kernel):
         self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
 
     def set_ranges(self, lengths, reduction_lengths):
-        assert not self.ranges
-        self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
-        self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-        self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
-        self.reduction_depth = len(lengths)
-        return self.itervars[: len(lengths)], self.itervars[len(lengths) :]
+        if self.call_ranges:
+            assert self.call_ranges == tuple(lengths) + tuple(
+                reduction_lengths
+            ), f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
+            assert self.reduction_depth == len(lengths)
+        else:
+            self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
+            self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
+            self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
+            self.reduction_depth = len(lengths)
+        return (
+            self.itervars[: self.reduction_depth],
+            self.itervars[self.reduction_depth :],
+        )
 
     def size_hint(self):
         return graph.sizevars.size_hint(product(self.call_ranges))
 
     @classmethod
     def codegen(cls, outputs, schedule, threads=None):
+        args = KernelArgs()
+        kernels = cls.schedule_kernels(outputs, lambda g, rg: CppKernel(args))
+        cls.codegen_define_and_call(kernels, schedule, args, threads)
+
+    @classmethod
+    def codegen_define_and_call(cls, kernels, schedule, args, threads):
         if threads is None:
             threads = config.cpp.threads
         if threads < 1:
             threads = multiprocessing.cpu_count()
-
-        args = KernelArgs()
-        kernels = []
-
-        # group by common loop nests
-        reduction_loop_nests = collections.defaultdict(list)
-        loop_nests = collections.defaultdict(list)
-        for output_name, node in outputs.items():
-            if node.get_reduction_type():
-                reduction_loop_nests[
-                    (tuple(node.get_size()), tuple(node.get_reduction_size()))
-                ].append((output_name, node))
-            else:
-                loop_nests[tuple(node.get_size())].append((output_name, node))
-
-        for (sizes, reduction_sizes), name_nodes in reduction_loop_nests.items():
-            with CppKernel(args) as kernel:
-                vars, reduction_vars = kernel.set_ranges(sizes, reduction_sizes)
-                for output_name, node in name_nodes:
-                    node.store_reduction(output_name, vars, reduction_vars)
-                kernels.append(kernel)
-
-        for sizes, name_nodes in loop_nests.items():
-            with CppKernel(args) as kernel:
-                vars, _ = kernel.set_ranges(sizes, ())
-                for output_name, node in name_nodes:
-                    node.store_output(output_name, vars)
-                kernels.append(kernel)
 
         if (
             len(kernels) == 1
@@ -284,6 +271,56 @@ class CppKernel(Kernel):
             seq /= hint
         return depth
 
+    @contextlib.contextmanager
+    def write_to_suffix(self):
+        prior = (self.loads, self.compute, self.stores)
+        self.loads = IndentedBuffer()
+        self.compute = IndentedBuffer()
+        self.stores = IndentedBuffer()
+        yield
+        self.reduction_suffix.splice(self.loads)
+        self.reduction_suffix.splice(self.compute)
+        self.reduction_suffix.splice(self.stores)
+        (self.loads, self.compute, self.stores) = prior
+
+    @classmethod
+    def schedule_kernels(cls, outputs, make_kernel):
+        scheduler = Scheduler(cls.schedule_group_fn)
+        scheduler.enqueue(outputs)
+
+        kernels = []
+
+        # first schedule reductions, as we can fuse non-reductions into them
+        for (
+            group,
+            reduction_group,
+        ), named_nodes in scheduler.reduction_loop_nests.items():
+            with make_kernel(group, reduction_group) as kernel:
+                kernels.append(kernel)
+                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                for output_name, node in named_nodes:
+                    node.store_reduction(output_name, vars, reduction_vars)
+
+                # fuse compatible non-reductions
+                for output_name, node in scheduler.loop_nests.pop(
+                    group + reduction_group, []
+                ):
+                    node.store_output(output_name, vars + reduction_vars)
+
+                # fuse more compatible non-reductions
+                for output_name, node in scheduler.loop_nests.pop(group, []):
+                    with kernel.write_to_suffix():
+                        node.store_output(output_name, vars)
+
+        for group, named_nodes in scheduler.loop_nests.items():
+            with make_kernel(group, None) as kernel:
+                kernels.append(kernel)
+                for output_name, node in named_nodes:
+                    vars, _ = kernel.set_ranges(node.get_size(), [])
+                    node.store_output(output_name, vars)
+
+        return kernels
+
 
 class WorkSharing:
     def __init__(self, code):
@@ -304,8 +341,7 @@ class WorkSharing:
     def single(self):
         if self.in_parallel:
             self.code.writeline("#pragma omp single nowait")
-            return True
-        return False
+        return self.in_parallel
 
     def barrier(self):
         self.need_barrier = True
