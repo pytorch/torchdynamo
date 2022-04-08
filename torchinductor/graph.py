@@ -6,6 +6,7 @@ import torch.fx
 from sympy import Integer
 
 from . import config
+from . import virtualized_ops
 from .codegen.schedule import ScheduleCodeGen
 from .ir import Constant
 from .ir import FixedLayout
@@ -99,16 +100,17 @@ class GraphLowering(torch.fx.Interpreter):
         return result
 
     def codegen(self):
-        from torchinductor.codegen.cpp import CppPointwiseKernel
-        from torchinductor.codegen.triton import TritonPointwiseKernel
+        from .codegen.cpp import CppKernel
+        from .codegen.triton import TritonKernel
 
-        schedule = ScheduleCodeGen(self)
+        with virtualized_ops.graph.set_handler(self):
+            schedule = ScheduleCodeGen(self)
 
-        backends = {"cpu": CppPointwiseKernel, "cuda": TritonPointwiseKernel}
-        backend_cls = backends[self.device.type]
-        backend_cls.codegen(self, self.graph_outputs, schedule)
-        # TODO(jansel): manage a dependency graph
-        return schedule.generate()
+            backends = {"cpu": CppKernel, "cuda": TritonKernel}
+            backend_cls = backends[self.device.type]
+            backend_cls.codegen(self.graph_outputs, schedule)
+            # TODO(jansel): manage a dependency graph
+            return schedule.generate()
 
     def compile_to_fn(self):
         from .codecache import PyCodeCache

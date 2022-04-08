@@ -10,6 +10,8 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from .. import virtualized_ops
+from ..virtualized_ops import kernel
 from ..virtualized_ops import ops
 
 product = functools.partial(functools.reduce, operator.mul)
@@ -83,6 +85,8 @@ class IndentedBuffer:
         return ctx()
 
     def splice(self, other_code, strip=False):
+        if isinstance(other_code, IndentedBuffer):
+            other_code = other_code.getvalue()
         other_code = textwrap.dedent(other_code)
         if strip:
             other_code = other_code.lstrip()
@@ -94,11 +98,19 @@ class BracesBuffer(IndentedBuffer):
     def indent(self, offset=1):
         @contextlib.contextmanager
         def ctx():
-            self.writeline("{")
-            self._indent += offset
+            for _ in range(offset):
+                self.writeline("{")
+                self._indent += 1
+            for _ in range(-offset):
+                self._indent -= 1
+                self.writeline("}")
             yield
-            self._indent -= offset
-            self.writeline("}")
+            for _ in range(-offset):
+                self.writeline("{")
+                self._indent += 1
+            for _ in range(offset):
+                self._indent -= 1
+                self.writeline("}")
 
         return ctx()
 
@@ -155,11 +167,12 @@ class CSE:
         self.suffix = suffix
         self.cache = {}
 
-    def generate(self, buffer: IndentedBuffer, expr: str):
+    def generate(self, buffer: IndentedBuffer, expr: str, write=True):
         if expr not in self.cache:
             var = f"tmp{len(self.cache)}"
             self.cache[expr] = var
-            buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
+            if write:
+                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 
 
@@ -176,7 +189,7 @@ class CodeGen:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
-class PointwiseKernel(CodeGen):
+class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
     overrides = None
@@ -195,6 +208,9 @@ class PointwiseKernel(CodeGen):
         raise NotImplementedError()
 
     def store(self, name, index, value):
+        raise NotImplementedError()
+
+    def reduction(self, name, dtype, reduction_type, index, value):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -216,9 +232,14 @@ class PointwiseKernel(CodeGen):
             def store(name, index, value):
                 return self.store(name, index, value)
 
+            @staticmethod
+            def reduction(name, dtype, reduction_type, index, value):
+                return self.reduction(name, dtype, reduction_type, index, value)
+
         super().__enter__()
         parent_handler = self.overrides(ops.get_handler())
         self.exit_stack.enter_context(ops.set_handler(CSEProxy()))
+        self.exit_stack.enter_context(kernel.set_handler(self))
         return self
 
     def rename_indexing(self, index):

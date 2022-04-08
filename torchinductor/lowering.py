@@ -150,12 +150,15 @@ def expand(x, sizes):
 
 
 def make_reduction(reduction_type: str):
-    def inner(x, axis):
+    def inner(x, axis=None):
+        size = x.get_size()
+        if axis is None:
+            axis = range(len(size))
         axis = list(axis)
         for i in range(len(axis)):
             if axis[i] < 0:
-                axis[i] += len(axis)
-            assert 0 <= axis[i] < len(axis)
+                axis[i] += len(size)
+            assert 0 <= axis[i] < len(size)
         assert len(set(axis)) == len(axis), "reduction axis not unique"
         axis = set(axis)
 
@@ -163,7 +166,6 @@ def make_reduction(reduction_type: str):
         kept_idx = []
         reduced_sizes = []
         reduced_idx = []
-        size = x.get_size()
         for i in range(len(size)):
             if i in axis:
                 reduced_idx.append(i)
@@ -175,7 +177,7 @@ def make_reduction(reduction_type: str):
         def loader(index, reduction_index):
             assert len(index) == len(kept_idx)
             assert len(reduction_index) == len(reduced_idx)
-            new_index = [None] * len(index)
+            new_index = [None] * (len(index) + len(reduction_index))
             for idx, var in itertools.chain(
                 zip(kept_idx, index), zip(reduced_idx, reduction_index)
             ):
@@ -196,6 +198,8 @@ def make_reduction(reduction_type: str):
 
 
 register_lowering(aten.sum)(make_reduction("sum"))
+register_lowering(aten.max)(make_reduction("max"))
+register_lowering(aten.min)(make_reduction("min"))
 register_pointwise(aten.add)
 register_pointwise(aten.div)
 register_pointwise(aten.abs)

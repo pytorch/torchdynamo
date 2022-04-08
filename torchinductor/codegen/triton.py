@@ -8,8 +8,8 @@ import torch
 from .. import codecache
 from .common import ExprPrinter
 from .common import IndentedBuffer
+from .common import Kernel
 from .common import OpOverrides
-from .common import PointwiseKernel
 from .common import product
 
 
@@ -41,12 +41,12 @@ class TritonOverrides(OpOverrides):
         return f"tl.maximum({a}, {b})"
 
 
-class TritonPointwiseKernel(PointwiseKernel):
+class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
     def __init__(self, numel):
-        super(TritonPointwiseKernel, self).__init__()
+        super(TritonKernel, self).__init__()
         self.numel = numel
         self.iter_range_tree = dict()
         self.iter_vars_count = itertools.count()
@@ -91,7 +91,7 @@ class TritonPointwiseKernel(PointwiseKernel):
             loop_nests[product(node.get_size())].append((output_name, node))
 
         for numel, named_nodes in loop_nests.items():
-            with TritonPointwiseKernel(numel) as kernel:
+            with TritonKernel(numel) as kernel:
                 for output_name, node in named_nodes:
                     node.store_output(output_name, kernel.add_ranges(node.get_size()))
                 kernels.append(kernel)

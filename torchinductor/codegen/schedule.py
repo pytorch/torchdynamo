@@ -4,7 +4,7 @@ from itertools import count
 from torchinductor import codecache
 from torchinductor.codegen.common import CodeGen
 from torchinductor.codegen.common import IndentedBuffer
-from torchinductor.codegen.common import PointwiseKernel
+from torchinductor.codegen.common import Kernel
 
 
 class ScheduleCodeGen(CodeGen):
@@ -79,5 +79,5 @@ class ScheduleCodeGen(CodeGen):
     def define_kernel(self, name: str, kernel: str):
         self.header.splice(f"\n\n{name} = {kernel}")
 
-    def call_kernel(self, name: str, kernel: PointwiseKernel):
+    def call_kernel(self, name: str, kernel: Kernel):
         kernel.call_kernel(self, self.body, name)

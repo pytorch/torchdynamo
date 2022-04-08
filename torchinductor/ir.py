@@ -118,8 +118,12 @@ class Reduction(TypedLoops):
 
     def store_reduction(self, output_name, vars, reduction_vars):
         indexer = FixedLayout.indexer_from_sizes(self.get_size())
-        return ops.store(
-            output_name, indexer(vars), self.inner_fn(vars, reduction_vars)
+        return ops.reduction(
+            output_name,
+            self.dtype,
+            self.reduction_type,
+            indexer(vars),
+            self.inner_fn(vars, reduction_vars),
         )
 
 

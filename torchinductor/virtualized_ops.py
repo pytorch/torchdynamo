@@ -15,9 +15,9 @@ class Virtualized:
     This allows us to swap in different op implementations in codegen.
     """
 
-    def __init__(self, vname, default=None):
+    def __init__(self, vname, default):
         self._key = f"__torchinductor_{vname}"
-        self._default = default or MockHandler
+        self._default = default
 
     def set_handler(self, value):
         prior = self.get_handler()
@@ -67,5 +67,11 @@ class MockHandler:
         cls.store = make_handler("store({}[{}], {})")
 
 
+class NullHandler:
+    pass
+
+
 MockHandler._init_cls()
-ops = Virtualized("ops")
+ops = Virtualized("ops", MockHandler)
+graph = Virtualized("graph", NullHandler)
+kernel = Virtualized("kernel", NullHandler)
