@@ -646,15 +646,14 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
 @functools.lru_cache(None)
 def _init_ltc():
     try:
-        import lazy_tensor_core
-        from lazy_tensor_core import _LAZYC
+        import torch._lazy.extract_compiled_graph
+        from torch._lazy.ts_backend import init as init_ts_backend
 
         # hopefully changing this line to sth like _ltc_init_xla_backend in future
         # will enable XLA
-        _LAZYC._ltc_init_ts_backend()
-        import lazy_tensor_core.core.extract_compiled_graph
+        init_ts_backend()
 
-        return lazy_tensor_core
+        return torch._lazy
     except ModuleNotFoundError as e:
         print(f"ltc backend fails. Can not import {e.name}")
         raise
@@ -662,15 +661,16 @@ def _init_ltc():
 
 def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs):
     ltc = _init_ltc()
-    return ltc.core.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
+    return ltc.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
 
 
 def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
-    _init_ltc()
+    ltc = _init_ltc()
     lazy_model = copy.deepcopy(gm).to(device="lazy")
+    ltc.extract_compiled_graph.force_lazy_device(lazy_model)
 
     def ltc_model(*inputs):
-        orig_device = inputs[0].device
+        orig_device = inputs[0].device if len(inputs) > 0 else "cuda"
         lazy_inputs = tuple(inp.to(device="lazy") for inp in inputs)
 
         lazy_out = lazy_model(*lazy_inputs)
