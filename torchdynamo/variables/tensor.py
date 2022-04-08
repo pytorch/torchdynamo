@@ -173,7 +173,7 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
 
         if name == "__class__":
-            return TorchVariable(torch.Tensor, **options)
+            return TorchVariable(self.python_type(), **options)
 
         if result is None:
             raise NotImplementedError()
