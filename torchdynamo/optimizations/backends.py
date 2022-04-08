@@ -282,7 +282,7 @@ def taso(subgraph):
 def ipex(subgraph):
     import intel_extension_for_pytorch
 
-    return intel_extension_for_pytorch._optimize_catch_errors(subgraph.scripted)
+    return intel_extension_for_pytorch.optimize(subgraph.scripted)
 
 
 def _raise_timeout(signum, frame):
