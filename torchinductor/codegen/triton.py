@@ -45,50 +45,117 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, numel):
+    def __init__(self, numel, reduction_numel=sympy.Integer(1)):
         super(TritonKernel, self).__init__()
         self.numel = numel
+        self.reduction_numel = reduction_numel
         self.iter_range_tree = dict()
+        self.reduction_range_tree = dict()
+        self.iter_vars = []
+        self.reduction_vars = []
         self.iter_vars_count = itertools.count()
+        self.inside_reduction = reduction_numel != 1
 
-    def add_ranges(self, lengths):
+    def _add_ranges(self, lengths, var_list, tree, prefix):
         # make sure needed vars in in call_args
         self.rename_indexing(lengths[:-1])
         itervars = []
-        tree = self.iter_range_tree
         for sv in lengths:
             if sv not in tree:
-                tree[sv] = (sympy.Symbol(f"i{next(self.iter_vars_count)}"), dict())
+                sym = sympy.Symbol(f"{prefix}{next(self.iter_vars_count)}")
+                tree[sv] = (sym, dict())
+                var_list.append(sym)
             iv, tree = tree[sv]
             itervars.append(iv)
         return itervars
 
+    def add_ranges(self, lengths):
+        return self._add_ranges(lengths, self.iter_vars, self.iter_range_tree, "i")
+
+    def add_reduction_ranges(self, lengths):
+        return self._add_ranges(
+            lengths, self.reduction_vars, self.reduction_range_tree, "r"
+        )
+
+    def indexing(self, index: sympy.Expr, reductions=True):
+        index = self.rename_indexing(index)
+        offset = index.subs({v: 0 for v in chain(self.iter_vars, self.reduction_vars)})
+        base_part = index.subs({v: 0 for v in self.reduction_vars}) - offset
+        reduction_part = index.subs({v: 0 for v in self.iter_vars}) - offset
+        addr = []
+        if offset != 0:
+            addr.append(texpr(offset))
+
+        if base_part != 0:
+            addr.append(texpr(base_part))
+        else:
+            addr.append("tl.zeros((BLOCK_SIZE, ), tl.int32)")
+
+        if self.inside_reduction and reductions:
+            addr[-1] = f"tl.reshape({addr[-1]}, (BLOCK_SIZE, 1))"
+
+            if reduction_part != 0:
+                addr.append(texpr(reduction_part))
+            else:
+                addr.append("tl.zeros((REDUCTION_SIZE, ), tl.int32)")
+
+            addr[-1] = f"tl.reshape({addr[-1]}, (1, REDUCTION_SIZE))"
+        else:
+            assert reduction_part == 0
+
+        return " + ".join(addr)
+
+    def mask(self, reductions=True):
+        return (
+            "mask=mask_reduction"
+            if (self.inside_reduction and reductions)
+            else "mask=mask"
+        )
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
-        index = self.rename_indexing(index)
-        if len(index.free_symbols) == 0:
-            broadcast = " + " + self.cse.generate(
-                self.loads, "tl.zeros((BLOCK_SIZE, ), tl.int32)"
-            )
-        else:
-            broadcast = ""
-        line = f"tl.load({var} + {texpr(index)}{broadcast}, mask=mask)"
+        line = f"tl.load({var} + {self.indexing(index)}, {self.mask()})"
         return self.cse.generate(self.loads, line)
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, reductions=True):
         var = self.args.output(name)
-        index = self.rename_indexing(index)
-        line = f"tl.store({var} + {texpr(index)}, {value}, mask=mask)"
+        line = f"tl.store({var} + {self.indexing(index, reductions)}, {value}, {self.mask(reductions)})"
         self.stores.writeline(line)
 
+    def reduction(self, name, dtype, reduction_type, index, value):
+        default = {"sum": 0, "max": "float('-inf')", "min": "float('inf')"}
+        res = self.cse.generate(
+            self.compute,
+            f"tl.where(mask_reduction, {value}, "
+            f"{default[reduction_type]}) if NEED_MASK else {value}",
+        )
+        res = self.cse.generate(self.compute, f"tl.{reduction_type}({res}, 1)")
+        self.store(name, index, res, reductions=False)
+
     @classmethod
-    def codegen(cls, graph, outputs, schedule):
+    def codegen(cls, outputs, schedule):
         kernels = []
 
         # loop nests by number of elements
+        reduction_loop_nests = collections.defaultdict(list)
         loop_nests = collections.defaultdict(list)
         for output_name, node in outputs.items():
-            loop_nests[product(node.get_size())].append((output_name, node))
+            if node.get_reduction_type():
+                reduction_loop_nests[
+                    (product(node.get_size()), product(node.get_reduction_size()))
+                ].append((output_name, node))
+            else:
+                loop_nests[product(node.get_size())].append((output_name, node))
+
+        for (numel, reduction_numel), named_nodes in reduction_loop_nests.items():
+            with TritonKernel(numel, reduction_numel) as kernel:
+                for output_name, node in named_nodes:
+                    node.store_reduction(
+                        output_name,
+                        kernel.add_ranges(node.get_size()),
+                        kernel.add_reduction_ranges(node.get_reduction_size()),
+                    )
+                kernels.append(kernel)
 
         for numel, named_nodes in loop_nests.items():
             with TritonKernel(numel) as kernel:
@@ -103,13 +170,16 @@ class TritonKernel(Kernel):
 
     def codegen_kernel(self):
         code = IndentedBuffer()
+        heuristics = (
+            "reduction_heuristics" if self.inside_reduction else "pointwise_heuristics"
+        )
         code.splice(
             f"""
                 import triton
                 import triton.language as tl
-                from {codecache.__name__} import pointwise_heuristics
+                from {codecache.__name__} import reduction_heuristics, pointwise_heuristics
 
-                @triton.heuristics(pointwise_heuristics())
+                @triton.heuristics({heuristics}())
                 @triton.jit
             """
         )
@@ -121,11 +191,22 @@ class TritonKernel(Kernel):
         for var in self.args.sizevars.values():
             # argdefs.append(f"{var}: tl.constexpr")
             argdefs.append(f"{var}")
-        argdefs += [
-            "numel",
-            "BLOCK_SIZE: tl.constexpr",
-            "NEED_MASK: tl.constexpr",
-        ]
+
+        if self.inside_reduction:
+            argdefs += [
+                "numel",
+                "reduction_numel",
+                "BLOCK_SIZE: tl.constexpr",
+                "REDUCTION_SIZE: tl.constexpr",
+                "NEED_MASK: tl.constexpr",
+            ]
+
+        else:
+            argdefs += [
+                "numel",
+                "BLOCK_SIZE: tl.constexpr",
+                "NEED_MASK: tl.constexpr",
+            ]
 
         code.writeline(f"def kernel({', '.join(argdefs)}):")
         with code.indent():
@@ -133,19 +214,38 @@ class TritonKernel(Kernel):
                 """
                     offset = tl.program_id(0) * BLOCK_SIZE
                     indices0 = offset + tl.arange(0, BLOCK_SIZE)
+                """,
+                strip=True,
+            )
+
+            if self.inside_reduction:
+                code.splice(
+                    """
+                        reduction0 = tl.arange(0, REDUCTION_SIZE)
+                        if NEED_MASK:
+                            mask = indices0 < numel
+                            mask_reduction = (tl.reshape(mask, (BLOCK_SIZE, 1)) &
+                                              tl.reshape(reduction0 < reduction_numel, (1, REDUCTION_SIZE)))
+                        else:
+                            mask = None
+                            mask_reduction = None
+                    """,
+                    strip=True,
+                )
+            else:
+                code.splice(
+                    """
                     if NEED_MASK:
                         mask = indices0 < numel
                     else:
                         mask = None
                 """,
-                strip=True,
-            )
+                    strip=True,
+                )
 
-            def walk_indices(indices, tree):
+            def walk_indices(indices, tree, prefix, cnt):
                 """Splat out all our indexing math"""
-                nonlocal indices_count
-                indices_count += 1
-                subindices = f"indices{indices_count}"
+                subindices = f"{prefix}{next(cnt)}"
                 for size, (var, subtree) in tree.items():
                     if subtree:
                         size = TritonPrinter.paren(texpr(self.rename_indexing(size)))
@@ -156,12 +256,16 @@ class TritonKernel(Kernel):
                             """,
                             strip=True,
                         )
-                        walk_indices(subindices, subtree)
+                        walk_indices(subindices, subtree, prefix, cnt)
                     else:
                         code.writeline(f"{var} = {indices}")
 
-            indices_count = 0
-            walk_indices("indices0", self.iter_range_tree)
+            walk_indices(
+                "indices0", self.iter_range_tree, "indices", itertools.count(1)
+            )
+            walk_indices(
+                "reduction0", self.reduction_range_tree, "reduction", itertools.count(1)
+            )
 
             code.splice(self.loads.getvalue())
             code.splice(self.compute.getvalue())
@@ -184,6 +288,9 @@ class TritonKernel(Kernel):
         )
         code.writeline(f"{name}_numel = {texpr(self.numel)}")
         call_args.append(f"{name}_numel")
+        if self.inside_reduction:
+            code.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
+            call_args.append(f"{name}_reduction_numel")
         code.writeline(f"{name}[grid({name}_numel)](")
         with code.indent():
             code.writeline(", ".join(call_args))

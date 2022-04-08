@@ -10,11 +10,12 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
-from .. import virtualized_ops
 from ..virtualized_ops import kernel
 from ..virtualized_ops import ops
 
-product = functools.partial(functools.reduce, operator.mul)
+
+def product(it):
+    return functools.reduce(operator.mul, it, sympy.Integer(1))
 
 
 class ExprPrinter(Printer):
@@ -90,6 +91,8 @@ class IndentedBuffer:
         other_code = textwrap.dedent(other_code)
         if strip:
             other_code = other_code.lstrip()
+        if not other_code:
+            return
         assert other_code.endswith("\n")
         self.contents.write(textwrap.indent(other_code, self.prefix()))
 
@@ -242,7 +245,7 @@ class Kernel(CodeGen):
         self.exit_stack.enter_context(kernel.set_handler(self))
         return self
 
-    def rename_indexing(self, index):
+    def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         subs = {

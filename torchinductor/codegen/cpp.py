@@ -14,7 +14,6 @@ import torch
 from .. import codecache
 from .. import config
 from ..virtualized_ops import graph
-from ..virtualized_ops import kernel
 from .common import BracesBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
@@ -171,7 +170,6 @@ class CppKernel(Kernel):
                 vars, reduction_vars = kernel.set_ranges(sizes, reduction_sizes)
                 for output_name, node in name_nodes:
                     node.store_reduction(output_name, vars, reduction_vars)
-
                 kernels.append(kernel)
 
         for sizes, name_nodes in loop_nests.items():
