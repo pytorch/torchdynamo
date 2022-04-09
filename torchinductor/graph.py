@@ -6,7 +6,7 @@ import torch.fx
 from sympy import Integer
 
 from . import config
-from . import virtualized_ops
+from . import ir
 from .codegen.schedule import ScheduleCodeGen
 from .ir import Constant
 from .ir import FixedLayout
@@ -55,6 +55,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs = collections.OrderedDict()
         self.graph_outputs = None
         self.device = None
+        self.buffers = []
+
+    def register_buffer(self, buffer: ir.ComputedBuffer):
+        name = f"buf{len(self.buffers)}"
+        self.buffers.append(buffer)
+        return name
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
@@ -64,9 +70,8 @@ class GraphLowering(torch.fx.Interpreter):
         sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
         data = InputBuffer(
-            FixedLayout(example.device, example.dtype, sizes, strides),
-            len(self.graph_inputs),
             target,
+            FixedLayout(example.device, example.dtype, sizes, strides),
         )
         tensor = TensorBox.create(data)
         self.graph_inputs[target] = tensor
@@ -87,9 +92,11 @@ class GraphLowering(torch.fx.Interpreter):
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
         assert isinstance(result, tuple)
-        self.graph_outputs = collections.OrderedDict(
-            (f"out{i}", r) for i, r in enumerate(result)
-        )
+        assert all(isinstance(x, TensorBox) for x in result)
+        assert all(
+            isinstance(x.data, ir.StorageBox) for x in result
+        ), "TODO: returning views"
+        self.graph_outputs = [x.realize() for x in result]
 
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
@@ -103,14 +110,13 @@ class GraphLowering(torch.fx.Interpreter):
         from .codegen.cpp import CppKernel
         from .codegen.triton import TritonKernel
 
-        with virtualized_ops.graph.set_handler(self):
-            schedule = ScheduleCodeGen(self)
+        schedule = ScheduleCodeGen(self)
 
-            backends = {"cpu": CppKernel, "cuda": TritonKernel}
-            backend_cls = backends[self.device.type]
-            backend_cls.codegen(self.graph_outputs, schedule)
-            # TODO(jansel): manage a dependency graph
-            return schedule.generate()
+        backends = {"cpu": CppKernel, "cuda": TritonKernel}
+        backend_cls = backends[self.device.type]
+        backend_cls.codegen(schedule)
+        # TODO(jansel): manage a dependency graph
+        return schedule.generate()
 
     def compile_to_fn(self):
         from .codecache import PyCodeCache

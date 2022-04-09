@@ -40,6 +40,10 @@ class Virtualized:
         return getattr(self.get_handler(), name)
 
 
+class NullHandler:
+    pass
+
+
 class MockHandler:
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -63,15 +67,9 @@ class MockHandler:
         ):
             setattr(cls, name, make_handler(format_string))
 
-        cls.load = make_handler("{}[{}]")
-        cls.store = make_handler("store({}[{}], {})")
-
-
-class NullHandler:
-    pass
-
 
 MockHandler._init_cls()
+
 ops = Virtualized("ops", MockHandler)
 graph = Virtualized("graph", NullHandler)
 kernel = Virtualized("kernel", NullHandler)

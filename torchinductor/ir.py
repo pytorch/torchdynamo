@@ -1,4 +1,5 @@
 import dataclasses
+from functools import partial
 from typing import Any
 from typing import Callable
 from typing import List
@@ -8,7 +9,9 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
-from .virtualized_ops import ops
+from .dependencies import extract_read_writes
+from .virtualized import graph
+from .virtualized import ops
 
 
 class IRNode(object):
@@ -85,9 +88,6 @@ class TypedLoops(Loops):
 
     def get_device(self):
         return self.device
-
-    def get_stride(self):
-        return FixedLayout.default_strides(self.get_size())
 
 
 class UnrealizedBuffer(TypedLoops):
@@ -210,7 +210,11 @@ class Constant(IRNode):
 
 @dataclasses.dataclass
 class Buffer(IRNode):
+    name: str
     layout: Layout
+
+    def get_name(self):
+        return self.name
 
     def get_size(self):
         return self.layout.size
@@ -232,11 +236,30 @@ class Buffer(IRNode):
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
-    index: int
-    name: str
-
     def get_stride(self):
         return self.layout.stride
+
+
+@dataclasses.dataclass
+class ComputedBuffer(Buffer):
+    data: TypedLoops
+
+    def get_stride(self):
+        assert isinstance(self.layout, FlexibleLayout)
+        return FixedLayout.default_strides(self.get_size())
+
+    def get_read_writes(self):
+        if self.data.get_reduction_type():
+            return extract_read_writes(
+                partial(self.data.store_reduction, self.name),
+                len(self.data.get_size()),
+                len(self.data.get_reduction_size()),
+            )
+        else:
+            return extract_read_writes(
+                partial(self.data.store_output, self.name),
+                len(self.data.get_size()),
+            )
 
 
 @dataclasses.dataclass
@@ -260,11 +283,23 @@ class TensorBox(MutableBox):
         return TensorBox(StorageBox(data))
 
     def mark_reuse(self, users):
-        pass
+        pass  # TODO(jansel): realize the buffers?
 
 
 class StorageBox(MutableBox):
-    pass
+    def realize(self):
+        assert isinstance(self.data, (UnrealizedBuffer, Reduction))
+        self.data = ComputedBuffer(
+            name=None,
+            layout=FlexibleLayout(
+                device=self.data.get_device(),
+                dtype=self.data.get_dtype(),
+                size=self.data.get_size(),
+            ),
+            data=self.data,
+        )
+        self.data.name = graph.register_buffer(self.data)
+        return self.data.name
 
 
 @dataclasses.dataclass

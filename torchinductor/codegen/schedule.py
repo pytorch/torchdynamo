@@ -50,11 +50,12 @@ class ScheduleCodeGen(CodeGen):
             stride = tuple(value.get_stride())
             empty_like_cache.setdefault((device, dtype, shape, stride), name)
 
-        for name, value in self.graph.graph_outputs.items():
-            device = value.get_device()
-            dtype = value.get_dtype()
-            shape = tuple(value.get_size())
-            stride = tuple(value.get_stride())
+        for buffer in self.graph.buffers:
+            name = buffer.get_name()
+            device = buffer.get_device()
+            dtype = buffer.get_dtype()
+            shape = tuple(buffer.get_size())
+            stride = tuple(buffer.get_stride())
             key = (device, dtype, shape, stride)
             # TODO(jansel): strides?
             if key in empty_like_cache:
@@ -63,17 +64,15 @@ class ScheduleCodeGen(CodeGen):
                 code.writeline(
                     f"{name} = empty([{', '.join(map(str, shape))}], device='{device.type}', dtype={dtype})"
                 )
-        for name, value in chain(
-            self.graph.graph_inputs.items(), self.graph.graph_outputs.items()
-        ):
+
+        for value in chain(self.graph.graph_inputs.values(), self.graph.buffers):
+            name = value.get_name()
             device = value.get_device()
             if device.type == "cpu":
                 code.writeline(f"{name}_ptr = c_void_p({name}.data_ptr())")
 
     def generate(self):
-        self.body.writeline(
-            "return (" + ", ".join(self.graph.graph_outputs.keys()) + ", )"
-        )
+        self.body.writeline("return (" + ", ".join(self.graph.graph_outputs) + ", )")
         return f"{self.header.getvalue()}\n\n{self.body.getvalue()}"
 
     def define_kernel(self, name: str, kernel: str):

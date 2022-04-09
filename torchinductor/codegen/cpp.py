@@ -12,7 +12,7 @@ import torch
 
 from .. import codecache
 from .. import config
-from ..virtualized_ops import graph
+from ..virtualized import graph
 from .common import BracesBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
@@ -99,7 +99,6 @@ class CppKernel(Kernel):
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
-    schedule_group_fn = tuple
 
     def __init__(self, args):
         super(CppKernel, self).__init__(args)
@@ -154,9 +153,9 @@ class CppKernel(Kernel):
         return graph.sizevars.size_hint(product(self.call_ranges))
 
     @classmethod
-    def codegen(cls, outputs, schedule, threads=None):
+    def codegen(cls, schedule, threads=None):
         args = KernelArgs()
-        kernels = cls.schedule_kernels(outputs, lambda g, rg: CppKernel(args))
+        kernels = cls.schedule_kernels(args)
         cls.codegen_define_and_call(kernels, schedule, args, threads)
 
     @classmethod
@@ -284,40 +283,30 @@ class CppKernel(Kernel):
         (self.loads, self.compute, self.stores) = prior
 
     @classmethod
-    def schedule_kernels(cls, outputs, make_kernel):
-        scheduler = Scheduler(cls.schedule_group_fn)
-        scheduler.enqueue(outputs)
+    def schedule_kernels(cls, args):
+        scheduler = Scheduler(tuple)
+        scheduler.add_nodes(graph.buffers)
 
         kernels = []
 
-        # first schedule reductions, as we can fuse non-reductions into them
-        for (
-            group,
-            reduction_group,
-        ), named_nodes in scheduler.reduction_loop_nests.items():
-            with make_kernel(group, reduction_group) as kernel:
+        for group, reduction_group in scheduler.iter_runable_groups():
+            with CppKernel(args) as kernel:
                 kernels.append(kernel)
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                for output_name, node in named_nodes:
-                    node.store_reduction(output_name, vars, reduction_vars)
 
-                # fuse compatible non-reductions
-                for output_name, node in scheduler.loop_nests.pop(
-                    group + reduction_group, []
-                ):
-                    node.store_output(output_name, vars + reduction_vars)
+                # first any pointwise sharing same loops
+                for node in scheduler.pop_group((group + reduction_group, ())):
+                    node.run(vars, reduction_vars)
 
-                # fuse more compatible non-reductions
-                for output_name, node in scheduler.loop_nests.pop(group, []):
+                if reduction_group:
+                    # reductions
+                    for node in scheduler.pop_group((group, reduction_group)):
+                        node.run(vars, reduction_vars)
+
+                    # we can fuse in some extra pointwise into the suffix
                     with kernel.write_to_suffix():
-                        node.store_output(output_name, vars)
-
-        for group, named_nodes in scheduler.loop_nests.items():
-            with make_kernel(group, None) as kernel:
-                kernels.append(kernel)
-                for output_name, node in named_nodes:
-                    vars, _ = kernel.set_ranges(node.get_size(), [])
-                    node.store_output(output_name, vars)
+                        for node in scheduler.pop_group((group, ())):
+                            node.run(vars, ())
 
         return kernels
 

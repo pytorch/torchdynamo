@@ -53,8 +53,9 @@ def compute_speedups(args, models, example_inputs):
 def microbenchmark(args, model, example_inputs):
     gm, wrap = python_key_normalize(fx.symbolic_trace(model), example_inputs)
     graph = GraphLowering(gm)
-    wrap(graph.run)(*example_inputs)
-    compiled_fn = graph.compile_to_fn()
+    with torchinductor.virtualized.graph.set_handler(graph):
+        wrap(graph.run)(*example_inputs)
+        compiled_fn = graph.compile_to_fn()
     return compute_speedups(
         args,
         [model, torch.jit.trace(model, example_inputs), wrap(compiled_fn)],

@@ -11,7 +11,7 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import UnrealizedBuffer
-from .virtualized_ops import ops
+from .virtualized import ops
 
 lowerings = {}
 aten = torch.ops.aten

@@ -4,6 +4,7 @@ import importlib
 import unittest
 
 import torch
+import torchinductor
 from torch import fx
 from torchinductor import config
 from torchinductor.graph import GraphLowering
@@ -67,9 +68,9 @@ def check_model(self: TestCase, model, example_inputs):
     gm, wrap = python_key_normalize(fx.symbolic_trace(model), example_inputs)
     gm.graph.print_tabular()
     graph = GraphLowering(gm)
-    wrap(graph.run)(*example_inputs)
-
-    compiled_fn = graph.compile_to_fn()
+    with torchinductor.virtualized.graph.set_handler(graph):
+        wrap(graph.run)(*example_inputs)
+        compiled_fn = graph.compile_to_fn()
     actual = wrap(compiled_fn)(*example_inputs)
     correct = model(*example_inputs)
     self.assertTrue(same(actual, correct))

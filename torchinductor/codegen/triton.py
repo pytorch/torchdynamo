@@ -5,6 +5,7 @@ import sympy
 import torch
 
 from .. import codecache
+from ..virtualized import graph
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
@@ -44,7 +45,6 @@ class TritonOverrides(OpOverrides):
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
-    schedule_group_fn = product
 
     def __init__(self, numel, reduction_numel):
         super(TritonKernel, self).__init__()
@@ -139,8 +139,8 @@ class TritonKernel(Kernel):
         self.store(name, index, res, reductions=False)
 
     @classmethod
-    def codegen(cls, outputs, schedule):
-        kernels = cls.schedule_kernels(outputs, TritonKernel)
+    def codegen(cls, schedule):
+        kernels = cls.schedule_kernels()
         cls.codegen_define_and_call(kernels, schedule)
 
     @classmethod
@@ -279,52 +279,42 @@ class TritonKernel(Kernel):
         code.writeline(")")
 
     @classmethod
-    def schedule_kernels(cls, outputs, make_kernel):
-        scheduler = Scheduler(cls.schedule_group_fn)
-        scheduler.enqueue(outputs)
+    def schedule_kernels(cls):
+        scheduler = Scheduler(product)
+        scheduler.add_nodes(graph.buffers)
 
         kernels = []
 
-        # first schedule reductions, as we can fuse non-reductions into them
-        for (
-            group,
-            reduction_group,
-        ), named_nodes in scheduler.reduction_loop_nests.items():
-            with make_kernel(group, reduction_group) as kernel:
+        for group, reduction_group in scheduler.iter_runable_groups():
+            reschedule = []
+            with TritonKernel(group, reduction_group) as kernel:
                 kernels.append(kernel)
-                for output_name, node in named_nodes:
-                    vars, reduction_vars = kernel.set_ranges(
-                        node.get_size(), node.get_reduction_size()
-                    )
-                    node.store_reduction(output_name, vars, reduction_vars)
+                for _ in scheduler.iter_fixed_point():
+                    for node in scheduler.pop_group(
+                        (group, reduction_group),
+                    ):
+                        node.run(*kernel.set_ranges(*node.get_ranges()))
 
-                # fuse compatible non-reductions
-                for output_name, node in scheduler.loop_nests.pop(
-                    group * reduction_group, []
-                ):
-                    sizes = node.get_size()
-                    split = split_sizes(sizes, group, reduction_group)
-                    if split is None:
-                        scheduler.enqueue({output_name: node})
-                        continue
-                    vars, reduction_vars = kernel.set_ranges(
-                        sizes[:split], sizes[split:]
-                    )
-                    node.store_output(output_name, vars + reduction_vars)
+                    if kernel.inside_reduction:
+                        # Add pointwise with compatible dimensions
+                        for node in scheduler.pop_group(
+                            (group * reduction_group, sympy.Integer(1)),
+                        ):
+                            sizes, _ = node.get_ranges()
+                            split = split_sizes(sizes, group, reduction_group)
+                            if split is None:
+                                reschedule.append(node)
+                            else:
+                                node.run(
+                                    *kernel.set_ranges(sizes[:split], sizes[split:])
+                                )
 
-                # fuse more compatible non-reductions
-                kernel.inside_reduction = False
-                for output_name, node in scheduler.loop_nests.pop(group, []):
-                    vars, _ = kernel.set_ranges(node.get_size(), [])
-                    node.store_output(output_name, vars)
-                kernel.inside_reduction = True
-
-        for group, named_nodes in scheduler.loop_nests.items():
-            with make_kernel(group, None) as kernel:
-                kernels.append(kernel)
-                for output_name, node in named_nodes:
-                    vars, _ = kernel.set_ranges(node.get_size(), [])
-                    node.store_output(output_name, vars)
+                        # Add more pointwise with fewer dimensions
+                        kernel.inside_reduction = False
+                        for node in scheduler.pop_group((group, sympy.Integer(1))):
+                            node.run(*kernel.set_ranges(*node.get_ranges()))
+                        kernel.inside_reduction = True
+            scheduler.enqueue(reschedule)
 
         return kernels
 
