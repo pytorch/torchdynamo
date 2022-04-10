@@ -47,6 +47,7 @@ class BuiltinVariable(VariableTracker):
             round,
             set,
             str,
+            str.format,
             sum,
             tuple,
             type,

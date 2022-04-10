@@ -855,6 +855,36 @@ class InstructionTranslatorBase(object):
         self.push(b)
         self.push(a)
 
+    def FORMAT_VALUE(self, inst):
+        flags = inst.arg
+        if (flags & 0x04) == 0x04:
+            fmt_spec = self.pop()
+        else:
+            fmt_spec = ConstantVariable("")
+
+        value = self.pop()
+
+        if (flags & 0x03) == 0x01:
+            value = BuiltinVariable(str).call_function(self, [value], {})
+        elif (flags & 0x03) == 0x02:
+            value = BuiltinVariable(repr).call_function(self, [value], {})
+        elif (flags & 0x03) == 0x03:
+            value = BuiltinVariable(ascii).call_function(self, [value], {})
+
+        fmt_var = ConstantVariable(
+            "{:" + fmt_spec.as_python_constant() + "}"
+        ).add_options(fmt_spec)
+
+        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+
+    def BUILD_STRING(self, inst):
+        result = ""
+        for _ in range(inst.arg):
+            str_var = self.pop()
+            assert isinstance(str_var, ConstantVariable)
+            result = str_var.value + result
+        self.push(ConstantVariable(value=result))
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)

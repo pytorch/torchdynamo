@@ -71,23 +71,30 @@ SKIP_TRAIN = {
     "maml",
     # Known issues with training
     "demucs",  # https://github.com/pytorch/benchmark/pull/639
-    "densenet121",  # https://github.com/pytorch/benchmark/issues/652
-    "hf_Albert",  # https://github.com/pytorch/benchmark/issues/652
     "hf_Reformer",  # Can only be used in the training phase
-    # AOT Autograd known issues
-    "dlrm",  # No sparse support
-    "resnet50_quantized_qat",  # Con2DBnRelu
     # Known TorchDynamo bug
     "hf_GPT2",  # Hard to debug stashed tensor issue
     "tacotron2",  # Model uses Variable
 }
 
 # Some models have bad train dataset. We read eval dataset.
-ONLY_EVAL_DATASET = {"yolov3"}
+# yolov3 - seems to have different number of inputs between eval and train
+# densenet121 - OOM for train, using eval for now.
+ONLY_EVAL_DATASET = {"yolov3", "densenet121"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
 ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
+
+# Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
+REQUIRE_HIGHER_TOLERANCE = {
+    "alexnet",
+    "attention_is_all_you_need_pytorch",
+    "densenet121",
+    "hf_Albert",
+    "vgg16",
+    "mobilenet_v3_large",
+}
 
 current_name = ""
 current_device = ""
@@ -110,7 +117,7 @@ def iter_models(args):
     for model_name in iter_model_names(args):
         for device in args.devices:
             try:
-                yield load_model(device, model_name, args.training, args.check_accuracy)
+                yield load_model(device, model_name, args.training, args.use_eval_mode)
             except NotImplementedError:
                 continue  # bad benchmark implementation
 
@@ -130,7 +137,7 @@ def iter_model_names(args):
         yield model_name
 
 
-def load_model(device, model_name, is_training, check_accuracy):
+def load_model(device, model_name, is_training, use_eval_mode):
     module = importlib.import_module(f"torchbenchmark.models.{model_name}")
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
@@ -142,7 +149,7 @@ def load_model(device, model_name, is_training, check_accuracy):
     model, example_inputs = benchmark.get_module()
 
     # Models that must be in train mode while training
-    if is_training and (not check_accuracy or model_name in ONLY_TRAINING_MODE):
+    if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
         model.train()
     else:
         model.eval()
@@ -153,17 +160,17 @@ def load_model(device, model_name, is_training, check_accuracy):
     return device, current_name, model, example_inputs
 
 
-def timed(model, model_iter_fn, example_inputs, times=1):
+def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
     gc.collect()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
-        model_iter_fn(model, example_inputs, collect_outputs=False)
+        result = model_iter_fn(model, example_inputs, collect_outputs=False)
         synchronize()
     t1 = time.perf_counter()
-    return t1 - t0
+    return (t1 - t0, result) if return_result else t1 - t0
 
 
 class Stats:
@@ -247,6 +254,30 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
     return speedup_experiment(args, model_iter_fn, model, example_inputs)
 
 
+def randomize_input(inputs):
+    if isinstance(inputs, (list, tuple)):
+        return type(inputs)([randomize_input(x) for x in inputs])
+    elif isinstance(inputs, torch.Tensor):
+        if inputs.dtype in (torch.float32, torch.float64):
+            torchdynamo.utils.counters["randomize_input"]["times"] += 1
+            return torch.randn_like(inputs)
+        elif inputs.dtype == torch.int64:
+            # Note: we can not simply tune integer tensors as follows
+            #   `return torch.randint_like(inputs, high=inputs.max().item())`
+            # This may break some invariants between tensors.
+            # E.g. in embedding lookup case, one tensor is the length
+            # and another is an indices tensor.
+            return inputs
+        else:
+            raise RuntimeError(
+                f"randomize_input need support tensor of type {inputs.dtype}"
+            )
+    else:
+        raise RuntimeError(
+            f"randomize_input can not handle input of type {type(inputs)}"
+        )
+
+
 def speedup_experiment(args, model_iter_fn, model, example_inputs):
     """
     Measure speedups over eager using the autotuning inference backend.  To use this:
@@ -257,11 +288,27 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     Writes to ./speedups.csv
     """
     timings = np.zeros((args.repeat, 2), np.float64)
+    # if we randomize the input, we should also check the result is correct
+    should_check_result = should_randomize_input = args.randomize_input
+    is_correct = True
+
     for rep in range(args.repeat):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+
         # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0] = timed(model, model_iter_fn, example_inputs)
+        timings[rep, 0], expected_output = timed(
+            model, model_iter_fn, inputs, return_result=True
+        )
         with torchdynamo.run():
-            timings[rep, 1] = timed(model, model_iter_fn, example_inputs)
+            timings[rep, 1], actual_output = timed(
+                model, model_iter_fn, inputs, return_result=True
+            )
+        if should_check_result:
+            is_correct = is_correct and same(expected_output, actual_output)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -270,7 +317,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         ("dev", "name", "speedup"),
         [current_device, current_name, float(speedup)],
     )
-    return format_speedup(speedup, pvalue)
+    return format_speedup(speedup, pvalue, is_correct=is_correct)
 
 
 def overhead_experiment(*args, model_iter_fn):
@@ -497,15 +544,16 @@ def cast_to_fp16(model, inputs):
             inputs,
         )
     )
-    # TRT does not support int64. Some model need to down level precison
-    inputs = tuple(
-        tree_map(
-            lambda x: x.to(torch.int32)
-            if getattr(x, "dtype", None) == torch.int64
-            else x,
-            inputs,
+    # TRT does not support int64. Some model does need it like Super_SloMo
+    if current_name != "Super_SloMo" and current_name != "fastNLP_Bert":
+        inputs = tuple(
+            tree_map(
+                lambda x: x.to(torch.int32)
+                if getattr(x, "dtype", None) == torch.int64
+                else x,
+                inputs,
+            )
         )
-    )
     return model, inputs
 
 
@@ -520,6 +568,11 @@ def main():
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
+    )
+    parser.add_argument(
+        "--randomize-input",
+        action="store_true",
+        help="Whether to randomize the input values. Dimensions will be kept the same.",
     )
     parser.add_argument(
         "--threads", "-t", type=int, help="number of threads to use for eager"
@@ -551,14 +604,24 @@ def main():
         help="Performs training",
     )
     parser.add_argument(
-        "--check-accuracy",
+        "--use-eval-mode",
         action="store_true",
         help="sets model.eval() to reduce randomness",
+    )
+    parser.add_argument(
+        "--skip-accuracy-check",
+        action="store_true",
+        help="keeps running even when accuracy fails",
     )
     parser.add_argument(
         "--generate-aot-autograd-stats",
         action="store_true",
         help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+    )
+    parser.add_argument(
+        "--disable-functionalization",
+        action="store_true",
+        help="Disables functionalization",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -798,8 +861,6 @@ def main():
         )
         experiment = speedup_experiment
         output_filename = "accuracy_aot_nop.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.accuracy_aot_ts:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_nnc_strategy, nopython=args.nopython
@@ -807,8 +868,6 @@ def main():
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.accuracy_aot_ts_mincut:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_speedup_strategy, nopython=args.nopython
@@ -816,15 +875,11 @@ def main():
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.accuracy_ts:
         optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_{backend_str}.csv"
-        args.check_accuracy = True
-        args.isolate = True
     elif args.nothing:
         pass
     elif args.nops:
@@ -850,13 +905,16 @@ def main():
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
 
+    if args.disable_functionalization:
+        torchdynamo.config.normalize_ir = False
+
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
     if args.only:
         for device in args.devices:
             try:
                 device, name, model, example_inputs = load_model(
-                    device, args.only, args.training, args.check_accuracy
+                    device, args.only, args.training, args.use_eval_mode
                 )
                 # torchbench changed the default precison=fp16 on torchvision net
                 if args.speedup_fx2trt:
@@ -887,6 +945,7 @@ def main():
                 optimize_ctx,
                 experiment,
                 cos_similarity,
+                args.skip_accuracy_check,
             )
         stats_file = output_filename.split(".csv")[0] + "_stats.csv"
         if args.generate_aot_autograd_stats:
@@ -922,6 +981,7 @@ def main():
                 optimize_ctx,
                 experiment,
                 cos_similarity,
+                args.skip_accuracy_check,
             )
 
         Stats.print_summary()
@@ -960,7 +1020,13 @@ def run_one_model(
     optimize_ctx,
     experiment,
     cos_similarity=False,
+    skip_accuracy_check=False,
 ):
+    tolerance = 1e-4
+    # Increase the tolerance for torch allclose
+    if is_training and current_device == "cuda" and name in REQUIRE_HIGHER_TOLERANCE:
+        tolerance = 1e-3
+
     with pick_grad(name, is_training):
         mode = "train" if is_training else "eval"
         sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
@@ -975,7 +1041,8 @@ def run_one_model(
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
             if not same(correct_result, correct_rerun_result):
                 print("INCORRECT - Variation in Eager runs itself")
-                return sys.exit(-1)
+                if not skip_accuracy_check:
+                    return sys.exit(-1)
 
         torch.manual_seed(1337)
         torchdynamo.reset()
@@ -991,9 +1058,10 @@ def run_one_model(
             # check correctness.
             # TODO(jansel): submit upstream fix for this
             pass
-        elif not same(correct_result, new_result, cos_similarity):
+        elif not same(correct_result, new_result, cos_similarity, tolerance):
             print("INCORRECT")
-            return sys.exit(-1)
+            if not skip_accuracy_check:
+                return sys.exit(-1)
         ok, total = Stats.reset_counters()
         results = []
 
