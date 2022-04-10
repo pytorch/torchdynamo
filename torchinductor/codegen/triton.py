@@ -7,6 +7,7 @@ import torch
 from .. import codecache
 from ..scheduler import Scheduler
 from ..virtualized import graph
+from ..virtualized import ops
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
@@ -83,7 +84,7 @@ class TritonKernel(Kernel):
     def set_ranges(self, lengths, reduction_lengths):
         return self.add_ranges(lengths), self.add_reduction_ranges(reduction_lengths)
 
-    def indexing(self, index: sympy.Expr, reductions=True):
+    def indexing(self, index: sympy.Expr):
         index = self.rename_indexing(index)
         offset = index.subs({v: 0 for v in chain(self.iter_vars, self.reduction_vars)})
         base_part = index.subs({v: 0 for v in self.reduction_vars}) - offset
@@ -97,7 +98,7 @@ class TritonKernel(Kernel):
         else:
             addr.append("tl.zeros((BLOCK_SIZE, ), tl.int32)")
 
-        if self.inside_reduction and reductions:
+        if self.inside_reduction:
             addr[-1] = f"tl.reshape({addr[-1]}, (BLOCK_SIZE, 1))"
 
             if reduction_part != 0:
@@ -123,9 +124,9 @@ class TritonKernel(Kernel):
         line = f"tl.load({var} + {self.indexing(index)}, {self.mask()})"
         return self.cse.generate(self.loads, line)
 
-    def store(self, name, index, value, reductions=True):
+    def store(self, name, index, value):
         var = self.args.output(name)
-        line = f"tl.store({var} + {self.indexing(index, reductions)}, {value}, {self.mask(reductions)})"
+        line = f"tl.store({var} + {self.indexing(index)}, {value}, {self.mask()})"
         self.stores.writeline(line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
@@ -136,7 +137,10 @@ class TritonKernel(Kernel):
             f"{default[reduction_type]}) if NEED_MASK else {value}",
         )
         res = self.cse.generate(self.compute, f"tl.{reduction_type}({res}, 1)")
-        self.store(name, index, res, reductions=False)
+        assert self.inside_reduction
+        self.inside_reduction = False
+        ops.store(name, index, res)
+        self.inside_reduction = True
 
     @classmethod
     def codegen(cls, wrapper):
@@ -289,7 +293,9 @@ class TritonKernel(Kernel):
                     for node in scheduler.pop_group(
                         (group, reduction_group),
                     ):
+                        scheduler.maybe_remove_buffer(node)
                         node.run(*kernel.set_ranges(*node.get_ranges()))
+                        node.mark_fusable()
 
                     if kernel.inside_reduction:
                         # Add pointwise with compatible dimensions
@@ -304,11 +310,13 @@ class TritonKernel(Kernel):
                                 node.run(
                                     *kernel.set_ranges(sizes[:split], sizes[split:])
                                 )
+                                node.mark_fusable()
 
                         # Add more pointwise with fewer dimensions
                         kernel.inside_reduction = False
                         for node in scheduler.pop_group((group, sympy.Integer(1))):
                             node.run(*kernel.set_ranges(*node.get_ranges()))
+                            node.mark_fusable()
                         kernel.inside_reduction = True
             scheduler.enqueue(reschedule)
             scheduler.barrier()

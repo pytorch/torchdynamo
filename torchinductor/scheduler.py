@@ -5,18 +5,35 @@ from typing import Any
 from typing import Dict
 
 from torchinductor import ir
+from torchinductor.dependencies import StarDep
 from torchinductor.virtualized import graph
 
 
+class OutputNode:
+    def __init__(self, dep):
+        self.unmet_dependencies = {dep}
+
+    def is_reduction(self):
+        return False
+
+
 class SchedulerNode:
-    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group):
+    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         assert isinstance(node, ir.ComputedBuffer)
         self.scheduler = scheduler
         self.node = node
         self.read_writes = node.get_read_writes()
-        self.group = group
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
+        self._size, self._reindex = ir.SqueezeView.squeezer(node.data.get_size())
+        self._reduction_size, self._reduction_reindex = ir.SqueezeView.squeezer(
+            node.data.get_reduction_size()
+        )
+        self.group = (
+            group_fn(self._size),
+            group_fn(self._reduction_size),
+        )
+        self.users = None
 
     def prune_deps(self):
         self.unmet_dependencies = {
@@ -25,6 +42,18 @@ class SchedulerNode:
             if dep.name not in self.scheduler.available_buffer_names
         }
 
+    def can_remove_buffer(self):
+        if (
+            self.is_reduction()
+            and len(self.users) == 1
+            and len(self.users[0].unmet_dependencies) == 1
+        ):
+            user = self.users[0]
+            dep = next(iter(user.unmet_dependencies))
+            # this will get fused into us, so we don't need to keep the buffer
+            return not user.is_reduction() and dep in self.read_writes.writes
+        return False
+
     def mark_fusable(self):
         self.scheduler.fusable_deps.update(self.read_writes.writes)
 
@@ -32,22 +61,22 @@ class SchedulerNode:
         return self.node.name
 
     def get_ranges(self):
-        node = self.node.data
-        return node.get_size(), node.get_reduction_size()
+        return self._size, self._reduction_size
 
     def is_reduction(self):
         return bool(self.node.data.get_reduction_type())
 
     def run(self, vars, reduction_vars):
-        vars = tuple(vars)
-        reduction_vars = tuple(reduction_vars)
         self.scheduler.run_count += 1
         name = self.get_name()
         indexer = self.node.layout.make_indexer()
         if self.is_reduction():
+            vars = self._reindex(vars)
+            reduction_vars = self._reduction_reindex(reduction_vars)
             self.node.data.store_reduction(name, indexer, vars, reduction_vars)
         else:
-            self.node.data.store_output(name, indexer, vars + reduction_vars)
+            vars = self._reindex([*vars, *reduction_vars])
+            self.node.data.store_output(name, indexer, vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
 
@@ -100,7 +129,7 @@ class BlockedNodes:
 
 
 class Scheduler:
-    def __init__(self, group_fn, nodes=None):
+    def __init__(self, group_fn, nodes):
         super(Scheduler, self).__init__()
         self.group_fn = group_fn
         self.runable_reduction_groups = collections.defaultdict(int)
@@ -113,17 +142,33 @@ class Scheduler:
         self.available_buffer_names = set(graph.graph_inputs.keys())
         self.pending_buffer_names = set()
         self.fusable_deps = set()
-        if nodes:
-            self.add_nodes(nodes)
-
-    def add_nodes(self, nodes):
         for node in nodes:
-            group = (
-                self.group_fn(node.data.get_size()),
-                self.group_fn(node.data.get_reduction_size()),
-            )
-            self.nodes.append(SchedulerNode(self, node, group))
+            self.nodes.append(SchedulerNode(self, node, self.group_fn))
+        self.compute_users()
         self.enqueue(self.nodes)
+
+    def compute_users(self):
+        name_to_users = collections.defaultdict(list)
+        for name in graph.graph_outputs:
+            name_to_users[name].append(OutputNode(StarDep(name)))
+        for node in reversed(self.nodes):
+            node.users = name_to_users[node.get_name()]
+            name_to_users[node.get_name()] = None
+            for read in node.read_writes.reads:
+                name_to_users[read.name].append(node)
+
+        updated_nodes = []
+        for node in self.nodes:
+            if node.users:
+                updated_nodes.append(node)
+            else:
+                # dead code
+                graph.removed_buffers.add(node.get_name())
+        self.nodes = updated_nodes
+
+    def maybe_remove_buffer(self, node: SchedulerNode):
+        if node.can_remove_buffer():
+            graph.removed_buffers.add(node.get_name())
 
     def enqueue(self, node):
         if isinstance(node, (tuple, list)):

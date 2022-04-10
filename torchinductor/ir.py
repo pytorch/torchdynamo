@@ -158,22 +158,33 @@ class ExpandView(BaseView):
 
 
 class SqueezeView(BaseView):
-    def get_size(self):
-        return [s for s in self.data.get_size() if s != 1]
-
-    def make_loader(self):
-        inner = self.data.make_loader()
-        size = self.data.get_size()
+    @staticmethod
+    def squeezer(size):
+        new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def load(index):
-            assert len(index) == len(not_one)
+        def reindex(index):
+            assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.Integer(0)] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
-            return inner(new_index)
+            return tuple(new_index)
 
+        return new_size, reindex
+
+    def __init__(self, data):
+        super(SqueezeView, self).__init__(data)
+        self.size, self.reindex = SqueezeView.squeezer(data.get_size())
+
+    def get_size(self):
+        return self.size
+
+    def make_loader(self):
+        def load(index):
+            return inner(self.reindex(index))
+
+        inner = self.data.make_loader()
         return load
 
 
@@ -245,13 +256,13 @@ class ComputedBuffer(Buffer):
         if self.data.get_reduction_type():
             return extract_read_writes(
                 partial(self.data.store_reduction, self.name, indexer),
-                len(self.data.get_size()),
-                len(self.data.get_reduction_size()),
+                self.data.get_size(),
+                self.data.get_reduction_size(),
             )
         else:
             return extract_read_writes(
                 partial(self.data.store_output, self.name, indexer),
-                len(self.data.get_size()),
+                self.data.get_size(),
             )
 
 

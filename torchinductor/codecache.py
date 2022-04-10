@@ -9,6 +9,8 @@ import subprocess
 import types
 from ctypes import cdll
 
+from . import config
+
 
 def cache_dir():
     return f"/tmp/torchinductor_{getpass.getuser()}"
@@ -44,10 +46,10 @@ class CppCodeCache:
     cpp_compile_cmd = re.sub(
         r"[ \n]+",
         " ",
-        """
-            g++ -shared -fPIC -Wall -std=c++14
+        f"""
+            {config.cpp.cxx} -shared -fPIC -Wall -std=c++14
             -march=native -O3 -ffast-math -fopenmp -lgomp
-            -o{output} {input}
+            -o{{output}} {{input}}
         """,
     ).strip()
 

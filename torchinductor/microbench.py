@@ -7,13 +7,11 @@ import time
 import numpy as np
 import tabulate
 import torch
-import torchinductor
-from torch import fx
 from torch.cuda import synchronize
-from torchinductor.graph import GraphLowering
 
-from torchdynamo.optimizations.python_key import python_key_normalize
+import torchinductor
 from torchdynamo.testing import same
+from torchinductor.compile_fx import compile_fx
 
 try:
     import tests.test_torchinductor as tti
@@ -51,14 +49,10 @@ def compute_speedups(args, models, example_inputs):
 
 
 def microbenchmark(args, model, example_inputs):
-    gm, wrap = python_key_normalize(fx.symbolic_trace(model), example_inputs)
-    graph = GraphLowering(gm)
-    with torchinductor.virtualized.graph.set_handler(graph):
-        wrap(graph.run)(*example_inputs)
-        compiled_fn = graph.compile_to_fn()
+    compiled_fn = compile_fx(torch.fx.symbolic_trace(model), example_inputs)
     return compute_speedups(
         args,
-        [model, torch.jit.trace(model, example_inputs), wrap(compiled_fn)],
+        [model, torch.jit.trace(model, example_inputs), compiled_fn],
         example_inputs,
     )
 

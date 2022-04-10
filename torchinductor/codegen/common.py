@@ -10,6 +10,7 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from ..virtualized import graph
 from ..virtualized import kernel
 from ..virtualized import ops
 
@@ -133,9 +134,14 @@ class KernelArgs:
         self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
+        assert name not in graph.removed_buffers
+        if name in self.output_buffers:
+            return self.output_buffers[name]
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
+        assert name not in graph.removed_buffers
+        assert name not in self.input_buffers
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def size(self, name):
@@ -175,6 +181,7 @@ class CSE:
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
+        self.store_cache = {}
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
         if expr not in self.cache:
@@ -235,11 +242,16 @@ class Kernel(CodeGen):
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
+                store_cache = self.cse.store_cache
+                if (name, index) in store_cache:
+                    return store_cache[(name, index)]
                 return self.load(name, index)
 
             @staticmethod
             def store(name, index, value):
-                return self.store(name, index, value)
+                self.cse.store_cache[(name, index)] = value
+                if name not in graph.removed_buffers:
+                    return self.store(name, index, value)
 
             @staticmethod
             def reduction(name, dtype, reduction_type, index, value):

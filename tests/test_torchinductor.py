@@ -1,16 +1,16 @@
 #!/usr/bin/env pytest
+import contextlib
 import dataclasses
 import importlib
 import unittest
+from unittest.mock import patch
 
 import torch
-import torchinductor
 from torch import fx
-from torchinductor import config
-from torchinductor.graph import GraphLowering
 
-from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
+from torchinductor import config
+from torchinductor.compile_fx import compile_fx
 
 HAS_CUDA = False
 if torch.cuda.is_available():
@@ -24,12 +24,13 @@ if torch.cuda.is_available():
 class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.prior_debug = config.debug
-        config.debug = True
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(patch.object(config, "debug", True))
+        cls._stack.enter_context(patch.object(config.cpp, "min_chunk_size", 1))
 
     @classmethod
     def tearDownClass(cls):
-        config.debug = cls.prior_debug
+        cls._stack.close()
 
 
 @dataclasses.dataclass
@@ -65,13 +66,8 @@ class InputGen:
 
 
 def check_model(self: TestCase, model, example_inputs):
-    gm, wrap = python_key_normalize(fx.symbolic_trace(model), example_inputs)
-    gm.graph.print_tabular()
-    graph = GraphLowering(gm)
-    with torchinductor.virtualized.graph.set_handler(graph):
-        wrap(graph.run)(*example_inputs)
-        compiled_fn = graph.compile_to_fn()
-    actual = wrap(compiled_fn)(*example_inputs)
+    compiled_fn = compile_fx(fx.symbolic_trace(model), example_inputs)
+    actual = compiled_fn(*example_inputs)
     correct = model(*example_inputs)
     self.assertTrue(same(actual, correct))
 
@@ -205,7 +201,18 @@ class CommonTemplate:
             f = e + 5
             return (f, e, d, c, b)
 
-        self.common(fn, (torch.randn(8, 8, 8, 8),))
+        self.common(fn, (torch.randn(1, 16, 8, 8),))
+
+    def test_sum5(self):
+        def fn(a):
+            b = a + 1
+            c = b.sum(-1)
+            d = c + 3
+            e = d.sum(-1)
+            f = e + 5
+            return (f,)
+
+        self.common(fn, (torch.randn(1, 17, 8, 9),))
 
     def test_min_max_reduction(self):
         def fn(a, b):

@@ -1,12 +1,14 @@
 debug = False
 
+dce = False
 
-# TODO(jansel): these constants are total guesses without tuning
+
 class cpp:
     threads = -1  # set to cpu_count()
     simdlen = None
-    # min_chunk_size = 512
-    min_chunk_size = 1
+    min_chunk_size = 512
+    cxx = "g++-10"
+    # cxx = "clang++-10"
 
 
 class triton:

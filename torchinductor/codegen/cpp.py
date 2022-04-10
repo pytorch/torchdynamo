@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import multiprocessing
+import re
 import textwrap
 from itertools import chain
 from typing import Dict
@@ -93,6 +94,10 @@ class CppOverrides(OpOverrides):
     def maximum(a, b):
         return f"std::max({a}, {b})"
 
+    @staticmethod
+    def constant(val, dtype):
+        return val
+
 
 class CppKernel(Kernel):
     overrides = CppOverrides
@@ -122,15 +127,19 @@ class CppKernel(Kernel):
         self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
 
     def reduction(self, name, dtype, reduction_type, index, value):
-        var = self.args.output(name)
+        tmpvar = self.cse.generate(
+            self.loads, f"reduction {name} {cexpr(index)}", write=False
+        )
         index = self.rename_indexing(index)
-        tmpvar = self.cse.generate(self.loads, f"{var}[{cexpr(index)}]", write=False)
         self.reduction_vars[tmpvar] = reduction_type
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
         self.stores.writeline(f"{reduction_combine(reduction_type, tmpvar, value)};")
-        self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
+        if name not in graph.removed_buffers:
+            var = self.args.output(name)
+            self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
+        self.cse.store_cache[(name, index)] = tmpvar
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -295,6 +304,7 @@ class CppKernel(Kernel):
                         scheduler.pop_group((group, reduction_group))
                     )
                     for node in reduction_nodes:
+                        scheduler.maybe_remove_buffer(node)
                         node.run(vars, reduction_vars)
                     # can't fuse reduction into reduction
                     for node in reduction_nodes:
@@ -379,7 +389,7 @@ class LoopLevel:
                 line1 = line1.replace(" for ", f" for {simd}")
         elif self.simd:
             line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_vars:
+        elif not self.reduction_vars and re.search(r"(gcc|g\+\+)", config.cpp.cxx):
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""

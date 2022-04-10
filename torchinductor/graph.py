@@ -56,6 +56,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = None
         self.device = None
         self.buffers = []
+        self.removed_buffers = set()
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         name = f"buf{len(self.buffers)}"
@@ -110,7 +111,7 @@ class GraphLowering(torch.fx.Interpreter):
         from .codegen.cpp import CppKernel
         from .codegen.triton import TritonKernel
 
-        wrapper = WrapperCodeGen(self)
+        wrapper = WrapperCodeGen()
 
         backends = {"cpu": CppKernel, "cuda": TritonKernel}
         backend_cls = backends[self.device.type]
