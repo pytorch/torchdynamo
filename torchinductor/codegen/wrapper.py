@@ -7,7 +7,7 @@ from torchinductor.codegen.common import IndentedBuffer
 from torchinductor.codegen.common import Kernel
 
 
-class ScheduleCodeGen(CodeGen):
+class WrapperCodeGen(CodeGen):
     """
     The outer wrapper that calls the kernels above.
     """

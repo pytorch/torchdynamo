@@ -17,7 +17,7 @@ class MemoryDep(typing.NamedTuple):
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[MemoryDep]
-    wrties: Set[MemoryDep]
+    writes: Set[MemoryDep]
 
 
 class RecordLoadStore(MockHandler):

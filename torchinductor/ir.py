@@ -23,25 +23,28 @@ class Layout(IRNode):
     device: torch.device
     dtype: torch.dtype
     size: List[Expr]
+    stride: List[Expr]
+    offset: Expr = Integer(0)
+
+    def make_indexer(self):
+        """A closure containing math to read a given element"""
+
+        def indexer(index):
+            assert len(index) == len(self.stride)
+            return sum(a * b for a, b in zip(index, self.stride)) + self.offset
+
+        return indexer
 
 
 @dataclasses.dataclass
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
-    stride: List[Expr]
-    offset: Expr = Integer(0)
+    pass
 
-    def make_indexer(self):
-        """A closure containing math to read a given element"""
-        stride = list(self.stride)
-        offset = self.offset
 
-        def indexer(index):
-            assert len(index) == len(stride)
-            return sum(a * b for a, b in zip(index, stride)) + offset
-
-        return indexer
+class FlexibleLayout(Layout):
+    """A Tensor layout we are allowed to change"""
 
     @staticmethod
     def default_strides(sizes):
@@ -52,17 +55,10 @@ class FixedLayout(Layout):
             reversed_strides.append(size * reversed_strides[-1])
         return list(reversed(reversed_strides))
 
-    @staticmethod
-    def indexer_from_sizes(sizes):
-        return FixedLayout(
-            None, None, sizes, FixedLayout.default_strides(sizes)
-        ).make_indexer()
-
-
-class FlexibleLayout(Layout):
-    """A Tensor layout we are allowed to change"""
-
-    pass
+    def __init__(self, device, dtype, size):
+        super(FlexibleLayout, self).__init__(
+            device, dtype, size, FlexibleLayout.default_strides(size)
+        )
 
 
 @dataclasses.dataclass
@@ -100,8 +96,7 @@ class UnrealizedBuffer(TypedLoops):
     def get_reduction_type(self):
         return None
 
-    def store_output(self, output_name, vars):
-        indexer = FixedLayout.indexer_from_sizes(self.get_size())
+    def store_output(self, output_name, indexer, vars):
         return ops.store(output_name, indexer(vars), self.inner_fn(vars))
 
 
@@ -116,8 +111,7 @@ class Reduction(TypedLoops):
     def get_reduction_type(self):
         return self.reduction_type
 
-    def store_reduction(self, output_name, vars, reduction_vars):
-        indexer = FixedLayout.indexer_from_sizes(self.get_size())
+    def store_reduction(self, output_name, indexer, vars, reduction_vars):
         return ops.reduction(
             output_name,
             self.dtype,
@@ -216,14 +210,17 @@ class Buffer(IRNode):
     def get_name(self):
         return self.name
 
-    def get_size(self):
-        return self.layout.size
+    def get_device(self):
+        return self.layout.device
 
     def get_dtype(self):
         return self.layout.dtype
 
-    def get_device(self):
-        return self.layout.device
+    def get_size(self):
+        return self.layout.size
+
+    def get_stride(self):
+        return self.layout.stride
 
     def make_loader(self):
         indexer = self.layout.make_indexer()
@@ -236,28 +233,24 @@ class Buffer(IRNode):
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
-    def get_stride(self):
-        return self.layout.stride
+    pass
 
 
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: TypedLoops
 
-    def get_stride(self):
-        assert isinstance(self.layout, FlexibleLayout)
-        return FixedLayout.default_strides(self.get_size())
-
     def get_read_writes(self):
+        indexer = self.layout.make_indexer()
         if self.data.get_reduction_type():
             return extract_read_writes(
-                partial(self.data.store_reduction, self.name),
+                partial(self.data.store_reduction, self.name, indexer),
                 len(self.data.get_size()),
                 len(self.data.get_reduction_size()),
             )
         else:
             return extract_read_writes(
-                partial(self.data.store_output, self.name),
+                partial(self.data.store_output, self.name, indexer),
                 len(self.data.get_size()),
             )
 
@@ -288,6 +281,8 @@ class TensorBox(MutableBox):
 
 class StorageBox(MutableBox):
     def realize(self):
+        if isinstance(self.data, ComputedBuffer):
+            return self.data.name
         assert isinstance(self.data, (UnrealizedBuffer, Reduction))
         self.data = ComputedBuffer(
             name=None,

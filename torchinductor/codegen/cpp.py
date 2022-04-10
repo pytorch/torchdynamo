@@ -12,6 +12,7 @@ import torch
 
 from .. import codecache
 from .. import config
+from ..scheduler import Scheduler
 from ..virtualized import graph
 from .common import BracesBuffer
 from .common import ExprPrinter
@@ -19,7 +20,6 @@ from .common import IndentedBuffer
 from .common import Kernel
 from .common import KernelArgs
 from .common import OpOverrides
-from .common import Scheduler
 from .common import product
 
 DTYPE_TO_CPP = {
@@ -111,13 +111,12 @@ class CppKernel(Kernel):
         self.reduction_vars = {}
 
     def load(self, name: str, index: sympy.Expr):
-        assert "arg" in name
         var = self.args.input(name)
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
 
     def store(self, name, index, value):
-        assert "out" in name or "buf" in name
+        assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
         self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
@@ -153,39 +152,28 @@ class CppKernel(Kernel):
         return graph.sizevars.size_hint(product(self.call_ranges))
 
     @classmethod
-    def codegen(cls, schedule, threads=None):
+    def codegen(cls, wrapper, threads=None):
         args = KernelArgs()
-        kernels = cls.schedule_kernels(args)
-        cls.codegen_define_and_call(kernels, schedule, args, threads)
+        loops_code = BracesBuffer()
+        with WorkSharing(loops_code) as ws:
+            cls.schedule_kernels(loops_code, args, ws)
+        cls.codegen_define_and_call(loops_code, wrapper, args)
 
     @classmethod
-    def codegen_define_and_call(cls, kernels, schedule, args, threads):
-        if threads is None:
-            threads = config.cpp.threads
-        if threads < 1:
-            threads = multiprocessing.cpu_count()
-
-        if (
-            len(kernels) == 1
-            and kernels[0].size_hint() // threads < config.cpp.min_chunk_size
-        ):
-            # not enough work to go multithreaded
-            threads = 1
-
+    def codegen_define_and_call(cls, loops_code, wrapper, args):
         argdefs = ",\n".ljust(25).join(args.cpp_argdefs(graph))
         code = BracesBuffer()
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({argdefs})'])
-        with code.indent(), WorkSharing(code) as ws:
-            for kernel in kernels:
-                kernel.codegen_loops(code, threads, ws)
+        with code.indent():
+            code.splice(loops_code)
 
-        wrapper = IndentedBuffer()
-        wrapper.writeline("CppCodeCache.load('''")
-        wrapper.splice(code)
-        wrapper.writeline("''').kernel")
+        codecache_def = IndentedBuffer()
+        codecache_def.writeline("CppCodeCache.load('''")
+        codecache_def.splice(code)
+        codecache_def.writeline("''').kernel")
 
-        kernel_name = schedule.next_kernel_name()
-        schedule.define_kernel(kernel_name, wrapper.getvalue())
+        kernel_name = wrapper.next_kernel_name()
+        wrapper.define_kernel(kernel_name, codecache_def.getvalue())
 
         # generate the code to call this
         call_args = []
@@ -193,11 +181,15 @@ class CppKernel(Kernel):
             call_args.append(f"{name}_ptr")
         for name in args.sizevars.keys():
             call_args.append(f"c_long({name})")
-        schedule.body.writeline(
+        wrapper.body.writeline(
             "{}({})".format(kernel_name, ", ".join(call_args)),
         )
 
-    def codegen_loops(self, code, threads, worksharing):
+    def codegen_loops(self, code, worksharing):
+        threads = config.cpp.threads
+        if threads < 1:
+            threads = multiprocessing.cpu_count()
+
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
             loops[self.reduction_depth :]
@@ -283,32 +275,44 @@ class CppKernel(Kernel):
         (self.loads, self.compute, self.stores) = prior
 
     @classmethod
-    def schedule_kernels(cls, args):
-        scheduler = Scheduler(tuple)
-        scheduler.add_nodes(graph.buffers)
-
-        kernels = []
+    def schedule_kernels(
+        cls, code: BracesBuffer, args: KernelArgs, ws: "WorkSharing"
+    ) -> Scheduler:
+        scheduler = Scheduler(tuple, graph.buffers)
 
         for group, reduction_group in scheduler.iter_runable_groups():
-            with CppKernel(args) as kernel:
-                kernels.append(kernel)
+            with scheduler.kernel(CppKernel(args)) as kernel:
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
 
                 # first any pointwise sharing same loops
                 for node in scheduler.pop_group((group + reduction_group, ())):
                     node.run(vars, reduction_vars)
+                    node.mark_fusable()
 
                 if reduction_group:
                     # reductions
-                    for node in scheduler.pop_group((group, reduction_group)):
+                    reduction_nodes = list(
+                        scheduler.pop_group((group, reduction_group))
+                    )
+                    for node in reduction_nodes:
                         node.run(vars, reduction_vars)
+                    # can't fuse reduction into reduction
+                    for node in reduction_nodes:
+                        node.mark_fusable()
 
                     # we can fuse in some extra pointwise into the suffix
                     with kernel.write_to_suffix():
                         for node in scheduler.pop_group((group, ())):
                             node.run(vars, ())
+                            node.mark_fusable()
+            kernel.codegen_loops(code, ws)
+            if not ws.in_parallel:
+                scheduler.barrier()
+            if not scheduler.runable_nodes and scheduler.pending_buffer_names:
+                ws.barrier()
+                scheduler.barrier()
 
-        return kernels
+        return scheduler
 
 
 class WorkSharing:

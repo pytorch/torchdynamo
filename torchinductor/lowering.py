@@ -200,7 +200,7 @@ def make_reduction(reduction_type: str):
             return inner_loader(new_index)
 
         inner_loader = x.make_loader()
-        return Reduction.create(
+        result = Reduction.create(
             kept_sizes,
             loader,
             device=x.get_device(),
@@ -208,6 +208,8 @@ def make_reduction(reduction_type: str):
             reduction_size=reduced_sizes,
             reduction_type=reduction_type,
         )
+        result.realize()
+        return result
 
     return inner
 

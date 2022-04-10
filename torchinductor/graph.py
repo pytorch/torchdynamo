@@ -7,7 +7,7 @@ from sympy import Integer
 
 from . import config
 from . import ir
-from .codegen.schedule import ScheduleCodeGen
+from .codegen.wrapper import WrapperCodeGen
 from .ir import Constant
 from .ir import FixedLayout
 from .ir import InputBuffer
@@ -110,13 +110,13 @@ class GraphLowering(torch.fx.Interpreter):
         from .codegen.cpp import CppKernel
         from .codegen.triton import TritonKernel
 
-        schedule = ScheduleCodeGen(self)
+        wrapper = WrapperCodeGen(self)
 
         backends = {"cpu": CppKernel, "cuda": TritonKernel}
         backend_cls = backends[self.device.type]
-        backend_cls.codegen(schedule)
+        backend_cls.codegen(wrapper)
         # TODO(jansel): manage a dependency graph
-        return schedule.generate()
+        return wrapper.generate()
 
     def compile_to_fn(self):
         from .codecache import PyCodeCache

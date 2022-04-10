@@ -6,13 +6,10 @@ import re
 import textwrap
 from io import StringIO
 from itertools import chain
-from typing import Any
-from typing import Dict
 
 import sympy
 from sympy.printing.printer import Printer
 
-from .. import ir
 from ..virtualized import kernel
 from ..virtualized import ops
 
@@ -153,11 +150,15 @@ class KernelArgs:
         from .cpp import DTYPE_TO_CPP
         from .cpp import INDEX_TYPE
 
+        # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in graph.buffers}
+        buffer_types.update(
+            {name: val.get_dtype() for name, val in graph.graph_inputs.items()}
+        )
 
         argdefs = []
         for outer, inner in self.input_buffers.items():
-            dtype = graph.graph_inputs[outer].get_dtype()
+            dtype = buffer_types[outer]
             argdefs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
         for outer, inner in self.output_buffers.items():
             dtype = buffer_types[outer]
@@ -257,88 +258,3 @@ class Kernel(CodeGen):
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
         }
         return index.subs(subs)
-
-
-class SchedulerNode:
-    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group):
-        assert isinstance(node, ir.ComputedBuffer)
-        self.scheduler = scheduler
-        self.node = node
-        self.read_writes = node.get_read_writes()
-        self.group = group
-
-    def get_name(self):
-        return self.node.name
-
-    def get_ranges(self):
-        node = self.node.data
-        return node.get_size(), node.get_reduction_size()
-
-    def is_reduction(self):
-        return bool(self.node.data.get_reduction_type())
-
-    def run(self, vars, reduction_vars):
-        vars = tuple(vars)
-        reduction_vars = tuple(reduction_vars)
-        self.scheduler.run_count += 1
-        if self.is_reduction():
-            self.node.data.store_reduction(self.get_name(), vars, reduction_vars)
-        else:
-            self.node.data.store_output(self.get_name(), vars + reduction_vars)
-
-
-class Scheduler:
-    def __init__(self, group_fn):
-        super(Scheduler, self).__init__()
-        self.group_fn = group_fn
-        self.runable_reduction_groups = collections.defaultdict(int)
-        self.runable_pointwise_groups = collections.defaultdict(int)
-        self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
-        self.blocked_nodes = []
-        self.run_count = 0
-
-    def add_nodes(self, nodes):
-        for node in nodes:
-            group = (
-                self.group_fn(node.data.get_size()),
-                self.group_fn(node.data.get_reduction_size()),
-            )
-            self.enqueue(SchedulerNode(self, node, group))
-
-    def enqueue(self, node):
-        if isinstance(node, (tuple, list)):
-            for n in node:
-                self.enqueue(n)
-            return
-
-        assert isinstance(node, SchedulerNode)
-        self.runable_nodes[node.group].append(node)
-        if node.is_reduction():
-            # Do reductions first as they yield more possible fusions
-            self.runable_reduction_groups[node.group] += 1
-        else:
-            self.runable_pointwise_groups[node.group] += 1
-
-    def iter_runable_groups(self):
-        while self.runable_reduction_groups or self.runable_pointwise_groups:
-            if self.runable_reduction_groups:
-                yield next(iter(self.runable_reduction_groups.keys()))
-            else:
-                yield next(iter(self.runable_pointwise_groups.keys()))
-        assert not self.runable_nodes
-        assert not self.blocked_nodes
-
-    def iter_fixed_point(self):
-        """
-        Keep yielding until self.run_count converges
-        """
-        prior_run_count = -1
-        while prior_run_count != self.run_count:
-            prior_run_count = self.run_count
-            yield
-
-    def pop_group(self, group):
-        while group in self.runable_nodes:
-            self.runable_reduction_groups.pop(group, None)
-            self.runable_pointwise_groups.pop(group, None)
-            yield from self.runable_nodes.pop(group)

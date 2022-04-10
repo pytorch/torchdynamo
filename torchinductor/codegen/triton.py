@@ -5,12 +5,12 @@ import sympy
 import torch
 
 from .. import codecache
+from ..scheduler import Scheduler
 from ..virtualized import graph
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
-from .common import Scheduler
 from .common import product
 
 
@@ -139,16 +139,16 @@ class TritonKernel(Kernel):
         self.store(name, index, res, reductions=False)
 
     @classmethod
-    def codegen(cls, schedule):
-        kernels = cls.schedule_kernels()
-        cls.codegen_define_and_call(kernels, schedule)
+    def codegen(cls, wrapper):
+        kernels = cls.schedule_kernels().kernels
+        cls.codegen_define_and_call(kernels, wrapper)
 
     @classmethod
-    def codegen_define_and_call(cls, kernels, schedule):
+    def codegen_define_and_call(cls, kernels, wrapper):
         for kernel in kernels:
-            kernel_name = schedule.next_kernel_name()
-            schedule.define_kernel(kernel_name, kernel.codegen_kernel())
-            kernel.call_kernel(schedule, kernel_name)
+            kernel_name = wrapper.next_kernel_name()
+            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+            kernel.call_kernel(wrapper, kernel_name)
 
     def codegen_kernel(self):
         code = IndentedBuffer()
@@ -279,16 +279,12 @@ class TritonKernel(Kernel):
         code.writeline(")")
 
     @classmethod
-    def schedule_kernels(cls):
-        scheduler = Scheduler(product)
-        scheduler.add_nodes(graph.buffers)
-
-        kernels = []
+    def schedule_kernels(cls) -> Scheduler:
+        scheduler = Scheduler(product, graph.buffers)
 
         for group, reduction_group in scheduler.iter_runable_groups():
             reschedule = []
-            with TritonKernel(group, reduction_group) as kernel:
-                kernels.append(kernel)
+            with scheduler.kernel(TritonKernel(group, reduction_group)) as kernel:
                 for _ in scheduler.iter_fixed_point():
                     for node in scheduler.pop_group(
                         (group, reduction_group),
@@ -315,8 +311,9 @@ class TritonKernel(Kernel):
                             node.run(*kernel.set_ranges(*node.get_ranges()))
                         kernel.inside_reduction = True
             scheduler.enqueue(reschedule)
+            scheduler.barrier()
 
-        return kernels
+        return scheduler
 
 
 def split_sizes(sizes, prod1, prod2):

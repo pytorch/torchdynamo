@@ -196,6 +196,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(10, 10), torch.randn(1, 10)))
 
+    def test_sum4(self):
+        def fn(a):
+            b = a + 1
+            c = b.sum(-1)
+            d = c + 3
+            e = d.sum(-1)
+            f = e + 5
+            return (f, e, d, c, b)
+
+        self.common(fn, (torch.randn(8, 8, 8, 8),))
+
     def test_min_max_reduction(self):
         def fn(a, b):
             return ((a + b).max(), (a + b).min())
