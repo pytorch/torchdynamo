@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import gc
+import inspect
 import sys
 import time
 
@@ -83,7 +84,7 @@ class MicroBenchmarks:
 
     @staticmethod
     def scale(x, m, d):
-        return ((x - m) / torch.maximum(d, 1e-4),)
+        return ((x - m) / torch.clip(d, 1e-4),)
 
     @staticmethod
     def abs_norm(x):
@@ -141,6 +142,7 @@ def main():
 
     rows = []
     for model in (MicroBenchmarks.scale,):
+        nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:
                 n = int(n)
@@ -149,11 +151,7 @@ def main():
                 result = microbenchmark(
                     args,
                     model,
-                    (
-                        torch.rand((n, n), device=device),
-                        torch.rand((n, n), device=device),
-                        torch.rand((n, n), device=device),
-                    ),
+                    [torch.rand((n, n * 2), device=device) for _ in range(nargs)],
                 )
                 rows.append([model.__name__, device, str(n)] + result)
                 print(" ".join(f"{v:.2f}x" for v in result))

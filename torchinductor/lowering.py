@@ -7,10 +7,12 @@ import torch
 import torch.fx
 
 from .ir import ExpandView
+from .ir import GenericView
 from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import UnrealizedBuffer
+from .virtualized import graph
 from .virtualized import ops
 
 lowerings = {}
@@ -79,7 +81,7 @@ def broadcast_symbolic_shapes(a, b):
             output.append(b)
         else:
             guard_shape_equal(a, b)
-            if len(str(b)) < len(str(a)):
+            if len(sympy.expand(b).free_symbols) < len(sympy.expand(a).free_symbols):
                 output.append(b)  # prefer shorter formula
             else:
                 output.append(a)
@@ -88,8 +90,7 @@ def broadcast_symbolic_shapes(a, b):
 
 def guard_shape_equal(a, b):
     if a != b:
-        assert False
-        pass  # TODO(jansel): implement guarding
+        graph.sizevars.guard_equals(a, b)
 
 
 def make_pointwise(fn, override_dtype=None, override_device=None):
@@ -160,6 +161,36 @@ def expand(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
     return TensorBox(ExpandView(x.data, tuple(sizes)))
+
+
+@register_lowering(aten.view)
+def view(x, sizes):
+    assert isinstance(x, TensorBox)
+    assert isinstance(sizes, (list, tuple))
+    return TensorBox(GenericView.create(x.data, sizes))
+
+
+@register_lowering(torch.arange)
+def arange(start, end=None, step=1, *, dtype=None, device=None):
+    if end is None:
+        end = start
+        start = 0
+
+    assert isinstance(start, int)
+    assert isinstance(end, int)
+    assert isinstance(step, int)
+
+    dtype = dtype or torch.get_default_dtype()
+    length = (end - start) // step
+    start = sympy.Integer(start)
+    step = sympy.Integer(step)
+
+    return UnrealizedBuffer.create(
+        [sympy.Integer(length)],
+        lambda index: ops.index_expr(step * index[0] + start, dtype),
+        device=device or torch.tensor(0.0).device,
+        dtype=dtype,
+    )
 
 
 def make_reduction(reduction_type: str):

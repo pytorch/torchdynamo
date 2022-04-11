@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import builtins
 import contextlib
 import dataclasses
 import importlib
@@ -66,7 +67,11 @@ class InputGen:
 
 
 def check_model(self: TestCase, model, example_inputs):
-    compiled_fn = compile_fx(fx.symbolic_trace(model), example_inputs)
+    if isinstance(model, torch.fx.Graph):
+        model = torch.fx.GraphModule({}, model)
+    elif not isinstance(model, torch.fx.GraphModule):
+        model = fx.symbolic_trace(model)
+    compiled_fn = compile_fx(model, example_inputs)
     actual = compiled_fn(*example_inputs)
     correct = model(*example_inputs)
     self.assertTrue(same(actual, correct))
@@ -220,6 +225,62 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_clamp(self):
+        def fn(a, b):
+            return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_arange(self):
+        # fx can't capture arange
+        g = fx.Graph()
+        x = g.placeholder("x")
+        device = g.call_function(builtins.getattr, (x, "device"))
+        rng1 = g.call_function(
+            torch.arange,
+            (8 * 8,),
+            {"dtype": torch.float32, "device": device},
+        )
+        rng1 = g.call_method("view", (rng1, 8, 8))
+        rng2 = g.call_function(torch.arange, (10, 18), {"device": device})
+        r1 = g.call_function(torch.mul, (x, rng1))
+        r2 = g.call_function(torch.add, (r1, rng2))
+        g.output((r1, r2))
+
+        self.common(g, (torch.randn(8, 8),))
+
+    def test_views1(self):
+        def fn(x, y):
+            return (x.view(size2) + y,)
+
+        views = [
+            ([5 * 7], [5, 7]),
+            ([2 * 3 * 4 * 5 * 6 * 7], [2, 3, 4, 5, 6, 7]),
+            ([2 * 3, 4, 5, 6 * 7], [2, 3, 4, 5, 6, 7]),
+            ([10 * 5, 20], [10, 5, 20]),
+            ([1, 10, 1], [10]),
+            ([10, 1, 10, 1, 10], [10, 100]),
+            ([2, 2, 2, 2], [4, 4]),
+        ]
+        for size1, size2 in views:
+            self.common(fn, (torch.randn(size1), torch.randn(size2)))
+
+        for size2, size1 in views:
+            self.common(fn, (torch.randn(size1), torch.randn(size2)))
+
+    def test_views2(self):
+        def fn(
+            x,
+        ):
+            return (x.view(size2) + 1,)
+
+        for size1, size2 in [
+            ([2, 2, 2, 2], [4, -1]),
+            ([10, 1, 10, 1, 10], [-1, 100]),
+            ([10 * 5, 20], [10, -1, 20]),
+        ]:
+            self.common(fn, (torch.randn(size1),))
+
 
 class CpuTests(TestCase):
     common = check_model
@@ -236,5 +297,13 @@ if HAS_CUDA:
 
     class GpuTests(TestCase):
         common = check_model_cuda
+
+        def test_simplify_dims(self):
+            def fn(a):
+                return (a + 1,)
+
+            self.common(
+                fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
+            )
 
     CommonTemplate.install(GpuTests, "cuda")

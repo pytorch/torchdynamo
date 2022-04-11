@@ -1,5 +1,9 @@
+import dataclasses
+import functools
 import itertools
 from itertools import chain
+from typing import Dict
+from typing import List
 
 import sympy
 import torch
@@ -7,6 +11,7 @@ import torch
 from .. import codecache
 from ..scheduler import Scheduler
 from ..virtualized import graph
+from ..virtualized import kernel
 from ..virtualized import ops
 from .common import ExprPrinter
 from .common import IndentedBuffer
@@ -16,7 +21,20 @@ from .common import product
 
 
 class TritonPrinter(ExprPrinter):
-    pass
+    def _print_ModularIndexing(self, expr):
+        x, div, mod = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        mod = self.paren(self.doprint(mod))
+        if div != "1":
+            x = f"({x} // {div})"
+        return f"{x} % {mod}"
+
+    def _print_CleanDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
 
 
 texpr = TritonPrinter().doprint
@@ -42,6 +60,136 @@ class TritonOverrides(OpOverrides):
     def maximum(a, b):
         return f"tl.maximum({a}, {b})"
 
+    @staticmethod
+    def index_expr(expr, dtype):
+        return kernel.indexing(expr)
+
+
+@dataclasses.dataclass
+class RangeTree:
+    def __init__(
+        self,
+        name: str,
+        var_list: List[sympy.Symbol],
+        numel: sympy.Expr,
+        prefix: str,
+        depth=0,
+        length=sympy.Integer(1),
+    ):
+        super(RangeTree, self).__init__()
+        self.name = name
+        self.children: Dict[sympy.Expr, RangeTreeEntry] = dict()
+        self.var_list = var_list
+        self.numel = numel
+        self.prefix = prefix
+        self.depth = depth
+        self.length = length
+
+    def child_node(self, length):
+        if length not in self.children:
+            node = RangeTreeEntry(
+                f"{self.prefix}{next(kernel.iter_vars_count)}", length, self
+            )
+            self.children[length] = node
+            kernel.range_tree_nodes[node.symbol()] = node
+            self.var_list.append(node.symbol())
+        else:
+            node = self.children[length]
+        return node
+
+
+class RangeTreeRoot(RangeTree):
+    def __init__(self, name: str, numel: sympy.Expr, prefix: str):
+        super(RangeTreeRoot, self).__init__(
+            name=name,
+            var_list=[],
+            numel=numel,
+            prefix=prefix,
+        )
+
+    def codegen_next(self):
+        return self.name
+
+    def simplify(self, expr, nodes):
+        return expr
+
+    def construct(self, lengths):
+        node = self
+        itervars = []
+        for sv in reversed(lengths):
+            node = node.child_node(sv)
+            itervars.append(node.symbol())
+        return list(reversed(itervars))
+
+
+class RangeTreeEntry(RangeTree):
+    def __init__(self, name: str, length: sympy.Expr, parent: RangeTree):
+        super(RangeTreeEntry, self).__init__(
+            name=name,
+            numel=parent.numel / length,
+            var_list=parent.var_list,
+            prefix=parent.prefix,
+            length=length,
+            depth=parent.depth + 1,
+        )
+        self.parent = parent
+        self.codegen = functools.lru_cache(None)(self._codegen)
+        self.codegen_next = functools.lru_cache(None)(self._codegen_next)
+
+    def _codegen_next(self):
+        denom = texpr(kernel.rename_indexing(self.length))
+        kernel.indexing_code.writeline(
+            f"{self.name}_next = {self.parent.codegen_next()} // {denom}"
+        )
+        return f"{self.name}_next"
+
+    def _codegen(self):
+        denom = texpr(kernel.rename_indexing(self.length))
+        if self.numel == 1:
+            line = f"{self.name} = {self.parent.codegen_next()}"
+        else:
+            line = f"{self.name} = {self.parent.codegen_next()} % {denom}"
+        kernel.indexing_code.writeline(line)
+        return self.name
+
+    def symbol(self):
+        return sympy.Symbol(self.name)
+
+    def next_symbol(self):
+        return sympy.Symbol(f"{self.name}_next")
+
+    def simplify(self, expr: sympy.Expr):
+        """
+        Merge the indexing math for contiguous dimensions
+        """
+        if isinstance(self.parent, RangeTreeRoot):
+            return expr
+
+        v1 = sympy.Symbol("subs_var1")
+        v2 = sympy.Symbol("subs_var2")
+        pl = self.parent.length
+        test_expr = sympy.expand(
+            expr.subs({self.name: 0, self.parent.name: (v1 * pl + v2)}).subs(
+                {
+                    v1: self.name,
+                    v2: self.parent.name,
+                }
+            )
+        )
+        if test_expr == sympy.expand(expr):
+            # we can compact this dimension into a a single one
+            node = self.parent.parent.child_node(self.length * self.parent.length)
+            new_expr = expr.subs({self.name: 0, self.parent.name: node.symbol()})
+            return node.simplify(new_expr)
+
+        return expr
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return self.name == other.name
+
 
 class TritonKernel(Kernel):
     overrides = TritonOverrides
@@ -53,42 +201,30 @@ class TritonKernel(Kernel):
             reduction_numel = sympy.Integer(1)
         self.numel = numel
         self.reduction_numel = reduction_numel
-        self.iter_range_tree = dict()
-        self.reduction_range_tree = dict()
-        self.iter_vars = []
-        self.reduction_vars = []
+        self.iter_range_tree = RangeTreeRoot("indices", numel, "i")
+        self.reduction_range_tree = RangeTreeRoot("reduction", reduction_numel, "r")
+        self.range_tree_nodes = dict()
         self.iter_vars_count = itertools.count()
         self.inside_reduction = reduction_numel != 1
-
-    def _add_ranges(self, lengths, var_list, tree, prefix):
-        # make sure needed vars in in call_args
-        self.rename_indexing(lengths[:-1])
-        itervars = []
-        for sv in lengths:
-            if sv not in tree:
-                sym = sympy.Symbol(f"{prefix}{next(self.iter_vars_count)}")
-                tree[sv] = (sym, dict())
-                var_list.append(sym)
-            iv, tree = tree[sv]
-            itervars.append(iv)
-        return itervars
-
-    def add_ranges(self, lengths):
-        return self._add_ranges(lengths, self.iter_vars, self.iter_range_tree, "i")
-
-    def add_reduction_ranges(self, lengths):
-        return self._add_ranges(
-            lengths, self.reduction_vars, self.reduction_range_tree, "r"
-        )
+        self.indexing_code = IndentedBuffer()
 
     def set_ranges(self, lengths, reduction_lengths):
-        return self.add_ranges(lengths), self.add_reduction_ranges(reduction_lengths)
+        return self.iter_range_tree.construct(
+            lengths
+        ), self.reduction_range_tree.construct(reduction_lengths)
 
     def indexing(self, index: sympy.Expr):
-        index = self.rename_indexing(index)
-        offset = index.subs({v: 0 for v in chain(self.iter_vars, self.reduction_vars)})
-        base_part = index.subs({v: 0 for v in self.reduction_vars}) - offset
-        reduction_part = index.subs({v: 0 for v in self.iter_vars}) - offset
+        iter_vars = self.iter_range_tree.var_list
+        reduction_vars = self.reduction_range_tree.var_list
+
+        offset = index.subs({v: 0 for v in chain(iter_vars, reduction_vars)})
+        base_part = index.subs({v: 0 for v in reduction_vars}) - offset
+        reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
+
+        offset = self.rename_indexing(offset)
+        base_part = self.rename_indexing(self.simplify_indexing(base_part))
+        reduction_part = self.rename_indexing(self.simplify_indexing(reduction_part))
+
         addr = []
         if offset != 0:
             addr.append(texpr(offset))
@@ -111,6 +247,21 @@ class TritonKernel(Kernel):
             assert reduction_part == 0
 
         return " + ".join(addr)
+
+    def simplify_indexing(self, expr: sympy.Expr):
+        nodes = [
+            self.range_tree_nodes[sym]
+            for sym in expr.free_symbols
+            if sym in self.range_tree_nodes
+        ]
+        if nodes:
+            nodes.sort(key=lambda x: x.depth)
+            expr = nodes[-1].simplify(expr)
+
+        for sym in expr.free_symbols:
+            if sym in self.range_tree_nodes:
+                self.range_tree_nodes[sym].codegen()
+        return expr
 
     def mask(self, reductions=True):
         return (
@@ -149,10 +300,10 @@ class TritonKernel(Kernel):
 
     @classmethod
     def codegen_define_and_call(cls, kernels, wrapper):
-        for kernel in kernels:
+        for kern in kernels:
             kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
-            kernel.call_kernel(wrapper, kernel_name)
+            wrapper.define_kernel(kernel_name, kern.codegen_kernel())
+            kern.call_kernel(wrapper, kernel_name)
 
     def codegen_kernel(self):
         code = IndentedBuffer()
@@ -199,7 +350,7 @@ class TritonKernel(Kernel):
             code.splice(
                 """
                     offset = tl.program_id(0) * BLOCK_SIZE
-                    indices0 = offset + tl.arange(0, BLOCK_SIZE)
+                    indices = offset + tl.arange(0, BLOCK_SIZE)
                 """,
                 strip=True,
             )
@@ -207,11 +358,11 @@ class TritonKernel(Kernel):
             if self.inside_reduction:
                 code.splice(
                     """
-                        reduction0 = tl.arange(0, REDUCTION_SIZE)
+                        reduction = tl.arange(0, REDUCTION_SIZE)
                         if NEED_MASK:
-                            mask = indices0 < numel
+                            mask = indices < numel
                             mask_reduction = (tl.reshape(mask, (BLOCK_SIZE, 1)) &
-                                              tl.reshape(reduction0 < reduction_numel, (1, REDUCTION_SIZE)))
+                                              tl.reshape(reduction < reduction_numel, (1, REDUCTION_SIZE)))
                         else:
                             mask = None
                             mask_reduction = None
@@ -222,40 +373,16 @@ class TritonKernel(Kernel):
                 code.splice(
                     """
                     if NEED_MASK:
-                        mask = indices0 < numel
+                        mask = indices < numel
                     else:
                         mask = None
                 """,
                     strip=True,
                 )
-
-            def walk_indices(indices, tree, prefix, cnt):
-                """Splat out all our indexing math"""
-                subindices = f"{prefix}{next(cnt)}"
-                for size, (var, subtree) in tree.items():
-                    if subtree:
-                        size = TritonPrinter.paren(texpr(self.rename_indexing(size)))
-                        code.splice(
-                            f"""
-                                {var} = {indices} % {size}
-                                {subindices} = {indices} // {size}
-                            """,
-                            strip=True,
-                        )
-                        walk_indices(subindices, subtree, prefix, cnt)
-                    else:
-                        code.writeline(f"{var} = {indices}")
-
-            walk_indices(
-                "indices0", self.iter_range_tree, "indices", itertools.count(1)
-            )
-            walk_indices(
-                "reduction0", self.reduction_range_tree, "reduction", itertools.count(1)
-            )
-
-            code.splice(self.loads.getvalue())
-            code.splice(self.compute.getvalue())
-            code.splice(self.stores.getvalue())
+            code.splice(self.indexing_code)
+            code.splice(self.loads)
+            code.splice(self.compute)
+            code.splice(self.stores)
 
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")

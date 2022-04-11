@@ -22,7 +22,11 @@ def product(it):
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
-        if re.match(r"^[a-z0-9_.]+$", string, re.I):
+        if (
+            re.match(r"^[a-z0-9_.]+$", string, re.I)
+            or re.match(r"^\(.*\)$", string, re.I)
+            or string == ""
+        ):
             return string
         return f"({string})"
 
@@ -177,15 +181,16 @@ class KernelArgs:
 class CSE:
     """Common subexpression elimination"""
 
-    def __init__(self, prefix="", suffix=""):
+    def __init__(self, prefix="", suffix="", name_prefix="tmp"):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
+        self.name_prefix = name_prefix
         self.store_cache = {}
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
         if expr not in self.cache:
-            var = f"tmp{len(self.cache)}"
+            var = f"{self.name_prefix}{len(self.cache)}"
             self.cache[expr] = var
             if write:
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
@@ -266,6 +271,7 @@ class Kernel(CodeGen):
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
+        index = sympy.simplify(index.subs(graph.sizevars.replacements))
         subs = {
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
         }

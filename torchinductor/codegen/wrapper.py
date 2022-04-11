@@ -5,6 +5,7 @@ from ..virtualized import graph
 from .common import CodeGen
 from .common import IndentedBuffer
 from .common import Kernel
+from .triton import texpr
 
 
 class WrapperCodeGen(CodeGen):
@@ -69,7 +70,7 @@ class WrapperCodeGen(CodeGen):
                 code.writeline(f"{name} = empty_like({empty_like_cache[key]})")
             else:
                 code.writeline(
-                    f"{name} = empty([{', '.join(map(str, shape))}], device='{device.type}', dtype={dtype})"
+                    f"{name} = empty([{', '.join(map(texpr, shape))}], device='{device.type}', dtype={dtype})"
                 )
 
             if device.type == "cpu":

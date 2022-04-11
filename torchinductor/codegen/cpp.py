@@ -15,6 +15,8 @@ from .. import codecache
 from .. import config
 from ..scheduler import Scheduler
 from ..virtualized import graph
+from ..virtualized import kernel
+from ..virtualized import ops
 from .common import BracesBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
@@ -69,7 +71,20 @@ def cpp_prefix():
 
 
 class CppPrinter(ExprPrinter):
-    pass
+    def _print_ModularIndexing(self, expr):
+        x, div, mod = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        mod = self.paren(self.doprint(mod))
+        if div != "1":
+            x = f"({x} / {div})"
+        return f"{x} % {mod}"
+
+    def _print_CleanDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} / {div})"
 
 
 cexpr = CppPrinter().doprint
@@ -96,7 +111,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        return val
+        return ops.to_dtype(repr(val), dtype)
+
+    @staticmethod
+    def index_expr(expr, dtype):
+        return ops.to_dtype(cexpr(kernel.rename_indexing(expr)), dtype)
 
 
 class CppKernel(Kernel):

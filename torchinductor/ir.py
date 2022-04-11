@@ -9,9 +9,42 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
+from .codegen.common import product
 from .dependencies import extract_read_writes
 from .virtualized import graph
 from .virtualized import ops
+
+
+class ModularIndexing(sympy.Function):
+    """
+    ModularIndexing(a, b, c) => (a // b) % c
+    """
+
+    nargs = (3,)
+
+    @classmethod
+    def eval(cls, base, divisor, modulus):
+        if base.is_integer and divisor.is_integer and modulus.is_integer:
+            return (base // divisor) % modulus
+        if base == 0:
+            return sympy.Integer(0)
+
+
+class CleanDiv(sympy.Function):
+    """
+    a//b where we know there is no rounding
+    """
+
+    nargs = (2,)
+
+    @classmethod
+    def eval(cls, base, divisor):
+        if base == 0:
+            return sympy.Integer(0)
+        if base.is_integer and divisor.is_integer:
+            return base // divisor
+        if sympy.gcd(base, divisor) == divisor:
+            return base / divisor
 
 
 class IRNode(object):
@@ -157,7 +190,102 @@ class ExpandView(BaseView):
         return load
 
 
-class SqueezeView(BaseView):
+@dataclasses.dataclass
+class GenericView(BaseView):
+    size: List[Expr]
+    reindex: Callable
+
+    @classmethod
+    def create(cls, x, new_size):
+        new_size = [sympy.expand(x).subs(graph.sizevars.replacements) for x in new_size]
+        old_size = [
+            sympy.expand(x).subs(graph.sizevars.replacements) for x in x.get_size()
+        ]
+
+        assert isinstance(old_size, (tuple, list))
+        assert isinstance(new_size, (tuple, list))
+        new_size = list(new_size)
+        for i in range(len(new_size)):
+            if new_size[i] == -1:
+                new_size[i] = sympy.Integer(1)
+                new_size[i] = CleanDiv(product(old_size), product(new_size))
+                break
+
+        graph.sizevars.guard_equals(product(old_size), product(new_size))
+        return cls(x, tuple(new_size), cls.create_reindexer(old_size, new_size))
+
+    @staticmethod
+    def create_reindexer(old_size, new_size):
+        size_hint = graph.sizevars.size_hint
+        vars = [sympy.Symbol(f"view{i}") for i in range(len(new_size))]
+
+        stack_new = list(zip(vars, new_size))
+        stack_old = list(old_size)
+
+        view_expr = []
+        while stack_new and stack_old:
+            size_old = stack_old.pop()
+            var, size_new = stack_new.pop()
+            if size_old == 1:
+                view_expr.append(sympy.Integer(0))
+                stack_new.append((var, size_new))  # re-add
+            elif size_new == 1:
+                stack_old.append(size_old)  # re-add
+            elif size_hint(size_new) == size_hint(size_old):
+                view_expr.append(var)
+                graph.sizevars.guard_equals(size_new, size_old)
+            elif size_hint(size_new) < size_hint(size_old):
+                while size_hint(size_new) < size_hint(size_old):
+                    var2, size_new2 = stack_new.pop()
+                    var = var2 * size_new + var
+                    size_new = size_new * size_new2
+                view_expr.append(var)
+                graph.sizevars.guard_equals(size_new, size_old)
+            elif size_hint(size_new) > size_hint(size_old):
+                divisor = sympy.Integer(1)
+                modulus = size_old
+                view_expr.append(ModularIndexing(var, divisor, modulus))
+                divisor = divisor * modulus
+                while size_hint(size_new) > size_hint(size_old):
+                    modulus = stack_old.pop()
+                    view_expr.append(ModularIndexing(var, divisor, modulus))
+                    divisor = divisor * modulus
+                    size_old = size_old * modulus
+                graph.sizevars.guard_equals(size_new, size_old)
+            else:
+                assert False
+
+        while stack_old:
+            size_old = stack_old.pop()
+            assert size_old == 1
+            view_expr.append(sympy.Integer(0))
+
+        while stack_new:
+            var, size_new = stack_new.pop()
+            assert size_new == 1
+
+        view_expr = list(reversed(view_expr))
+        assert len(view_expr) == len(old_size)
+
+        def reindex(index):
+            assert len(index) == len(vars)
+            replacements = dict(zip(vars, index))
+            return tuple(x.subs(replacements) for x in view_expr)
+
+        return reindex
+
+    def get_size(self):
+        return self.size
+
+    def make_loader(self):
+        def load(index):
+            return inner(self.reindex(index))
+
+        inner = self.data.make_loader()
+        return load
+
+
+class SqueezeView(GenericView):
     @staticmethod
     def squeezer(size):
         new_size = [s for s in size if s != 1]
@@ -174,18 +302,7 @@ class SqueezeView(BaseView):
         return new_size, reindex
 
     def __init__(self, data):
-        super(SqueezeView, self).__init__(data)
-        self.size, self.reindex = SqueezeView.squeezer(data.get_size())
-
-    def get_size(self):
-        return self.size
-
-    def make_loader(self):
-        def load(index):
-            return inner(self.reindex(index))
-
-        inner = self.data.make_loader()
-        return load
+        super(SqueezeView, self).__init__(data, *SqueezeView.squeezer(data.get_size()))
 
 
 @dataclasses.dataclass
