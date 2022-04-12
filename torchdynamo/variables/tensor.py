@@ -15,6 +15,7 @@ from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
 from .base import typestr
+from .lists import SizeVariable
 
 
 class TensorVariable(VariableTracker):
@@ -75,6 +76,11 @@ class TensorVariable(VariableTracker):
             if isinstance(example_value, torch.Size):
                 options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
+        elif istype(example_value, torch.Size) and all(
+            [isinstance(x, int) for x in example_value]
+        ):
+            sizes = [variables.ConstantVariable(x) for x in example_value]
+            return SizeVariable(sizes, **options)
         elif isinstance(example_value, (tuple, list)):
             unpacked = []
             for i, val in enumerate(example_value):
