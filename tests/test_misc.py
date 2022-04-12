@@ -1007,3 +1007,20 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertFalse(True)
         except torchdynamo.exc.Unsupported as e:
             self.assertIn("call torchdynamo.disable() wrapped function", str(e))
+
+    def test_torch_size(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            output_size = torch.Size([10, 10])
+            x = x.view(*output_size)
+            return (x,)
+
+        x = torch.randn(100, requires_grad=True)
+        x_clone = x.clone()
+        ref = fn(x)
+
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn(x_clone)
+
+        self.assertTrue(same(ref, res))
