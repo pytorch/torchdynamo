@@ -250,8 +250,11 @@ class CommonTemplate:
         self.common(g, (torch.randn(8, 8),))
 
     def test_views1(self):
-        def fn(x, y):
+        def fn1(x, y):
             return (x.view(size2) + y,)
+
+        def fn2(x, y):
+            return ((x + 1).view(size2) + y,)
 
         views = [
             ([5 * 7], [5, 7]),
@@ -263,23 +266,27 @@ class CommonTemplate:
             ([2, 2, 2, 2], [4, 4]),
         ]
         for size1, size2 in views:
-            self.common(fn, (torch.randn(size1), torch.randn(size2)))
+            self.common(fn1, (torch.randn(size1), torch.randn(size2)))
+            self.common(fn2, (torch.randn(size1), torch.randn(size2)))
 
         for size2, size1 in views:
-            self.common(fn, (torch.randn(size1), torch.randn(size2)))
+            self.common(fn1, (torch.randn(size1), torch.randn(size2)))
+            self.common(fn2, (torch.randn(size1), torch.randn(size2)))
 
     def test_views2(self):
-        def fn(
-            x,
-        ):
+        def fn1(x):
             return (x.view(size2) + 1,)
+
+        def fn2(x):
+            return ((x * 2).view(size2) + 1,)
 
         for size1, size2 in [
             ([2, 2, 2, 2], [4, -1]),
             ([10, 1, 10, 1, 10], [-1, 100]),
             ([10 * 5, 20], [10, -1, 20]),
         ]:
-            self.common(fn, (torch.randn(size1),))
+            self.common(fn1, (torch.randn(size1),))
+            self.common(fn2, (torch.randn(size1),))
 
 
 class CpuTests(TestCase):

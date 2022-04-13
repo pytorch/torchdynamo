@@ -221,6 +221,8 @@ class TritonKernel(Kernel):
         base_part = index.subs({v: 0 for v in reduction_vars}) - offset
         reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
 
+        assert index == offset + base_part + reduction_part
+
         offset = self.rename_indexing(offset)
         base_part = self.rename_indexing(self.simplify_indexing(base_part))
         reduction_part = self.rename_indexing(self.simplify_indexing(reduction_part))

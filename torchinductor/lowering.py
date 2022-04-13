@@ -7,11 +7,11 @@ import torch
 import torch.fx
 
 from .ir import ExpandView
-from .ir import GenericView
 from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import UnrealizedBuffer
+from .ir import View
 from .virtualized import graph
 from .virtualized import ops
 
@@ -167,7 +167,7 @@ def expand(x, sizes):
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
-    return TensorBox(GenericView.create(x.data, sizes))
+    return TensorBox(View.create(x.data, sizes))
 
 
 @register_lowering(torch.arange)

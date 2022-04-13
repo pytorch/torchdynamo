@@ -14,6 +14,8 @@ from .dependencies import extract_read_writes
 from .virtualized import graph
 from .virtualized import ops
 
+sympy.Mod
+
 
 class ModularIndexing(sympy.Function):
     """
@@ -49,49 +51,6 @@ class CleanDiv(sympy.Function):
 
 class IRNode(object):
     pass
-
-
-@dataclasses.dataclass
-class Layout(IRNode):
-    device: torch.device
-    dtype: torch.dtype
-    size: List[Expr]
-    stride: List[Expr]
-    offset: Expr = Integer(0)
-
-    def make_indexer(self):
-        """A closure containing math to read a given element"""
-
-        def indexer(index):
-            assert len(index) == len(self.stride)
-            return sum(a * b for a, b in zip(index, self.stride)) + self.offset
-
-        return indexer
-
-
-@dataclasses.dataclass
-class FixedLayout(Layout):
-    """A Tensor layout we cannot change"""
-
-    pass
-
-
-class FlexibleLayout(Layout):
-    """A Tensor layout we are allowed to change"""
-
-    @staticmethod
-    def default_strides(sizes):
-        if len(sizes) == 0:
-            return []
-        reversed_strides = [sympy.Integer(1)]
-        for size in reversed(sizes[1:]):
-            reversed_strides.append(size * reversed_strides[-1])
-        return list(reversed(reversed_strides))
-
-    def __init__(self, device, dtype, size):
-        super(FlexibleLayout, self).__init__(
-            device, dtype, size, FlexibleLayout.default_strides(size)
-        )
 
 
 @dataclasses.dataclass
@@ -164,6 +123,9 @@ class BaseView(IRNode):
     def get_device(self):
         return self.data.get_device()
 
+    def storage_data(self):
+        return self.data.storage_data()
+
 
 @dataclasses.dataclass
 class ExpandView(BaseView):
@@ -191,19 +153,40 @@ class ExpandView(BaseView):
 
 
 @dataclasses.dataclass
-class GenericView(BaseView):
+class View(BaseView):
     size: List[Expr]
     reindex: Callable
 
     @classmethod
     def create(cls, x, new_size):
-        new_size = [sympy.expand(x).subs(graph.sizevars.replacements) for x in new_size]
-        old_size = [
-            sympy.expand(x).subs(graph.sizevars.replacements) for x in x.get_size()
-        ]
-
-        assert isinstance(old_size, (tuple, list))
         assert isinstance(new_size, (tuple, list))
+        old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
+
+        if (
+            isinstance(x, StorageBox)
+            and isinstance(x.storage_data(), Buffer)
+            and x.storage_data().layout.is_contiguous()
+        ):
+            # fast path, just creates a new indexer from scratch
+            buffer = x.storage_data()
+            buffer.freeze_layout()
+            old_layout = buffer.layout
+            new_layout = Layout(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                FlexibleLayout.contiguous_strides(new_size),
+                old_layout.offset,
+            )
+            return ReinterpretView(x, new_layout)
+
+        return cls(x, tuple(new_size), cls.dynamic_reshape_indexer(old_size, new_size))
+
+    @staticmethod
+    def resolve_negative_size(old_size, new_size):
+        new_size = [sympy.expand(x).subs(graph.sizevars.replacements) for x in new_size]
+        old_size = [sympy.expand(x).subs(graph.sizevars.replacements) for x in old_size]
+
         new_size = list(new_size)
         for i in range(len(new_size)):
             if new_size[i] == -1:
@@ -212,10 +195,13 @@ class GenericView(BaseView):
                 break
 
         graph.sizevars.guard_equals(product(old_size), product(new_size))
-        return cls(x, tuple(new_size), cls.create_reindexer(old_size, new_size))
+        return old_size, new_size
 
     @staticmethod
-    def create_reindexer(old_size, new_size):
+    def dynamic_reshape_indexer(old_size, new_size):
+        """
+        Perform a reshape entirely by modifying indexing math
+        """
         size_hint = graph.sizevars.size_hint
         vars = [sympy.Symbol(f"view{i}") for i in range(len(new_size))]
 
@@ -285,7 +271,34 @@ class GenericView(BaseView):
         return load
 
 
-class SqueezeView(GenericView):
+@dataclasses.dataclass
+class ReinterpretView(BaseView):
+    """Pretend our storage has a different layout"""
+
+    layout: "Layout"
+
+    def get_device(self):
+        return self.layout.device
+
+    def get_dtype(self):
+        return self.layout.dtype
+
+    def get_size(self):
+        return self.layout.size
+
+    def get_stride(self):
+        return self.layout.stride
+
+    def make_loader(self):
+        indexer = self.layout.make_indexer()
+
+        def loader(index):
+            return ops.load(self.data.get_name(), indexer(index))
+
+        return loader
+
+
+class SqueezeView(View):
     @staticmethod
     def squeezer(size):
         new_size = [s for s in size if s != 1]
@@ -331,6 +344,61 @@ class Constant(IRNode):
 
 
 @dataclasses.dataclass
+class Layout(IRNode):
+    device: torch.device
+    dtype: torch.dtype
+    size: List[Expr]
+    stride: List[Expr]
+    offset: Expr = Integer(0)
+
+    def make_indexer(self):
+        """A closure containing math to read a given element"""
+
+        def indexer(index):
+            assert len(index) == len(self.stride), f"{index} == {self.stride}"
+            return sum(a * b for a, b in zip(index, self.stride)) + self.offset
+
+        return indexer
+
+    def is_contiguous(self):
+        return self.stride == FlexibleLayout.contiguous_strides(self.size)
+
+    def as_fixed(self):
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            self.stride,
+            self.offset,
+        )
+
+
+@dataclasses.dataclass
+class FixedLayout(Layout):
+    """A Tensor layout we cannot change"""
+
+    pass
+
+
+class FlexibleLayout(Layout):
+    """A Tensor layout we are allowed to change"""
+
+    @staticmethod
+    def contiguous_strides(sizes):
+        if len(sizes) == 0:
+            return []
+        reversed_strides = [sympy.Integer(1)]
+        for size in reversed(sizes[1:]):
+            reversed_strides.append(size * reversed_strides[-1])
+        return list(reversed(reversed_strides))
+
+    def __init__(self, device, dtype, size):
+        super(FlexibleLayout, self).__init__(
+            device, dtype, size, FlexibleLayout.contiguous_strides(size)
+        )
+
+
+@dataclasses.dataclass
 class Buffer(IRNode):
     name: str
     layout: Layout
@@ -357,6 +425,9 @@ class Buffer(IRNode):
             return ops.load(self.name, indexer(index))
 
         return loader
+
+    def freeze_layout(self):
+        self.layout = self.layout.as_fixed()
 
 
 @dataclasses.dataclass
@@ -424,7 +495,5 @@ class StorageBox(MutableBox):
         self.data.name = graph.register_buffer(self.data)
         return self.data.name
 
-
-@dataclasses.dataclass
-class View(IRNode):
-    storage: StorageBox
+    def storage_data(self):
+        return self.data
