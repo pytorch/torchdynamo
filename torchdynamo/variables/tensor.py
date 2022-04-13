@@ -106,6 +106,14 @@ class TensorVariable(VariableTracker):
                 )
         elif example_value is None or proxy.node.target is torch.manual_seed:
             return variables.ConstantVariable(None, **options)
+        elif istype(example_value, int) and proxy.node.target in (
+            torch.seed,
+            operator.mod,
+            int,
+        ):
+            # TODO - Is it possible to check that the args for mod and int is a SeedVariable
+            proxy.node.meta["example_value"] = example_value
+            return SeedVariable(proxy, **options)
         else:
             assert (
                 False
@@ -272,6 +280,14 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+
+
+class SeedVariable(TensorVariable):
+    def __init__(self, proxy, **kwargs):
+        super(SeedVariable, self).__init__(proxy, **kwargs)
+
+    def python_type(self):
+        return int
 
 
 class DynamicShapeVariable(TensorVariable):

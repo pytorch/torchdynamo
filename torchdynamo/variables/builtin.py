@@ -8,6 +8,8 @@ from typing import List
 
 import torch
 
+from torchdynamo.variables.tensor import SeedVariable
+
 from .. import config
 from .. import variables
 from ..allowed_functions import is_disallowed
@@ -94,6 +96,7 @@ class BuiltinVariable(VariableTracker):
     @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
+            int,
             operator.pos,
             operator.neg,
             operator.not_,
