@@ -407,6 +407,10 @@ class InstructionTranslatorBase(object):
         # only exists in python<=3.7
         self.block_stack.append(BlockStackEntry(inst.target))
 
+    def SETUP_EXCEPT(self, inst):
+        # only exists in python<=3.7
+        self.block_stack.append(BlockStackEntry(inst.target))
+
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
 
@@ -438,7 +442,11 @@ class InstructionTranslatorBase(object):
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
-        assert exc is None
+        if sys.version_info < (3, 8):
+            assert exc.is_python_constant()
+            assert exc.as_python_constant() is None
+        else:
+            assert exc is None
         self.push(exc)
         self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
 

@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import sys
 import types
 from typing import Any
 from typing import Dict
@@ -29,9 +30,14 @@ class ReenterWith:
 
     def __call__(self, code_options, cleanup):
         with_cleanup_start = create_instruction("WITH_CLEANUP_START")
+        if sys.version_info < (3, 8):
+            begin_finally = create_instruction("LOAD_CONST", 0)
+        else:
+            begin_finally = create_instruction("BEGIN_FINALLY")
+
         cleanup[:] = [
             create_instruction("POP_BLOCK"),
-            create_instruction("BEGIN_FINALLY"),
+            begin_finally,
             with_cleanup_start,
             create_instruction("WITH_CLEANUP_FINISH"),
             create_instruction("END_FINALLY"),
