@@ -10,6 +10,7 @@ from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import transform_code_object
 from .utils import ExactWeakKeyDictionary
+from .utils import istype
 
 # taken from code.h in cpython
 CO_OPTIMIZED = 0x0001
@@ -30,14 +31,9 @@ class ReenterWith:
 
     def __call__(self, code_options, cleanup):
         with_cleanup_start = create_instruction("WITH_CLEANUP_START")
-        if sys.version_info < (3, 8):
-            begin_finally = create_instruction("LOAD_CONST", 0)
-        else:
-            begin_finally = create_instruction("BEGIN_FINALLY")
-
         cleanup[:] = [
             create_instruction("POP_BLOCK"),
-            begin_finally,
+            self._create_compatible_begin_finally(code_options),
             with_cleanup_start,
             create_instruction("WITH_CLEANUP_FINISH"),
             create_instruction("END_FINALLY"),
@@ -48,6 +44,24 @@ class ReenterWith:
             create_instruction("SETUP_WITH", target=with_cleanup_start),
             create_instruction("POP_TOP"),
         ]
+
+    # For Python 3.7 compatibility
+    def _create_compatible_begin_finally(self, code_options):
+        if sys.version_info < (3, 8):
+            co_consts = code_options["co_consts"]
+            assert istype(co_consts, tuple)
+            index = None
+            for i, v in enumerate(co_consts):
+                if v is None:
+                    index = i
+                    break
+            if index is None:
+                index = len(co_consts)
+                co_consts = co_consts + (None,)
+                code_options["co_consts"] = co_consts
+            return create_instruction("LOAD_CONST", index, None)
+        else:
+            return create_instruction("BEGIN_FINALLY")
 
 
 @dataclasses.dataclass
