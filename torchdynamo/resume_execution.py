@@ -11,7 +11,6 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import transform_code_object
 from .codegen import PyCodegen
 from .utils import ExactWeakKeyDictionary
-from .utils import istype
 
 # taken from code.h in cpython
 CO_OPTIMIZED = 0x0001
