@@ -155,6 +155,7 @@ def break_graph_if_unsupported(*, push):
             )
 
         return wrapper
+
     return decorator
 
 
