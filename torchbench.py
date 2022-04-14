@@ -162,7 +162,6 @@ def load_model(device, model_name, is_training, use_eval_mode):
 
 def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
-    gc.collect()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
