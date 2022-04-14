@@ -132,28 +132,30 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     return inner
 
 
-def break_graph_if_unsupported(inner_fn):
-    @functools.wraps(inner_fn)
-    def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
-        state = self.copy_graphstate()
-        try:
-            return inner_fn(self, inst)
-        except Unsupported as exc:
-            if not self.should_compile_partial_graph():
-                raise
-            exc.remove_from_stats()
-            exc.add_to_stats("graph_break")
-        self.restore_graphstate(state)
-        self.output.compile_subgraph(self)
-        # note, assuming inst pushes 1
-        self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
-        self.output.add_output_instructions([inst])
-        self.push(UnknownVariable())
-        self.output.add_output_instructions(
-            self.create_call_resume_at(self.next_instruction)
-        )
+def break_graph_if_unsupported(*, push):
+    def decorator(inner_fn):
+        @functools.wraps(inner_fn)
+        def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
+            state = self.copy_graphstate()
+            try:
+                return inner_fn(self, inst)
+            except Unsupported as exc:
+                if not self.should_compile_partial_graph():
+                    raise
+                exc.remove_from_stats()
+                exc.add_to_stats("graph_break")
+            self.restore_graphstate(state)
+            self.output.compile_subgraph(self)
+            self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+            self.output.add_output_instructions([inst])
+            for _ in range(push):
+                self.push(UnknownVariable())
+            self.output.add_output_instructions(
+                self.create_call_resume_at(self.next_instruction)
+            )
 
-    return wrapper
+        return wrapper
+    return decorator
 
 
 class InstructionTranslatorBase(object):
@@ -536,13 +538,13 @@ class InstructionTranslatorBase(object):
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
-    @break_graph_if_unsupported
+    @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
 
-    @break_graph_if_unsupported
+    @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({})
@@ -579,7 +581,7 @@ class InstructionTranslatorBase(object):
 
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
-    @break_graph_if_unsupported
+    @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_KW(self, inst):
         argnames = self.pop()
         args = self.popn(inst.argval)
@@ -635,6 +637,7 @@ class InstructionTranslatorBase(object):
             self.create_call_resume_at(self.next_instruction)
         )
 
+    @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
@@ -898,7 +901,7 @@ class InstructionTranslatorBase(object):
     BINARY_MODULO = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-    BINARY_SUBSCR = break_graph_if_unsupported(stack_op(operator.getitem))
+    BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
