@@ -38,7 +38,7 @@ def compute_speedups(args, models, example_inputs):
     expected = models[0](*example_inputs)
     for model in models[1:]:
         actual = model(*example_inputs)
-        assert same(actual, expected), expected - actual
+        assert same(actual, expected), expected[0] - actual[0]
 
     timings = np.zeros((args.repeat, len(models)), np.float64)
     for rep in range(args.repeat):
@@ -89,6 +89,10 @@ class MicroBenchmarks:
     @staticmethod
     def abs_norm(x):
         return (x / (torch.abs(x) + 1),)
+
+    @staticmethod
+    def add_relu_softmax(x, a):
+        return (torch.softmax(torch.relu(x + a), -1),)
 
 
 def main():
@@ -141,7 +145,7 @@ def main():
         torchinductor.config.debug = True
 
     rows = []
-    for model in (MicroBenchmarks.scale,):
+    for model in (MicroBenchmarks.add_relu_softmax,):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:

@@ -194,7 +194,7 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
 
 
 def make_reduction(reduction_type: str):
-    def inner(x, axis=None):
+    def inner(x, axis=None, keepdims=False):
         size = x.get_size()
         if axis is None:
             axis = range(len(size))
@@ -221,8 +221,12 @@ def make_reduction(reduction_type: str):
                 kept_sizes.append(size[i])
 
         def loader(index, reduction_index):
-            assert len(index) == len(kept_idx)
             assert len(reduction_index) == len(reduced_idx)
+            if keepdims:
+                assert len(index) == len(size)
+                assert all(index[i] == 0 for i in reduced_idx)
+                index = [index[i] for i in kept_idx]
+            assert len(index) == len(kept_idx)
             new_index = [None] * (len(index) + len(reduction_index))
             for idx, var in itertools.chain(
                 zip(kept_idx, index), zip(reduced_idx, reduction_index)
@@ -230,9 +234,16 @@ def make_reduction(reduction_type: str):
                 new_index[idx] = var
             return inner_loader(new_index)
 
+        if keepdims:
+            new_size = list(size)
+            for i in reduced_idx:
+                new_size[i] = sympy.Integer(1)
+        else:
+            new_size = kept_sizes
+
         inner_loader = x.make_loader()
         result = Reduction.create(
-            kept_sizes,
+            new_size,
             loader,
             device=x.get_device(),
             dtype=x.get_dtype(),
@@ -245,7 +256,7 @@ def make_reduction(reduction_type: str):
     return inner
 
 
-register_lowering(aten.sum)(make_reduction("sum"))
+sum = register_lowering(aten.sum)(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_pointwise(aten.add)
@@ -255,3 +266,7 @@ register_pointwise(aten.sub)
 register_pointwise(aten.mul)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
+register_pointwise(aten.sigmoid)
+register_pointwise(aten.silu)
+relu = register_pointwise(aten.relu)
+exp = register_pointwise(aten.exp)

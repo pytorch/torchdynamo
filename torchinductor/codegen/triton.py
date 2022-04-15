@@ -53,6 +53,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.abs({x})"
 
     @staticmethod
+    def exp(x):
+        return f"tl.exp({x})"
+
+    @staticmethod
+    def relu(x):
+        return f"tl.where({x} <= 0, 0, {x})"
+
+    @staticmethod
     def minimum(a, b):
         return f"tl.minimum({a}, {b})"
 

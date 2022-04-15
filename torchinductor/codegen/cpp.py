@@ -63,6 +63,8 @@ def cpp_prefix():
             #include <cmath>
             #include <cstdlib>
             #include <limits>
+            #define SLEEF_ENABLE_OMP_SIMD
+            //#include <sleef.h>
             """
         ),
         "h",
@@ -100,6 +102,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def abs(x):
         return f"std::abs({x})"
+
+    @staticmethod
+    def exp(x):
+        # return f"Sleef_expf_u10({x})"
+        return f"std::exp({x})"
+
+    @staticmethod
+    def relu(x):
+        return f"{x} * ({x}>0)"
 
     @staticmethod
     def minimum(a, b):

@@ -60,6 +60,15 @@ class OpOverrides:
     def constant(value, dtype):
         return repr(value)
 
+    @staticmethod
+    def sigmoid(x):
+        x = ops.exp(f"-{x}")
+        return f"1 / (1 + {x})"
+
+    @staticmethod
+    def silu(x):
+        return f"{x} * {ops.sigmoid(x)}"
+
 
 class IndentedBuffer:
     tabwidth = 4

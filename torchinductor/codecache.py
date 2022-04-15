@@ -32,7 +32,7 @@ def write(source_code, ext):
         os.makedirs(subdir, exist_ok=True)
     path = os.path.join(subdir, f"{basename}.{ext}")
     if not os.path.exists(path):
-        # use a a random temp file for thread safety
+        # use a random temp file for thread safety
         tmp_path = f"{path}.{random.randint(0, 2**31)}"
         with open(tmp_path, "w") as fd:
             fd.write(source_code)
@@ -48,7 +48,7 @@ class CppCodeCache:
         " ",
         f"""
             {config.cpp.cxx} -shared -fPIC -Wall -std=c++14
-            -march=native -O3 -ffast-math -fopenmp -lgomp
+            -march=native -O3 -ffast-math -fopenmp -liomp5 -lsleef
             -o{{output}} {{input}}
         """,
     ).strip()

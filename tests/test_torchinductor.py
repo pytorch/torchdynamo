@@ -288,6 +288,42 @@ class CommonTemplate:
             self.common(fn1, (torch.randn(size1),))
             self.common(fn2, (torch.randn(size1),))
 
+    def test_relu(self):
+        def fn(a, b):
+            return (torch.relu(a), torch.relu(a + b))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_exp(self):
+        def fn(a, b):
+            return (torch.exp(a), torch.exp(a + b))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_sigmoid(self):
+        def fn(a, b):
+            return (torch.sigmoid(a), torch.sigmoid(a + b))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_silu(self):
+        def fn(a):
+            return (torch.nn.functional.silu(a),)
+
+        self.common(fn, (torch.randn(8, 8),))
+
+    def test_sum_keepdims(self):
+        def fn(a, b):
+            return (torch.sum(a + b, -1, keepdim=True),)
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_softmax(self):
+        def fn(a, b):
+            return (torch.softmax(a + b, -1), torch.softmax(a, 0), torch.softmax(b, 1))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
 
 class CpuTests(TestCase):
     common = check_model
