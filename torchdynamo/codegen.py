@@ -201,8 +201,9 @@ class PyCodegen(object):
         assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
-    def _create_load_const(self, value):
-        co_consts = self.code_options["co_consts"]
+    @staticmethod
+    def get_const_index(code_options, value):
+        co_consts = code_options["co_consts"]
         assert istype(co_consts, tuple)
         index = None
         for i, v in enumerate(co_consts):
@@ -212,7 +213,11 @@ class PyCodegen(object):
         if index is None:
             index = len(co_consts)
             co_consts = co_consts + (value,)
-            self.code_options["co_consts"] = co_consts
+            code_options["co_consts"] = co_consts
+        return index
+
+    def _create_load_const(self, value):
+        index = self.get_const_index(self.code_options, value)
         return create_instruction("LOAD_CONST", index, value)
 
     create_load_output = _create_load_const
