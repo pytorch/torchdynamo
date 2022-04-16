@@ -336,7 +336,7 @@ class CppKernel(Kernel):
                     for node in reduction_nodes:
                         scheduler.maybe_remove_buffer(node)
                         node.run(vars, reduction_vars)
-                    # can't fuse reduction into reduction
+                    # can't yet fuse reduction into reduction
                     for node in reduction_nodes:
                         node.mark_fusable()
 

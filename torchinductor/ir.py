@@ -34,7 +34,7 @@ class ModularIndexing(sympy.Function):
 
 class CleanDiv(sympy.Function):
     """
-    a//b where we know there is no rounding
+    a // b where we know there is no rounding
     """
 
     nargs = (2,)
@@ -147,6 +147,28 @@ class ExpandView(BaseView):
                 if actual[i] == 1:
                     # zero out broadcast dimension
                     index[i] = sympy.Integer(0)
+            return inner(index)
+
+        return load
+
+
+@dataclasses.dataclass
+class PermuteView(BaseView):
+    dims: List[Expr]
+
+    def get_size(self):
+        assert set(self.dims) == set(range(len(self.dims)))
+        size = self.data.get_size()
+        return [size[i] for i in self.dims]
+
+    def make_loader(self):
+        inner = self.data.make_loader()
+        inv = {j: i for i, j in enumerate(self.dims)}
+        inv = [inv[i] for i in range(len(self.dims))]
+        assert set(inv) == set(range(len(self.dims)))
+
+        def load(index):
+            index = [index[i] for i in inv]
             return inner(index)
 
         return load

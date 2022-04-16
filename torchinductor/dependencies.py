@@ -15,6 +15,10 @@ class MemoryDep(typing.NamedTuple):
     index: sympy.Expr
     size: List[sympy.Expr]
 
+    def broadcast_extend_sizes(self, extra_sizes):
+        size = (*self.size, *[x for x in extra_sizes if x != 1])
+        return MemoryDep(self.name, self.index, size)
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -32,7 +36,7 @@ class RecordLoadStore(MockHandler):
         super(RecordLoadStore, self).__init__()
         self._reads = set()
         self._writes = set()
-        self._size = tuple(size)
+        self._size = tuple([x for x in size if x != 1])
 
     def load(self, name: str, index: sympy.Expr):
         self._reads.add(MemoryDep(name, index, self._size))

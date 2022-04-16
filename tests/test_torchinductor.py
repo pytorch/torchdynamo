@@ -34,6 +34,11 @@ class TestCase(unittest.TestCase):
         cls._stack.close()
 
 
+class ToTuple(torch.nn.Module):
+    def forward(self, x):
+        return (x,)
+
+
 @dataclasses.dataclass
 class InputGen:
     n: int
@@ -290,7 +295,7 @@ class CommonTemplate:
 
     def test_relu(self):
         def fn(a, b):
-            return (torch.relu(a), torch.relu(a + b))
+            return (torch.relu(a), torch.relu(a + b)/10)
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -323,6 +328,37 @@ class CommonTemplate:
             return (torch.softmax(a + b, -1), torch.softmax(a, 0), torch.softmax(b, 1))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_transpose(self):
+        def fn(a, b):
+            return (
+                torch.t(a) + b,
+                torch.transpose(b * 2, 0, 1) + 10,
+            )
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_permute(self):
+        def fn(a):
+            return (torch.permute(a + 1, [2, 1, 4, 0, 3]) + 2,)
+
+        self.common(fn, (torch.randn(2, 2, 2, 2, 2),))
+
+
+    def test_addmm(self):
+        def fn(a, b, c):
+            return (torch.addmm(a+1, b+2, c+3) + 4, )
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8), torch.randn(8, 8),))
+
+
+    def test_linear(self):
+        mod = torch.nn.Sequential(
+            torch.nn.Linear(8, 16),
+            torch.nn.Sigmoid(),
+            ToTuple(),
+        )
+        self.common(mod, (torch.randn(2, 8),))
 
 
 class CpuTests(TestCase):

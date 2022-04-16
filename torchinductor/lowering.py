@@ -7,6 +7,7 @@ import torch
 import torch.fx
 
 from .ir import ExpandView
+from .ir import PermuteView
 from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
@@ -168,6 +169,13 @@ def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
     return TensorBox(View.create(x.data, sizes))
+
+
+@register_lowering(aten.permute)
+def permute(x, dims):
+    assert isinstance(x, TensorBox)
+    assert isinstance(dims, (list, tuple))
+    return TensorBox(PermuteView(x.data, tuple(dims)))
 
 
 @register_lowering(torch.arange)

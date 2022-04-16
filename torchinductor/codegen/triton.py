@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -58,7 +59,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"tl.where({x} <= 0, 0, {x})"
+        # return f"tl.where({x} <= 0, 0, {x})"
+        return ops.maximum("0", x)
 
     @staticmethod
     def minimum(a, b):
@@ -213,8 +215,24 @@ class TritonKernel(Kernel):
         self.reduction_range_tree = RangeTreeRoot("reduction", reduction_numel, "r")
         self.range_tree_nodes = dict()
         self.iter_vars_count = itertools.count()
-        self.inside_reduction = reduction_numel != 1
         self.indexing_code = IndentedBuffer()
+        self.inside_reduction = reduction_numel != 1
+        self.disabled_reduction_stores = dict()
+
+    def disable_reduction(self):
+        @contextlib.contextmanager
+        def ctx():
+            if not self.inside_reduction:
+                yield
+                return
+            prior = self.cse.store_cache
+            self.cse.store_cache = self.disabled_reduction_stores
+            self.inside_reduction = False
+            yield
+            self.inside_reduction = True
+            self.cse.store_cache = prior
+
+        return ctx()
 
     def set_ranges(self, lengths, reduction_lengths):
         return self.iter_range_tree.construct(
@@ -281,6 +299,9 @@ class TritonKernel(Kernel):
         )
 
     def load(self, name: str, index: sympy.Expr):
+        if (name, index) in self.disabled_reduction_stores:
+            tmpvar = self.disabled_reduction_stores[(name, index)]
+            return f"tl.reshape({tmpvar}, (BLOCK_SIZE, 1))"
         var = self.args.input(name)
         line = f"tl.load({var} + {self.indexing(index)}, {self.mask()})"
         return self.cse.generate(self.loads, line)
@@ -299,9 +320,8 @@ class TritonKernel(Kernel):
         )
         res = self.cse.generate(self.compute, f"tl.{reduction_type}({res}, 1)")
         assert self.inside_reduction
-        self.inside_reduction = False
-        ops.store(name, index, res)
-        self.inside_reduction = True
+        with self.disable_reduction():
+            ops.store(name, index, res)
 
     @classmethod
     def codegen(cls, wrapper):
@@ -430,9 +450,9 @@ class TritonKernel(Kernel):
                     for node in scheduler.pop_group(
                         (group, reduction_group),
                     ):
-                        scheduler.maybe_remove_buffer(node)
+                        scheduler.maybe_remove_buffer(node, broadcast_after_reduce=True)
                         node.run(*kernel.set_ranges(*node.get_ranges()))
-                        node.mark_fusable()
+                        node.mark_fusable(broadcast_after_reduce=True)
 
                     if kernel.inside_reduction:
                         # Add pointwise with compatible dimensions
@@ -450,11 +470,10 @@ class TritonKernel(Kernel):
                                 node.mark_fusable()
 
                         # Add more pointwise with fewer dimensions
-                        kernel.inside_reduction = False
-                        for node in scheduler.pop_group((group, sympy.Integer(1))):
-                            node.run(*kernel.set_ranges(*node.get_ranges()))
-                            node.mark_fusable()
-                        kernel.inside_reduction = True
+                        with kernel.disable_reduction():
+                            for node in scheduler.pop_group((group, sympy.Integer(1))):
+                                node.run(*kernel.set_ranges(*node.get_ranges()))
+                                node.mark_fusable()
             scheduler.enqueue(reschedule)
             scheduler.barrier()
 

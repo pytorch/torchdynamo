@@ -42,7 +42,7 @@ class SchedulerNode:
             if dep.name not in self.scheduler.available_buffer_names
         }
 
-    def can_remove_buffer(self):
+    def can_remove_buffer(self, broadcast_after_reduce=False):
         if (
             self.is_reduction()
             and len(self.users) == 1
@@ -50,12 +50,23 @@ class SchedulerNode:
         ):
             user = self.users[0]
             dep = next(iter(user.unmet_dependencies))
+            writes = self.read_writes.writes
+            if broadcast_after_reduce:
+                writes = set(writes)
+                writes.update(
+                    [w.broadcast_extend_sizes(self._reduction_size) for w in writes]
+                )
             # this will get fused into us, so we don't need to keep the buffer
-            return not user.is_reduction() and dep in self.read_writes.writes
+            return not user.is_reduction() and dep in writes
         return False
 
-    def mark_fusable(self):
+    def mark_fusable(self, broadcast_after_reduce=False):
         self.scheduler.fusable_deps.update(self.read_writes.writes)
+        if broadcast_after_reduce and self._reduction_size:
+            self.scheduler.fusable_deps.update(
+                w.broadcast_extend_sizes(self._reduction_size)
+                for w in self.read_writes.writes
+            )
 
     def get_name(self):
         return self.node.name
@@ -117,8 +128,10 @@ class BlockedNodes:
     def pop_fusable(self, deps, group):
         assert isinstance(deps, set)
         result = []
+        print(f"pop_fusable {deps} {group} {list(self.dep_to_nodes.keys())}")
         for dep in deps:
             self.dep_to_nodes[dep] = [x for x in self.dep_to_nodes[dep] if x]
+            print(f"pop_fusable match {dep} {self.dep_to_nodes[dep]}")
             for box in self.dep_to_nodes[dep]:
                 if (
                     len(box.peek().unmet_dependencies - deps) == 0
@@ -166,8 +179,8 @@ class Scheduler:
                 graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
-    def maybe_remove_buffer(self, node: SchedulerNode):
-        if node.can_remove_buffer():
+    def maybe_remove_buffer(self, node: SchedulerNode, broadcast_after_reduce=False):
+        if node.can_remove_buffer(broadcast_after_reduce=broadcast_after_reduce):
             graph.removed_buffers.add(node.get_name())
 
     def enqueue(self, node):
