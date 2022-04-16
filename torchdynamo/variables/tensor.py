@@ -112,11 +112,6 @@ class TensorVariable(VariableTracker):
                 )
         elif example_value is None or proxy.node.target is torch.manual_seed:
             return variables.ConstantVariable(None, **options)
-        elif (
-            isinstance(example_value, bool)
-            and proxy.node.target is torch.overrides.is_tensor_like
-        ):
-            return variables.ConstantVariable(example_value, **options)
         else:
             assert (
                 False

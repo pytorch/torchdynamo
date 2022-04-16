@@ -69,7 +69,11 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def can_constant_fold_through(self):
-        if self.value in (torch.is_tensor, torch.is_floating_point):
+        if self.value in (
+            torch.is_tensor,
+            torch.is_floating_point,
+            torch.overrides.is_tensor_like,
+        ):
             return True
         return getattr(self.value, "__module__", None) == "math"
 
@@ -101,11 +105,16 @@ class TorchVariable(VariableTracker):
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
         elif (
-            self.value in (torch.is_tensor, torch.is_floating_point)
+            self.value
+            in (
+                torch.is_tensor,
+                torch.is_floating_point,
+                torch.overrides.is_tensor_like,
+            )
             and isinstance(args[0], TensorVariable)
             and args[0].dtype is not None
         ):
-            if self.value is torch.is_tensor:
+            if self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
                 return ConstantVariable(True, **options)
             elif self.value is torch.is_floating_point:
                 return ConstantVariable(args[0].dtype.is_floating_point, **options)
