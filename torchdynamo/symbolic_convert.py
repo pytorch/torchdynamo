@@ -1148,6 +1148,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             assert tracer.symbolic_result.as_python_constant() is None
             return ListIteratorVariable(
                 tracer.generated_items,
+                mutable_local=MutableLocal(),
                 **VariableTracker.propagate(tracer.symbolic_result),
             )
         else:
