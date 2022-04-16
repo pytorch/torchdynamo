@@ -116,8 +116,7 @@ class TensorVariable(VariableTracker):
             isinstance(example_value, bool)
             and proxy.node.target is torch.overrides.is_tensor_like
         ):
-            proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return variables.ConstantVariable(example_value, **options)
         else:
             assert (
                 False
