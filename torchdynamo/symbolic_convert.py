@@ -1177,8 +1177,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.symbolic_result = None
         self.closure_cells = closure_cells
-        # self.funcvar = funcvar
-        # self.parent = parent
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:
