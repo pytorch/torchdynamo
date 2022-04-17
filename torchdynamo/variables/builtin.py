@@ -96,7 +96,6 @@ class BuiltinVariable(VariableTracker):
     @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
-            int,
             operator.pos,
             operator.neg,
             operator.not_,
@@ -200,6 +199,10 @@ class BuiltinVariable(VariableTracker):
                 )
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+
+        # Handle cases like int(torch.seed())
+        if self.fn is int and isinstance(args[0], SeedVariable):
+            return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
 
