@@ -6,12 +6,13 @@ import sympy
 import torch
 import torch.fx
 
+from . import ir
 from .ir import ExpandView
 from .ir import PermuteView
+from .ir import Pointwise
 from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
-from .ir import UnrealizedBuffer
 from .ir import View
 from .virtualized import graph
 from .virtualized import ops
@@ -81,7 +82,7 @@ def broadcast_symbolic_shapes(a, b):
         elif a == 1:
             output.append(b)
         else:
-            guard_shape_equal(a, b)
+            graph.sizevars.guard_equals(a, b)
             if len(sympy.expand(b).free_symbols) < len(sympy.expand(a).free_symbols):
                 output.append(b)  # prefer shorter formula
             else:
@@ -89,19 +90,14 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def guard_shape_equal(a, b):
-    if a != b:
-        graph.sizevars.guard_equals(a, b)
-
-
 def make_pointwise(fn, override_dtype=None, override_device=None):
     def inner(*inputs: List[TensorBox]):
         loaders = [x.make_loader() for x in inputs]
-        return UnrealizedBuffer.create(
-            inputs[0].get_size(),
-            lambda index: fn(*[load(index) for load in loaders]),
+        return Pointwise.create(
             device=override_device or inputs[0].get_device(),
             dtype=override_dtype or inputs[0].get_dtype(),
+            inner_fn=lambda index: fn(*[load(index) for load in loaders]),
+            ranges=inputs[0].get_size(),
         )
 
     return inner
@@ -154,14 +150,14 @@ def detach(x):
 @register_lowering(aten.squeeze)
 def squeeze(x):
     assert isinstance(x, TensorBox)
-    return TensorBox(SqueezeView(x.data))
+    return TensorBox(SqueezeView.create(x.data))
 
 
 @register_lowering(aten.expand)
 def expand(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
-    return TensorBox(ExpandView(x.data, tuple(sizes)))
+    return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
 @register_lowering(aten.view)
@@ -175,7 +171,14 @@ def view(x, sizes):
 def permute(x, dims):
     assert isinstance(x, TensorBox)
     assert isinstance(dims, (list, tuple))
-    return TensorBox(PermuteView(x.data, tuple(dims)))
+    return TensorBox(PermuteView.create(x.data, tuple(dims)))
+
+
+@register_lowering(aten.mm)
+def mm(a, b):
+    assert isinstance(a, TensorBox)
+    assert isinstance(b, TensorBox)
+    return TensorBox.create(ir.MatrixMultiply.create(a, b))
 
 
 @register_lowering(torch.arange)
@@ -193,11 +196,11 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
     start = sympy.Integer(start)
     step = sympy.Integer(step)
 
-    return UnrealizedBuffer.create(
-        [sympy.Integer(length)],
-        lambda index: ops.index_expr(step * index[0] + start, dtype),
+    return Pointwise.create(
         device=device or torch.tensor(0.0).device,
         dtype=dtype,
+        inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
+        ranges=[sympy.Integer(length)],
     )
 
 
@@ -251,10 +254,10 @@ def make_reduction(reduction_type: str):
 
         inner_loader = x.make_loader()
         result = Reduction.create(
-            new_size,
-            loader,
             device=x.get_device(),
             dtype=x.get_dtype(),
+            inner_fn=loader,
+            ranges=new_size,
             reduction_size=reduced_sizes,
             reduction_type=reduction_type,
         )

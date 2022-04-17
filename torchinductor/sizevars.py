@@ -31,12 +31,14 @@ class SizeVarAllocator(object):
             self.val_to_var.clear()
 
     def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+        if left == right:
+            return left
         expr = sympy.expand(left - right).subs(self.replacements)
         assert self.size_hint(expr) == 0
         free = list(expr.free_symbols)
         if len(free) == 0:
             assert expr == 0
-            return
+            return left
         elif len(free) in (1, 2, 3):
             # remove the largest of the guarded variables
             free.sort(key=self.size_hint)
@@ -52,6 +54,11 @@ class SizeVarAllocator(object):
                 pass
 
         self.guards.append(ZeroGuard(expr))
+
+        if len(right.free_symbols) < len(left.free_symbols):
+            return right
+        else:
+            return left
 
     def __getitem__(self, val):
         if val in self.val_to_var:
@@ -96,3 +103,16 @@ class SizeVarAllocator(object):
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")
 
         assert not needed
+
+    def codegen_sizevar(self, x):
+        from .codegen.wrapper import pexpr
+
+        return pexpr(x.subs(self.replacements))
+
+    def codegen_shape_tuple(self, shape):
+        parts = list(map(self.codegen_sizevar, shape))
+        if len(parts) == 0:
+            return "()"
+        if len(parts) == 1:
+            return f"({parts[0]}, )"
+        return f"({', '.join(parts)})"

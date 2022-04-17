@@ -7,6 +7,8 @@ from .common import IndentedBuffer
 from .common import Kernel
 from .triton import texpr
 
+pexpr = texpr
+
 
 class WrapperCodeGen(CodeGen):
     """
@@ -23,7 +25,7 @@ class WrapperCodeGen(CodeGen):
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
-                from torch import empty, empty_like
+                from torch import empty, empty_like, as_strided
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache, grid
                 try:
                     import triton
@@ -70,7 +72,7 @@ class WrapperCodeGen(CodeGen):
                 code.writeline(f"{name} = empty_like({empty_like_cache[key]})")
             else:
                 code.writeline(
-                    f"{name} = empty([{', '.join(map(texpr, shape))}], device='{device.type}', dtype={dtype})"
+                    f"{name} = empty([{', '.join(map(pexpr, shape))}], device='{device.type}', dtype={dtype})"
                 )
 
             if device.type == "cpu":
@@ -83,7 +85,8 @@ class WrapperCodeGen(CodeGen):
         with result.indent():
             self.codegen_outputs(result)
             result.splice(self.body)
-            result.writeline("return (" + ", ".join(graph.graph_outputs) + ", )")
+            output_refs = [x.codegen_reference() for x in graph.graph_outputs]
+            result.writeline("return (" + ", ".join(output_refs) + ", )")
         return result.getvalue()
 
     def define_kernel(self, name: str, kernel: str):

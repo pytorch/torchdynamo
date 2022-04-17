@@ -295,7 +295,7 @@ class CommonTemplate:
 
     def test_relu(self):
         def fn(a, b):
-            return (torch.relu(a), torch.relu(a + b)/10)
+            return (torch.relu(a), torch.relu(a + b) / 10)
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -340,17 +340,37 @@ class CommonTemplate:
 
     def test_permute(self):
         def fn(a):
-            return (torch.permute(a + 1, [2, 1, 4, 0, 3]) + 2,)
+            return (
+                torch.permute(a + 1, [2, 1, 4, 0, 3]) + 2,
+                torch.permute(a, [2, 1, 4, 0, 3]) + 2,
+            )
 
         self.common(fn, (torch.randn(2, 2, 2, 2, 2),))
 
+    def test_expand(self):
+        def fn(a):
+            return ((a + 1).expand(3, 4, 2, 3, 2) + 2, a.expand(2, 1, 2, 3, 2) + 2)
+
+        self.common(fn, (torch.randn(2, 1, 2),))
+
+    def test_squeeze(self):
+        def fn(a):
+            return ((a + 1).squeeze() + 2, a.squeeze() + 2)
+
+        self.common(fn, (torch.randn(1, 2, 1, 2, 2, 1, 1),))
 
     def test_addmm(self):
         def fn(a, b, c):
-            return (torch.addmm(a+1, b+2, c+3) + 4, )
+            return (torch.addmm(a + 1, b + 2, c + 3) + 4,)
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8), torch.randn(8, 8),))
-
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randn(8, 8),
+                torch.randn(8, 8),
+            ),
+        )
 
     def test_linear(self):
         mod = torch.nn.Sequential(

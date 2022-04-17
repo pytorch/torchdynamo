@@ -10,6 +10,7 @@ import sympy
 import torch
 
 from .. import codecache
+from .. import ir
 from ..scheduler import Scheduler
 from ..virtualized import graph
 from ..virtualized import kernel
@@ -323,18 +324,6 @@ class TritonKernel(Kernel):
         with self.disable_reduction():
             ops.store(name, index, res)
 
-    @classmethod
-    def codegen(cls, wrapper):
-        kernels = cls.schedule_kernels().kernels
-        cls.codegen_define_and_call(kernels, wrapper)
-
-    @classmethod
-    def codegen_define_and_call(cls, kernels, wrapper):
-        for kern in kernels:
-            kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, kern.codegen_kernel())
-            kern.call_kernel(wrapper, kernel_name)
-
     def codegen_kernel(self):
         code = IndentedBuffer()
         heuristics = (
@@ -440,10 +429,17 @@ class TritonKernel(Kernel):
         code.writeline(")")
 
     @classmethod
-    def schedule_kernels(cls) -> Scheduler:
+    def codegen(cls, wrapper):
+        def codegen_extern_call(node):
+            assert isinstance(node, ir.ExternKernel)
+            node.codegen(wrapper)
+            scheduler.barrier()
+
         scheduler = Scheduler(product, graph.buffers)
 
-        for group, reduction_group in scheduler.iter_runable_groups():
+        for group, reduction_group in scheduler.iter_runable_groups(
+            codegen_extern_call
+        ):
             reschedule = []
             with scheduler.kernel(TritonKernel(group, reduction_group)) as kernel:
                 for _ in scheduler.iter_fixed_point():
@@ -474,10 +470,13 @@ class TritonKernel(Kernel):
                             for node in scheduler.pop_group((group, sympy.Integer(1))):
                                 node.run(*kernel.set_ranges(*node.get_ranges()))
                                 node.mark_fusable()
+
+            kernel_name = wrapper.next_kernel_name()
+            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+            kernel.call_kernel(wrapper, kernel_name)
+
             scheduler.enqueue(reschedule)
             scheduler.barrier()
-
-        return scheduler
 
 
 def split_sizes(sizes, prod1, prod2):

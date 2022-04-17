@@ -97,7 +97,7 @@ class GraphLowering(torch.fx.Interpreter):
         assert all(
             isinstance(x.data, ir.StorageBox) for x in result
         ), "TODO: returning views"
-        self.graph_outputs = [x.realize() for x in result]
+        self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
 
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)

@@ -17,22 +17,13 @@ class OutputNode:
         return False
 
 
-class SchedulerNode:
-    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
-        assert isinstance(node, ir.ComputedBuffer)
+class BaseSchedulerNode:
+    def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
         self.scheduler = scheduler
         self.node = node
         self.read_writes = node.get_read_writes()
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
-        self._size, self._reindex = ir.SqueezeView.squeezer(node.data.get_size())
-        self._reduction_size, self._reduction_reindex = ir.SqueezeView.squeezer(
-            node.data.get_reduction_size()
-        )
-        self.group = (
-            group_fn(self._size),
-            group_fn(self._reduction_size),
-        )
         self.users = None
 
     def prune_deps(self):
@@ -41,6 +32,33 @@ class SchedulerNode:
             for dep in self.unmet_dependencies
             if dep.name not in self.scheduler.available_buffer_names
         }
+
+    def get_name(self):
+        return self.node.name
+
+
+class ExternKernelSchdulerNode(BaseSchedulerNode):
+    def can_remove_buffer(self, **kwargs):
+        return False
+
+    def run(self, codegen_extern_call):
+        self.scheduler.run_count += 1
+        self.scheduler.pending_buffer_names.add(self.get_name())
+        self.scheduler.kernels.append(self.node)
+        codegen_extern_call(self.node)
+
+
+class SchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
+        super().__init__(scheduler, node)
+        self._size, self._reindex = ir.SqueezeView.squeezer(node.data.get_size())
+        self._reduction_size, self._reduction_reindex = ir.SqueezeView.squeezer(
+            node.data.get_reduction_size()
+        )
+        self.group = (
+            group_fn(self._size),
+            group_fn(self._reduction_size),
+        )
 
     def can_remove_buffer(self, broadcast_after_reduce=False):
         if (
@@ -67,9 +85,6 @@ class SchedulerNode:
                 w.broadcast_extend_sizes(self._reduction_size)
                 for w in self.read_writes.writes
             )
-
-    def get_name(self):
-        return self.node.name
 
     def get_ranges(self):
         return self._size, self._reduction_size
@@ -148,6 +163,7 @@ class Scheduler:
         self.runable_reduction_groups = collections.defaultdict(int)
         self.runable_pointwise_groups = collections.defaultdict(int)
         self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
+        self.runable_extern_kernels = collections.deque()
         self.blocked_nodes = BlockedNodes()
         self.run_count = 0
         self.nodes = []
@@ -156,14 +172,17 @@ class Scheduler:
         self.pending_buffer_names = set()
         self.fusable_deps = set()
         for node in nodes:
-            self.nodes.append(SchedulerNode(self, node, self.group_fn))
+            if isinstance(node, ir.ComputedBuffer):
+                self.nodes.append(SchedulerNode(self, node, self.group_fn))
+            elif isinstance(node, ir.ExternKernel):
+                self.nodes.append(ExternKernelSchdulerNode(self, node))
         self.compute_users()
         self.enqueue(self.nodes)
 
     def compute_users(self):
         name_to_users = collections.defaultdict(list)
-        for name in graph.graph_outputs:
-            name_to_users[name].append(OutputNode(StarDep(name)))
+        for node in graph.graph_outputs:
+            name_to_users[node.get_name()].append(OutputNode(StarDep(node.get_name())))
         for node in reversed(self.nodes):
             node.users = name_to_users[node.get_name()]
             name_to_users[node.get_name()] = None
@@ -189,16 +208,19 @@ class Scheduler:
                 self.enqueue(n)
             return
 
-        assert isinstance(node, SchedulerNode)
+        assert isinstance(node, BaseSchedulerNode)
         if node.unmet_dependencies:
             self.blocked_nodes.add(node)
         else:
-            self.runable_nodes[node.group].append(node)
-            if node.is_reduction():
-                # Do reductions first as they yield more possible fusions
-                self.runable_reduction_groups[node.group] += 1
+            if isinstance(node, ExternKernelSchdulerNode):
+                self.runable_extern_kernels.append(node)
             else:
-                self.runable_pointwise_groups[node.group] += 1
+                self.runable_nodes[node.group].append(node)
+                if node.is_reduction():
+                    # Do reductions first as they yield more possible fusions
+                    self.runable_reduction_groups[node.group] += 1
+                else:
+                    self.runable_pointwise_groups[node.group] += 1
 
     def barrier(self):
         """
@@ -225,9 +247,15 @@ class Scheduler:
 
         return ctx()
 
-    def iter_runable_groups(self):
-        while self.runable_reduction_groups or self.runable_pointwise_groups:
-            if self.runable_reduction_groups:
+    def iter_runable_groups(self, codegen_extern_call):
+        while (
+            self.runable_reduction_groups
+            or self.runable_pointwise_groups
+            or self.runable_extern_kernels
+        ):
+            if self.runable_extern_kernels:
+                self.runable_extern_kernels.popleft().run(codegen_extern_call)
+            elif self.runable_reduction_groups:
                 yield next(iter(self.runable_reduction_groups.keys()))
             else:
                 yield next(iter(self.runable_pointwise_groups.keys()))
