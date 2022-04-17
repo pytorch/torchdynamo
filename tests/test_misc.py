@@ -1041,3 +1041,20 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(x)
 
         self.assertTrue(same(ref, res))
+
+    def test_is_tensor_like(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def f(x):
+            if torch.overrides.is_tensor_like(x):
+                return (x * 2,)
+            return (torch.ones(10) + x,)
+
+        x = torch.randn(10)
+        ref0 = f(x)
+        ref1 = f(4)
+        with torchdynamo.optimize(cnts, nopython=True):
+            res0 = f(x)
+            res1 = f(4)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
