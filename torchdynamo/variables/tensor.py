@@ -76,6 +76,12 @@ class TensorVariable(VariableTracker):
             if isinstance(example_value, torch.Size):
                 options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
+        elif istype(example_value, int) and proxy.node.target in (
+            torch.seed,
+            operator.mod,
+        ):
+            proxy.node.meta["example_value"] = example_value
+            return DynamicShapeVariable(proxy, type(example_value), **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
         ):

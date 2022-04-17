@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import functools
 import math
+import sys
 import typing
 
 import numpy as np
@@ -1022,5 +1023,21 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         with torchdynamo.optimize(cnts, nopython=True):
             res = fn(x_clone)
+
+        self.assertTrue(same(ref, res))
+
+    def test_torch_seed(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            attention_seed = int(torch.seed() % sys.maxsize)
+            torch.manual_seed(attention_seed)
+            return (x,)
+
+        x = torch.randn(100, requires_grad=True)
+        ref = fn(x)
+
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn(x)
 
         self.assertTrue(same(ref, res))

@@ -8,6 +8,8 @@ from typing import List
 
 import torch
 
+from torchdynamo.variables.tensor import DynamicShapeVariable
+
 from .. import config
 from .. import variables
 from ..allowed_functions import is_disallowed
@@ -197,6 +199,10 @@ class BuiltinVariable(VariableTracker):
                 )
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+
+        # Handle cases like int(torch.seed())
+        if self.fn is int and isinstance(args[0], DynamicShapeVariable):
+            return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
 
