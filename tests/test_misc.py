@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import functools
 import math
+import sys
 import typing
 
 import numpy as np
@@ -1024,3 +1025,36 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(x_clone)
 
         self.assertTrue(same(ref, res))
+
+    def test_torch_seed(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            attention_seed = int(torch.seed() % sys.maxsize)
+            torch.manual_seed(attention_seed)
+            return (x,)
+
+        x = torch.randn(100, requires_grad=True)
+        ref = fn(x)
+
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn(x)
+
+        self.assertTrue(same(ref, res))
+
+    def test_is_tensor_like(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def f(x):
+            if torch.overrides.is_tensor_like(x):
+                return (x * 2,)
+            return (torch.ones(10) + x,)
+
+        x = torch.randn(10)
+        ref0 = f(x)
+        ref1 = f(4)
+        with torchdynamo.optimize(cnts, nopython=True):
+            res0 = f(x)
+            res1 = f(4)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
