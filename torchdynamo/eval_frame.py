@@ -162,3 +162,15 @@ def disable(fn=None):
         assert callable(fn)
         return DisableContext()(fn)
     return DisableContext()
+
+
+def skip(fn=None):
+    """
+    Skip frames associated with the function code, but still process recursively
+    invoked frames
+    """
+    if fn is None:
+        return skip
+    assert callable(fn)
+    skip_code(fn.__code__)
+    return fn

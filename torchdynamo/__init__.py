@@ -5,6 +5,7 @@ from .eval_frame import optimize
 from .eval_frame import optimize_assert
 from .eval_frame import reset_code
 from .eval_frame import run
+from .eval_frame import skip
 
 __all__ = [
     "optimize",
@@ -13,6 +14,7 @@ __all__ = [
     "disable",
     "reset",
     "list_backends",
+    "skip",
 ]
 
 

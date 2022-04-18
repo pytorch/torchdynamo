@@ -529,14 +529,12 @@ def help(fn):
     return fn.__doc__
 
 
+@torchdynamo.skip
 def forward_pass(mod, inputs, collect_outputs=True):
     return mod(*inputs)
 
 
-# Skip the wrapper function to allow tracing to print the traced filenames
-torchdynamo.eval_frame.skip_code(forward_pass.__code__)
-
-
+@torchdynamo.skip
 def forward_and_backward_pass(mod, inputs, collect_outputs=True):
     cloned_inputs = clone_inputs(inputs)
     mod.zero_grad(True)
@@ -546,10 +544,6 @@ def forward_and_backward_pass(mod, inputs, collect_outputs=True):
     if collect_outputs:
         return collect_results(mod, pred, loss, cloned_inputs)
     return None
-
-
-# Skip the wrapper function to allow tracing to print the traced filenames
-torchdynamo.eval_frame.skip_code(forward_and_backward_pass.__code__)
 
 
 def cast_to_fp16(model, inputs):
