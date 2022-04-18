@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  test-py38:
+  test-py39:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
