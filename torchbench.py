@@ -59,6 +59,8 @@ SKIP = {
     "tacotron2",
     # https://github.com/facebookresearch/torchdynamo/issues/101
     "detectron2_maskrcnn",
+    # https://github.com/facebookresearch/torchdynamo/issues/145
+    "fambench_xlmr",
 }
 
 # Additional models that are skipped in training
@@ -69,22 +71,19 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
-    # Known issues with training
-    "demucs",  # https://github.com/pytorch/benchmark/pull/639
-    "hf_Reformer",  # Can only be used in the training phase
-    # Known TorchDynamo bug
-    "hf_GPT2",  # Hard to debug stashed tensor issue
-    "tacotron2",  # Model uses Variable
+    # TorchDynamo and AOT errors
+    "hf_Reformer",
 }
 
 # Some models have bad train dataset. We read eval dataset.
 # yolov3 - seems to have different number of inputs between eval and train
 # densenet121 - OOM for train, using eval for now.
-ONLY_EVAL_DATASET = {"yolov3", "densenet121"}
+# timm_efficientdet - loader only exists for eval mode.
+ONLY_EVAL_DATASET = {"yolov3", "densenet121", "timm_efficientdet"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular", "tacotron2"}
+ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
 REQUIRE_HIGHER_TOLERANCE = {
@@ -94,6 +93,14 @@ REQUIRE_HIGHER_TOLERANCE = {
     "hf_Albert",
     "vgg16",
     "mobilenet_v3_large",
+}
+
+# Some models have large dataset that doesn't fit in memory. Lower the batch
+# size to test the accuracy.
+USE_SMALL_BATCH_SIZE = {
+    "timm_efficientdet": 1,
+    "demucs": 4,
+    "hf_Reformer": 4,
 }
 
 current_name = ""
@@ -142,10 +149,18 @@ def load_model(device, model_name, is_training, use_eval_mode):
     benchmark_cls = getattr(module, "Model", None)
     if not hasattr(benchmark_cls, "name"):
         benchmark_cls.name = model_name
+    batch_size = None
+    if is_training and model_name in USE_SMALL_BATCH_SIZE:
+        batch_size = USE_SMALL_BATCH_SIZE[model_name]
+
     if is_training and model_name not in ONLY_EVAL_DATASET:
-        benchmark = benchmark_cls(test="train", device=device, jit=False)
+        benchmark = benchmark_cls(
+            test="train", device=device, jit=False, batch_size=batch_size
+        )
     else:
-        benchmark = benchmark_cls(test="eval", device=device, jit=False)
+        benchmark = benchmark_cls(
+            test="eval", device=device, jit=False, batch_size=batch_size
+        )
     model, example_inputs = benchmark.get_module()
 
     # Models that must be in train mode while training
@@ -514,10 +529,12 @@ def help(fn):
     return fn.__doc__
 
 
+@torchdynamo.skip
 def forward_pass(mod, inputs, collect_outputs=True):
     return mod(*inputs)
 
 
+@torchdynamo.skip
 def forward_and_backward_pass(mod, inputs, collect_outputs=True):
     cloned_inputs = clone_inputs(inputs)
     mod.zero_grad(True)
