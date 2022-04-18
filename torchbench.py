@@ -45,10 +45,15 @@ from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-torchbench_dir = abspath(
-    "../torchbench" if exists("../torchbench") else "../torchbenchmark"
-)
-assert os.path.exists(torchbench_dir)
+for torchbench_dir in (
+    "../torchbenchmark",
+    "../torchbench",
+    "../benchmark",
+):
+    if exists(torchbench_dir):
+        break
+assert exists(torchbench_dir), "../torchbenchmark does not exist"
+torchbench_dir = abspath(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
@@ -697,6 +702,11 @@ def main():
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
     )
     group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -778,6 +788,12 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
+    elif args.inductor:
+        from torchinductor.compile_fx import compile_fx
+        optimize_ctx = torchdynamo.optimize(compile_fx, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "inductor.csv"
+        args.isolate = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
@@ -889,6 +905,7 @@ def main():
         optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = f"speedup_{args.backend}.csv"
+        args.isolate = True
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
