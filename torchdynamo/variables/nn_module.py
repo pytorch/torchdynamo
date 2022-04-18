@@ -278,21 +278,26 @@ class NNModuleVariable(VariableTracker):
                 torch.nn.ParameterList.__getitem__,
             ), typestr(module)
             assert self.source
+
             if isinstance(args[0], SliceVariable):
+                # Build a TupleVariable of NNModules
                 result = []
-                for submod in module[args[0].as_python_constant()]:
-                    name = key
-                    src = NNModuleSource(AttrSource(self.source, name))
+
+                # Turn the slice into the list of integers
+                keys = list(range(len(module)))[args[0].as_python_constant()]
+                for idx, submod in enumerate(module[args[0].as_python_constant()]):
+                    key = keys[idx]
+                    src = NNModuleSource(GetItemSource(self.source, key))
                     result.append(
                         tx.output.add_submodule(
                             submod,
                             key,
-                            name,
                             source=src,
                             **options,
                         )
                     )
                 return TupleVariable(result, **options)
+
             key = args[0].as_python_constant()
             submod = module[key]
             return tx.output.add_submodule(
