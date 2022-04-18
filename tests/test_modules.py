@@ -262,6 +262,9 @@ class ModuleList(torch.nn.Module):
         for idx, layer in enumerate(self.layers):
             x = layer(x) * idx
 
+        for idx, layer in enumerate(self.layers[::-1]):
+            x = layer(x) * idx
+
         return x
 
 
