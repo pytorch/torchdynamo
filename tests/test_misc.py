@@ -6,6 +6,7 @@ import functools
 import math
 import sys
 import typing
+import unittest
 
 import numpy as np
 import torch
@@ -1059,22 +1060,23 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
-    # def test_rand(self):
-    #     cnts = torchdynamo.testing.CompileCounter()
-    #     device = "cuda"
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_rand(self):
+        cnts = torchdynamo.testing.CompileCounter()
+        device = "cuda"
 
-    #     def fn():
-    #         return torch.randn(10, device=device)
+        def fn():
+            return torch.randn(10, device=device)
 
-    #     torch.manual_seed(10)
-    #     ref_run1 = fn()
+        torch.manual_seed(10)
+        ref_run1 = fn()
 
-    #     torch.manual_seed(10)
-    #     ref_run2 = fn()
-    #     self.assertTrue(same(ref_run1, ref_run2))
+        torch.manual_seed(10)
+        ref_run2 = fn()
+        self.assertTrue(same(ref_run1, ref_run2))
 
-    #     torch.manual_seed(10)
-    #     with torchdynamo.optimize(cnts, nopython=True):
-    #         res = fn()
+        torch.manual_seed(10)
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn()
 
-    #     self.assertTrue(same(res, ref_run1))
+        self.assertTrue(same(res, ref_run1))

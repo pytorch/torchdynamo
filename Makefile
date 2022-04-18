@@ -11,7 +11,7 @@ develop:
 	python setup.py develop
 
 test: develop
-	pytest -v -s tests
+	pytest tests
 
 torchbench: develop
 	python torchbench.py
