@@ -918,12 +918,10 @@ class InstructionTranslatorBase(object):
         ):
             # <non-None> is None
             self.push(ConstantVariable(operator.is_(object(), right.value), **options))
-        elif (left.is_python_constant() and right.is_python_constant()):
+        elif left.is_python_constant() and right.is_python_constant():
             self.push(
                 ConstantVariable(
-                    operator.is_(
-                        left.as_python_constant(), right.as_python_constant()
-                    ),
+                    operator.is_(left.as_python_constant(), right.as_python_constant()),
                     **options,
                 )
             )
@@ -948,7 +946,10 @@ class InstructionTranslatorBase(object):
         list.extend(obj.items, list(v.unpack_var_sequence(self)))
         self.replace_all(
             obj,
-            ListVariable(obj.items, **VariableTracker.propagate([obj, v]),)
+            ListVariable(
+                obj.items,
+                **VariableTracker.propagate([obj, v]),
+            ),
         )
 
     def LIST_TO_TUPLE(self, inst):
@@ -963,7 +964,10 @@ class InstructionTranslatorBase(object):
         collections.OrderedDict.update(obj.items, v.items)
         self.replace_all(
             obj,
-            ConstDictVariable(obj.items, **VariableTracker.propagate([obj, v]),)
+            ConstDictVariable(
+                obj.items,
+                **VariableTracker.propagate([obj, v]),
+            ),
         )
 
     UNARY_POSITIVE = stack_op(operator.pos)

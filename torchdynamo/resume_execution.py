@@ -69,15 +69,16 @@ class ReenterWith:
                 create_instruction("POP_TOP"),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
                 with_except_start,
-                create_instruction("POP_JUMP_IF_TRUE", target=pop_top_after_with_except_start),
+                create_instruction(
+                    "POP_JUMP_IF_TRUE", target=pop_top_after_with_except_start
+                ),
                 create_instruction("RERAISE"),
                 pop_top_after_with_except_start,
                 create_instruction("POP_TOP"),
                 create_instruction("POP_TOP"),
                 create_instruction("POP_EXCEPT"),
                 create_instruction("POP_TOP"),
-
-                cleanup_complete_jump_target
+                cleanup_complete_jump_target,
             ] + cleanup
 
             return [
