@@ -898,6 +898,74 @@ class InstructionTranslatorBase(object):
             result = str_var.value + result
         self.push(ConstantVariable(value=result))
 
+    def IS_OP(self, inst):
+        left, right = self.popn(2)
+        options = VariableTracker.propagate([left, right])
+        op = inst.argval
+        if (
+            isinstance(
+                left,
+                (
+                    TensorVariable,
+                    NNModuleVariable,
+                    BaseListVariable,
+                    UserDefinedVariable,
+                    BaseUserFunctionVariable,
+                ),
+            )
+            and isinstance(right, ConstantVariable)
+            and right.value is None
+        ):
+            # <non-None> is None
+            self.push(ConstantVariable(operator.is_(object(), right.value), **options))
+        elif (left.is_python_constant() and right.is_python_constant()):
+            self.push(
+                ConstantVariable(
+                    operator.is_(
+                        left.as_python_constant(), right.as_python_constant()
+                    ),
+                    **options,
+                )
+            )
+        else:
+            unimplemented(f"{typestr(left)} is {typestr(right)}")
+        if op == 1:
+            self.UNARY_NOT(inst)
+
+    def CONTAINS_OP(self, inst):
+        left, right = self.popn(2)
+        op = inst.argval
+        self.push(right.call_method(self, "__contains__", [left], {}))
+        if op == 1:
+            self.UNARY_NOT(inst)
+
+    def LIST_EXTEND(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ListVariable)
+        assert obj.mutable_local
+        list.extend(obj.items, list(v.unpack_var_sequence(self)))
+        self.replace_all(
+            obj,
+            ListVariable(obj.items, **VariableTracker.propagate([obj, v]),)
+        )
+
+    def LIST_TO_TUPLE(self, inst):
+        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))
+
+    def DICT_MERGE(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ConstDictVariable)
+        assert obj.mutable_local
+        collections.OrderedDict.update(obj.items, v.items)
+        self.replace_all(
+            obj,
+            ConstDictVariable(obj.items, **VariableTracker.propagate([obj, v]),)
+        )
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)

@@ -159,5 +159,5 @@ def stacksize_analysis(instructions):
         return low + 32
 
     assert fixed_point.value, "failed to reach fixed point"
-    assert low >= 0
+    # assert low >= 0
     return high
