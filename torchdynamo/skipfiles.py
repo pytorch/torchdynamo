@@ -77,14 +77,14 @@ FILENAME_ALLOWLIST = {
 }
 
 
-def add(module_spec: typing.Optional[types.ModuleSpec]):
+def add(module_spec: typing.Optional[importlib.machinery.ModuleSpec]):
     if not module_spec:
         return
     global SKIP_DIRS_RE
     name = module_spec.origin
     if name is None:
         return
-    SKIP_DIRS.append(os.path.dirname(module_spec))
+    SKIP_DIRS.append(os.path.dirname(name))
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
