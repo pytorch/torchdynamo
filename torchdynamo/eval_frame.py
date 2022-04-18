@@ -173,4 +173,5 @@ def skip(fn=None):
         return skip
     assert callable(fn)
     skip_code(fn.__code__)
+    fn._torchdynamo_disable = True
     return fn
