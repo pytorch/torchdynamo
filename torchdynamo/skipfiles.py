@@ -122,6 +122,7 @@ for _name in (
 ):
     add(importlib.util.find_spec(_name))
 
+
 def is_torch_inline_allowed(filename):
     return filename.startswith(_module_dir(torch.nn)) or filename.startswith(
         _module_dir(torch.distributions)
