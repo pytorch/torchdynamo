@@ -184,6 +184,7 @@ class GuardBuilder:
                 list,
                 tuple,
                 set,
+                slice,
                 frozenset,
                 range,
                 torch.Size,

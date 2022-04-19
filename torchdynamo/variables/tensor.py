@@ -53,6 +53,8 @@ class TensorVariable(VariableTracker):
 
         if example_value is None:
             rng = torch.clone(torch.random.get_rng_state())
+            if torch.cuda.is_available():
+                cuda_rng = torch.clone(torch.cuda.get_rng_state())
             op = proxy.node.op
             args, kwargs = cls.propagate_args_kwargs(proxy.node)
             if op == "call_function":
@@ -65,6 +67,8 @@ class TensorVariable(VariableTracker):
             else:
                 assert False, op
             torch.random.set_rng_state(rng)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng)
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = example_value.clone()
@@ -81,6 +85,8 @@ class TensorVariable(VariableTracker):
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
         ):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)

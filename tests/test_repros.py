@@ -925,3 +925,29 @@ class ReproTests(torchdynamo.testing.TestCase):
             )
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, ifdyn(28, 14))
+
+    def test_recursive_map(self):
+        # https://github.com/facebookresearch/torchdynamo/issues/132
+        def _recursive_map(struct, batch_dim=0):
+            for k, v in struct.items():
+                if v is not None:
+                    if isinstance(v, dict):
+                        _recursive_map(v)
+                    else:
+                        struct[k] = v
+
+        def toy_example(a, b, v):
+            x = a / (torch.abs(a) + 1)
+            if v is not None:
+                _recursive_map(v)
+            return x * b
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            toy_example(
+                torch.randn(10),
+                torch.randn(10),
+                {"layer0": {"memory_keys": torch.randn(10)}},
+            )
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 4)

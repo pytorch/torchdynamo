@@ -6,6 +6,7 @@ import functools
 import math
 import sys
 import typing
+import unittest
 
 import numpy as np
 import torch
@@ -1058,3 +1059,52 @@ class MiscTests(torchdynamo.testing.TestCase):
             res1 = f(4)
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_rand(self):
+        cnts = torchdynamo.testing.CompileCounter()
+        device = "cuda"
+
+        def fn():
+            return torch.randn(10, device=device)
+
+        torch.manual_seed(10)
+        ref_run1 = fn()
+
+        torch.manual_seed(10)
+        ref_run2 = fn()
+        self.assertTrue(same(ref_run1, ref_run2))
+
+        torch.manual_seed(10)
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn()
+
+        self.assertTrue(same(res, ref_run1))
+
+    def test_slice_input(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def getitem(a, idx):
+            if isinstance(idx, slice):
+                return (
+                    torch.zeros(1),
+                    a[idx]
+                    + [
+                        100,
+                    ],
+                )
+            else:
+                return (torch.zeros(1), a[idx])
+
+        layers = list(range(10))
+        ref0 = getitem(layers, slice(0, 2, 1))
+        ref1 = getitem(layers, 2)
+        ref2 = getitem(layers, slice(3, 8, 2))
+        with torchdynamo.optimize(cnts, nopython=True):
+            res0 = getitem(layers, slice(0, 2, 1))
+            res1 = getitem(layers, 2)
+            res2 = getitem(layers, slice(3, 8, 2))
+
+        self.assertTrue(ref0 == res0)
+        self.assertTrue(ref1 == res1)
+        self.assertTrue(ref2 == res2)

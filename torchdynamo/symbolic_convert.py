@@ -501,6 +501,7 @@ class InstructionTranslatorBase(object):
                     BaseListVariable,
                     UserDefinedVariable,
                     BaseUserFunctionVariable,
+                    ConstDictVariable,
                 ),
             )
             and isinstance(right, ConstantVariable)
@@ -1031,7 +1032,9 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
         for val in self.symbolic_locals.values():
-            if isinstance(val, (ListIteratorVariable, BaseListVariable)):
+            if isinstance(
+                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+            ):
                 self.output.guards.update(val.guards)
 
         self._freevars_ids = dict()

@@ -59,10 +59,17 @@ class AOTAutogradStrategy(object):
             if isinstance(ex, torch.nn.parameter.Parameter):
                 has_param_as_input = True
 
+        # 3) set_grad_enabled
+        has_set_grad_enabled = False
+        for node in self.gm.graph.nodes:
+            if node.target == torch._C._set_grad_enabled:
+                has_set_grad_enabled = True
+
         if (
             has_mutation(self.gm, self.example_inputs)
             or len(gm_inputs) == 0
             or has_param_as_input
+            or has_set_grad_enabled
         ):
             self.use_fallback = True
 

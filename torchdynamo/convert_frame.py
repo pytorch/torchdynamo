@@ -80,6 +80,8 @@ def wrap_convert_context(fn):
     def _fn(*args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
         rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         try:
@@ -87,6 +89,8 @@ def wrap_convert_context(fn):
         finally:
             torch._C._set_grad_enabled(prior_grad_mode)
             torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
     return _fn
