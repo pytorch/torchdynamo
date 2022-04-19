@@ -1080,3 +1080,31 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn()
 
         self.assertTrue(same(res, ref_run1))
+
+    def test_slice_input(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def getitem(a, idx):
+            if isinstance(idx, slice):
+                return (
+                    torch.zeros(1),
+                    a[idx]
+                    + [
+                        100,
+                    ],
+                )
+            else:
+                return (torch.zeros(1), a[idx])
+
+        layers = list(range(10))
+        ref0 = getitem(layers, slice(0, 2, 1))
+        ref1 = getitem(layers, 2)
+        ref2 = getitem(layers, slice(3, 8, 2))
+        with torchdynamo.optimize(cnts, nopython=True):
+            res0 = getitem(layers, slice(0, 2, 1))
+            res1 = getitem(layers, 2)
+            res2 = getitem(layers, slice(3, 8, 2))
+
+        self.assertTrue(ref0 == res0)
+        self.assertTrue(ref1 == res1)
+        self.assertTrue(ref2 == res2)

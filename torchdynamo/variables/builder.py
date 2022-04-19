@@ -40,6 +40,7 @@ from .lists import ListIteratorVariable
 from .lists import ListVariable
 from .lists import NamedTupleVariable
 from .lists import RangeVariable
+from .lists import SliceVariable
 from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
 from .misc import InspectSignatureVariable
@@ -264,6 +265,13 @@ class VariableBuilder:
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif isinstance(value, slice):
+            start = ConstantVariable(value.start)
+            stop = ConstantVariable(value.stop)
+            step = ConstantVariable(value.step)
+            return SliceVariable(
+                [start, stop, step], guards=make_guards(GuardBuilder.CONSTANT_MATCH)
             )
         else:
             result = UserDefinedObjectVariable(
