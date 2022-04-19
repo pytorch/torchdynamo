@@ -911,6 +911,7 @@ class InstructionTranslatorBase(object):
                     BaseListVariable,
                     UserDefinedVariable,
                     BaseUserFunctionVariable,
+                    ConstDictVariable,
                 ),
             )
             and isinstance(right, ConstantVariable)
