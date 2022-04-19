@@ -71,15 +71,12 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
-    # TorchDynamo and AOT errors
-    "hf_Reformer",
 }
 
 # Some models have bad train dataset. We read eval dataset.
 # yolov3 - seems to have different number of inputs between eval and train
-# densenet121 - OOM for train, using eval for now.
 # timm_efficientdet - loader only exists for eval mode.
-ONLY_EVAL_DATASET = {"yolov3", "densenet121", "timm_efficientdet"}
+ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
@@ -98,9 +95,9 @@ REQUIRE_HIGHER_TOLERANCE = {
 # Some models have large dataset that doesn't fit in memory. Lower the batch
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
-    "timm_efficientdet": 1,
     "demucs": 4,
     "hf_Reformer": 4,
+    "timm_efficientdet": 1,
 }
 
 current_name = ""
@@ -1049,9 +1046,10 @@ def run_one_model(
         sys.stdout.flush()
         for submod in itertools.chain([model], model.modules()):
             assert not torchdynamo.utils.is_jit_model(submod)
-        torch.manual_seed(1337)
 
+        torch.manual_seed(1337)
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
+
         torch.manual_seed(1337)
         if current_name != "pyhpc_turbulent_kinetic_energy":
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
