@@ -501,6 +501,7 @@ class InstructionTranslatorBase(object):
                     BaseListVariable,
                     UserDefinedVariable,
                     BaseUserFunctionVariable,
+                    ConstDictVariable,
                 ),
             )
             and isinstance(right, ConstantVariable)
@@ -1031,7 +1032,9 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
         for val in self.symbolic_locals.values():
-            if isinstance(val, (ListIteratorVariable, BaseListVariable)):
+            if isinstance(
+                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+            ):
                 self.output.guards.update(val.guards)
 
         self._freevars_ids = dict()
@@ -1160,6 +1163,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             assert tracer.symbolic_result.as_python_constant() is None
             return ListIteratorVariable(
                 tracer.generated_items,
+                mutable_local=MutableLocal(),
                 **VariableTracker.propagate(tracer.symbolic_result),
             )
         else:
@@ -1188,8 +1192,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.symbolic_result = None
         self.closure_cells = closure_cells
-        # self.funcvar = funcvar
-        # self.parent = parent
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:
