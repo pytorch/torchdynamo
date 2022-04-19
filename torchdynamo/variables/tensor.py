@@ -83,6 +83,8 @@ class TensorVariable(VariableTracker):
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
         ):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
