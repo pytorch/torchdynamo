@@ -1,8 +1,6 @@
 import abc
 import collections
 import contextlib
-import posixpath
-import signal
 import copy
 import copyreg
 import dataclasses
@@ -15,13 +13,15 @@ import logging
 import multiprocessing
 import operator
 import os
+import posixpath
 import random
 import re
 import selectors
-import threading
-import traceback
-import tokenize
+import signal
 import tempfile
+import threading
+import tokenize
+import traceback
 import types
 import typing
 import unittest
@@ -59,20 +59,20 @@ SKIP_DIRS = [
         inspect,
         linecache,
         logging,
-        signal,
         multiprocessing,
         operator,
         os,
+        posixpath,
         random,
         re,
         selectors,
+        signal,
+        tempfile,
         threading,
+        tokenize,
         traceback,
         types,
         typing,
-        tokenize,
-        tempfile,
-        posixpath,
         unittest,
         weakref,
         _collections_abc,
