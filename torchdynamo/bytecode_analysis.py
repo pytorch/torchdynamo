@@ -8,9 +8,10 @@ TERMINAL_OPCODES = {
     dis.opmap["JUMP_ABSOLUTE"],
     dis.opmap["JUMP_FORWARD"],
     dis.opmap["RAISE_VARARGS"],
-    # dis.opmap["RERAISE"],
     # TODO(jansel): double check exception handling
 }
+if sys.version_info >= (3, 9):
+    TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
@@ -159,5 +160,5 @@ def stacksize_analysis(instructions):
         return low + 32
 
     assert fixed_point.value, "failed to reach fixed point"
-    # assert low >= 0
+    assert low >= 0
     return high
