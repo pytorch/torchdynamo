@@ -8,7 +8,7 @@ from sympy import Integer
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
-from .exc import MissingOperator
+from .exc import MissingOperator, LoweringException
 from .ir import Constant
 from .ir import FixedLayout
 from .ir import InputBuffer
@@ -82,7 +82,10 @@ class GraphLowering(torch.fx.Interpreter):
     def call_function(self, target, args, kwargs):
         if target not in lowerings:
             raise MissingOperator(target, args, kwargs)
-        return lowerings[target](*args, **kwargs)
+        try:
+            return lowerings[target](*args, **kwargs)
+        except Exception as e:
+            raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
@@ -97,9 +100,6 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().output(target, args, kwargs)
         assert isinstance(result, tuple)
         assert all(isinstance(x, TensorBox) for x in result)
-        assert all(
-            isinstance(x.data, ir.StorageBox) for x in result
-        ), "TODO: returning views"
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
 
     def run_node(self, n: torch.fx.Node):

@@ -56,7 +56,7 @@ class CleanDiv(sympy.Function):
 
 class IRNode(object):
     def str_helper(self, lines):
-        lines = indent("\n".join(map(str, lines)))
+        lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
 
@@ -92,13 +92,19 @@ class Loops(IRNode):
     def create(cls, *args, **kwargs):
         return TensorBox.create(cls(*args, **kwargs))
 
+    @staticmethod
+    def _index(ranges, prefix="i"):
+        return [
+            sympy.Integer(0) if s == 1 else sympy.Symbol(f"{prefix}{n}")
+            for n, s in enumerate(ranges)
+        ]
+
     def inner_fn_str(self):
         try:
             with ops.set_handler(MockHandler()):
-                index = [sympy.Symbol(f"i{n}") for n in range(self.ranges)]
-                return f"lambda {', '.join(map(str, index))}: {self.inner_fn(index)}"
-        except Exception:
-            return "inner_fn()"
+                return self.inner_fn(self._index(self.ranges))
+        except Exception as e:
+            return f"inner_fn(): {e}"
 
 
 class Pointwise(Loops):
@@ -148,13 +154,9 @@ class Reduction(Loops):
     def inner_fn_str(self):
         try:
             with ops.set_handler(MockHandler()):
-                index = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
-                rindex = [
-                    sympy.Symbol(f"r{n}") for n in range(len(self.reduction_ranges))
-                ]
-                return f"lambda {', '.join(map(str, index + rindex))}: {self.inner_fn(index, rindex)}"
-        except Exception:
-            return "inner_fn()"
+                return self.inner_fn(self._index(self.ranges), self._index(self.reduction_ranges, 'r'))
+        except Exception as e:
+            return f"inner_fn(): {e}"
 
 
 def is_storage_and_layout(x):
@@ -816,7 +818,7 @@ class MutableBox(IRNode):
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
 
     def __str__(self):
-        if isinstance(self.data, TensorBox):
+        if isinstance(self.data, MutableBox):
             line0 = f"{type(self).__name__}({type(self.data).__name__}("
             endl = "))"
             inner = self.data.data

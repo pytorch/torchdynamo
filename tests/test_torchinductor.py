@@ -360,11 +360,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(2, 1, 2),))
 
-    def test_squeeze(self):
+    def test_squeeze1(self):
         def fn(a):
             return ((a + 1).squeeze() + 2, a.squeeze() + 2)
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 1, 1),))
+
+    def test_squeeze2(self):
+        def fn(a):
+            return ((a + 1).squeeze(-1).squeeze(2) + 2, a.squeeze(0) + 2)
+
+        self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
 
     def test_unsqueeze(self):
         def fn(a):

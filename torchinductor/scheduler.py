@@ -143,10 +143,8 @@ class BlockedNodes:
     def pop_fusable(self, deps, group):
         assert isinstance(deps, set)
         result = []
-        print(f"pop_fusable {deps} {group} {list(self.dep_to_nodes.keys())}")
         for dep in deps:
             self.dep_to_nodes[dep] = [x for x in self.dep_to_nodes[dep] if x]
-            print(f"pop_fusable match {dep} {self.dep_to_nodes[dep]}")
             for box in self.dep_to_nodes[dep]:
                 if (
                     len(box.peek().unmet_dependencies - deps) == 0

@@ -148,10 +148,15 @@ def detach(x):
 
 
 @register_lowering(aten.squeeze)
-def squeeze(x):
+def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
-    return TensorBox(SqueezeView.create(x.data))
+    if dim is None:
+        return TensorBox(SqueezeView.create(x.data))
 
+    dim = _validate_dim(x, dim, 0)
+    new_shape = list(x.get_size())
+    assert new_shape.pop(dim) == 1
+    return view(x, new_shape)
 
 @register_lowering(aten.expand)
 def expand(x, sizes):
@@ -176,14 +181,18 @@ def permute(x, dims):
 
 @register_lowering(aten.unsqueeze)
 def unsqueeze(x, dim):
-    assert isinstance(dim, int)
-    ndim = len(x.get_size())
-    if dim < 0:
-        dim += ndim + 1
-    assert 0 <= dim <= ndim
+    dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
     new_shape.insert(dim, sympy.Integer(1))
     return view(x, new_shape)
+
+def _validate_dim(x, dim, offset):
+    assert isinstance(dim, int)
+    ndim = len(x.get_size())
+    if dim < 0:
+        dim += ndim + offset
+    assert 0 <= dim < ndim + offset
+    return dim
 
 
 @register_lowering(aten.mm)
@@ -223,7 +232,7 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
     )
 
 
-@register_lowering(aten.gather, type_promote=False, broadcast=True)
+@register_lowering(aten.gather, type_promote=False)
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
     assert isinstance(dim, int)
@@ -233,17 +242,17 @@ def gather(x, dim, index):
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
-    def fn(index):
-        index = list(index)
-        var_index = index_loader(index)
-        index[dim] = sympy.Symbol(str(var_index))
-        return x_loader(index)
+    def fn(idx):
+        idx = list(idx)
+        var_index = index_loader(idx)
+        idx[dim] = sympy.Symbol(str(var_index))
+        return x_loader(idx)
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=x.get_size(),
+        ranges=index.get_size(),
     )
 
 
