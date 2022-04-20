@@ -193,6 +193,13 @@ def mm(a, b):
     return TensorBox.create(ir.MatrixMultiply.create(a, b))
 
 
+@register_lowering(aten.bmm)
+def bmm(a, b):
+    assert isinstance(a, TensorBox)
+    assert isinstance(b, TensorBox)
+    return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
+
+
 @register_lowering(torch.arange)
 def arange(start, end=None, step=1, *, dtype=None, device=None):
     if end is None:

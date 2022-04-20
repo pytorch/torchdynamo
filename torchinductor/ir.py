@@ -5,6 +5,7 @@ from functools import partial
 from typing import Any
 from typing import Callable
 from typing import List
+from typing import Optional
 
 import sympy
 import torch
@@ -666,6 +667,7 @@ class ComputedBuffer(Buffer):
 @dataclasses.dataclass
 class ExternKernel(Buffer):
     inputs: List[Buffer]
+    output_view: Optional[ReinterpretView] = None
 
     def get_read_writes(self):
         return dependencies.ReadWrites(
@@ -675,7 +677,10 @@ class ExternKernel(Buffer):
 
     def codegen(self, wrapper):
         args = [x.codegen_reference() for x in self.inputs]
-        args.append(f"out={self.codegen_reference()}")
+        if self.output_view:
+            args.append(f"out={self.output_view.codegen_reference()}")
+        else:
+            args.append(f"out={self.codegen_reference()}")
         wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
 
     @staticmethod
@@ -735,6 +740,50 @@ class MatrixMultiply(ExternKernel):
             ),
             inputs=[a, b],
         )
+        data.name = graph.register_buffer(data)
+        return data
+
+
+class BatchMatrixMultiply(ExternKernel):
+    kernel = "torch.bmm"
+
+    @classmethod
+    def create(cls, a, b):
+        b1, m, k1 = a.get_size()
+        b2, k2, n = b.get_size()
+        b3 = graph.sizevars.guard_equals(b1, b2)
+        graph.sizevars.guard_equals(k1, k2)
+        a = cls.require_stride1(cls.realize_input(a))
+        b = cls.require_stride1(cls.realize_input(b))
+
+        output_layout = FlexibleLayout(
+            device=a.get_device(),
+            dtype=a.get_dtype(),
+            size=[b3, m, n],
+        )
+
+        if b3 == 1:
+            # convert to normal mm
+            data = MatrixMultiply(
+                name=None,
+                layout=output_layout.as_fixed(),
+                inputs=[View.create(a, [m, k1]), View.create(b, [k2, n])],
+            )
+            data.output_view = ReinterpretView(
+                data,
+                FlexibleLayout(
+                    device=a.get_device(),
+                    dtype=a.get_dtype(),
+                    size=[m, n],
+                ).as_fixed(),
+            )
+        else:
+            data = BatchMatrixMultiply(
+                name=None,
+                layout=output_layout,
+                inputs=[a, b],
+            )
+
         data.name = graph.register_buffer(data)
         return data
 

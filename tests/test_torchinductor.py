@@ -401,6 +401,28 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
+    def test_bmm(self):
+        def fn(a, b):
+            return (
+                torch.bmm(a, b),
+                torch.bmm(a + 1, b + 2) + 3,
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(2, 8, 8),
+                torch.randn(2, 8, 8),
+            ),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn(1, 16, 8),
+                torch.randn(1, 8, 10),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
