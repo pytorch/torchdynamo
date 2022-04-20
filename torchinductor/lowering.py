@@ -270,7 +270,7 @@ def make_reduction(reduction_type: str):
             dtype=x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
-            reduction_size=reduced_sizes,
+            reduction_ranges=reduced_sizes,
             reduction_type=reduction_type,
         )
         result.realize()
