@@ -359,6 +359,22 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 1, 1),))
 
+    def test_unsqueeze(self):
+        def fn(a):
+            return (
+                torch.unsqueeze(a + 1, -1) + 2,
+                torch.unsqueeze(a, 2) + 2,
+                torch.unsqueeze(a + 1, 0) + 2,
+                torch.unsqueeze(a, -2) + 2,
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(2, 2, 2, 2,),
+            ),
+        )
+
     def test_addmm(self):
         def fn(a, b, c):
             return (torch.addmm(a + 1, b + 2, c + 3) + 4,)

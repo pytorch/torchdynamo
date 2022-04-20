@@ -1,4 +1,5 @@
 import collections
+import textwrap
 from itertools import chain
 
 import torch
@@ -14,6 +15,10 @@ from .ir import InputBuffer
 from .ir import TensorBox
 from .lowering import lowerings
 from .sizevars import SizeVarAllocator
+
+
+class MissingOperator(RuntimeError):
+    pass
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -79,6 +84,15 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
+        if target not in lowerings:
+            lines = ["missing lowering/decomposition", f"target: {target}"] + [
+                f"args[{i}]: {arg}" for i, arg in enumerate(args)
+            ]
+            if kwargs:
+                lines.append(f"kwargs: {kwargs}")
+            raise MissingOperator(
+                textwrap.indent("\n".join(lines), "  - ").lstrip(" -")
+            )
         return lowerings[target](*args, **kwargs)
 
     def get_attr(self, target, args, kwargs):

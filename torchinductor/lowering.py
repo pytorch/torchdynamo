@@ -173,6 +173,17 @@ def permute(x, dims):
     assert isinstance(dims, (list, tuple))
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
+@register_lowering(aten.unsqueeze)
+def unsqueeze(x, dim):
+    assert isinstance(dim, int)
+    ndim = len(x.get_size())
+    if dim < 0:
+        dim += ndim + 1
+    assert 0 <= dim <= ndim
+    new_shape = list(x.get_size())
+    new_shape.insert(dim, sympy.Integer(1))
+    return view(x, new_shape)
+
 
 @register_lowering(aten.mm)
 def mm(a, b):
