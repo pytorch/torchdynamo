@@ -8,9 +8,10 @@ TERMINAL_OPCODES = {
     dis.opmap["JUMP_ABSOLUTE"],
     dis.opmap["JUMP_FORWARD"],
     dis.opmap["RAISE_VARARGS"],
-    # dis.opmap["RERAISE"],
     # TODO(jansel): double check exception handling
 }
+if sys.version_info >= (3, 9):
+    TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
