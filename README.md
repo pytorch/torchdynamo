@@ -381,7 +381,9 @@ make lint-deps
 
 ## Tests
 
+[![Test Python 3.7](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py37.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py37.yml)
 [![Test Python 3.8](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml)
+[![Test Python 3.9](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml)
 
 Run tests with
 ```shell

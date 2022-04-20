@@ -154,7 +154,9 @@ class Reduction(Loops):
     def inner_fn_str(self):
         try:
             with ops.set_handler(MockHandler()):
-                return self.inner_fn(self._index(self.ranges), self._index(self.reduction_ranges, 'r'))
+                return self.inner_fn(
+                    self._index(self.ranges), self._index(self.reduction_ranges, "r")
+                )
         except Exception as e:
             return f"inner_fn(): {e}"
 

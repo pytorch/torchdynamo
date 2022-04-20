@@ -25,8 +25,8 @@ def code_hash(code):
     )
 
 
-def write(source_code, ext):
-    basename = code_hash(source_code)
+def write(source_code, ext, extra=""):
+    basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -48,14 +48,14 @@ class CppCodeCache:
         " ",
         f"""
             {config.cpp.cxx} -shared -fPIC -Wall -std=c++14
-            -march=native -O3 -ffast-math -fopenmp -liomp5 -lsleef
+            -march=native -O3 -ffast-math -fopenmp -lgomp
             -o{{output}} {{input}}
         """,
     ).strip()
 
     @classmethod
     def load(cls, source_code):
-        key, input_path = write(source_code, "cpp")
+        key, input_path = write(source_code, "cpp", extra=CppCodeCache.cpp_compile_cmd)
         if key not in cls.cache:
             output_path = input_path[:-3] + "so"
             if not os.path.exists(output_path):

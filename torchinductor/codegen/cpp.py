@@ -213,6 +213,13 @@ class CppKernel(Kernel):
             else:
                 loops.loops[-1].simd = True
 
+        # limit thread count for smaller sizes
+        work = self.size_hint()
+        if work < 2**18:
+            threads = min(threads, 4)
+        elif work < 2**22:
+            threads = min(threads, 8)
+
         par_depth = 0
         reduction_par_depth = 0
         if loops:
@@ -223,6 +230,7 @@ class CppKernel(Kernel):
             reduction_par_depth = self.decide_parallel_depth(
                 self.call_ranges[self.reduction_depth :], threads
             )
+
 
         with contextlib.ExitStack() as stack:
             if par_depth:
@@ -389,11 +397,16 @@ class WorkSharing:
     def __init__(self, code):
         self.code = code
         self.in_parallel = False
+        self.num_threads = None
         self.need_barrier = False
         self.stack = contextlib.ExitStack()
 
     def parallel(self, threads):
+        if self.in_parallel and threads != self.num_threads:
+            # wrong number of threads
+            self.close()
         if not self.in_parallel:
+            self.num_threads = threads
             self.in_parallel = True
             self.code.writeline(f"#pragma omp parallel num_threads({threads})")
             self.stack.enter_context(self.code.indent())

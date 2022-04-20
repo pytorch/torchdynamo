@@ -14,9 +14,13 @@ class OperatorIssue(RuntimeError):
 
 class MissingOperator(OperatorIssue):
     def __init__(self, target, args, kwargs):
-        super().__init__(f"missing lowering/decomposition\n{self.operator_str(target, args, kwargs)}")
+        super().__init__(
+            f"missing lowering/decomposition\n{self.operator_str(target, args, kwargs)}"
+        )
 
 
 class LoweringException(OperatorIssue):
     def __init__(self, exc, target, args, kwargs):
-        super().__init__(f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}")
+        super().__init__(
+            f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
+        )

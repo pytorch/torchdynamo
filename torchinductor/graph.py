@@ -8,7 +8,8 @@ from sympy import Integer
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
-from .exc import MissingOperator, LoweringException
+from .exc import LoweringException
+from .exc import MissingOperator
 from .ir import Constant
 from .ir import FixedLayout
 from .ir import InputBuffer

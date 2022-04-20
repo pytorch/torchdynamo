@@ -158,6 +158,7 @@ def squeeze(x, dim=None):
     assert new_shape.pop(dim) == 1
     return view(x, new_shape)
 
+
 @register_lowering(aten.expand)
 def expand(x, sizes):
     assert isinstance(x, TensorBox)
@@ -185,6 +186,7 @@ def unsqueeze(x, dim):
     new_shape = list(x.get_size())
     new_shape.insert(dim, sympy.Integer(1))
     return view(x, new_shape)
+
 
 def _validate_dim(x, dim, offset):
     assert isinstance(dim, int)
