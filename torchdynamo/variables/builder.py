@@ -50,6 +50,7 @@ from .misc import PythonModuleVariable
 from .misc import SkipFilesVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
+from .tensor import TensorWithTFOverrideVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -296,14 +297,26 @@ class VariableBuilder:
             )
         else:
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value))
-            return TensorVariable.create(
-                tx=self.tx,
-                proxy=self.tx.output.create_graph_input(
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                ),
-                example_value=value,
-                guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
-            )
+            # Disable __torch_function__ to prevent cloning of `value` to hit
+            # user code.
+            with torch._C.DisableTorchFunction():
+                tensor_variable = TensorVariable.create(
+                    tx=self.tx,
+                    proxy=self.tx.output.create_graph_input(
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                    ),
+                    example_value=value,
+                    guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                )
+            if torch.overrides.has_torch_function_unary(value):
+                subclass_torch_function__func = value.__torch_function__.__func__
+                subclass_type = type(value)
+                return TensorWithTFOverrideVariable(
+                    tensor_variable,
+                    subclass_torch_function__func,
+                    subclass_type,
+                )
+            return tensor_variable
 
 
 def _dataclasses_fields_lambda(obj):
