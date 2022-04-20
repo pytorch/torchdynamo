@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch.nn import functional as F
 
 from torchdynamo.testing import same
 from torchinductor import config
@@ -326,6 +327,12 @@ class CommonTemplate:
     def test_softmax(self):
         def fn(a, b):
             return (torch.softmax(a + b, -1), torch.softmax(a, 0), torch.softmax(b, 1))
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_log_softmax(self):
+        def fn(a, b):
+            return (F.log_softmax(a + b, -1), F.log_softmax(a, 0), F.log_softmax(b, 1))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 

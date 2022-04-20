@@ -16,10 +16,22 @@ def clamp(x, min=None, max=None):
 
 @register_decomposition([aten._softmax], decompositions)
 def _softmax(x, dim, half_to_float):
-    assert half_to_float is False
+    # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
+    if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
+        x = x.to(torch.float32)
     x = torch.exp(x)
     x_sum = torch.sum(x, dim, keepdim=True)
     return x / x_sum
+
+
+@register_decomposition([aten._log_softmax], decompositions)
+def _log_softmax(x, dim, half_to_float):
+    # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
+    if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
+        x = x.to(torch.float32)
+    assert half_to_float is False, "TODO"
+    x_sum = torch.log(torch.sum(torch.exp(x), dim, keepdim=True))
+    return x - x_sum
 
 
 @register_decomposition([aten.t], decompositions)

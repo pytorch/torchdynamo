@@ -110,6 +110,10 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def log(x):
+        return f"std::log({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 

@@ -92,13 +92,13 @@ class Loops(IRNode):
     def create(cls, *args, **kwargs):
         return TensorBox.create(cls(*args, **kwargs))
 
-    def index_length(self):
-        return len(self.ranges)
-
     def inner_fn_str(self):
-        with ops.set_handler(MockHandler()):
-            index = [sympy.Symbol(f"i{n}") for n in range(self.index_length())]
-            return f"lambda {', '.join(map(str, index))}: {self.inner_fn(index)}"
+        try:
+            with ops.set_handler(MockHandler()):
+                index = [sympy.Symbol(f"i{n}") for n in range(self.ranges)]
+                return f"lambda {', '.join(map(str, index))}: {self.inner_fn(index)}"
+        except Exception:
+            return "inner_fn()"
 
 
 class Pointwise(Loops):
@@ -120,9 +120,11 @@ class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
 
-    __str__ = functools.partial(
-        Loops.__str__, names=("ranges", "reduction_ranges", "reduction_type")
-    )
+    def __str__(self):
+        return Loops.__str__(
+            self, names=("ranges", "reduction_ranges", "reduction_type")
+        )
+
     __repr__ = __str__
 
     def get_reduction_size(self):
@@ -142,6 +144,17 @@ class Reduction(Loops):
 
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
+
+    def inner_fn_str(self):
+        try:
+            with ops.set_handler(MockHandler()):
+                index = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
+                rindex = [
+                    sympy.Symbol(f"r{n}") for n in range(len(self.reduction_ranges))
+                ]
+                return f"lambda {', '.join(map(str, index + rindex))}: {self.inner_fn(index, rindex)}"
+        except Exception:
+            return "inner_fn()"
 
 
 def is_storage_and_layout(x):
