@@ -899,39 +899,16 @@ class InstructionTranslatorBase(object):
         self.push(ConstantVariable(value=result))
 
     def IS_OP(self, inst):
-        left, right = self.popn(2)
-        options = VariableTracker.propagate([left, right])
-        op = inst.argval
-        if (
-            isinstance(
-                left,
-                (
-                    TensorVariable,
-                    NNModuleVariable,
-                    BaseListVariable,
-                    UserDefinedVariable,
-                    BaseUserFunctionVariable,
-                    ConstDictVariable,
-                ),
-            )
-            and isinstance(right, ConstantVariable)
-            and right.value is None
-        ):
-            # <non-None> is None
-            self.push(ConstantVariable(operator.is_(object(), right.value), **options))
-        elif left.is_python_constant() and right.is_python_constant():
-            self.push(
-                ConstantVariable(
-                    operator.is_(left.as_python_constant(), right.as_python_constant()),
-                    **options,
-                )
-            )
+        assert inst.argval == 0 or inst.argval == 1
+        if inst.argval == 0:
+            new_argval = "is"
         else:
-            unimplemented(f"{typestr(left)} is {typestr(right)}")
-        if op == 1:
-            self.UNARY_NOT(inst)
+            new_argval = "is not"
+        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
+        self.COMPARE_OP(new_inst)
 
     def CONTAINS_OP(self, inst):
+        assert inst.argval == 0 or inst.argval == 1
         left, right = self.popn(2)
         op = inst.argval
         self.push(right.call_method(self, "__contains__", [left], {}))
@@ -944,14 +921,7 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
-        list.extend(obj.items, list(v.unpack_var_sequence(self)))
-        self.replace_all(
-            obj,
-            ListVariable(
-                obj.items,
-                **VariableTracker.propagate([obj, v]),
-            ),
-        )
+        obj.call_method(self, "extend", [v], {})
 
     def LIST_TO_TUPLE(self, inst):
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))
@@ -962,14 +932,7 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
-        collections.OrderedDict.update(obj.items, v.items)
-        self.replace_all(
-            obj,
-            ConstDictVariable(
-                obj.items,
-                **VariableTracker.propagate([obj, v]),
-            ),
-        )
+        obj.call_method(self, "update", [v], {})
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)

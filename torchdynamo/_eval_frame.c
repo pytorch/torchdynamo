@@ -95,8 +95,9 @@ static void ignored(void *obj) {}
 static PyObject *_custom_eval_frame(PyThreadState *tstate,
                                     PyFrameObject *frame,
                                     int throw_flag);
-static PyObject *_custom_eval_frame_run_only(PyFrameObject *frame,
-                                            int throw_flag);
+static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
+                                             PyFrameObject *frame,
+                                             int throw_flag);
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject *custom_eval_frame(PyThreadState *tstate,
                                    PyFrameObject *frame,
@@ -106,7 +107,7 @@ static PyObject *custom_eval_frame(PyThreadState *tstate,
 static PyObject *custom_eval_frame_run_only(PyThreadState *tstate,
                                             PyFrameObject *frame,
                                             int throw_flag) {
-  return _custom_eval_frame_run_only(frame, throw_flag);
+  return _custom_eval_frame_run_only(tstate, frame, throw_flag);
 }
 #else
 static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
@@ -115,14 +116,18 @@ static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
 }
 static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
                                             int throw_flag) {
-  return _custom_eval_frame_run_only(frame, throw_flag);
+  PyThreadState *tstate = PyThreadState_GET();
+  return _custom_eval_frame_run_only(tstate, frame, throw_flag);
 }
 #endif
 
-inline static PyObject *eval_frame_default(PyFrameObject *frame,
+inline static PyObject *eval_frame_default(PyThreadState *tstate,
+                                           PyFrameObject *frame,
                                            int throw_flag) {
   #if PY_VERSION_HEX >= 0x03090000
-  PyThreadState *tstate = PyThreadState_GET();
+  if (tstate == NULL) {
+    tstate = PyThreadState_GET();
+  }
   return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
   #else
   return _PyEval_EvalFrameDefault(frame, throw_flag);
@@ -287,7 +292,6 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
   if (shadow == NULL) {
     return NULL;
   }
-  PyObject_GC_UnTrack(shadow);
 
   PyObject **fastlocals_old = frame->f_localsplus;
   PyObject **fastlocals_new = shadow->f_localsplus;
@@ -302,17 +306,8 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
 
-  PyObject *result = eval_frame_default(shadow, throw_flag);
-
-  // cleanup code copied from cpython/.../call.c
-  if (Py_REFCNT(shadow) > 1) {
-    Py_DECREF(shadow);
-    PyObject_GC_Track(shadow);
-  } else {
-    ++tstate->recursion_depth;
-    Py_DECREF(shadow);
-    --tstate->recursion_depth;
-  }
+  PyObject *result = eval_frame_default(tstate, shadow, throw_flag);
+  Py_DECREF(shadow);
   return result;
 }
 
@@ -325,7 +320,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
   CacheEntry *extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE) {
     DEBUG_TRACE("skip %s", name(frame));
-    return eval_frame_default(frame, throw_flag);
+    return eval_frame_default(tstate, frame, throw_flag);
   }
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
     DEBUG_TRACE("error %s", name(frame));
@@ -367,18 +362,19 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_DECREF(result);
     set_extra(frame->f_code, SKIP_CODE);
     enable_eval_frame(tstate);
-    return eval_frame_default(frame, throw_flag);
+    return eval_frame_default(tstate, frame, throw_flag);
   }
 }
 
-static PyObject *_custom_eval_frame_run_only(PyFrameObject *frame,
-                                            int throw_flag) {
+static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
+                                             PyFrameObject *frame,
+                                             int throw_flag) {
   // do not dynamically compile anything, just reuse prior compiles
   DEBUG_TRACE("begin %s", name(frame));
   CacheEntry *extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || extra == NULL) {
     DEBUG_TRACE("skip %s", name(frame));
-    return eval_frame_default(frame, throw_flag);
+    return eval_frame_default(tstate, frame, throw_flag);
   }
   // TODO(jansel): investigate directly using the "fast" representation
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
@@ -389,11 +385,11 @@ static PyObject *_custom_eval_frame_run_only(PyFrameObject *frame,
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    return eval_custom_code(PyThreadState_GET(), frame, cached_code,
+    return eval_custom_code(tstate, frame, cached_code,
                             throw_flag);
   } else {
     DEBUG_TRACE("cache miss %s", name(frame));
-    return eval_frame_default(frame, throw_flag);
+    return eval_frame_default(tstate, frame, throw_flag);
   }
 }
 
