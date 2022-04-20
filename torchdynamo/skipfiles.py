@@ -85,14 +85,13 @@ FILENAME_ALLOWLIST = {
 }
 
 
-def add(module_spec: typing.Optional[importlib.machinery.ModuleSpec]):
-    if not module_spec:
-        return
+def add(module: types.ModuleType):
+    assert isinstance(module, types.ModuleType)
     global SKIP_DIRS_RE
-    name = module_spec.origin
+    name = module.__file__
     if name is None:
         return
-    SKIP_DIRS.append(os.path.dirname(name))
+    SKIP_DIRS.append(_module_dir(module))
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
@@ -128,7 +127,10 @@ for _name in (
     "tvm",
     "fx2trt_oss",
 ):
-    add(importlib.util.find_spec(_name))
+    try:
+        add(importlib.import_module(_name))
+    except (ImportError, TypeError):
+        pass
 
 
 def is_torch_inline_allowed(filename):
