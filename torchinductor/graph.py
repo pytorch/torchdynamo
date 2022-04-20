@@ -90,9 +90,7 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             if kwargs:
                 lines.append(f"kwargs: {kwargs}")
-            raise MissingOperator(
-                textwrap.indent("\n".join(lines), "  - ").lstrip(" -")
-            )
+            raise MissingOperator(textwrap.indent("\n".join(lines), "  ").lstrip(" -"))
         return lowerings[target](*args, **kwargs)
 
     def get_attr(self, target, args, kwargs):

@@ -173,6 +173,7 @@ def permute(x, dims):
     assert isinstance(dims, (list, tuple))
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
+
 @register_lowering(aten.unsqueeze)
 def unsqueeze(x, dim):
     assert isinstance(dim, int)

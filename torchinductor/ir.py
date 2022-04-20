@@ -1,4 +1,6 @@
 import dataclasses
+import functools
+import textwrap
 from functools import partial
 from typing import Any
 from typing import Callable
@@ -12,8 +14,11 @@ from sympy import Integer
 from . import dependencies
 from .codegen.common import product
 from .dependencies import extract_read_writes
+from .virtualized import MockHandler
 from .virtualized import graph
 from .virtualized import ops
+
+indent = functools.partial(textwrap.indent, prefix="  ")
 
 
 class ModularIndexing(sympy.Function):
@@ -49,7 +54,9 @@ class CleanDiv(sympy.Function):
 
 
 class IRNode(object):
-    pass
+    def str_helper(self, lines):
+        lines = indent("\n".join(map(str, lines)))
+        return f"{type(self).__name__}(\n{lines}\n)"
 
 
 @dataclasses.dataclass
@@ -58,6 +65,18 @@ class Loops(IRNode):
     dtype: torch.dtype
     inner_fn: Callable
     ranges: List[Expr]
+
+    def __str__(self, names=("ranges",)):
+        return self.str_helper(
+            [
+                f"'{self.device.type}'",
+                str(self.dtype),
+                self.inner_fn_str(),
+            ]
+            + [f"{name}={getattr(self, name)}" for name in names]
+        )
+
+    __repr__ = __str__
 
     def get_dtype(self):
         return self.dtype
@@ -71,6 +90,14 @@ class Loops(IRNode):
     @classmethod
     def create(cls, *args, **kwargs):
         return TensorBox.create(cls(*args, **kwargs))
+
+    def index_length(self):
+        return len(self.ranges)
+
+    def inner_fn_str(self):
+        with ops.set_handler(MockHandler()):
+            index = [sympy.Symbol(f"i{n}") for n in range(self.index_length())]
+            return f"lambda {', '.join(map(str, index))}: {self.inner_fn(index)}"
 
 
 class Pointwise(Loops):
@@ -89,11 +116,16 @@ class Pointwise(Loops):
 
 @dataclasses.dataclass
 class Reduction(Loops):
-    reduction_size: List[Expr]
+    reduction_ranges: List[Expr]
     reduction_type: str
 
+    __str__ = functools.partial(
+        Loops.__str__, names=("ranges", "reduction_ranges", "reduction_type")
+    )
+    __repr__ = __str__
+
     def get_reduction_size(self):
-        return self.reduction_size
+        return self.reduction_ranges
 
     def get_reduction_type(self):
         return self.reduction_type
@@ -106,6 +138,9 @@ class Reduction(Loops):
             indexer(vars),
             self.inner_fn(vars, reduction_vars),
         )
+
+    def index_length(self):
+        return len(self.ranges) + len(self.reduction_ranges)
 
 
 def is_storage_and_layout(x):
@@ -283,6 +318,18 @@ class View(BaseView):
     size: List[Expr]
     reindex: Callable
 
+    def reindex_str(self):
+        index_old = [sympy.Symbol(f"i{n}") for n in range(len(self.size))]
+        index_new = list(self.reindex(index_old))
+        return f"lambda {', '.join(map(str, index_old))}: {index_new}"
+
+    def __str__(self):
+        return self.str_helper(
+            [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
+        )
+
+    __repr__ = __str__
+
     @classmethod
     def create(cls, x, new_size):
         assert isinstance(new_size, (tuple, list))
@@ -396,6 +443,16 @@ class ReinterpretView(BaseView):
 
     layout: "Layout"
 
+    def __str__(self):
+        return self.str_helper(
+            [
+                self.data,
+                self.layout,
+            ]
+        )
+
+    __repr__ = __str__
+
     def get_name(self):
         return self.data.get_name()
 
@@ -467,6 +524,17 @@ class Layout(IRNode):
     stride: List[Expr]
     offset: Expr = Integer(0)
 
+    def __str__(self):
+        offset = ""
+        if self.offset != 0:
+            offset = f", offset={self.offset}"
+        return (
+            f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+            f"size={self.size}, stride={self.stride}{offset})"
+        )
+
+    __repr__ = __str__
+
     def make_indexer(self):
         """A closure containing math to read a given element"""
 
@@ -508,7 +576,6 @@ class Layout(IRNode):
         )
 
 
-@dataclasses.dataclass
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
@@ -685,6 +752,25 @@ class MutableBox(IRNode):
         if callable(fn):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
+
+    def __str__(self):
+        if isinstance(self.data, TensorBox):
+            line0 = f"{type(self).__name__}({type(self.data).__name__}("
+            endl = "))"
+            inner = self.data.data
+        else:
+            line0 = f"{type(self).__name__}("
+            inner = self.data
+            endl = ")"
+
+        lines = [
+            line0,
+            indent(str(inner)),
+            endl,
+        ]
+        return "\n".join(lines)
+
+    __repr__ = __str__
 
 
 class TensorBox(MutableBox):
