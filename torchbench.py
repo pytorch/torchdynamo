@@ -55,8 +55,6 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # https://github.com/facebookresearch/torchdynamo/issues/82
-    "tacotron2",
     # https://github.com/facebookresearch/torchdynamo/issues/101
     "detectron2_maskrcnn",
     # https://github.com/facebookresearch/torchdynamo/issues/145
@@ -96,6 +94,7 @@ REQUIRE_HIGHER_TOLERANCE = {
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
     "demucs": 4,
+    "densenet121": 4,
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
 }
