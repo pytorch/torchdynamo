@@ -430,6 +430,18 @@ class CommonTemplate:
             ),
         )
 
+    def test_gather(self):
+        def fn(a, b):
+            return (torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),)
+
+        self.common(
+            fn,
+            (
+                torch.randn([1, 1, 10, 6]),
+                torch.randint(5, [4, 5, 10, 1], dtype=torch.int64),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

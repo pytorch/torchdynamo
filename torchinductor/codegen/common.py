@@ -237,6 +237,16 @@ class Kernel(CodeGen):
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
 
+    def indirect_load(self, name: str, index: sympy.Expr):
+        """A load the depends on an index we have read"""
+        prior = self.loads
+        try:
+            # put the load in the compute section as it might have deps
+            self.loads = self.compute
+            return self.load(name, index)
+        finally:
+            self.loads = prior
+
     def store(self, name, index, value):
         raise NotImplementedError()
 
@@ -256,6 +266,8 @@ class Kernel(CodeGen):
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
+                if "tmp" in str(index):
+                    return self.indirect_load(name, index)
                 store_cache = self.cse.store_cache
                 if (name, index) in store_cache:
                     return store_cache[(name, index)]

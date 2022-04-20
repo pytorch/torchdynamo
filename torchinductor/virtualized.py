@@ -68,6 +68,14 @@ class MockHandler:
             setattr(cls, name, make_handler(format_string))
 
 
+class WrapperHandler:
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, item):
+        return getattr(self._inner, item)
+
+
 MockHandler._init_cls()
 
 ops = Virtualized("ops", MockHandler)

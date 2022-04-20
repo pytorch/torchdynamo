@@ -223,6 +223,30 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
     )
 
 
+@register_lowering(aten.gather, type_promote=False, broadcast=True)
+def gather(x, dim, index):
+    assert isinstance(x, TensorBox)
+    assert isinstance(dim, int)
+    assert "int" in str(index.get_dtype())
+    assert 0 <= dim < len(x.get_size())
+
+    x_loader = x.make_loader()
+    index_loader = index.make_loader()
+
+    def fn(index):
+        index = list(index)
+        var_index = index_loader(index)
+        index[dim] = sympy.Symbol(str(var_index))
+        return x_loader(index)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=x.get_size(),
+    )
+
+
 def make_reduction(reduction_type: str):
     def inner(x, axis=None, keepdims=False):
         size = x.get_size()
