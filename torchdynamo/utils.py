@@ -142,6 +142,14 @@ class CleanupManager(ExactWeakKeyDictionary):
 CleanupManager.instance = CleanupManager()
 
 
+def clone_tensor(x):
+    """Clone the tensor and its gradient"""
+    y = x.clone().requires_grad_(x.requires_grad)
+    if x.is_leaf and x.grad is not None:
+        y.grad = x.grad.clone()
+    return y
+
+
 def clone_input(x):
     """copy while preserving strides"""
     with torch.no_grad():

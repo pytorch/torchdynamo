@@ -10,6 +10,7 @@ import torch.random
 from .. import config
 from .. import variables
 from ..exc import unimplemented
+from ..utils import clone_tensor
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
@@ -69,7 +70,7 @@ class TensorVariable(VariableTracker):
                 torch.cuda.set_rng_state(cuda_rng)
 
         if isinstance(example_value, torch.Tensor):
-            proxy.node.meta["example_value"] = example_value.clone()
+            proxy.node.meta["example_value"] = clone_tensor(example_value)
             options.update(TensorVariable.specialize(example_value))
             return TensorVariable(proxy, **options)
         elif (
