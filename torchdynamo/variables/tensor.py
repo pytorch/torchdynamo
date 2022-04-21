@@ -71,8 +71,6 @@ class TensorVariable(VariableTracker):
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = clone_tensor(example_value)
-            if example_value.grad is not None:
-                proxy.node.meta["example_grad_value"] = example_value.grad.clone()
             options.update(TensorVariable.specialize(example_value))
             return TensorVariable(proxy, **options)
         elif (
