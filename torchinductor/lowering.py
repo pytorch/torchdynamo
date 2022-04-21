@@ -194,6 +194,20 @@ def select(x, dim, idx):
     return squeeze(slice_(x, dim, idx, idx + 1), dim)
 
 
+@register_lowering(aten.split)
+def split(x, sizes, dim):
+    dim = _validate_dim(x, dim, 0)
+    x_size = graph.sizevars.guard_static_shape(x.get_size()[dim])
+    if isinstance(sizes, int):
+        sizes = [sizes] * ((x_size + sizes - 1) // sizes)
+    result = []
+    start = 0
+    for size in sizes:
+        end = start + size
+        result.append(slice_(x, dim, start, end))
+        start = end
+    return result
+
 @register_lowering(aten.unsqueeze)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)

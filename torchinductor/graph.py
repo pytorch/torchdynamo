@@ -1,4 +1,5 @@
 import collections
+import operator
 from itertools import chain
 
 import torch
@@ -81,6 +82,9 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
+        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+            return super().call_function(target, args, kwargs)
+
         if target not in lowerings:
             raise MissingOperator(target, args, kwargs)
         try:
@@ -106,7 +110,7 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
         num_users = len(set(n.users))
-        if num_users > 1:
+        if num_users > 1 and isinstance(result, TensorBox):
             # TODO(jansel): introduce a store vs inline choice
             result.mark_reuse(n.users)
         return result

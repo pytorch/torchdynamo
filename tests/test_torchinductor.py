@@ -472,6 +472,24 @@ class CommonTemplate:
             (torch.randn([2, 20, 2]),),
         )
 
+    def test_split(self):
+        def fn(a):
+            t = torch.split(a, 3, -1)
+            return (t[0], t[1], t[2], t[3])
+
+        def fn2(a):
+            return fn(a+1)
+
+        self.common(
+            fn,
+            (torch.randn([2, 2, 10]),),
+        )
+
+        self.common(
+            fn2,
+            (torch.randn([2, 2, 10]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

@@ -83,7 +83,7 @@ class CppPrinter(ExprPrinter):
             x = f"({x} / {div})"
         return f"{x} % {mod}"
 
-    def _print_CleanDiv(self, expr):
+    def _print_IndexingDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))

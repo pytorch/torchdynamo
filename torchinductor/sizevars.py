@@ -97,9 +97,9 @@ class SizeVarAllocator(object):
         return -self.guard_min(-left, -right)
 
     def guard_static_shape(self, left):
-        right = sympy.Integer(self.size_hint(left))
-        self.guard_equals(left, right)
-        return right
+        right = self.size_hint(left)
+        self.guard_equals(left, sympy.Integer(right))
+        return int(right)
 
     def __getitem__(self, val):
         if val < 0:

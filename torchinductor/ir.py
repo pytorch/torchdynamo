@@ -39,11 +39,14 @@ class ModularIndexing(sympy.Function):
             and isinstance(modulus, sympy.Integer)
         ):
             return (base // divisor) % modulus
+        if isinstance(base, IndexingDiv):
+            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
 
-class CleanDiv(sympy.Function):
+class IndexingDiv(sympy.Function):
     """
-    a // b where we know there is no rounding
+    a // b used in indexing where we need to be careful about simplification.
+    We don't use sympy.FloorDiv to bypass some simplification rules.
     """
 
     nargs = (2,)
@@ -58,6 +61,15 @@ class CleanDiv(sympy.Function):
             return base // divisor
         if sympy.gcd(base, divisor) == divisor:
             return base / divisor
+
+
+class CleanDiv(IndexingDiv):
+    """
+    Div where we can assume no rounding.
+    This is to enable future optimizations.
+    """
+
+    pass
 
 
 class IRNode(object):
@@ -543,7 +555,7 @@ class SliceView(View):
             sizevars.guard_equals(end, new_size[dim])
             return x
 
-        new_size[dim] = CleanDiv(end - start + (step - 1), step)
+        new_size[dim] = IndexingDiv(end - start + (step - 1), step)
 
         if is_storage_and_layout(x):
             # Fast path
