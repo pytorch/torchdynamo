@@ -448,6 +448,30 @@ class CommonTemplate:
             ),
         )
 
+    def test_slice1(self):
+        def fn(a):
+            return (
+                a[:, :10, 0] + a[:, 10:, 0],
+                (a + 1)[:, :10, 0] + (a + 1)[:, 10:, 0],
+            )
+
+        self.common(
+            fn,
+            (torch.randn([2, 20, 2]),),
+        )
+
+    def test_slice2(self):
+        def fn(a):
+            return (
+                a[:-1, ::2, -1] + a[-1:, 1::2, -2],
+                (a + 1)[:-1, ::2, -1] + (a + 2)[-1:, 1::2, -2],
+            )
+
+        self.common(
+            fn,
+            (torch.randn([2, 20, 2]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

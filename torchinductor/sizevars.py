@@ -19,6 +19,16 @@ class ZeroGuard:
     expr: sympy.Expr
 
 
+@dataclasses.dataclass
+class PositiveGuard:
+    """
+    An expression we should check for > 0
+    Guards are currently not checked.  Plan to add this later.
+    """
+
+    expr: sympy.Expr
+
+
 class SizeVarAllocator(object):
     def __init__(self, prefix="s", zero_one_const=True):
         super().__init__()
@@ -34,7 +44,7 @@ class SizeVarAllocator(object):
         if left == right:
             return left
         expr = sympy.expand(left - right).subs(self.replacements)
-        assert self.size_hint(expr) == 0
+        assert self.size_hint(expr) == 0, (expr, self.size_hint(expr))
         free = list(expr.free_symbols)
         if len(free) == 0:
             assert expr == 0
@@ -60,16 +70,52 @@ class SizeVarAllocator(object):
         else:
             return left
 
+    def guard_lt(self, left: sympy.Symbol, right: sympy.Symbol):
+        expr = sympy.expand(right - left).subs(self.replacements)
+        assert self.size_hint(expr) > 0
+        if len(expr.free_symbols) == 0:
+            return
+        if "-" in str(expr):
+            # all vars are positive, so needs a minus sign to get negative values
+            self.guards.append(PositiveGuard(expr))
+
+    def guard_min(self, left: sympy.Symbol, right: sympy.Symbol):
+        """return the smaller of left and right, and guard on that choice"""
+        lv = self.size_hint(left)
+        rv = self.size_hint(right)
+        if lv == rv:
+            return self.guard_equals(left, right)
+        elif lv < rv:
+            self.guard_lt(left, right)
+            return left
+        else:
+            self.guard_lt(right, left)
+            return right
+
+    def guard_max(self, left: sympy.Symbol, right: sympy.Symbol):
+        """return the larger of left and right, and guard on that choice"""
+        return -self.guard_min(-left, -right)
+
+    def guard_static_shape(self, left):
+        right = sympy.Integer(self.size_hint(left))
+        self.guard_equals(left, right)
+        return right
+
     def __getitem__(self, val):
+        if val < 0:
+            # all variables are positive
+            return -self[-val]
         if val in self.val_to_var:
             return self.val_to_var[val]
-        var = Symbol(f"{self.prefix}{len(self.var_to_val)}")
+        var = Symbol(
+            f"{self.prefix}{len(self.var_to_val)}", positive=True, integer=True
+        )
         self.val_to_var[val] = var
         self.var_to_val[var] = val
         return var
 
     def size_hint(self, expr: Expr):
-        return int(expr.subs(self.var_to_val))
+        return int(sympy.expand(expr).subs(self.var_to_val))
 
     def codegen(self, code, graph_inputs):
         """Assign all symbolic shapes to locals"""

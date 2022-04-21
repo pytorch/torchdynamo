@@ -35,7 +35,7 @@ class GraphLowering(torch.fx.Interpreter):
             candidates = {
                 ex.size(i) * ex.stride(i): size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None
+                if stride[i] is not None and ex.stride(i) >= 0
             }
             for i in chain(reversed(range(len(stride))), range(len(stride))):
                 if stride[i] is None and ex.stride(i) in candidates:

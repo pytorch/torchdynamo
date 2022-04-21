@@ -231,7 +231,6 @@ class CppKernel(Kernel):
                 self.call_ranges[self.reduction_depth :], threads
             )
 
-
         with contextlib.ExitStack() as stack:
             if par_depth:
                 worksharing.parallel(threads)

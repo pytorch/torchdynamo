@@ -31,10 +31,14 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
-        if base.is_integer and divisor.is_integer and modulus.is_integer:
-            return (base // divisor) % modulus
         if base == 0:
             return sympy.Integer(0)
+        if (
+            isinstance(base, sympy.Integer)
+            and isinstance(divisor, sympy.Integer)
+            and isinstance(modulus, sympy.Integer)
+        ):
+            return (base // divisor) % modulus
 
 
 class CleanDiv(sympy.Function):
@@ -48,7 +52,9 @@ class CleanDiv(sympy.Function):
     def eval(cls, base, divisor):
         if base == 0:
             return sympy.Integer(0)
-        if base.is_integer and divisor.is_integer:
+        if divisor == 1:
+            return base
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
         if sympy.gcd(base, divisor) == divisor:
             return base / divisor
@@ -336,6 +342,14 @@ class View(BaseView):
     size: List[Expr]
     reindex: Callable
 
+    @staticmethod
+    def handle_negative_index(idx, size):
+        sizevars = graph.sizevars
+        if sizevars.size_hint(idx) < 0:
+            sizevars.guard_lt(idx, 0)
+            idx = idx + size
+        return idx
+
     def reindex_str(self):
         index_old = [sympy.Symbol(f"i{n}") for n in range(len(self.size))]
         index_new = list(self.reindex(index_old))
@@ -507,6 +521,51 @@ class ReinterpretView(BaseView):
         if offset != "0":
             return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
         return f"as_strided({self.get_name()}, {size}, {stride})"
+
+
+class SliceView(View):
+    @classmethod
+    def create(cls, x, dim, start, end, step=1):
+        step = sympy.expand(step)
+        assert step > 0
+        if start == 0 and end >= 2**63 and step == 1:
+            return x
+
+        sizevars = graph.sizevars
+        new_size = list(x.get_size())
+
+        start = cls.handle_negative_index(start, new_size[dim])
+        end = cls.handle_negative_index(end, new_size[dim])
+
+        end = sizevars.guard_min(end, new_size[dim])
+        start = sizevars.guard_min(sizevars.guard_min(start, new_size[dim]), end)
+        if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
+            sizevars.guard_equals(end, new_size[dim])
+            return x
+
+        new_size[dim] = CleanDiv(end - start + (step - 1), step)
+
+        if is_storage_and_layout(x):
+            # Fast path
+            storage, old_layout = as_storage_and_layout(x)
+            new_stride = list(old_layout.stride)
+            new_stride[dim] = new_stride[dim] * step
+            new_layout = FixedLayout(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                new_stride,
+                old_layout.offset + old_layout.stride[dim] * start,
+            )
+            return ReinterpretView(storage, new_layout)
+
+        def reindex(index):
+            index = list(index)
+            index[dim] = index[dim] * step + start
+            return index
+
+        # redirect to a generic view
+        return SliceView(x, size=new_size, reindex=reindex)
 
 
 @dataclasses.dataclass

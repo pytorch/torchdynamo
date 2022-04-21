@@ -155,7 +155,8 @@ def squeeze(x, dim=None):
 
     dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
-    assert new_shape.pop(dim) == 1
+    removed = new_shape.pop(dim)
+    assert removed == 1, removed
     return view(x, new_shape)
 
 
@@ -178,6 +179,19 @@ def permute(x, dims):
     assert isinstance(x, TensorBox)
     assert isinstance(dims, (list, tuple))
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
+
+
+@register_lowering(aten.slice)
+def slice_(x, dim, start, end, step=1):
+    assert isinstance(x, TensorBox)
+    dim = _validate_dim(x, dim, 0)
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
+
+
+@register_lowering(aten.select)
+def select(x, dim, idx):
+    idx = View.handle_negative_index(idx, x.get_size()[dim])
+    return squeeze(slice_(x, dim, idx, idx + 1), dim)
 
 
 @register_lowering(aten.unsqueeze)
