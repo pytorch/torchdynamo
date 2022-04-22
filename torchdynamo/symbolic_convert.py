@@ -898,6 +898,42 @@ class InstructionTranslatorBase(object):
             result = str_var.value + result
         self.push(ConstantVariable(value=result))
 
+    def IS_OP(self, inst):
+        assert inst.argval == 0 or inst.argval == 1
+        if inst.argval == 0:
+            new_argval = "is"
+        else:
+            new_argval = "is not"
+        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
+        self.COMPARE_OP(new_inst)
+
+    def CONTAINS_OP(self, inst):
+        assert inst.argval == 0 or inst.argval == 1
+        left, right = self.popn(2)
+        op = inst.argval
+        self.push(right.call_method(self, "__contains__", [left], {}))
+        if op == 1:
+            self.UNARY_NOT(inst)
+
+    def LIST_EXTEND(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ListVariable)
+        assert obj.mutable_local
+        obj.call_method(self, "extend", [v], {})
+
+    def LIST_TO_TUPLE(self, inst):
+        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))
+
+    def DICT_MERGE(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ConstDictVariable)
+        assert obj.mutable_local
+        obj.call_method(self, "update", [v], {})
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)

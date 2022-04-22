@@ -30,26 +30,62 @@ class ReenterWith:
     stack_index: int = None
 
     def __call__(self, code_options, cleanup):
-        with_cleanup_start = create_instruction("WITH_CLEANUP_START")
-        if sys.version_info < (3, 8):
-            begin_finally = create_instruction(
-                "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
-            )
-        else:
-            begin_finally = create_instruction("BEGIN_FINALLY")
-        cleanup[:] = [
-            create_instruction("POP_BLOCK"),
-            begin_finally,
-            with_cleanup_start,
-            create_instruction("WITH_CLEANUP_FINISH"),
-            create_instruction("END_FINALLY"),
-        ] + cleanup
+        if sys.version_info < (3, 9):
+            with_cleanup_start = create_instruction("WITH_CLEANUP_START")
+            if sys.version_info < (3, 8):
+                begin_finally = create_instruction(
+                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+                )
+            else:
+                begin_finally = create_instruction("BEGIN_FINALLY")
+            cleanup[:] = [
+                create_instruction("POP_BLOCK"),
+                begin_finally,
+                with_cleanup_start,
+                create_instruction("WITH_CLEANUP_FINISH"),
+                create_instruction("END_FINALLY"),
+            ] + cleanup
 
-        return [
-            create_instruction("CALL_FUNCTION", 0),
-            create_instruction("SETUP_WITH", target=with_cleanup_start),
-            create_instruction("POP_TOP"),
-        ]
+            return [
+                create_instruction("CALL_FUNCTION", 0),
+                create_instruction("SETUP_WITH", target=with_cleanup_start),
+                create_instruction("POP_TOP"),
+            ]
+        else:
+
+            with_except_start = create_instruction("WITH_EXCEPT_START")
+            pop_top_after_with_except_start = create_instruction("POP_TOP")
+
+            cleanup_complete_jump_target = create_instruction("NOP")
+
+            cleanup[:] = [
+                create_instruction("POP_BLOCK"),
+                create_instruction(
+                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+                ),
+                create_instruction("DUP_TOP"),
+                create_instruction("DUP_TOP"),
+                create_instruction("CALL_FUNCTION", 3),
+                create_instruction("POP_TOP"),
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                with_except_start,
+                create_instruction(
+                    "POP_JUMP_IF_TRUE", target=pop_top_after_with_except_start
+                ),
+                create_instruction("RERAISE"),
+                pop_top_after_with_except_start,
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                create_instruction("POP_EXCEPT"),
+                create_instruction("POP_TOP"),
+                cleanup_complete_jump_target,
+            ] + cleanup
+
+            return [
+                create_instruction("CALL_FUNCTION", 0),
+                create_instruction("SETUP_WITH", target=with_except_start),
+                create_instruction("POP_TOP"),
+            ]
 
 
 @dataclasses.dataclass

@@ -60,8 +60,6 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # https://github.com/facebookresearch/torchdynamo/issues/82
-    "tacotron2",
     # https://github.com/facebookresearch/torchdynamo/issues/101
     "detectron2_maskrcnn",
     # https://github.com/facebookresearch/torchdynamo/issues/145
@@ -101,6 +99,7 @@ REQUIRE_HIGHER_TOLERANCE = {
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
     "demucs": 4,
+    "densenet121": 4,
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
 }
@@ -344,6 +343,21 @@ def overhead_experiment(*args, model_iter_fn):
     Writes to ./overheads.csv
     """
     return speedup_experiment(*args, model_iter_fn)
+
+
+def print_fx(gm, example_inputs):
+    print(gm.graph)
+    return gm
+
+
+def print_aten_ops(gm, example_inputs):
+    from functorch.compile import aot_module
+
+    def trace_printer(gm, _):
+        print(gm.graph)
+        return gm
+
+    return aot_module(gm, fw_compiler=trace_printer, bw_compiler=trace_printer)
 
 
 def baselines(models, model_iter_fn, example_inputs, args):
@@ -711,6 +725,16 @@ def main():
         help="Accuracy testing and speedup for AOT with Torchscript(NNC/NVFuser) with mincut vs Eager",
     )
     group.add_argument(
+        "--print-fx",
+        action="store_true",
+        help="Print fx traces captured from model",
+    )
+    group.add_argument(
+        "--print-aten-ops",
+        action="store_true",
+        help="Print traces of aten ops captured by AOT autograd",
+    )
+    group.add_argument(
         "--accuracy-ts",
         action="store_true",
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
@@ -909,6 +933,16 @@ def main():
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
+    elif args.print_fx:
+        optimize_ctx = torchdynamo.optimize(
+            print_fx,
+            nopython=args.nopython,
+        )
+    elif args.print_aten_ops:
+        optimize_ctx = torchdynamo.optimize(
+            print_aten_ops,
+            nopython=args.nopython,
+        )
     elif args.accuracy_ts:
         optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
         experiment = speedup_experiment

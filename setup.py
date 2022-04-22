@@ -24,8 +24,7 @@ setup(
     author_email="jansel@fb.com",
     license="BSD-3",
     keywords="pytorch machine learning compilers",
-    zip_safe=False,
-    python_requires=">=3.7, <3.9",
+    python_requires=">=3.7, <3.10",
     install_requires=["torch>=1.11.0", "numpy", "tabulate", "sympy"],
     packages=find_packages(
         include=[
@@ -35,6 +34,7 @@ setup(
             "torchinductor.*",
         ]
     ),
+    zip_safe=False,
     ext_modules=[
         Extension(
             "torchdynamo._eval_frame",

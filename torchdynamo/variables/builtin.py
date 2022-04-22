@@ -440,6 +440,12 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
+        elif isinstance(obj, variables.TensorVariable) and name == "grad":
+            if source:
+                example_value = obj.proxy.node.meta["example_value"].grad
+                return VariableBuilder(tx, source)(example_value).add_options(options)
+            else:
+                unimplemented("tensor grad")
         elif isinstance(
             obj,
             (

@@ -1108,3 +1108,24 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(ref0 == res0)
         self.assertTrue(ref1 == res1)
         self.assertTrue(ref2 == res2)
+
+    def test_grad(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(a, b):
+            out = a * b
+            out.sum().backward()
+            real_out = torch.sigmoid(a.grad + b)
+            return real_out
+
+        inps = [torch.randn(4, requires_grad=True) for _ in range(2)]
+        for inp in inps:
+            inp.grad = None
+        ref = fn(*inps)
+
+        for inp in inps:
+            inp.grad = None
+        with torchdynamo.optimize(cnts):
+            res = fn(*inps)
+
+        self.assertTrue(same(ref, res))
