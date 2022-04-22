@@ -755,6 +755,7 @@ class ComputedBuffer(Buffer):
 @dataclasses.dataclass
 class ExternKernel(Buffer):
     inputs: List[Buffer]
+    constant_args: List[Any] = ()
     output_view: Optional[ReinterpretView] = None
 
     def get_read_writes(self):
@@ -762,14 +763,6 @@ class ExternKernel(Buffer):
             {dependencies.StarDep(x.get_name()) for x in self.inputs},
             {dependencies.StarDep(self.get_name())},
         )
-
-    def codegen(self, wrapper):
-        args = [x.codegen_reference() for x in self.inputs]
-        if self.output_view:
-            args.append(f"out={self.output_view.codegen_reference()}")
-        else:
-            args.append(f"out={self.codegen_reference()}")
-        wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
 
     @staticmethod
     def copy_input(x):
@@ -803,9 +796,50 @@ class ExternKernel(Buffer):
                 return x
         return cls.copy_input(x)
 
+    def codegen_args(self):
+        args = [x.codegen_reference() for x in self.inputs]
+        args.extend(map(repr(self.constant_args)))
+        return args
 
-class MatrixMultiply(ExternKernel):
-    kernel = "torch.mm"
+    def codegen_size_asserts(self, wrapper):
+        size = graph.sizevars.codegen_shape_tuple(self.get_size())
+        stride = graph.sizevars.codegen_shape_tuple(self.get_stride())
+        wrapper.body.writeline(f"assert {self.get_name()}.size() == {size}")
+        wrapper.body.writeline(f"assert {self.get_name()}.stride() == {stride}")
+
+
+@dataclasses.dataclass
+class ExternKernelOut(ExternKernel):
+    output_view: Optional[ReinterpretView] = None
+
+    def codegen(self, wrapper):
+        args = self.codegen_args()
+        if self.output_view:
+            args.append(f"out={self.output_view.codegen_reference()}")
+        else:
+            args.append(f"out={self.codegen_reference()}")
+        wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
+
+    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+        super(ExternKernelOut, self).__init__(None, layout, inputs, constant_args)
+        self.output_view = output_view
+        self.name = graph.register_buffer(self)
+
+
+class ExternKernelAlloc(ExternKernel):
+    def codegen(self, wrapper):
+        wrapper.body.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        self.codegen_size_asserts(wrapper)
+
+    def __init__(self, layout, inputs, constant_args=()):
+        super(ExternKernelOut, self).__init__(None, layout, inputs, constant_args)
+        self.name = graph.register_buffer(self)
+
+
+class MatrixMultiply(ExternKernelOut):
+    kernel = "aten.mm.out"
 
     @classmethod
     def create(cls, a, b):
@@ -819,8 +853,7 @@ class MatrixMultiply(ExternKernel):
         else:
             a = cls.require_stride1(a)
         b = cls.require_stride1(b)
-        data = MatrixMultiply(
-            name=None,
+        return MatrixMultiply(
             layout=FlexibleLayout(
                 device=a.get_device(),
                 dtype=a.get_dtype(),
@@ -828,12 +861,10 @@ class MatrixMultiply(ExternKernel):
             ),
             inputs=[a, b],
         )
-        data.name = graph.register_buffer(data)
-        return data
 
 
-class BatchMatrixMultiply(ExternKernel):
-    kernel = "torch.bmm"
+class BatchMatrixMultiply(ExternKernelOut):
+    kernel = "aten.bmm.out"
 
     @classmethod
     def create(cls, a, b):
@@ -848,12 +879,11 @@ class BatchMatrixMultiply(ExternKernel):
             device=a.get_device(),
             dtype=a.get_dtype(),
             size=[b3, m, n],
-        )
+        ).as_fixed()
 
         if b3 == 1:
             # convert to normal mm
             data = MatrixMultiply(
-                name=None,
                 layout=output_layout.as_fixed(),
                 inputs=[View.create(a, [m, k1]), View.create(b, [k2, n])],
             )
@@ -867,13 +897,94 @@ class BatchMatrixMultiply(ExternKernel):
             )
         else:
             data = BatchMatrixMultiply(
-                name=None,
                 layout=output_layout,
                 inputs=[a, b],
             )
-
-        data.name = graph.register_buffer(data)
         return data
+
+
+class Convolution(ExternKernelAlloc):
+    kernel = "aten.convolution"
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        stride: List[int],
+        padding: List[int],
+        dilation: List[int],
+        transposed: bool,
+        output_padding: List[int],
+        groups: int,
+    ):
+        x = cls.require_stride1(cls.realize_input(x))
+        weight = cls.require_stride1(cls.realize_input(weight))
+        bias = cls.require_stride1(cls.realize_input(bias))
+        stride = tuple(stride)
+        padding = tuple(padding)
+        dilation = tuple(dilation)
+        assert isinstance(transposed, bool)
+        output_padding = tuple(output_padding)
+        assert isinstance(groups, int)
+
+        weight_shape = [
+            sympy.Integer(graph.sizevars.guard_static_shape(s))
+            for s in weight.get_size()
+        ]
+        (bias_shape,) = [
+            sympy.Integer(graph.sizevars.guard_static_shape(s)) for s in bias.get_size()
+        ]
+
+        out_channels, in_channels1, *kernel_size = weight_shape
+        in_channels1 = in_channels1 * groups
+        assert bias_shape == out_channels
+
+        if len(x.get_size()) == 1 + len(kernel_size):
+            in_channels2, *input_size = x.get_size()
+            output_size = []
+        else:
+            assert len(x.get_size()) == 2 + len(kernel_size)
+            batch, in_channels2, *input_size = x.get_size()
+            output_size = [batch]
+
+        graph.sizevars.guard_equals(in_channels1, in_channels2)
+
+        output_size.append(out_channels)
+
+        assert (
+            len(stride)
+            == len(padding)
+            == len(dilation)
+            == len(output_padding)
+            == len(kernel_size)
+            == len(input_size)
+        )
+        for i in range(len(stride)):
+            output_size.append(
+                IndexingDiv(
+                    input_size[i]
+                    + 2 * padding[i]
+                    - dilation[i] * (kernel_size[i] - 1)
+                    - 1
+                    + stride[i],
+                    stride[i],
+                )
+                + 2 * output_padding[i]
+            )
+
+        return Convolution(
+            FixedLayout(
+                x.get_device(),
+                x.get_dtype(),
+                output_size,
+                # TODO(jansel): fix channels last case
+                FlexibleLayout.contiguous_strides(output_size),
+            ),
+            (x, weight, bias),
+            (stride, padding, dilation, transposed, output_padding, groups),
+        )
 
 
 @dataclasses.dataclass

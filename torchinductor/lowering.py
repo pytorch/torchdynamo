@@ -208,6 +208,7 @@ def split(x, sizes, dim):
         start = end
     return result
 
+
 @register_lowering(aten.unsqueeze)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
@@ -226,17 +227,38 @@ def _validate_dim(x, dim, offset):
 
 
 @register_lowering(aten.mm)
-def mm(a, b):
-    assert isinstance(a, TensorBox)
-    assert isinstance(b, TensorBox)
+def mm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.MatrixMultiply.create(a, b))
 
 
 @register_lowering(aten.bmm)
-def bmm(a, b):
-    assert isinstance(a, TensorBox)
-    assert isinstance(b, TensorBox)
+def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
+
+
+@register_lowering(aten.convolution)
+def convolution(
+    x: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int,
+):
+    return TensorBox.create(ir.Convolution.create(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        ))
 
 
 @register_lowering(torch.arange)
