@@ -427,6 +427,24 @@ class SuperModule(BasicModule):
         return x + 10.0
 
 
+class ComplicatedSuperParent(torch.nn.Module):
+    @classmethod
+    def custom_add(cls, x):
+        x = x + x
+        return x
+
+
+class SuperChildCallsClassMethod(ComplicatedSuperParent):
+    @classmethod
+    def child_func(self, x):
+        x = super().custom_add(x)
+        return x
+
+    def forward(self, x):
+        x = self.child_func(x)
+        return x
+
+
 class HasAttrModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -531,6 +549,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
     test_super1 = make_test(SuperModule())
+    test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())

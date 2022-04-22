@@ -34,8 +34,15 @@ class SuperVariable(VariableTracker):
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
         search_type = self.typevar.as_python_constant()
+
+        # We default to the python type of the object. However, if this is a
+        # `type`, then the original object represents the user defined type.
+        type_to_use = self.objvar.python_type()
+        if type_to_use is type:
+            type_to_use = self.objvar.value
+
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
-        return getattr(super(search_type, self.objvar.python_type()), name)
+        return getattr(super(search_type, type_to_use), name)
 
     def call_method(
         self,
@@ -50,11 +57,16 @@ class SuperVariable(VariableTracker):
         inner_fn = self.const_getattr(self, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
-        if not isinstance(inner_fn, types.FunctionType):
-            unimplemented(f"non-function super: {inner_fn}")
-        return variables.UserFunctionVariable(inner_fn, **options).call_function(
-            tx, [self.objvar] + args, kwargs
-        )
+        elif isinstance(inner_fn, types.FunctionType):
+            return variables.UserFunctionVariable(inner_fn, **options).call_function(
+                tx, [self.objvar] + args, kwargs
+            )
+        elif isinstance(inner_fn, types.MethodType):
+            return variables.UserMethodVariable(
+                inner_fn.__func__, self.objvar, **options
+            ).call_function(tx, args, kwargs)
+        else:
+            unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class UnknownVariable(VariableTracker):
