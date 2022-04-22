@@ -623,9 +623,9 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
     def to_torch_tensor(nd_tensor):
         """A helper function to transfer a NDArray to torch.tensor."""
         if nd_tensor.dtype == "bool":
-            # Note that DLPack does not support boolean so it needs to be handled by
-            # torch.utils.dlpack.from_pack. For now, the workaround is going thorugh
-            # numpy, although this brings additional data copy overheads.
+            # DLPack does not support boolean so it can't be handled by
+            # torch.utils.dlpack.from_pack. Workaround by going through
+            # numpy, although this brings additional data copy overhead.
             return torch.from_numpy(nd_tensor.numpy())
         return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
