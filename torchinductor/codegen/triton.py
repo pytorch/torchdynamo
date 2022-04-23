@@ -76,6 +76,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.maximum({a}, {b})"
 
     @staticmethod
+    def where(a, b, c):
+        return f"tl.where({a}, {b}, {c})"
+
+    @staticmethod
     def index_expr(expr, dtype):
         return kernel.indexing(expr)
 

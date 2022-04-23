@@ -33,6 +33,8 @@ class WrapperCodeGen(CodeGen):
                     import triton.language as tl
                 except ImportError:
                     pass
+                    
+                aten = torch.ops.aten
             """
         )
         self.prefix.writelines(
@@ -41,16 +43,6 @@ class WrapperCodeGen(CodeGen):
         with self.prefix.indent():
             graph.sizevars.codegen(self.prefix, graph.graph_inputs)
 
-    def next_kernel_name(self):
-        return f"kernel{next(self._names_iter)}"
-
-    def codegen_outputs(self, code):
-        for value in graph.graph_inputs.values():
-            name = value.get_name()
-            device = value.get_device()
-            if device.type == "cpu":
-                code.writeline(f"{name}_ptr = c_void_p({name}.data_ptr())")
-
         empty_like_cache = dict()
         for name, value in graph.graph_inputs.items():
             device = value.get_device()
@@ -58,32 +50,32 @@ class WrapperCodeGen(CodeGen):
             shape = tuple(value.get_size())
             stride = tuple(value.get_stride())
             empty_like_cache.setdefault((device, dtype, shape, stride), name)
+        self.empty_like_cache = empty_like_cache
 
-        for buffer in graph.buffers:
-            name = buffer.get_name()
-            if name in graph.removed_buffers:
-                continue
-            device = buffer.get_device()
-            dtype = buffer.get_dtype()
-            shape = tuple(buffer.get_size())
-            stride = tuple(buffer.get_stride())
-            key = (device, dtype, shape, stride)
-            if key in empty_like_cache:
-                code.writeline(f"{name} = empty_like({empty_like_cache[key]})")
-            else:
-                code.writeline(
-                    f"{name} = empty([{', '.join(map(pexpr, shape))}], device='{device.type}', dtype={dtype})"
-                )
+    def next_kernel_name(self):
+        return f"kernel{next(self._names_iter)}"
 
-            if device.type == "cpu":
-                code.writeline(f"{name}_ptr = c_void_p({name}.data_ptr())")
+    def codegen_allocation(self, buffer):
+        name = buffer.get_name()
+        if name in graph.removed_buffers:
+            return
+        device = buffer.get_device()
+        dtype = buffer.get_dtype()
+        shape = tuple(buffer.get_size())
+        stride = tuple(buffer.get_stride())
+        key = (device, dtype, shape, stride)
+        if key in self.empty_like_cache:
+            self.body.writeline(f"{name} = empty_like({self.empty_like_cache[key]})")
+        else:
+            self.body.writeline(
+                f"{name} = empty([{', '.join(map(pexpr, shape))}], device='{device.type}', dtype={dtype})"
+            )
 
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
         with result.indent():
-            self.codegen_outputs(result)
             result.splice(self.body)
             output_refs = [x.codegen_reference() for x in graph.graph_outputs]
             result.writeline("return (" + ", ".join(output_refs) + ", )")

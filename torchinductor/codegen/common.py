@@ -168,7 +168,7 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
-    def cpp_argdefs(self, graph):
+    def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP
         from .cpp import INDEX_TYPE
 
@@ -201,6 +201,8 @@ class CSE:
         self.store_cache = {}
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
+        if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
+            return expr
         if expr not in self.cache:
             var = f"{self.name_prefix}{len(self.cache)}"
             self.cache[expr] = var

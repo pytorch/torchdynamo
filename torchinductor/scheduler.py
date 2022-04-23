@@ -42,6 +42,8 @@ class ExternKernelSchdulerNode(BaseSchedulerNode):
         return False
 
     def run(self, codegen_extern_call):
+        if self.node.should_allocate():
+            graph.wrapper_code.codegen_allocation(self.node)
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
         self.scheduler.kernels.append(self.node)
@@ -93,6 +95,7 @@ class SchedulerNode(BaseSchedulerNode):
         return bool(self.node.data.get_reduction_type())
 
     def run(self, vars, reduction_vars):
+        graph.wrapper_code.codegen_allocation(self.node)
         self.scheduler.run_count += 1
         name = self.get_name()
         indexer = self.node.layout.make_indexer()

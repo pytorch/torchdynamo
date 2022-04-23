@@ -92,15 +92,13 @@ inline static void eval_frame_callback_set(PyObject *obj) {
 #endif
 
 static void ignored(void *obj) {}
-static PyObject *_custom_eval_frame(PyThreadState *tstate,
-                                    PyFrameObject *frame,
+static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
                                     int throw_flag);
 static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
                                              PyFrameObject *frame,
                                              int throw_flag);
 #if PY_VERSION_HEX >= 0x03090000
-static PyObject *custom_eval_frame(PyThreadState *tstate,
-                                   PyFrameObject *frame,
+static PyObject *custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
                                    int throw_flag) {
   return _custom_eval_frame(tstate, frame, throw_flag);
 }
@@ -124,38 +122,40 @@ static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
 inline static PyObject *eval_frame_default(PyThreadState *tstate,
                                            PyFrameObject *frame,
                                            int throw_flag) {
-  #if PY_VERSION_HEX >= 0x03090000
+#if PY_VERSION_HEX >= 0x03090000
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
   return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
-  #else
+#else
   return _PyEval_EvalFrameDefault(frame, throw_flag);
-  #endif
+#endif
 }
 
 inline static void enable_eval_frame(PyThreadState *tstate) {
-  #if PY_VERSION_HEX >= 0x03090000
+#if PY_VERSION_HEX >= 0x03090000
   _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &custom_eval_frame);
-  #else
+#else
   tstate->interp->eval_frame = &custom_eval_frame;
-  #endif
+#endif
 }
 
 inline static void disable_eval_frame(PyThreadState *tstate) {
-  #if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &_PyEval_EvalFrameDefault);
-  #else
+#if PY_VERSION_HEX >= 0x03090000
+  _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                       &_PyEval_EvalFrameDefault);
+#else
   tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-  #endif
+#endif
 }
 
 inline static void enable_run_only_eval_frame(PyThreadState *tstate) {
-  #if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &custom_eval_frame_run_only);
-  #else
+#if PY_VERSION_HEX >= 0x03090000
+  _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                       &custom_eval_frame_run_only);
+#else
   tstate->interp->eval_frame = &custom_eval_frame_run_only;
-  #endif
+#endif
 }
 
 static inline PyObject *call_callback(PyObject *callable, PyObject *frame,
@@ -287,8 +287,7 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
-  PyFrameObject *shadow =
-      PyFrame_New(tstate, code, frame->f_globals, NULL);
+  PyFrameObject *shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
   if (shadow == NULL) {
     return NULL;
   }
@@ -311,8 +310,7 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
   return result;
 }
 
-static PyObject *_custom_eval_frame(PyThreadState *tstate,
-                                    PyFrameObject *frame,
+static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
                                     int throw_flag) {
   DEBUG_TRACE("begin %s %s %i %i %i %i", name(frame),
               PyUnicode_AsUTF8(frame->f_code->co_filename), frame->f_lineno,
@@ -385,8 +383,7 @@ static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    return eval_custom_code(tstate, frame, cached_code,
-                            throw_flag);
+    return eval_custom_code(tstate, frame, cached_code, throw_flag);
   } else {
     DEBUG_TRACE("cache miss %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
@@ -400,11 +397,11 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   //  - Python callable(): enables TorchDynamo
 
   PyObject *old_callback;
-  #if PY_VERSION_HEX >= 0x03090000
+#if PY_VERSION_HEX >= 0x03090000
   void *old_eval_frame = _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
-  #else
+#else
   void *old_eval_frame = tstate->interp->eval_frame;
-  #endif
+#endif
   if (old_eval_frame == &custom_eval_frame) {
     old_callback = eval_frame_callback_get();
   } else if (old_eval_frame == &custom_eval_frame_run_only) {

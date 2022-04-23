@@ -6,8 +6,11 @@ import os
 import random
 import re
 import subprocess
+import sysconfig
 import types
 from ctypes import cdll
+
+from torch.utils import cpp_extension
 
 from . import config
 
@@ -40,28 +43,43 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-class CppCodeCache:
-    cache = dict()
-    clear = staticmethod(cache.clear)
-    cpp_compile_cmd = re.sub(
+def cpp_compile_command(input, output, include_pytorch=False):
+    if include_pytorch:
+        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+        lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
+        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+    else:
+        ipaths = []
+        lpaths = []
+        libs = ["gomp"]
+    ipaths = " ".join(["-I" + p for p in ipaths])
+    lpaths = " ".join(["-L" + p for p in lpaths])
+    libs = " ".join(["-l" + p for p in libs])
+    return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {config.cpp.cxx} -shared -fPIC -Wall -std=c++14
-            -march=native -O3 -ffast-math -fopenmp -lgomp
-            -o{{output}} {{input}}
+            {config.cpp.cxx} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {ipaths} {lpaths} {libs}
+            -march=native -O3 -ffast-math -fopenmp
+            -o{output} {input}
         """,
     ).strip()
 
+
+class CppCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
     @classmethod
     def load(cls, source_code):
-        key, input_path = write(source_code, "cpp", extra=CppCodeCache.cpp_compile_cmd)
+        key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
         if key not in cls.cache:
             output_path = input_path[:-3] + "so"
             if not os.path.exists(output_path):
-                cmd = cls.cpp_compile_cmd.format(
-                    input=input_path, output=output_path
-                ).split(" ")
+                cmd = cpp_compile_command(input=input_path, output=output_path).split(
+                    " "
+                )
                 subprocess.check_call(cmd)
             cls.cache[key] = cdll.LoadLibrary(output_path)
             cls.cache[key].key = key

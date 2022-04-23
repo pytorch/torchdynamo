@@ -14,6 +14,8 @@ from torchdynamo.testing import same
 from torchinductor import config
 from torchinductor.compile_fx import compile_fx
 
+aten = torch.ops.aten
+
 HAS_CUDA = False
 if torch.cuda.is_available():
     try:
@@ -488,6 +490,27 @@ class CommonTemplate:
         self.common(
             fn2,
             (torch.randn([2, 2, 10]),),
+        )
+
+    def test_convolution(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(4, 4, [3, 3]),
+            torch.nn.ReLU(),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randn([2, 4, 16, 16]),),
+        )
+
+    def test_max_pool2d(self):
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
         )
 
 

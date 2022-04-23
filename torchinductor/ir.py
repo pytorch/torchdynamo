@@ -798,7 +798,7 @@ class ExternKernel(Buffer):
 
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
-        args.extend(map(repr(self.constant_args)))
+        args.extend(map(repr, self.constant_args))
         return args
 
     def codegen_size_asserts(self, wrapper):
@@ -821,9 +821,12 @@ class ExternKernelOut(ExternKernel):
         wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
 
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super(ExternKernelOut, self).__init__(None, layout, inputs, constant_args)
+        super().__init__(None, layout, inputs, constant_args)
         self.output_view = output_view
         self.name = graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
 
 
 class ExternKernelAlloc(ExternKernel):
@@ -834,8 +837,11 @@ class ExternKernelAlloc(ExternKernel):
         self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, inputs, constant_args=()):
-        super(ExternKernelOut, self).__init__(None, layout, inputs, constant_args)
+        super().__init__(None, layout, inputs, constant_args)
         self.name = graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
 
 
 class MatrixMultiply(ExternKernelOut):

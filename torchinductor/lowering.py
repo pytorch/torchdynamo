@@ -248,17 +248,19 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
-    return TensorBox.create(ir.Convolution.create(
-        x,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        ))
+    return TensorBox.create(
+        ir.Convolution.create(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+        )
+    )
 
 
 @register_lowering(torch.arange)
@@ -306,6 +308,58 @@ def gather(x, dim, index):
         inner_fn=fn,
         ranges=index.get_size(),
     )
+
+
+@register_lowering(aten.max_pool2d_with_indices)
+def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1):
+    assert isinstance(x, TensorBox)
+    assert len(kernel_size) == 2
+    assert len(stride) == 2
+    assert padding == 0, "TODO(jansel): support padding"
+    assert dilation == 1, "TODO(jansel): support dilation"
+    assert len(x.get_size()) in (3, 4)
+
+    x_loader = x.make_loader()
+
+    *batch, c, h, w = x.get_size()
+
+    h_out = ir.IndexingDiv(h - (kernel_size[0] - 1) + (stride[0] - 1), stride[0])
+    w_out = ir.IndexingDiv(h - (kernel_size[1] - 1) + (stride[1] - 1), stride[1])
+    new_size = list(batch) + [c, h_out, w_out]
+
+    def fn(idx, return_index):
+        *prefix, bh, bw = idx
+        maxval = None
+        maxindex = None
+        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
+            ih = bh * stride[0] + ih
+            iw = bw * stride[1] + iw
+            index = ops.index_expr(ih * w + iw, torch.int64)
+            val = x_loader([*prefix, ih, iw])
+            if maxval is None:
+                maxindex = index
+                maxval = val
+            else:
+                maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
+                maxval = ops.maximum(val, maxval)
+        if return_index:
+            return maxindex
+        else:
+            return maxval
+
+    r1 = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=functools.partial(fn, return_index=False),
+        ranges=new_size,
+    )
+    r2 = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=functools.partial(fn, return_index=True),
+        ranges=new_size,
+    )
+    return r1, r2
 
 
 def make_reduction(reduction_type: str):

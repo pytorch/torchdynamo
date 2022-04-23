@@ -126,6 +126,10 @@ class CppOverrides(OpOverrides):
         return f"std::max({a}, {b})"
 
     @staticmethod
+    def where(a, b, c):
+        return f"{a} ? {b} : {c}"
+
+    @staticmethod
     def constant(val, dtype):
         return ops.to_dtype(repr(val), dtype)
 
@@ -366,7 +370,7 @@ class KernelGroup:
         if self.count == 0:
             return
 
-        argdefs = ",\n".ljust(25).join(self.args.cpp_argdefs(graph))
+        argdefs = ",\n".ljust(25).join(self.args.cpp_argdefs())
         code = BracesBuffer()
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({argdefs})'])
         with code.indent():
@@ -384,7 +388,7 @@ class KernelGroup:
         args = self.args
         call_args = []
         for name in chain(args.input_buffers.keys(), args.output_buffers.keys()):
-            call_args.append(f"{name}_ptr")
+            call_args.append(f"c_void_p({name}.data_ptr())")
         for name in args.sizevars.keys():
             call_args.append(f"c_long({name})")
         wrapper.body.writeline(
