@@ -72,6 +72,10 @@ class OpOverrides:
     def silu(x):
         return f"{x} * {ops.sigmoid(x)}"
 
+    @staticmethod
+    def reciprocal(x):
+        return ops.div("1", x)
+
 
 class IndentedBuffer:
     tabwidth = 4

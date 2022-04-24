@@ -31,7 +31,7 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
-        if base == 0:
+        if base == 0 or modulus == 1:
             return sympy.Integer(0)
         if (
             isinstance(base, sympy.Integer)
@@ -220,6 +220,9 @@ class BaseView(IRNode):
 
     def get_device(self):
         return self.data.get_device()
+
+    def mark_reuse(self, users):
+        return self.data.mark_reuse(users)
 
 
 @dataclasses.dataclass
@@ -574,6 +577,7 @@ class SliceView(View):
             return ReinterpretView(storage, new_layout)
 
         def reindex(index):
+            assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
             index = list(index)
             index[dim] = index[dim] * step + start
             return index
@@ -1060,9 +1064,6 @@ class TensorBox(MutableBox):
     def create(data):
         return TensorBox(StorageBox(data))
 
-    def mark_reuse(self, users):
-        pass  # TODO(jansel): realize the buffers?
-
 
 class StorageBox(MutableBox):
     def realize(self):
@@ -1080,3 +1081,19 @@ class StorageBox(MutableBox):
         )
         self.data.name = graph.register_buffer(self.data)
         return self.data.name
+
+    def mark_reuse(self, users):
+        if users <= 1:
+            return
+        if isinstance(self.data, (Pointwise, Reduction)):
+            read_writes = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=self.data.get_device(),
+                    dtype=self.data.get_dtype(),
+                    size=self.data.get_size(),
+                ),
+                data=self.data,
+            ).get_read_writes()
+            if len(read_writes.reads) * users > 4:
+                self.realize()

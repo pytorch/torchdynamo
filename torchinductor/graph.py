@@ -113,7 +113,7 @@ class GraphLowering(torch.fx.Interpreter):
         num_users = len(set(n.users))
         if num_users > 1 and isinstance(result, TensorBox):
             # TODO(jansel): introduce a store vs inline choice
-            result.mark_reuse(n.users)
+            result.mark_reuse(len(n.users))
         return result
 
     def codegen(self):

@@ -158,7 +158,7 @@ class RangeTreeEntry(RangeTree):
     def _codegen_next(self):
         denom = texpr(kernel.rename_indexing(self.length))
         kernel.indexing_code.writeline(
-            f"{self.name}_next = {self.parent.codegen_next()} // {denom}"
+            f"{self.name}_next = {self.parent.codegen_next()} // {TritonPrinter.paren(denom)}"
         )
         return f"{self.name}_next"
 
@@ -167,7 +167,7 @@ class RangeTreeEntry(RangeTree):
         if self.numel == 1:
             line = f"{self.name} = {self.parent.codegen_next()}"
         else:
-            line = f"{self.name} = {self.parent.codegen_next()} % {denom}"
+            line = f"{self.name} = {self.parent.codegen_next()} % {TritonPrinter.paren(denom)}"
         kernel.indexing_code.writeline(line)
         return self.name
 

@@ -7,6 +7,7 @@ import torch
 import torch.fx
 
 from . import ir
+from .codegen.common import product
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -46,10 +47,20 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
             )
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
+            for i in range(len(args)):
+                if isinstance(args[i], ir.Constant):
+                    args[i] = ir.Constant(
+                        args[i].value, dtype, args[indices[0]].get_device()
+                    )
 
         if broadcast and indices:
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
+            for i in range(len(args)):
+                if isinstance(args[i], ir.Constant):
+                    args[i] = ExpandView.create(
+                        args[i], list(args[indices[0]].get_size())
+                    )
 
         return decomp_fn(*args, **kwargs)
 
@@ -96,7 +107,9 @@ def promote_constants(inputs):
     ex = next(x for x in inputs if isinstance(x, TensorBox))
     return [
         (
-            ir.Constant(x, ex.get_dtype(), ex.get_device())
+            ExpandView.create(
+                ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+            )
             if isinstance(x, (int, float))
             else x
         )
@@ -108,11 +121,21 @@ def make_pointwise(fn, override_dtype=None, override_device=None):
     def inner(*inputs: List[TensorBox]):
         inputs = promote_constants(inputs)
         loaders = [x.make_loader() for x in inputs]
+        ranges = inputs[0].get_size()
+        for other in inputs[1:]:
+            assert len(ranges) == len(
+                other.get_size()
+            ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
+
+        def inner_fn(index):
+            assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
+            return fn(*[load(index) for load in loaders])
+
         return Pointwise.create(
             device=override_device or inputs[0].get_device(),
             dtype=override_dtype or inputs[0].get_dtype(),
-            inner_fn=lambda index: fn(*[load(index) for load in loaders]),
-            ranges=inputs[0].get_size(),
+            inner_fn=inner_fn,
+            ranges=ranges,
         )
 
     return inner
@@ -199,7 +222,49 @@ def squeeze(x, dim=None):
 def expand(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
+    if tuple(x.get_size()) == tuple(sizes):
+        return x
+    x.mark_reuse(graph.sizevars.size_hint(product(sizes) / product(x.get_size())))
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
+
+
+@register_lowering(aten.repeat)
+def repeat(x, repeats):
+    old_size = list(x.get_size())
+    if len(repeats) > len(old_size):
+        old_size = [sympy.Integer(1)] * (len(repeats) - len(old_size)) + old_size
+        x = view(x, list(old_size))
+    assert len(repeats) == len(x.get_size())
+
+    new_size = list(x.get_size())
+
+    for i in range(len(repeats)):
+        assert repeats[i] >= 1
+        if repeats[i] > 1:
+            new_size[i] = new_size[i] * repeats[i]
+
+    if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
+        return expand(x, new_size)
+
+    def inner_fn(index):
+        assert len(index) == len(repeats)
+        index = list(index)
+        for i in range(len(repeats)):
+            if repeats[i] > 1:
+                if old_size[i] == 1:
+                    index[i] = sympy.Integer(0)
+                else:
+                    index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
+        return x_loader(index)
+
+    x.mark_reuse(graph.sizevars.size_hint(product(new_size) / product(old_size)))
+    x_loader = x.make_loader()
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=list(new_size),
+    )
 
 
 @register_lowering(aten.view)
@@ -473,16 +538,17 @@ def make_reduction(reduction_type: str):
 sum = register_lowering(aten.sum)(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
+register_pointwise(aten.abs)
 register_pointwise(aten.add)
 register_pointwise(aten.div)
-register_pointwise(aten.abs)
-register_pointwise(aten.sub)
 register_pointwise(aten.log)
-register_pointwise(aten.mul)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
+register_pointwise(aten.mul)
+register_pointwise(aten.reciprocal)
 register_pointwise(aten.sigmoid)
 register_pointwise(aten.silu)
+register_pointwise(aten.sub)
 relu = register_pointwise(aten.relu)
 exp = register_pointwise(aten.exp)
 

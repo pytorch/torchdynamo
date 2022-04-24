@@ -80,7 +80,7 @@ def check_model(self: TestCase, model, example_inputs):
         model = torch.fx.GraphModule({}, model)
     elif not isinstance(model, torch.fx.GraphModule):
         model = fx.symbolic_trace(model)
-    compiled_fn = compile_fx(model, example_inputs)
+    compiled_fn = compile_fx(model, example_inputs, cudagraphs=False)
     actual = compiled_fn(*example_inputs)
     correct = model(*example_inputs)
     self.assertTrue(same(actual, correct))
@@ -566,6 +566,28 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([16, 16]),),
+        )
+
+    def test_tahn(self):
+        def fn(x):
+            return aten.tanh(x) + 2, aten.tanh(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_repeat(self):
+        def fn(x):
+            return (
+                x.repeat(2, 2, 3, 1),
+                x.repeat(8, 1, 1, 1),
+                x.repeat(2, 1, 1, 1, 1, 1),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
         )
 
 

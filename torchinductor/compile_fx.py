@@ -1,4 +1,5 @@
 import functools
+import itertools
 import operator
 import os
 import textwrap
@@ -62,14 +63,21 @@ def dump_to_repro(gm, *args):
                 import torchdynamo
                 from torchdynamo.testing import rand_strided,same
                 from torchinductor.compile_fx import compile_fx
+
                 """
             )
         )
-        fd.write("\n")
-        fd.write(gm.code)
+        fd.write("class Repro:\n")
+        for i in itertools.count():
+            try:
+                val = getattr(gm, f"_tensor_constant{i}")
+            except AttributeError:
+                break
+            fd.write(f"    _tensor_constant{i} = {val.item()!r}\n")
+        fd.write(textwrap.indent(gm.code, "    "))
         fd.write("\n")
 
-        fd.write("args = (\n  None,\n")
+        fd.write("args = (\n")
         for arg in args:
             fd.write(
                 f"  rand_strided({tuple(arg.size())!r}, {tuple(arg.stride())!r},"
@@ -80,9 +88,9 @@ def dump_to_repro(gm, *args):
         fd.write(
             textwrap.dedent(
                 """
-                expected = forward(*args)
-                with torchdynamo.optimize(compile_fx):
-                    actual = forward(*args)
+                expected = Repro().forward(*args)
+                with torchdynamo.optimize(compile_fx, nopython=True):
+                    actual = Repro().forward(*args)
                 assert same(actual, expected), (actual[0]-expected[0]).max()
                 """
             )
@@ -90,7 +98,9 @@ def dump_to_repro(gm, *args):
         print("wrote repro.py")
 
 
-def compile_fx(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+def compile_fx(
+    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=True
+):
     """Main entrypoint to a compile given FX graph"""
     assert isinstance(model, torch.fx.GraphModule)
     assert all(isinstance(x, torch.Tensor) for x in example_inputs)
@@ -114,7 +124,7 @@ def compile_fx(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
-    if example_inputs[0].device.type == "cuda":
+    if example_inputs[0].device.type == "cuda" and cudagraphs:
         return cudagraphs_inner(compiled_fn, example_inputs)
     else:
         return compiled_fn

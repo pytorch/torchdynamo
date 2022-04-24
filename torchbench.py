@@ -857,6 +857,7 @@ def main():
         output_filename = "inductor.csv"
         args.isolate = True
         args.float32 = True
+        args.cosine = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment

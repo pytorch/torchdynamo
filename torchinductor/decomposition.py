@@ -21,7 +21,8 @@ def _softmax(x, dim, half_to_float):
         x = x.to(torch.float32)
     x = torch.exp(x)
     x_sum = torch.sum(x, dim, keepdim=True)
-    return x / x_sum
+    scale = torch.reciprocal(x_sum)
+    return x * scale
 
 
 @register_decomposition([aten._log_softmax], decompositions)
@@ -61,3 +62,8 @@ def elu(self, alpha=1, scale=1, input_scale=1):
     return torch.where(
         self <= 0, (torch.exp(self * input_scale) - 1) * negcoef, self * scale
     )
+
+
+@register_decomposition([aten.tanh], decompositions)
+def tanh(x):
+    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
