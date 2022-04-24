@@ -590,6 +590,18 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_embedding(self):
+        m = torch.nn.Sequential(
+            torch.nn.Embedding(10, 4, padding_idx=0),
+            torch.nn.ReLU(),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randint(10, [2, 8]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

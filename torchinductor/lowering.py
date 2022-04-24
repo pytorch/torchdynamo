@@ -410,6 +410,32 @@ def gather(x, dim, index):
     )
 
 
+@register_lowering(aten.embedding, type_promote=False)
+def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False):
+    assert not sparse
+    assert isinstance(weight, TensorBox)
+    assert isinstance(indices, TensorBox)
+    assert "int" in str(indices.get_dtype())
+
+    weight_loader = weight.make_loader()
+    indices_loader = indices.make_loader()
+    indices_ndim = len(indices.get_size())
+    new_size = [*indices.get_size(), *weight.get_size()[1:]]
+
+    def fn(idx):
+        assert len(idx) == len(new_size), f"{idx} != {new_size}"
+        var_index = indices_loader(idx[:indices_ndim])
+        weight_idx = [sympy.Symbol(str(var_index))] + [*idx[indices_ndim:]]
+        return weight_loader(weight_idx)
+
+    return Pointwise.create(
+        device=weight.get_device(),
+        dtype=weight.get_dtype(),
+        inner_fn=fn,
+        ranges=new_size,
+    )
+
+
 @register_lowering(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1):
     assert isinstance(x, TensorBox)
