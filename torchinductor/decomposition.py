@@ -53,3 +53,11 @@ def transpose(x, dim0: int, dim1: int):
 @register_decomposition([aten.addmm], decompositions)
 def addmm(input, mat1, mat2):
     return torch.mm(mat1, mat2) + input
+
+
+@register_decomposition([aten.elu], decompositions)
+def elu(self, alpha=1, scale=1, input_scale=1):
+    negcoef = alpha * scale
+    return torch.where(
+        self <= 0, (torch.exp(self * input_scale) - 1) * negcoef, self * scale
+    )

@@ -10,6 +10,7 @@ import torch
 from torch import fx
 from torch.nn import functional as F
 
+from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 from torchinductor import config
 from torchinductor.compile_fx import compile_fx
@@ -504,13 +505,67 @@ class CommonTemplate:
             (torch.randn([2, 4, 16, 16]),),
         )
 
-    def test_max_pool2d(self):
+    def test_max_pool2d1(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
 
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
+        )
+
+    def test_adaptive_avg_pool2d1(self):
+        def fn(x):
+            return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
+                x + 1, (4, 5)
+            )
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+        )
+
+    def test_max_pool2d2(self):
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
+
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+
+    def test_alexnet_prefix(self):
+        def forward(arg6, arg7, arg16):
+            convolution = torch.ops.aten.convolution(
+                arg16, arg7, arg6, [4, 4], [2, 2], [1, 1], False, [0, 0], 1
+            )
+            relu = torch.ops.aten.relu(convolution)
+            max_pool2d_with_indices = torch.ops.aten.max_pool2d_with_indices(
+                relu, [3, 3], [2, 2]
+            )
+            getitem = max_pool2d_with_indices[0]
+            return (getitem,)
+
+        self.common(
+            forward,
+            (
+                rand_strided((64,), (1,), torch.float32, "cpu"),
+                rand_strided((64, 3, 11, 11), (363, 121, 11, 1), torch.float32, "cpu"),
+                rand_strided(
+                    (16, 3, 224, 224), (150528, 50176, 224, 1), torch.float32, "cpu"
+                ),
+            ),
+        )
+
+    def test_elu(self):
+        def fn(x):
+            return aten.elu(x, 1.6732632423543772, 1.0507009873554805) + 2, aten.elu(
+                x + 1, 2, 3, 4
+            )
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
         )
 
 

@@ -33,7 +33,6 @@ class WrapperCodeGen(CodeGen):
                     import triton.language as tl
                 except ImportError:
                     pass
-                    
                 aten = torch.ops.aten
             """
         )

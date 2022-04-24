@@ -23,6 +23,7 @@ import pandas as pd
 import torch
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
+from torch.utils._pytree import tree_map
 
 import torchdynamo
 import torchdynamo.utils
@@ -565,7 +566,6 @@ def forward_and_backward_pass(mod, inputs, collect_outputs=True):
 def cast_to_fp16(model, inputs):
     # cast model and inputs to fp16
     model = model.half()
-    from torch.utils._pytree import tree_map
 
     inputs = tuple(
         tree_map(
@@ -586,6 +586,21 @@ def cast_to_fp16(model, inputs):
                 inputs,
             )
         )
+    return model, inputs
+
+
+def cast_to_fp32(model, inputs):
+    # cast model and inputs to fp16
+    model = model.to(torch.float32)
+
+    inputs = tuple(
+        tree_map(
+            lambda x: x.to(torch.float32)
+            if getattr(x, "dtype", None) == torch.float16
+            else x,
+            inputs,
+        )
+    )
     return model, inputs
 
 
@@ -626,6 +641,10 @@ def main():
     parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
     )
+
+    parser.add_argument("--float16", action="store_true", help="cast model to fp16")
+    parser.add_argument("--float32", action="store_true", help="cast model to fp32")
+    parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
         "--minimum-call-count", type=int, help="filter out graphs with too few ops"
@@ -837,6 +856,7 @@ def main():
         experiment = speedup_experiment
         output_filename = "inductor.csv"
         args.isolate = True
+        args.float32 = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
@@ -907,12 +927,27 @@ def main():
         )
         experiment = speedup_experiment_fx2trt
         output_filename = "speedups_fx2trt.csv"
+        SKIP.update(
+            {
+                "alexnet",
+                "resnet18",
+                "resnet50",
+                "mobilenet_v2",
+                "mnasnet1_0",
+                "squeezenet1_1",
+                "shufflenetv2_x1_0",
+                "vgg16",
+                "resnext50_32x4d",
+            }
+        )
     elif args.speedup_fx2trt_fp16:
         optimize_ctx = torchdynamo.optimize(
             backends.fx2trt_compiler_fp16, nopython=args.nopython
         )
         experiment = speedup_experiment_fx2trt
         output_filename = "speedups_fx2trt_fp16.csv"
+        args.float16 = True
+        args.cosine = True
     elif args.accuracy_aot_nop:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_debug_strategy1, nopython=args.nopython
@@ -966,10 +1001,7 @@ def main():
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 
-    if args.speedup_fx2trt_fp16:
-        cos_similarity = True
-    else:
-        cos_similarity = False
+    cos_similarity = args.cosine
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
@@ -985,26 +1017,14 @@ def main():
                 device, name, model, example_inputs = load_model(
                     device, args.only, args.training, args.use_eval_mode
                 )
-                # torchbench changed the default precison=fp16 on torchvision net
-                if args.speedup_fx2trt:
-                    if name in (
-                        "alexnet",
-                        "resnet18",
-                        "resnet50",
-                        "mobilenet_v2",
-                        "mnasnet1_0",
-                        "squeezenet1_1",
-                        "shufflenetv2_x1_0",
-                        "vgg16",
-                        "resnext50_32x4d",
-                    ):
-                        print("Do not test vision models in fp32 mode")
-                        continue  # We need to cast model and inputs back to fp32 before we can enable it
-                if args.speedup_fx2trt_fp16:
-                    model, example_inputs = cast_to_fp16(model, example_inputs)
-
             except NotImplementedError:
                 continue  # bad benchmark implementation
+
+            if args.float32:
+                model, example_inputs = cast_to_fp32(model, example_inputs)
+            elif args.float16:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
+
             run_one_model(
                 name,
                 model,

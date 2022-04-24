@@ -90,8 +90,23 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
+def promote_constants(inputs):
+    if not any(isinstance(x, (int, float)) for x in inputs):
+        return inputs
+    ex = next(x for x in inputs if isinstance(x, TensorBox))
+    return [
+        (
+            ir.Constant(x, ex.get_dtype(), ex.get_device())
+            if isinstance(x, (int, float))
+            else x
+        )
+        for x in inputs
+    ]
+
+
 def make_pointwise(fn, override_dtype=None, override_device=None):
     def inner(*inputs: List[TensorBox]):
+        inputs = promote_constants(inputs)
         loaders = [x.make_loader() for x in inputs]
         return Pointwise.create(
             device=override_device or inputs[0].get_device(),
@@ -113,16 +128,36 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_dtype=dtype)(x)
 
 
-def register_pointwise(aten_fn, name=None, broadcast=True, type_promote=True):
+def register_pointwise(
+    aten_fn,
+    name=None,
+    broadcast=True,
+    type_promote=True,
+    override_dtype=None,
+    override_device=None,
+):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
 
-    @register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)
-    @make_pointwise
     def fn(*args, **kwargs):
         return getattr(ops, name)(*args, **kwargs)
 
+    fn = make_pointwise(
+        fn, override_dtype=override_dtype, override_device=override_device
+    )
+    fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
     return fn
+
+
+@register_lowering(aten.where, broadcast=True, type_promote=False)
+def where(cond, a, b):
+    def fn(*args):
+        return ops.where(*args)
+
+    dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
+    return make_pointwise(fn, override_dtype=dtype)(
+        cond, to_dtype(a, dtype), to_dtype(b, dtype)
+    )
 
 
 @register_lowering(aten.broadcast_tensors, broadcast=False, type_promote=False)
@@ -319,6 +354,8 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
     assert dilation == 1, "TODO(jansel): support dilation"
     assert len(x.get_size()) in (3, 4)
 
+    x.realize()  # we will read this many times, so make sure it is computed
+
     x_loader = x.make_loader()
 
     *batch, c, h, w = x.get_size()
@@ -359,7 +396,15 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
         inner_fn=functools.partial(fn, return_index=True),
         ranges=new_size,
     )
+    # TODO(jansel): should we force these to be realized?
     return r1, r2
+
+
+@register_lowering(aten._adaptive_avg_pool2d)
+def _adaptive_avg_pool2d(x, output_size):
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 2
+    return TensorBox.create(ir.AdaptiveAvgPool2d.create(x, output_size))
 
 
 def make_reduction(reduction_type: str):
@@ -440,3 +485,10 @@ register_pointwise(aten.sigmoid)
 register_pointwise(aten.silu)
 relu = register_pointwise(aten.relu)
 exp = register_pointwise(aten.exp)
+
+register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)

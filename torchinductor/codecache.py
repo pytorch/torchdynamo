@@ -175,7 +175,8 @@ class TritonCodeCache:
     @classmethod
     def load(cls, source_code):
         patch_triton_dir()
-        patch_triton_hackery()
+        # this breaks cudagraphs, but speeds up small inputs:
+        # patch_triton_hackery()
         return PyCodeCache.load(source_code)
 
 

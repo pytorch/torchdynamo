@@ -39,8 +39,8 @@ class ModularIndexing(sympy.Function):
             and isinstance(modulus, sympy.Integer)
         ):
             return (base // divisor) % modulus
-        if isinstance(base, IndexingDiv):
-            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+        # if isinstance(base, IndexingDiv):
+        #     return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
 
 class IndexingDiv(sympy.Function):
@@ -59,6 +59,8 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
+        # if isinstance(base, IndexingDiv):
+        #     return IndexingDiv(base.args[0], base.args[1] * divisor)
         if sympy.gcd(base, divisor) == divisor:
             return base / divisor
 
@@ -909,6 +911,29 @@ class BatchMatrixMultiply(ExternKernelOut):
         return data
 
 
+class AdaptiveAvgPool2d(ExternKernelAlloc):
+    kernel = "aten._adaptive_avg_pool2d"
+
+    @classmethod
+    def create(cls, x, target_size):
+        x = cls.require_stride1(cls.realize_input(x))
+        output_size = [
+            *x.get_size()[: -len(target_size)],
+            *map(sympy.Integer, target_size),
+        ]
+        return cls(
+            FixedLayout(
+                x.get_device(),
+                x.get_dtype(),
+                output_size,
+                # TODO(jansel): fix channels last case
+                FlexibleLayout.contiguous_strides(output_size),
+            ),
+            (x,),
+            (tuple(target_size),),
+        )
+
+
 class Convolution(ExternKernelAlloc):
     kernel = "aten.convolution"
 
@@ -978,6 +1003,9 @@ class Convolution(ExternKernelAlloc):
                     stride[i],
                 )
                 + 2 * output_padding[i]
+            )
+            output_size[-1] = sympy.Integer(
+                graph.sizevars.guard_static_shape(output_size[-1])
             )
 
         return Convolution(

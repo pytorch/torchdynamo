@@ -240,3 +240,12 @@ def requires_static_shapes(fn):
         return fn(*args, **kwargs)
 
     return _fn
+
+
+def rand_strided(size, stride, dtype, device="cpu"):
+    needed_size = sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
+    if dtype.is_floating_point:
+        buffer = torch.randn(needed_size, dtype=dtype, device=device)
+    else:
+        buffer = torch.randint(0, 2, needed_size, dtype=dtype, device=device)
+    return torch.as_strided(buffer, size, stride)
