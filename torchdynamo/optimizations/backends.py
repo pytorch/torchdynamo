@@ -281,14 +281,15 @@ def taso(subgraph):
 @create_backend
 def ipex(subgraph, **kwargs):
     import intel_extension_for_pytorch as ipex
+
     inputs = subgraph.example_inputs
     model = subgraph.model
     with torch.no_grad():
         model.eval()
-        if kwargs["datatype"] == 'bf16':
-            model = ipex.optimize(model, dtype= torch.bfloat16)
+        if kwargs["datatype"] == "bf16":
+            model = ipex.optimize(model, dtype=torch.bfloat16)
         else:
-            model = ipex.optimize(model, dtype= torch.float32)
+            model = ipex.optimize(model, dtype=torch.float32)
         try:
             traced_model = torch.jit.trace(model, inputs).eval()
             traced_model = torch.jit.freeze(traced_model)
@@ -696,12 +697,12 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
 
 
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": 'fp32'}
+    kwargs_ipex = {"datatype": "fp32"}
     return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
 
 def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
-    kwargs_ipex = {"datatype": 'bf16'}
+    kwargs_ipex = {"datatype": "bf16"}
     return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
 
