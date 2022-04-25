@@ -1,5 +1,6 @@
 import dis
 import functools
+import inspect
 import itertools
 import os
 import sys
@@ -96,6 +97,28 @@ def wrap_convert_context(fn):
     return _fn
 
 
+def has_tensor_in_frame(frame):
+    # Check if the passed arguments are of type Tensor
+    for _, value in frame.f_locals.items():
+        if value is not None and isinstance(value, torch.Tensor):
+            return True
+
+    # Check if there is global import of torch.*
+    allowed_modules = ["torch"]
+    for _, value in frame.f_globals.items():
+        if inspect.ismodule(value) and value.__name__ in allowed_modules:
+            return True
+
+    if config.debug:
+        print(
+            "skipping",
+            frame.f_code.co_name,
+            frame.f_code.co_filename,
+            frame.f_code.co_firstlineno,
+        )
+    return False
+
+
 def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     """Fully convert a frame into an FX graph"""
     compiler_fn = wrap_compiler_fn(compiler_fn)
@@ -120,6 +143,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         if cache_size >= config.cache_size_limit:
             unimplemented("cache_size_limit reached")
         output = None
+
+        if not has_tensor_in_frame(frame):
+            return None
 
         # from .utils import print_once;  print_once(code.co_filename)
 
