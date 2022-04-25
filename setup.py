@@ -24,7 +24,7 @@ setup(
     author_email="jansel@fb.com",
     license="BSD-3",
     keywords="pytorch machine learning compilers",
-    python_requires=">=3.7, <3.10",
+    python_requires=">=3.7, <3.11",
     install_requires=["torch>=1.11.0", "numpy", "tabulate"],
     packages=find_packages(include=["torchdynamo", "torchdynamo.*"]),
     ext_modules=[

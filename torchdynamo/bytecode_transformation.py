@@ -59,7 +59,7 @@ def lnotab_writer(lineno, byteno=0):
     """
     Used to create typing.CodeType.co_lnotab
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    Note this format is changing in Python 3.10 and we will need to rewrite this
+    This is the internal format of the line number table if Python < 3.10
     """
     assert sys.version_info < (3, 10)
     lnotab = []
@@ -77,15 +77,57 @@ def lnotab_writer(lineno, byteno=0):
     return lnotab, update
 
 
+def linetable_writer(first_lineno):
+    """
+    Used to create typing.CodeType.co_linetable
+    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
+    This is the internal format of the line number table if Python >= 3.10
+    """
+    assert sys.version_info >= (3, 10)
+    linetable = []
+    lineno = first_lineno
+    lineno_delta = 0
+    byteno = 0
+
+    def _update(byteno_delta, lineno_delta):
+        while byteno_delta != 0 or lineno_delta != 0:
+            byte_offset = max(0, min(byteno_delta, 254))
+            line_offset = max(-127, min(lineno_delta, 127))
+            assert byte_offset != 0 or line_offset != 0
+            byteno_delta -= byte_offset
+            lineno_delta -= line_offset
+            linetable.extend((byte_offset, line_offset & 0xFF))
+
+    def update(lineno_new, byteno_new):
+        nonlocal lineno, lineno_delta, byteno
+        byteno_delta = byteno_new - byteno
+        byteno = byteno_new
+        _update(byteno_delta, lineno_delta)
+        lineno_delta = lineno_new - lineno
+        lineno = lineno_new
+
+    def end(total_bytes):
+        _update(total_bytes - byteno, lineno_delta)
+
+    return linetable, update, end
+
+
 def assemble(instructions: List[dis.Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
-    lnotab, update_lineno = lnotab_writer(firstlineno)
+    if sys.version_info < (3, 10):
+        lnotab, update_lineno = lnotab_writer(firstlineno)
+    else:
+        lnotab, update_lineno, end = linetable_writer(firstlineno)
+
     for inst in instructions:
         if inst.starts_line is not None:
             update_lineno(inst.starts_line, len(code))
         arg = inst.arg or 0
         code.extend((inst.opcode, arg & 0xFF))
+
+    if sys.version_info >= (3, 10):
+        end(len(code))
 
     return bytes(code), bytes(lnotab)
 
@@ -121,9 +163,17 @@ def devirtualize_jumps(instructions):
                     break
 
             if inst.opcode in dis.hasjabs:
-                inst.arg = target.offset
+                if sys.version_info < (3, 10):
+                    inst.arg = target.offset
+                else:
+                    # arg is offset of the instrunction line rather than the bytecode
+                    # for all jabs/jrel since python 3.10
+                    inst.arg = int(target.offset / 2)
             else:  # relative jump
-                inst.arg = target.offset - inst.offset - instruction_size(inst)
+                if sys.version_info < (3, 10):
+                    inst.arg = target.offset - inst.offset - instruction_size(inst)
+                else:
+                    inst.arg = int((target.offset - inst.offset - instruction_size(inst)) / 2)
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
@@ -270,12 +320,14 @@ def transform_code_object(code, transformations, safe=False):
         "co_filename",
         "co_name",
         "co_firstlineno",
-        "co_lnotab",
+        "co_lnotab",    # changed to "co_linetable" if python 3.10+
         "co_freevars",
         "co_cellvars",
-    ]
+        ]
     if sys.version_info < (3, 8):
         keys.pop(1)
+    if sys.version_info >= (3, 10):
+        keys = list(map(lambda x: x.replace("co_lnotab", "co_linetable"), keys))
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -293,8 +345,12 @@ def transform_code_object(code, transformations, safe=False):
         dirty = fix_extended_args(instructions)
 
     bytecode, lnotab = assemble(instructions, code.co_firstlineno)
+    if sys.version_info < (3, 10):
+        code_options["co_lnotab"] = lnotab
+    else:
+        code_options["co_linetable"] = lnotab
+
     code_options["co_code"] = bytecode
-    code_options["co_lnotab"] = lnotab
     code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
