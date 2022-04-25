@@ -2,6 +2,7 @@
 import collections
 import copy
 import dataclasses
+import dis
 import functools
 import math
 import sys
@@ -1129,3 +1130,23 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(*inps)
 
         self.assertTrue(same(ref, res))
+
+    def test_lnotab_and_linetable_writer(self):
+        def fn():
+            a = 10
+            b = 20
+            c = a + b
+            f = lnotab_and_linetable_writer
+            x = f"Test if {f} generates correct co_lnotab and co_linetable"
+            print(x)
+
+        from torchdynamo import bytecode_transformation
+
+        inst = dis.get_instructions(fn)
+
+        if sys.version_info < (3, 10):
+            result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
+            self.assertTrue(result[1] == fn.__code__.co_lnotab)
+        else:
+            result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
+            self.assertTrue(result[1] == fn.__code__.co_linetable)
