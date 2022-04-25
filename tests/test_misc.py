@@ -1137,7 +1137,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             b = 20
             c = a + b
             f = lnotab_and_linetable_writer
-            x = f"Test if {f} generates correct co_lnotab and co_linetable"
+            x = f"Test if {f} generates correct co_lnotab and co_linetable {c}"
             print(x)
 
         from torchdynamo import bytecode_transformation
