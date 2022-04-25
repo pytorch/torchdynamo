@@ -166,7 +166,7 @@ def devirtualize_jumps(instructions):
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset
                 else:
-                    # arg is offset of the instrunction line rather than the bytecode
+                    # arg is offset of the instruction line rather than the bytecode
                     # for all jabs/jrel since python 3.10
                     inst.arg = int(target.offset / 2)
             else:  # relative jump
