@@ -173,7 +173,9 @@ def devirtualize_jumps(instructions):
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset - inst.offset - instruction_size(inst)
                 else:
-                    inst.arg = int((target.offset - inst.offset - instruction_size(inst)) / 2)
+                    inst.arg = int(
+                        (target.offset - inst.offset - instruction_size(inst)) / 2
+                    )
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
@@ -320,10 +322,10 @@ def transform_code_object(code, transformations, safe=False):
         "co_filename",
         "co_name",
         "co_firstlineno",
-        "co_lnotab",    # changed to "co_linetable" if python 3.10+
+        "co_lnotab",  # changed to "co_linetable" if python 3.10+
         "co_freevars",
         "co_cellvars",
-        ]
+    ]
     if sys.version_info < (3, 8):
         keys.pop(1)
     if sys.version_info >= (3, 10):

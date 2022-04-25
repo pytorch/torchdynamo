@@ -1040,8 +1040,16 @@ class InstructionTranslatorBase(object):
         self.checkpoint = None
 
         if sys.version_info >= (3, 10):
-            from .resume_execution import CO_GENERATOR, CO_COROUTINE, CO_ITERABLE_COROUTINE, CO_ASYNC_GENERATOR
-            if f_code.co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR):
+            from .resume_execution import (
+                CO_GENERATOR,
+                CO_COROUTINE,
+                CO_ITERABLE_COROUTINE,
+                CO_ASYNC_GENERATOR,
+            )
+
+            if f_code.co_flags & (
+                CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+            ):
                 self.push(BuiltinVariable(None))
 
 
