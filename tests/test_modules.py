@@ -594,3 +594,28 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out3))
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_simple_torch_function(self):
+        def foo(x):
+            # function call, twice to test wrapping
+            x = F.sigmoid(x)
+            x = F.sigmoid(x)
+            # TODO(future PR): support method calls
+            # x = x.sigmoid()
+            return x
+
+        class TensorProxy(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs)
+
+        torchdynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+
+        x = torch.randn(1).as_subclass(TensorProxy)
+        cnt = torchdynamo.testing.CompileCounter()
+        out1 = foo(x)
+        with torchdynamo.optimize(cnt, nopython=True):
+            out2 = foo(x)
+
+        self.assertEqual(cnt.op_count, 2)
+        self.assertTrue(torchdynamo.testing.same(out1, out2))

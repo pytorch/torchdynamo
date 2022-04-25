@@ -305,3 +305,21 @@ class DynamicShapeVariable(TensorVariable):
                 for i in range(self.dyn_shape_len)
             ]
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
+
+
+class TensorWithTFOverrideVariable(VariableTracker):
+    """
+    Represents a tensor subclass instance with a __torch_function__ override.
+    """
+
+    def __init__(
+        self,
+        tensor_variable,
+        subclass_torch_function__func,
+        subclass_type,
+        **kwargs,
+    ):
+        super(TensorWithTFOverrideVariable, self).__init__(**kwargs)
+        self.tensor_variable = tensor_variable
+        self.subclass_torch_function__func = subclass_torch_function__func
+        self.subclass_type = subclass_type

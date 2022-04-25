@@ -17,6 +17,8 @@ from typing import Dict
 import torch
 from torch import fx
 
+from . import config
+
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
 
@@ -78,7 +80,9 @@ def istype(obj, allowed_types):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    return istype(obj, (torch.Tensor, torch.nn.Parameter))
+    return istype(
+        obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
+    )
 
 
 @functools.lru_cache(4096)
