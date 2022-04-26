@@ -84,10 +84,9 @@ class TensorVariable(VariableTracker):
                         assert nnmodule is not None
                         example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
                 except RuntimeError:
-                    # Call the pytorch operator leads to an assertion
+                    # Track the assertion when the pytorch execution raises
+                    # assertion
                     raise TorchRuntimeError
-                except Exception:
-                    raise
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = clone_tensor(example_value)
