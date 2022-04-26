@@ -6,6 +6,7 @@ from typing import List
 
 import torch.fx
 import torch.random
+from torch.fx.immutable_collections import immutable_list
 
 from .. import config
 from .. import variables
@@ -14,6 +15,7 @@ from ..utils import clone_tensor
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
+from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
 from .lists import SizeVariable
@@ -107,8 +109,12 @@ class TensorVariable(VariableTracker):
                         **options,
                     )
                 )
-            if istype(example_value, (tuple, list)):
+            if istype(example_value, tuple):
                 return variables.TupleVariable(unpacked, **options)
+            elif istype(example_value, (list, immutable_list)):
+                return variables.ListVariable(
+                    unpacked, mutable_local=MutableLocal(), **options
+                )
             else:
                 assert (
                     example_value.__class__.__module__ == "torch.return_types"
