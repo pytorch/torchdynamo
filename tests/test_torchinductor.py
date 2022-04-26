@@ -1,5 +1,4 @@
 #!/usr/bin/env pytest
-import builtins
 import contextlib
 import dataclasses
 import functools
@@ -8,7 +7,6 @@ import unittest
 from unittest.mock import patch
 
 import torch
-from torch import fx
 from torch.nn import functional as F
 
 import torchdynamo

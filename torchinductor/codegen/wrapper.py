@@ -12,7 +12,7 @@ pexpr = texpr
 
 class WrapperCodeGen(CodeGen):
     """
-    The outer wrapper that calls the kernels above.
+    The outer wrapper that calls the kernels.
     """
 
     def __init__(self):

@@ -1,14 +1,17 @@
+import contextlib
 import dis
 import functools
 import os.path
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch import fx
 
 import torchdynamo
 
+from . import config
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import is_generator
@@ -204,13 +207,16 @@ class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         torchdynamo.reset()
-        torchdynamo.config.debug = cls.prior_debug
+        cls._exit_stack.close()
 
     @classmethod
     def setUpClass(cls):
         torchdynamo.reset()
-        cls.prior_debug = torchdynamo.config.debug
-        torchdynamo.config.debug = True
+        cls._exit_stack = contextlib.ExitStack()
+        cls._exit_stack.enter_context(patch.object(config, "debug", True))
+        cls._exit_stack.enter_context(
+            patch.object(config, "raise_on_backend_error", True)
+        )
 
     def setUp(self):
         torchdynamo.utils.counters.clear()
