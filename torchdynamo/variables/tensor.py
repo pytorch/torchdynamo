@@ -323,3 +323,89 @@ class TensorWithTFOverrideVariable(VariableTracker):
         self.tensor_variable = tensor_variable
         self.subclass_torch_function__func = subclass_torch_function__func
         self.subclass_type = subclass_type
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This code block implements inlining the __torch_function__ override
+        # of `call_method`.
+        from . import GetAttrVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        # insert unwrapped version of self as the first argument
+        args = list(args)
+        args.insert(0, self.tensor_variable)
+        func_var = GetAttrVariable(self.tensor_variable, name)
+
+        unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+            tx,
+            func_var,
+            self.subclass_torch_function__func,
+            self.subclass_type,
+            options,
+            args,
+            kwargs,
+        )
+
+        # TODO(future PR): implement rewrapping conditional on method presence
+        # in `torch.overrides.get_default_nowrap_function()`. It's unclear how
+        # to do this easily in the current codebase since the resolution of
+        # `GetAttrVariable` depends on the type of the underlying object.
+
+        return TensorWithTFOverrideVariable(
+            unwrapped,
+            self.subclass_torch_function__func,
+            self.subclass_type,
+        )
+
+    @staticmethod
+    def inline_torch_function_unwrapped(
+        tx,
+        original_func_var,
+        tf_func,
+        subclass_type,
+        options,
+        args,
+        kwargs,
+    ):
+        """
+        This function inlines the `__torch_function__` override for `original_func_var`.
+        For example, if the user code is
+
+           x1 = torch.sigmoid(x0)
+
+        And `x0` has an override, then:
+        * `original_func_var` will be a `VariableTracker` object wrapping `torch.sigmoid`
+        * `tf_func` will be the custom `__torch_function__` function
+        * `subclass_type` will be `type(x0)`
+
+        The caller is expected to properly massage args and kwargs before
+        passing them into this function.
+
+        The caller is responsible for wrapping the return value, if needed.
+        """
+        from torchdynamo.variables import UserDefinedClassVariable
+        from torchdynamo.variables import UserFunctionVariable
+        from torchdynamo.variables.builder import TupleVariable
+
+        tf_func_var = UserFunctionVariable(tf_func, **options)
+        type_var = UserDefinedClassVariable(subclass_type, **options)
+
+        # signature:
+        # def __torch_function__(cls, func, types, args=(), kwargs=None):
+        tf_args = (
+            type_var,  # cls
+            original_func_var,  # func
+            (type_var,),  # types
+            TupleVariable(args),  # args
+            kwargs,  # kwargs
+        )
+
+        # Disable __torch_function__ here to prevent the clone of the
+        # example tensor from going into the override.
+        with torch._C.DisableTorchFunction():
+            return tx.inline_user_function_return(tf_func_var, tf_args, {})
