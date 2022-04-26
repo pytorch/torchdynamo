@@ -322,6 +322,8 @@ class OutputGraph(fx.Tracer):
             traceback.print_exc()
             sys.stderr.write("-" * 40 + "\n")
             compiled_fn = gm.forward
+            if config.raise_on_backend_error:
+                raise
         return compiled_fn
 
     def example_inputs(self):
