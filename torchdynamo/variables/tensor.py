@@ -1,6 +1,7 @@
 import copy
 import itertools
 import operator
+from contextlib import contextmanager
 from typing import Dict
 from typing import List
 
@@ -10,6 +11,7 @@ from torch.fx.immutable_collections import immutable_list
 
 from .. import config
 from .. import variables
+from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..utils import clone_tensor
 from ..utils import istype
@@ -19,6 +21,19 @@ from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
 from .lists import SizeVariable
+
+
+@contextmanager
+def preserve_rng_state():
+    rng = torch.clone(torch.random.get_rng_state())
+    if torch.cuda.is_available():
+        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    try:
+        yield
+    finally:
+        torch.random.set_rng_state(rng)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng)
 
 
 class TensorVariable(VariableTracker):
@@ -33,6 +48,8 @@ class TensorVariable(VariableTracker):
         "stride",
         "requires_grad",
         "is_quantized",
+        "is_contiguous",
+        "is_complex",
     ]
 
     @staticmethod
@@ -52,24 +69,26 @@ class TensorVariable(VariableTracker):
                 options.update(TensorVariable.specialize(example_value))
             return TensorVariable(proxy, **options)
 
-        if example_value is None:
-            rng = torch.clone(torch.random.get_rng_state())
-            if torch.cuda.is_available():
-                cuda_rng = torch.clone(torch.cuda.get_rng_state())
-            op = proxy.node.op
-            args, kwargs = cls.propagate_args_kwargs(proxy.node)
-            if op == "call_function":
-                example_value = proxy.node.target(*args, **kwargs)
-            elif op == "call_method":
-                example_value = getattr(args[0], proxy.node.target)(*args[1:], **kwargs)
-            elif op == "call_module":
-                assert nnmodule is not None
-                example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
-            else:
-                assert False, op
-            torch.random.set_rng_state(rng)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng)
+        with preserve_rng_state():
+            if example_value is None:
+                op = proxy.node.op
+                args, kwargs = cls.propagate_args_kwargs(proxy.node)
+                if op not in ["call_function", "call_method", "call_module"]:
+                    assert False, op
+                try:
+                    if op == "call_function":
+                        example_value = proxy.node.target(*args, **kwargs)
+                    elif op == "call_method":
+                        example_value = getattr(args[0], proxy.node.target)(
+                            *args[1:], **kwargs
+                        )
+                    elif op == "call_module":
+                        assert nnmodule is not None
+                        example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
+                except RuntimeError:
+                    # Track the assertion when the pytorch execution raises
+                    # assertion
+                    raise TorchRuntimeError
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = clone_tensor(example_value)
@@ -125,6 +144,12 @@ class TensorVariable(VariableTracker):
                 )
         elif example_value is None or proxy.node.target is torch.manual_seed:
             return variables.ConstantVariable(None, **options)
+        elif (
+            isinstance(example_value, int)
+            and proxy.node.target is torch._utils._element_size
+        ):
+            proxy.node.meta["example_value"] = example_value
+            return variables.ConstantVariable(example_value, **options)
         else:
             assert (
                 False
@@ -140,6 +165,8 @@ class TensorVariable(VariableTracker):
         stride=None,
         requires_grad=None,
         is_quantized=None,
+        is_contiguous=None,
+        is_complex=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -151,6 +178,8 @@ class TensorVariable(VariableTracker):
         self.stride = stride
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
+        self.is_contiguous = is_contiguous
+        self.is_complex = is_complex
 
     def as_proxy(self):
         return self.proxy
@@ -166,10 +195,12 @@ class TensorVariable(VariableTracker):
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
+            "is_complex": value.is_complex(),
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
             props["stride"] = tuple(value.stride())
+            props["is_contiguous"] = value.is_contiguous()
         return props
 
     def var_getattr(self, tx, name):
@@ -239,6 +270,10 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(self.ndim, **options)
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
+        elif name == "is_contiguous" and self.is_contiguous is not None:
+            constant_result = ConstantVariable(self.is_contiguous, **options)
+        elif name == "is_complex" and self.is_complex is not None:
+            constant_result = ConstantVariable(self.is_complex, **options)
         else:
             constant_result = None
 

@@ -36,6 +36,7 @@ from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
 from .exc import RestartAnalysis
+from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .output_graph import OutputGraph
@@ -277,7 +278,7 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (Unsupported, RestartAnalysis):
+        except (Unsupported, RestartAnalysis, TorchRuntimeError):
             raise
         except Exception as e:
             sys.stderr.write(
