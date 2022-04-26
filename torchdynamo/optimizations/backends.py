@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import warnings
 
 import numpy as np
 import torch
@@ -279,10 +280,27 @@ def taso(subgraph):
 
 
 @create_backend
-def ipex(subgraph):
-    import intel_extension_for_pytorch
+def ipex(subgraph, **kwargs):
+    import intel_extension_for_pytorch as ipex
 
-    return intel_extension_for_pytorch.optimize(subgraph.scripted)
+    inputs = subgraph.example_inputs
+    model = subgraph.model
+    with torch.no_grad():
+        model.eval()
+        if kwargs["datatype"] == "bf16":
+            model = ipex.optimize(model, dtype=torch.bfloat16)
+        else:
+            model = ipex.optimize(model, dtype=torch.float32)
+        try:
+            traced_model = torch.jit.trace(model, inputs).eval()
+            traced_model = torch.jit.freeze(traced_model)
+            # Warm up
+            for i in range(3):
+                traced_model(*inputs)
+            return traced_model
+        except Exception:
+            warnings.warn("JIT trace failed during the 'ipex' optimize process.")
+            return model
 
 
 def _raise_timeout(signum, frame):
@@ -678,6 +696,16 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
         return out
 
     return ltc_model
+
+
+def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
+    kwargs_ipex = {"datatype": "fp32"}
+    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+
+
+def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
+    kwargs_ipex = {"datatype": "bf16"}
+    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
