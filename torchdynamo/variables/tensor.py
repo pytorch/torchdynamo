@@ -118,16 +118,22 @@ class TensorVariable(VariableTracker):
         elif isinstance(example_value, (tuple, list)):
             unpacked = []
             for i, val in enumerate(example_value):
-                unpacked.append(
-                    TensorVariable.create(
-                        tx,
-                        proxy.tracer.create_proxy(
-                            "call_function", operator.getitem, (proxy, i), {}
-                        ),
-                        example_value=val,
-                        **options,
+                if val is None:
+                    # nn.MultiheadAttention() can return None, see issue #175
+                    unpacked.append(
+                        variables.ConstantVariable(None, **options),
                     )
-                )
+                else:
+                    unpacked.append(
+                        TensorVariable.create(
+                            tx,
+                            proxy.tracer.create_proxy(
+                                "call_function", operator.getitem, (proxy, i), {}
+                            ),
+                            example_value=val,
+                            **options,
+                        )
+                    )
             if istype(example_value, tuple):
                 return variables.TupleVariable(unpacked, **options)
             elif istype(example_value, (list, immutable_list)):
