@@ -1,5 +1,3 @@
-import torch
-
 from . import convert_frame
 from . import resume_execution
 from .eval_frame import disable
@@ -39,12 +37,3 @@ def list_backends():
     from .optimizations import BACKENDS
 
     return list(sorted(BACKENDS.keys()))
-
-
-# Monkey patching autograd.Variable name to fix FX codegen. FX generates a call by roughly doing
-# f"{fn.__module__}.{fn.__name__}(...). This yields torch.autograd.variable.Variable(...) in the
-# output of an FX graph.  Unfortunately the module name torch.autograd.variable is shadowed by this
-# deprecated function, causing the issue facebookresearch/torchdynamo#82.
-# A PyTorch PR is already in flight - https://github.com/pytorch/pytorch/pull/76079. We will remove
-# this when that PR is merged.
-torch.autograd.Variable.__module__ = "torch.autograd"
