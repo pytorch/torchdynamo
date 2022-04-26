@@ -1138,8 +1138,8 @@ class MiscTests(torchdynamo.testing.TestCase):
             a = 10
             b = 20
             c = a + b
-            f = linetable_writer
-            x = f"Test if {f} generates correct co_linetable: {c}"
+            f = "linetable_writer"
+            return f"Test if {f} generates correct co_linetable: {c}"
 
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
@@ -1151,8 +1151,8 @@ class MiscTests(torchdynamo.testing.TestCase):
             a = 10
             b = 20
             c = a + b
-            f = lnotab_writer
-            x = f"Test if {f} generates correct co_lnotab: {c}"
+            f = "lnotab_writer"
+            return f"Test if {f} generates correct co_lnotab: {c}"
 
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)

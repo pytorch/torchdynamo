@@ -3,9 +3,6 @@ flake8==4.0.1
 isort==5.10.1
 click==8.0.4
 ninja
-onnxruntime-gpu
-onnx-tf
 pytest
 tabulate
-tensorflow-gpu
 torch
