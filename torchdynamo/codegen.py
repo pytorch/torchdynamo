@@ -20,6 +20,7 @@ from .utils import rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+from .variables.tensor import TensorWithTFOverrideVariable
 
 
 @dataclasses.dataclass
@@ -90,7 +91,10 @@ class PyCodegen(object):
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
-        elif isinstance(value, TensorVariable):
+        elif isinstance(value, (TensorVariable, TensorWithTFOverrideVariable)):
+            if isinstance(value, TensorWithTFOverrideVariable):
+                # unwrap back to tensor
+                value = value.tensor_variable
             graph_outputs_key = id(value.proxy)
             if graph_outputs_key not in graph_outputs:
                 graph_outputs[graph_outputs_key] = GraphOutputEntry(

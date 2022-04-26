@@ -19,6 +19,7 @@ from .bytecode_transformation import transform_code_object
 from .eval_frame import skip_code
 from .exc import InternalTorchDynamoError
 from .exc import RestartAnalysis
+from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardedCode
@@ -177,7 +178,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
-        except Unsupported:
+        except (Unsupported, TorchRuntimeError):
             debug_print("WONT CONVERT")
             raise
         except Exception:
