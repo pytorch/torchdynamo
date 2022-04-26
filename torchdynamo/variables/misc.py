@@ -359,7 +359,11 @@ class SkipFilesVariable(VariableTracker):
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented("call torchdynamo.disable() wrapped function")
         else:
-            unimplemented("call_function in skip_files " + inspect.getfile(self.value))
+            try:
+                path = inspect.getfile(self.value)
+            except TypeError:
+                path = f"Builtin {self.value.__name__}"
+            unimplemented("call_function in skip_files " + path)
 
 
 class NumpyVariable(VariableTracker):
