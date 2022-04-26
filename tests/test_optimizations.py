@@ -22,8 +22,7 @@ def has_onnxruntime():
 
 def has_ipex():
     try:
-        import intel_extension_for_pytorch
-
+        importlib.import_module("intel_extension_for_pytorch")
         return True
     except ImportError:
         return False

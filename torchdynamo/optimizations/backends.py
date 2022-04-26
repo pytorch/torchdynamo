@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import warnings
 
 import numpy as np
 import torch
@@ -297,7 +298,8 @@ def ipex(subgraph, **kwargs):
             for i in range(3):
                 traced_model(*inputs)
             return traced_model
-        except:
+        except Exception:
+            warnings.warn("JIT trace failed during the 'ipex' optimize process.")
             return model
 
 
