@@ -2,6 +2,8 @@ debug = False
 
 dce = False
 
+forward_only = True
+
 
 class cpp:
     threads = -1  # set to cpu_count()

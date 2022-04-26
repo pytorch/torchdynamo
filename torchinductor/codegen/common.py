@@ -76,6 +76,10 @@ class OpOverrides:
     def reciprocal(x):
         return ops.div("1", x)
 
+    @staticmethod
+    def square(x):
+        return ops.mul(x, x)
+
 
 class IndentedBuffer:
     tabwidth = 4
@@ -84,6 +88,9 @@ class IndentedBuffer:
         self.contents = StringIO()
         self._indent = initial_indent
         self.getvalue = self.contents.getvalue
+
+    def __bool__(self):
+        return len(self.getvalue()) > 0
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
@@ -280,6 +287,9 @@ class Kernel(CodeGen):
                 store_cache = self.cse.store_cache
                 if (name, index) in store_cache:
                     return store_cache[(name, index)]
+                if (name, self.rename_indexing(index)) in store_cache:
+                    # TODO(jansel): figure out why we need this second case
+                    return store_cache[(name, self.rename_indexing(index))]
                 return self.load(name, index)
 
             @staticmethod

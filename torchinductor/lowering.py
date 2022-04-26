@@ -123,7 +123,7 @@ def make_pointwise(fn, override_dtype=None, override_device=None):
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         for other in inputs[1:]:
-            assert len(ranges) == len(
+            assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
@@ -267,6 +267,7 @@ def repeat(x, repeats):
     )
 
 
+@register_lowering(aten._unsafe_view)
 @register_lowering(aten.view)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
@@ -334,6 +335,11 @@ def mm(a: TensorBox, b: TensorBox):
 @register_lowering(aten.bmm)
 def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
+
+
+@register_lowering(aten._embedding_bag, type_promote=False)
+def _embedding_bag(*args, **kwargs):
+    return TensorBox.create(ir.EmbeddingBag.create(*args, **kwargs))
 
 
 @register_lowering(aten.convolution)
@@ -498,20 +504,28 @@ def _adaptive_avg_pool2d(x, output_size):
     return TensorBox.create(ir.AdaptiveAvgPool2d.create(x, output_size))
 
 
+def _validate_reduction_axis(x, axis):
+    size = x.get_size()
+    if isinstance(axis, int):
+        axis = [axis]
+    elif axis is None:
+        axis = range(len(size))
+    axis = list(axis)
+    for i in range(len(axis)):
+        if axis[i] < 0:
+            axis[i] += len(size)
+        assert 0 <= axis[i] < len(size)
+    assert len(set(axis)) == len(axis), "reduction axis not unique"
+    return axis
+
+
 def make_reduction(reduction_type: str):
-    def inner(x, axis=None, keepdims=False):
+    def inner(x, axis=None, keepdims=False, *, dtype=None):
+        if dtype is not None:
+            x = to_dtype(x, dtype)
+        assert reduction_type == "sum" or axis is None, "TODO: max with index"
         size = x.get_size()
-        if axis is None:
-            axis = range(len(size))
-        else:
-            assert reduction_type == "sum", "min/max need to find index"
-        axis = list(axis)
-        for i in range(len(axis)):
-            if axis[i] < 0:
-                axis[i] += len(size)
-            assert 0 <= axis[i] < len(size)
-        assert len(set(axis)) == len(axis), "reduction axis not unique"
-        axis = set(axis)
+        axis = set(_validate_reduction_axis(x, axis))
 
         kept_sizes = []
         kept_idx = []
@@ -561,20 +575,55 @@ def make_reduction(reduction_type: str):
     return inner
 
 
-sum = register_lowering(aten.sum)(make_reduction("sum"))
+@register_lowering(aten.mean)
+def mean(x, axis=None, keepdim=False, *, dtype=None):
+    if dtype is not None:
+        x = to_dtype(x, dtype)
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)
+    sum_result = sum_(x, axis, keepdim)
+    denom = product(size[i] for i in axis)
+    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ExpandView.create(denom, list(sum_result.get_size()))
+    return div(sum_result, denom)
+
+
+@register_lowering(aten.var)
+def var_(x, axis, correction=1, keepdim=False):
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)
+    diffs = square(sub(x, mean(x, axis, keepdim=True)))
+    sum_result = sum_(diffs, axis, keepdim)
+
+    denom = product(size[i] for i in axis)
+    if correction:
+        denom = denom - correction
+    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ExpandView.create(denom, list(sum_result.get_size()))
+    return div(sum_result, denom)
+
+
+@register_lowering(aten.std)
+def std(x, axis, correction=1, keepdim=False):
+    return sqrt(var_(x, axis, correction, keepdim=keepdim))
+
+
+sum_ = register_lowering(aten.sum)(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_pointwise(aten.abs)
 register_pointwise(aten.add)
-register_pointwise(aten.div)
+div = register_pointwise(aten.div)
 register_pointwise(aten.log)
+square = register_pointwise(aten.square)
+sqrt = register_pointwise(aten.sqrt)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
 register_pointwise(aten.mul)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.sigmoid)
 register_pointwise(aten.silu)
-register_pointwise(aten.sub)
+sub = register_pointwise(aten.sub)
 relu = register_pointwise(aten.relu)
 exp = register_pointwise(aten.exp)
 

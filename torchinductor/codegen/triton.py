@@ -59,12 +59,15 @@ class TritonOverrides(OpOverrides):
         return f"tl.exp({x})"
 
     @staticmethod
+    def sqrt(x):
+        return f"tl.sqrt({x})"
+
+    @staticmethod
     def log(x):
         return f"tl.log({x})"
 
     @staticmethod
     def relu(x):
-        # return f"tl.where({x} <= 0, 0, {x})"
         return ops.maximum("0", x)
 
     @staticmethod

@@ -12,6 +12,7 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
+from . import config
 from . import dependencies
 from .codegen.common import product
 from .dependencies import extract_read_writes
@@ -586,12 +587,7 @@ class SliceView(View):
         return SliceView(x, size=new_size, reindex=reindex)
 
 
-@dataclasses.dataclass
-class Constant(IRNode):
-    value: Any
-    dtype: torch.dtype
-    device: torch.device
-
+class BaseConstant(IRNode):
     def get_size(self):
         return ()
 
@@ -601,14 +597,34 @@ class Constant(IRNode):
     def get_device(self):
         return self.device
 
+    def mark_reuse(self, users):
+        pass
+
+
+@dataclasses.dataclass
+class Constant(BaseConstant):
+    value: Any
+    dtype: torch.dtype
+    device: torch.device
+
     def make_loader(self):
         def loader(index):
             return ops.constant(self.value, self.dtype)
 
         return loader
 
-    def mark_reuse(self, users):
-        pass
+
+@dataclasses.dataclass
+class IndexingConstant(BaseConstant):
+    index: Any
+    dtype: torch.dtype
+    device: torch.device
+
+    def make_loader(self):
+        def loader(index):
+            return ops.index_expr(self.index, self.dtype)
+
+        return loader
 
 
 @dataclasses.dataclass
@@ -935,6 +951,45 @@ class AdaptiveAvgPool2d(ExternKernelAlloc):
             ),
             (x,),
             (tuple(target_size),),
+        )
+
+
+class EmbeddingBag(ExternKernelAlloc):
+    kernel = (
+        "aten._embedding_bag_forward_only"
+        if config.forward_only
+        else "aten._embedding_bag"
+    )
+
+    @classmethod
+    def create(
+        cls,
+        weight,
+        indices,
+        offsets,
+        scale_grad_by_freq=False,
+        mode=0,
+        sparse=False,
+        per_sample_weights=None,
+        include_last_offset=False,
+    ):
+        weight = cls.realize_input(weight)
+        indices = cls.require_stride1(cls.realize_input(indices))
+        offsets = cls.require_stride1(cls.realize_input(offsets))
+        assert per_sample_weights is None
+        assert include_last_offset is False
+
+        output_size = list(offsets.get_size()) + weight.get_size()[1:]
+
+        return cls(
+            FixedLayout(
+                weight.get_device(),
+                weight.get_dtype(),
+                output_size,
+                FlexibleLayout.contiguous_strides(output_size),
+            ),
+            (weight, indices, offsets),
+            (scale_grad_by_freq, mode),
         )
 
 

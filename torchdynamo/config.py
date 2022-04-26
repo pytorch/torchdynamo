@@ -40,3 +40,5 @@ dynamic_propagation = True
 
 # run FX normalization passes in optimizer
 normalize_ir = True
+
+raise_on_backend_error = True

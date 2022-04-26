@@ -110,6 +110,10 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def sqrt(x):
+        return f"std::sqrt({x})"
+
+    @staticmethod
     def log(x):
         return f"std::log({x})"
 
@@ -249,21 +253,24 @@ class CppKernel(Kernel):
 
             loops.codegen(code, stack)
 
-            code.splice(self.reduction_prefix)
+            with contextlib.ExitStack() as stack_outer:
+                if self.reduction_prefix:
+                    stack_outer.enter_context(code.indent())
+                code.splice(self.reduction_prefix)
 
-            if reduction_par_depth:
-                worksharing.parallel(threads)
+                if reduction_par_depth:
+                    worksharing.parallel(threads)
 
-            with contextlib.ExitStack() as stack:
-                reductions.codegen(code, stack)
-                code.splice(self.loads)
-                code.splice(self.compute)
-                code.splice(self.stores)
+                with contextlib.ExitStack() as stack:
+                    reductions.codegen(code, stack)
+                    code.splice(self.loads)
+                    code.splice(self.compute)
+                    code.splice(self.stores)
 
-            if reduction_par_depth:
-                worksharing.close()
+                if reduction_par_depth:
+                    worksharing.close()
 
-            code.splice(self.reduction_suffix)
+                code.splice(self.reduction_suffix)
 
     def decide_parallel_depth(self, ranges, threads):
         if threads == 1:

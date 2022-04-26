@@ -2,6 +2,7 @@
 import builtins
 import contextlib
 import dataclasses
+import functools
 import importlib
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,7 @@ import torch
 from torch import fx
 from torch.nn import functional as F
 
+import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 from torchinductor import config
@@ -76,13 +78,15 @@ class InputGen:
 
 
 def check_model(self: TestCase, model, example_inputs):
-    if isinstance(model, torch.fx.Graph):
-        model = torch.fx.GraphModule({}, model)
-    elif not isinstance(model, torch.fx.GraphModule):
-        model = fx.symbolic_trace(model)
-    compiled_fn = compile_fx(model, example_inputs, cudagraphs=False)
-    actual = compiled_fn(*example_inputs)
     correct = model(*example_inputs)
+
+    @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
+    def run(*ex):
+        return model(*ex)
+
+    torchdynamo.reset()
+    with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
+        actual = run(*example_inputs)
     self.assertTrue(same(actual, correct))
 
 
@@ -241,22 +245,13 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     def test_arange(self):
-        # fx can't capture arange
-        g = fx.Graph()
-        x = g.placeholder("x")
-        device = g.call_function(builtins.getattr, (x, "device"))
-        rng1 = g.call_function(
-            torch.arange,
-            (8 * 8,),
-            {"dtype": torch.float32, "device": device},
-        )
-        rng1 = g.call_method("view", (rng1, 8, 8))
-        rng2 = g.call_function(torch.arange, (10, 18), {"device": device})
-        r1 = g.call_function(torch.mul, (x, rng1))
-        r2 = g.call_function(torch.add, (r1, rng2))
-        g.output((r1, r2))
+        def fn(x):
+            rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
+            rng2 = torch.arange(10, 18, device=x.device)
+            tmp = x * rng1
+            return tmp, tmp + rng2
 
-        self.common(g, (torch.randn(8, 8),))
+        self.common(fn, (torch.randn(8, 8),))
 
     def test_views1(self):
         def fn1(x, y):
@@ -600,6 +595,48 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randint(10, [2, 8]),),
+        )
+
+    def test_mean(self):
+        def fn(x):
+            return (
+                x.mean(),
+                x.mean(-1),
+                torch.mean(x, -2, keepdim=True),
+                x.mean([0, 1]),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
+        )
+
+    def test_std(self):
+        def fn(x):
+            return (
+                torch.var(x, True),
+                torch.var(x, False),
+                torch.var(x, -1, True),
+                torch.var(x, -1, False),
+                torch.std(x, False),
+                torch.std(x, [0, 1], True),
+                torch.std(x, [0, 1], False),
+                torch.std(x, -2, True, keepdim=True),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([2, 4, 4, 8]),),
+        )
+
+    @unittest.skip("todo")
+    def test_embedding_bag(self):
+        def fn(w, i, o):
+            return aten._embedding_bag(w, i, o, False, 0, False, None)
+
+        self.common(
+            fn,
+            (torch.randn([10, 4]), torch.randint(10, [8]), torch.tensor([0, 2, 6])),
         )
 
 
