@@ -173,6 +173,7 @@ class TensorVariable(VariableTracker):
         is_quantized=None,
         is_contiguous=None,
         is_complex=None,
+        class_type=torch.Tensor,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -186,12 +187,13 @@ class TensorVariable(VariableTracker):
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
         self.is_complex = is_complex
+        self.class_type = class_type
 
     def as_proxy(self):
         return self.proxy
 
     def python_type(self):
-        return torch.Tensor
+        return self.class_type
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -202,6 +204,7 @@ class TensorVariable(VariableTracker):
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
             "is_complex": value.is_complex(),
+            "class_type": type(value),
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
@@ -269,7 +272,8 @@ class TensorVariable(VariableTracker):
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
-            constant_result = ConstantVariable(self.size, **options)
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            constant_result = SizeVariable(sizes, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
