@@ -938,6 +938,46 @@ class InstructionTranslatorBase(object):
     def GEN_START(self, inst):
         self.pop()
 
+    def GET_LEN(self, inst):
+        tos = self.stack[-1]
+        if tos.is_python_constant():
+            self.push(ConstantVariable(len(tos.as_python_constant())))
+        else:
+            self.push(tos.call_method(self, "__len__", [], {}))
+
+    def MATCH_MAPPING(self, inst):
+        tos = self.stack[-1]
+        assert isinstance(tos, ConstDictVariable)
+        if isinstance(tos.items, collections.abc.Mapping):
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(False))
+
+    def MATCH_SEQUENCE(self, inst):
+        tos = self.stack[-1]
+        assert tos.is_python_constant()
+        tos_value = tos.as_python_constant()
+        if isinstance(tos_value, collections.abc.Sequence) and not isinstance(
+            tos_value, (str, bytes, bytearray)
+        ):
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(False))
+
+    def MATCH_KEYS(self, inst):
+        tos = self.stack[-1]
+        assert tos.is_python_constant()
+        keys = tos.as_python_constant()
+        tos1 = self.stack[-2]
+        assert isinstance(tos1, ConstDictVariable)
+        match_obj = tos1.items
+        if all(key in match_obj for key in keys):
+            self.push(TupleVariable(list(match_obj[key] for key in keys)))
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(None))
+            self.push(ConstantVariable(False))
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)

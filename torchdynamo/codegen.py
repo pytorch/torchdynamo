@@ -251,6 +251,8 @@ class PyCodegen(object):
             return [create_instruction("ROT_THREE")]
         elif n == 4 and sys.version_info >= (3, 8):
             return [create_instruction("ROT_FOUR")]
+        elif sys.version_info >= (3, 10):
+            return [create_instruction("ROT_N", n)]
         else:
             return [
                 create_instruction("BUILD_TUPLE", n),
