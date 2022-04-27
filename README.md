@@ -30,9 +30,7 @@ bugs and rough edges.
 ## Requirements and Setup
 
 Python 3.8 is recommended.
-Python 3.7 through 3.9 are supported and tested.
-[Python 3.10 support](https://github.com/facebookresearch/torchdynamo/issues/34)
-is coming soon.
+Python 3.7 through 3.10 are supported and tested.
 
 *PyTorch*'s main branch contains some fixes that improve TorchDynamo
 support, so we recommend building [PyTorch from source] or using PyTorch

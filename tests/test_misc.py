@@ -2,6 +2,7 @@
 import collections
 import copy
 import dataclasses
+import dis
 import functools
 import math
 import sys
@@ -12,6 +13,7 @@ import numpy as np
 import torch
 
 import torchdynamo.testing
+from torchdynamo import bytecode_transformation
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
@@ -1129,3 +1131,29 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(*inps)
 
         self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(sys.version_info < (3, 10), "use linetable when python >= 3.10")
+    def test_linetable_writer(self):
+        def fn():
+            a = 10
+            b = 20
+            c = a + b
+            f = "linetable_writer"
+            return f"Test if {f} generates correct co_linetable: {c}"
+
+        inst = dis.get_instructions(fn)
+        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
+        self.assertTrue(result[1] == fn.__code__.co_linetable)
+
+    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
+    def test_lnotab_writer(self):
+        def fn():
+            a = 10
+            b = 20
+            c = a + b
+            f = "lnotab_writer"
+            return f"Test if {f} generates correct co_lnotab: {c}"
+
+        inst = dis.get_instructions(fn)
+        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
+        self.assertTrue(result[1] == fn.__code__.co_lnotab)
