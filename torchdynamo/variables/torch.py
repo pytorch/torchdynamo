@@ -15,9 +15,7 @@ from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
-from .functions import UserFunctionVariable
 from .tensor import TensorWithTFOverrideVariable
-from .user_defined import UserDefinedClassVariable
 
 
 class TorchVariable(VariableTracker):
@@ -86,7 +84,6 @@ class TorchVariable(VariableTracker):
         from . import ConstantVariable
         from . import GradModeVariable
         from . import TensorVariable
-        from .builder import TupleVariable
 
         constant_args = check_constant_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -161,31 +158,15 @@ class TorchVariable(VariableTracker):
             # instead of assuming the relevant override is in the first argument.
             args[0] = args[0].tensor_variable
 
-            # Note: the __func__ attribute call is to ensure the function
-            # does not have `self`
-            # Note: currently this does not guard for the source code of the
-            # override.
-            func_var = UserFunctionVariable(
-                tensor_with_tf_override.subclass_torch_function__func, **options
-            )
-            type_var = UserDefinedClassVariable(
+            unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+                tx,
+                self,
+                tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
-                **options,
+                options,
+                args,
+                kwargs,
             )
-
-            # signature:
-            # def __torch_function__(cls, func, types, args=(), kwargs=None):
-            tf_args = (
-                type_var,  # cls
-                self,  # func
-                (type_var,),  # types
-                TupleVariable(args),  # args
-                kwargs,  # kwargs
-            )
-            # Disable __torch_function__ here to prevent the clone of the
-            # example tensor from going into the override.
-            with torch._C.DisableTorchFunction():
-                unwrapped = tx.inline_user_function_return(func_var, tf_args, {})
 
             # The wrapping here follows the logic in
             # `torch.Tensor.__torch_function__`.
