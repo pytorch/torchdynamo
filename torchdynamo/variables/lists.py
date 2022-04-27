@@ -232,7 +232,21 @@ class TupleVariable(BaseListVariable):
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
-    pass
+    def python_type(self):
+        return torch.Size
+
+    def reconstruct(self, codegen):
+        load_torch_size = [
+            create_instruction("LOAD_GLOBAL", "torch"),
+            create_instruction("LOAD_METHOD", "Size"),
+        ]
+        codegen.extend_output(load_torch_size)
+        codegen.foreach(self.items)
+        build_torch_size = [
+            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("CALL_METHOD", 1),
+        ]
+        return build_torch_size
 
 
 class NamedTupleVariable(TupleVariable):

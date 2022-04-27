@@ -957,6 +957,53 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    def test_nn_parameter(self):
+        def test_fn():
+            a = torch.nn.Parameter(torch.randn(5, 5))
+            # Checks that TensorVariable stores the type information correctly
+            self.assertTrue(isinstance(a, torch.nn.Parameter))
+            return a
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            test_fn()
+
+    def test_Size(self):
+        def test_fn():
+            a = torch.randn(4)
+            x = torch.Size([1, 2, 3])
+            # Checks that SizeVariable return torch.Size object
+            assert isinstance(x, torch.Size)
+            # Causes graph breaks and checks reconstruction of SizeVariable
+            # object
+            self.assertIsInstance(x, torch.Size)
+            return a
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            test_fn()
+
+    def test_indexing_with_list(self):
+        def test_fn():
+            def run_test(tensor, *idx):
+                npt = tensor.numpy()
+                assert npt[idx].shape == tensor[idx].shape
+
+            x = torch.arange(0, 10)
+            cases = [
+                [None, None],
+                [1, None],
+            ]
+
+            for case in cases:
+                run_test(x, *case)
+
+            return torch.randn(4)
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            test_fn()
+
     def test_reformer_min_chunk_len(self):
         def test_fn(cfg):
             t = torch.empty(10)

@@ -600,8 +600,9 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             # function call, twice to test wrapping
             x = F.sigmoid(x)
             x = F.sigmoid(x)
-            # TODO(future PR): support method calls
-            # x = x.sigmoid()
+            # method call, twice to test wrapping
+            x = x.sigmoid()
+            x = x.sigmoid()
             return x
 
         class TensorProxy(torch.Tensor):
@@ -617,5 +618,5 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnt, nopython=True):
             out2 = foo(x)
 
-        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(cnt.op_count, 4)
         self.assertTrue(torchdynamo.testing.same(out1, out2))

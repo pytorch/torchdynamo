@@ -173,6 +173,7 @@ class TensorVariable(VariableTracker):
         is_quantized=None,
         is_contiguous=None,
         is_complex=None,
+        class_type=torch.Tensor,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -186,12 +187,13 @@ class TensorVariable(VariableTracker):
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
         self.is_complex = is_complex
+        self.class_type = class_type
 
     def as_proxy(self):
         return self.proxy
 
     def python_type(self):
-        return torch.Tensor
+        return self.class_type
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -202,6 +204,7 @@ class TensorVariable(VariableTracker):
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
             "is_complex": value.is_complex(),
+            "class_type": type(value),
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
@@ -269,7 +272,8 @@ class TensorVariable(VariableTracker):
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
-            constant_result = ConstantVariable(self.size, **options)
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            constant_result = SizeVariable(sizes, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
@@ -370,3 +374,89 @@ class TensorWithTFOverrideVariable(VariableTracker):
         self.tensor_variable = tensor_variable
         self.subclass_torch_function__func = subclass_torch_function__func
         self.subclass_type = subclass_type
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This code block implements inlining the __torch_function__ override
+        # of `call_method`.
+        from . import GetAttrVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        # insert unwrapped version of self as the first argument
+        args = list(args)
+        args.insert(0, self.tensor_variable)
+        func_var = GetAttrVariable(self.tensor_variable, name)
+
+        unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+            tx,
+            func_var,
+            self.subclass_torch_function__func,
+            self.subclass_type,
+            options,
+            args,
+            kwargs,
+        )
+
+        # TODO(future PR): implement rewrapping conditional on method presence
+        # in `torch.overrides.get_default_nowrap_function()`. It's unclear how
+        # to do this easily in the current codebase since the resolution of
+        # `GetAttrVariable` depends on the type of the underlying object.
+
+        return TensorWithTFOverrideVariable(
+            unwrapped,
+            self.subclass_torch_function__func,
+            self.subclass_type,
+        )
+
+    @staticmethod
+    def inline_torch_function_unwrapped(
+        tx,
+        original_func_var,
+        tf_func,
+        subclass_type,
+        options,
+        args,
+        kwargs,
+    ):
+        """
+        This function inlines the `__torch_function__` override for `original_func_var`.
+        For example, if the user code is
+
+           x1 = torch.sigmoid(x0)
+
+        And `x0` has an override, then:
+        * `original_func_var` will be a `VariableTracker` object wrapping `torch.sigmoid`
+        * `tf_func` will be the custom `__torch_function__` function
+        * `subclass_type` will be `type(x0)`
+
+        The caller is expected to properly massage args and kwargs before
+        passing them into this function.
+
+        The caller is responsible for wrapping the return value, if needed.
+        """
+        from torchdynamo.variables import UserDefinedClassVariable
+        from torchdynamo.variables import UserFunctionVariable
+        from torchdynamo.variables.builder import TupleVariable
+
+        tf_func_var = UserFunctionVariable(tf_func, **options)
+        type_var = UserDefinedClassVariable(subclass_type, **options)
+
+        # signature:
+        # def __torch_function__(cls, func, types, args=(), kwargs=None):
+        tf_args = (
+            type_var,  # cls
+            original_func_var,  # func
+            (type_var,),  # types
+            TupleVariable(args),  # args
+            kwargs,  # kwargs
+        )
+
+        # Disable __torch_function__ here to prevent the clone of the
+        # example tensor from going into the override.
+        with torch._C.DisableTorchFunction():
+            return tx.inline_user_function_return(tf_func_var, tf_args, {})
