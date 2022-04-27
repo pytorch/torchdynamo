@@ -116,7 +116,9 @@ class VariableBuilder:
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list)) or is_namedtuple(value):
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+            # One can index a tensor with a list/tuple. Therefore, we need to
+            # have a stricter match.
+            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             output = [
                 VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
                     item
