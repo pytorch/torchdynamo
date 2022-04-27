@@ -6,6 +6,7 @@ import sympy
 import torch
 import torch.fx
 
+from . import config
 from . import ir
 from .codegen.common import product
 from .ir import ExpandView
@@ -338,8 +339,35 @@ def bmm(a: TensorBox, b: TensorBox):
 
 
 @register_lowering(aten._embedding_bag, type_promote=False)
-def _embedding_bag(*args, **kwargs):
-    return TensorBox.create(ir.EmbeddingBag.create(*args, **kwargs))
+def _embedding_bag(
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq=False,
+    mode=0,
+    sparse=False,
+    per_sample_weights=None,
+    include_last_offset=False,
+):
+    kernel = (
+        aten._embedding_bag_forward_only if config.forward_only else aten._embedding_bag
+    )
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(
+                kernel,
+                weight,
+                indices,
+                offsets,
+                scale_grad_by_freq,
+                mode,
+                False,  # TODO(jansel): support sparse
+                per_sample_weights,
+                include_last_offset,
+            ),
+        )
+    )
 
 
 @register_lowering(aten.convolution)

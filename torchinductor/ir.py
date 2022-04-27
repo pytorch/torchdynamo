@@ -12,7 +12,6 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
-from . import config
 from . import dependencies
 from .codegen.common import product
 from .dependencies import extract_read_writes
@@ -818,6 +817,16 @@ class ExternKernel(Buffer):
                 return x
         return cls.copy_input(x)
 
+    @classmethod
+    def require_contiguous(cls, x):
+        if is_contiguous_storage_and_layout(x):
+            as_storage_and_layout(x, freeze=True)
+            return x
+        x = cls.copy_input(x)
+        assert is_contiguous_storage_and_layout(x)
+        as_storage_and_layout(x, freeze=True)
+        return x
+
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
         args.extend(map(repr, self.constant_args))
@@ -856,7 +865,8 @@ class ExternKernelAlloc(ExternKernel):
         wrapper.body.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
-        self.codegen_size_asserts(wrapper)
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, inputs, constant_args=()):
         super().__init__(None, layout, inputs, constant_args)
@@ -954,43 +964,101 @@ class AdaptiveAvgPool2d(ExternKernelAlloc):
         )
 
 
-class EmbeddingBag(ExternKernelAlloc):
-    kernel = (
-        "aten._embedding_bag_forward_only"
-        if config.forward_only
-        else "aten._embedding_bag"
-    )
+@dataclasses.dataclass
+class FallbackKernel(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+    ):
+        super(FallbackKernel, self).__init__(
+            layout,
+            tuple(tensor_args),
+            tuple(nontensor_args),
+        )
+        assert getattr(torch.ops.aten, kernel.__name__) is kernel
+        self.kernel = f"aten.{kernel.__name__}"
 
     @classmethod
-    def create(
-        cls,
-        weight,
-        indices,
-        offsets,
-        scale_grad_by_freq=False,
-        mode=0,
-        sparse=False,
-        per_sample_weights=None,
-        include_last_offset=False,
-    ):
-        weight = cls.realize_input(weight)
-        indices = cls.require_stride1(cls.realize_input(indices))
-        offsets = cls.require_stride1(cls.realize_input(offsets))
-        assert per_sample_weights is None
-        assert include_last_offset is False
+    def create(cls, kernel, *args):
+        args = list(reversed(args))
+        tensor_args = []
+        while args and isinstance(args[-1], IRNode):
+            tensor_args.append(args.pop())
+        nontensor_args = list(reversed(args))
+        assert all(not isinstance(x, IRNode) for x in nontensor_args)
 
-        output_size = list(offsets.get_size()) + weight.get_size()[1:]
+        tensor_args = [
+            cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
+        ]
 
-        return cls(
-            FixedLayout(
-                weight.get_device(),
-                weight.get_dtype(),
-                output_size,
-                FlexibleLayout.contiguous_strides(output_size),
-            ),
-            (weight, indices, offsets),
-            (scale_grad_by_freq, mode),
+        # We don't have generic shape formulas, so just burn in the
+        # shapes and run an example input.
+        # TODO(jansel): replace this with dynamic shape formulas
+        example_args = [
+            torch.zeros(
+                [graph.sizevars.guard_static_shape(s) for s in x.get_size()],
+                dtype=x.get_dtype(),
+                device=x.get_device(),
+            )
+            for x in tensor_args
+        ]
+        example_output = kernel(*example_args, *nontensor_args)
+
+        if isinstance(example_output, (list, tuple)):
+            packed = FallbackKernel(
+                MultiOutputLayout(),
+                kernel,
+                tensor_args,
+                nontensor_args,
+            )
+            return [
+                MultiOutput(
+                    FixedLayout(
+                        example_output[i].device,
+                        example_output[i].dtype,
+                        [sympy.Integer(s) for s in example_output[i].size()],
+                        [sympy.Integer(s) for s in example_output[i].stride()],
+                    ),
+                    packed,
+                    i,
+                )
+                for i in range(len(example_output))
+            ]
+        else:
+            return FallbackKernel(
+                FixedLayout(
+                    example_output.device,
+                    example_output.dtype,
+                    [sympy.Integer(s) for s in example_output.size()],
+                    [sympy.Integer(s) for s in example_output.stride()],
+                ),
+                kernel,
+                tensor_args,
+                nontensor_args,
+            )
+
+
+class MultiOutputLayout(IRNode):
+    pass
+
+
+class MultiOutput(ExternKernel):
+    def codegen(self, wrapper):
+        wrapper.body.writeline(
+            f"{self.get_name()} = {self.inputs[0].get_name()}[{self.index}]"
         )
+        self.codegen_size_asserts(wrapper)
+
+    def __init__(self, layout, input, index):
+        super().__init__(None, layout, [input], ())
+        self.name = graph.register_buffer(self)
+        self.index = index
+
+    def should_allocate(self):
+        return False
 
 
 class Convolution(ExternKernelAlloc):

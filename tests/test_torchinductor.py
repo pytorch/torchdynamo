@@ -627,7 +627,6 @@ class CommonTemplate:
             (torch.randn([2, 4, 4, 8]),),
         )
 
-    @unittest.skip("todo")
     def test_embedding_bag(self):
         def fn(w, i, o):
             return aten._embedding_bag(w, i, o, False, 0, False, None)
