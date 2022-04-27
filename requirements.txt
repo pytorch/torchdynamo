@@ -2,6 +2,7 @@ black==22.1.0
 flake8==4.0.1
 isort==5.10.1
 click==8.0.4
+numpy==1.21.2
 ninja
 pytest
 tabulate
