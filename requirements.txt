@@ -7,4 +7,3 @@ ninja
 pytest
 tabulate
 torch
-Cython
