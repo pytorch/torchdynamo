@@ -44,7 +44,7 @@ def debug_node(n: Node):
     return f"{n.op} {target} {n.args} {n.kwargs}"
 
 
-def python_key_normalize(gm: torch.fx.GraphModule, example_inputs):
+def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decompositions={}):
     """
     Use AOT autograd for normalizing IR in inference mode.  This is useful
     for debugging and gives us a common IR for both eval and train modes.
@@ -115,7 +115,7 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs):
         assert isinstance(out, (tuple, list)), "graph must output tuple()"
         return tuple(x.proxy for x in out)
 
-    with pythonkey_decompose(aot_autograd_decompositions):
+    with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
         tracer: torch.fx.Tracer = PythonKeyTracer()
         graph = tracer.trace(fake_signature(fn_for_tracing, nargs))
         traced = GraphModule(tracer.root, graph, "python_key_traced")

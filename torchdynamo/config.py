@@ -40,3 +40,10 @@ dynamic_propagation = True
 
 # run FX normalization passes in optimizer
 normalize_ir = True
+
+# If a tensor subclass type is in this set, torchdynamo will inline the
+# __torch_function__ logic of the subclass.
+traceable_tensor_subclasses = set()
+
+# Propagate backend exceptions up to torchdynamo.optimize
+raise_on_backend_error = False

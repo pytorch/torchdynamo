@@ -507,3 +507,48 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_is_quantized(a, b):
         if not a.is_quantized:
             return a + b
+
+    @make_test
+    def test_fstrings1(a, b):
+        x = 1.229
+        tmp = f"{x:.2f} bar"
+        if tmp.startswith("1.23"):
+            return a + b
+
+    @requires_static_shapes
+    @make_test
+    def test_fstrings2(x):
+        tmp = f"{x.shape[0]} bar"
+        if tmp.startswith("10"):
+            return x + 1
+
+    @make_test
+    def test_fstrings3(x):
+        tmp = f"{x.__class__.__name__} foo"
+        if tmp.startswith("Tensor"):
+            return x + 1
+
+    # # This is to test the new syntax for pattern matching
+    # # ("match ... case ...") added on python 3.10.
+    # # Uncomment these test cases if you run on 3.10+
+    # @make_test
+    # def test_match_sequence(a):
+    #     point = (5, 8)
+    #     match point:
+    #         case (0, 0):
+    #             return a
+    #         case (0, y):
+    #             return a - y
+    #         case (x, 0):
+    #             return a + x
+    #         case (x, y):
+    #             return a + x - y
+
+    # @make_test
+    # def test_match_mapping_and_match_keys(x):
+    #     param = {"a": 0.5}
+    #     match param:
+    #         case {"a": param}:
+    #             return x * param
+    #         case {"b": param}:
+    #             return x / param

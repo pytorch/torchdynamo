@@ -13,10 +13,14 @@ import logging
 import multiprocessing
 import operator
 import os
+import posixpath
 import random
 import re
 import selectors
+import signal
+import tempfile
 import threading
+import tokenize
 import traceback
 import types
 import typing
@@ -58,10 +62,14 @@ SKIP_DIRS = [
         multiprocessing,
         operator,
         os,
+        posixpath,
         random,
         re,
         selectors,
+        signal,
+        tempfile,
         threading,
+        tokenize,
         traceback,
         types,
         typing,

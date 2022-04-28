@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import warnings
 
 import numpy as np
 import torch
@@ -279,10 +280,27 @@ def taso(subgraph):
 
 
 @create_backend
-def ipex(subgraph):
-    import intel_extension_for_pytorch
+def ipex(subgraph, **kwargs):
+    import intel_extension_for_pytorch as ipex
 
-    return intel_extension_for_pytorch._optimize_catch_errors(subgraph.scripted)
+    inputs = subgraph.example_inputs
+    model = subgraph.model
+    with torch.no_grad():
+        model.eval()
+        if kwargs["datatype"] == "bf16":
+            model = ipex.optimize(model, dtype=torch.bfloat16)
+        else:
+            model = ipex.optimize(model, dtype=torch.float32)
+        try:
+            traced_model = torch.jit.trace(model, inputs).eval()
+            traced_model = torch.jit.freeze(traced_model)
+            # Warm up
+            for i in range(3):
+                traced_model(*inputs)
+            return traced_model
+        except Exception:
+            warnings.warn("JIT trace failed during the 'ipex' optimize process.")
+            return model
 
 
 def _raise_timeout(signum, frame):
@@ -301,6 +319,7 @@ def fx2trt(subgraph, **kwargs):
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitter
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
     from fx2trt_oss.fx.trt_module import TRTModule
+    from fx2trt_oss.fx.utils import LowerPrecision
 
     try:
         model = subgraph.model
@@ -314,6 +333,11 @@ def fx2trt(subgraph, **kwargs):
         split_mod = splitter()
         for name, _ in split_mod.named_children():
             print(f"graph is split into {name}")
+
+        if kwargs["fp16_mode"]:
+            precision = LowerPrecision.FP16
+        else:
+            precision = LowerPrecision.FP32
 
         def get_submod_inputs(mod, submod, inputs):
             acc_inputs = None
@@ -341,7 +365,7 @@ def fx2trt(subgraph, **kwargs):
                 )
                 r = interp.run(
                     max_workspace_size=20 << 30,
-                    fp16_mode=kwargs["fp16_mode"],
+                    lower_precision=precision,
                 )
                 trt_mod = TRTModule(*r)
                 setattr(split_mod, name, trt_mod)
@@ -511,9 +535,9 @@ def aot_autograd(subgraph, **kwargs):
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
 
-    from functorch.compile import aot_module
+    from functorch.compile import aot_module_simplified
 
-    return subgraph.wrap_returns(aot_module(subgraph.model, **kwargs))
+    return aot_module_simplified(subgraph.model, **kwargs)
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
@@ -617,9 +641,9 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
     def to_torch_tensor(nd_tensor):
         """A helper function to transfer a NDArray to torch.tensor."""
         if nd_tensor.dtype == "bool":
-            # Note that DLPack does not support boolean so it needs to be handled by
-            # torch.utils.dlpack.from_pack. For now, the workaround is going thorugh
-            # numpy, although this brings additional data copy overheads.
+            # DLPack does not support boolean so it can't be handled by
+            # torch.utils.dlpack.from_pack. Workaround by going through
+            # numpy, although this brings additional data copy overhead.
             return torch.from_numpy(nd_tensor.numpy())
         return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
@@ -640,15 +664,14 @@ def tvm_compile_inner(jit_mod, example_inputs, log_file, trials=20000, cuda=Fals
 @functools.lru_cache(None)
 def _init_ltc():
     try:
-        import lazy_tensor_core
-        from lazy_tensor_core import _LAZYC
+        import torch._lazy.extract_compiled_graph
+        from torch._lazy.ts_backend import init as init_ts_backend
 
         # hopefully changing this line to sth like _ltc_init_xla_backend in future
         # will enable XLA
-        _LAZYC._ltc_init_ts_backend()
-        import lazy_tensor_core.core.extract_compiled_graph
+        init_ts_backend()
 
-        return lazy_tensor_core
+        return torch._lazy
     except ModuleNotFoundError as e:
         print(f"ltc backend fails. Can not import {e.name}")
         raise
@@ -656,15 +679,16 @@ def _init_ltc():
 
 def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs):
     ltc = _init_ltc()
-    return ltc.core.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
+    return ltc.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
 
 
 def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
-    _init_ltc()
+    ltc = _init_ltc()
     lazy_model = copy.deepcopy(gm).to(device="lazy")
+    ltc.extract_compiled_graph.force_lazy_device(lazy_model)
 
     def ltc_model(*inputs):
-        orig_device = inputs[0].device
+        orig_device = inputs[0].device if len(inputs) > 0 else "cuda"
         lazy_inputs = tuple(inp.to(device="lazy") for inp in inputs)
 
         lazy_out = lazy_model(*lazy_inputs)
@@ -672,6 +696,16 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
         return out
 
     return ltc_model
+
+
+def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
+    kwargs_ipex = {"datatype": "fp32"}
+    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
+
+
+def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
+    kwargs_ipex = {"datatype": "bf16"}
+    return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
 
 def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):

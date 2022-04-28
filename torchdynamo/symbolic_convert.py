@@ -36,6 +36,7 @@ from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
 from .exc import RestartAnalysis
+from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .output_graph import OutputGraph
@@ -132,28 +133,31 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     return inner
 
 
-def break_graph_if_unsupported(inner_fn):
-    @functools.wraps(inner_fn)
-    def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
-        state = self.copy_graphstate()
-        try:
-            return inner_fn(self, inst)
-        except Unsupported as exc:
-            if not self.should_compile_partial_graph():
-                raise
-            exc.remove_from_stats()
-            exc.add_to_stats("graph_break")
-        self.restore_graphstate(state)
-        self.output.compile_subgraph(self)
-        # note, assuming inst pushes 1
-        self.popn(1 - dis.stack_effect(inst.opcode, inst.arg))
-        self.output.add_output_instructions([inst])
-        self.push(UnknownVariable())
-        self.output.add_output_instructions(
-            self.create_call_resume_at(self.next_instruction)
-        )
+def break_graph_if_unsupported(*, push):
+    def decorator(inner_fn):
+        @functools.wraps(inner_fn)
+        def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
+            state = self.copy_graphstate()
+            try:
+                return inner_fn(self, inst)
+            except Unsupported as exc:
+                if not self.should_compile_partial_graph():
+                    raise
+                exc.remove_from_stats()
+                exc.add_to_stats("graph_break")
+            self.restore_graphstate(state)
+            self.output.compile_subgraph(self)
+            self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+            self.output.add_output_instructions([inst])
+            for _ in range(push):
+                self.push(UnknownVariable())
+            self.output.add_output_instructions(
+                self.create_call_resume_at(self.next_instruction)
+            )
 
-    return wrapper
+        return wrapper
+
+    return decorator
 
 
 class InstructionTranslatorBase(object):
@@ -274,7 +278,7 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (Unsupported, RestartAnalysis):
+        except (Unsupported, RestartAnalysis, TorchRuntimeError):
             raise
         except Exception as e:
             sys.stderr.write(
@@ -404,6 +408,10 @@ class InstructionTranslatorBase(object):
         # only exists in python<=3.7
         self.block_stack.append(BlockStackEntry(inst.target))
 
+    def SETUP_EXCEPT(self, inst):
+        # only exists in python<=3.7
+        self.block_stack.append(BlockStackEntry(inst.target))
+
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
 
@@ -435,7 +443,11 @@ class InstructionTranslatorBase(object):
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
-        assert exc is None
+        if sys.version_info < (3, 8):
+            assert exc.is_python_constant()
+            assert exc.as_python_constant() is None
+        else:
+            assert exc is None
         self.push(exc)
         self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
 
@@ -490,6 +502,7 @@ class InstructionTranslatorBase(object):
                     BaseListVariable,
                     UserDefinedVariable,
                     BaseUserFunctionVariable,
+                    ConstDictVariable,
                 ),
             )
             and isinstance(right, ConstantVariable)
@@ -536,13 +549,13 @@ class InstructionTranslatorBase(object):
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
-    @break_graph_if_unsupported
+    @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
 
-    @break_graph_if_unsupported
+    @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({})
@@ -579,7 +592,7 @@ class InstructionTranslatorBase(object):
 
         self.call_function(fn, argsvars.items, kwargsvars.items)
 
-    @break_graph_if_unsupported
+    @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_KW(self, inst):
         argnames = self.pop()
         args = self.popn(inst.argval)
@@ -635,6 +648,7 @@ class InstructionTranslatorBase(object):
             self.create_call_resume_at(self.next_instruction)
         )
 
+    @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
@@ -855,6 +869,115 @@ class InstructionTranslatorBase(object):
         self.push(b)
         self.push(a)
 
+    def FORMAT_VALUE(self, inst):
+        flags = inst.arg
+        if (flags & 0x04) == 0x04:
+            fmt_spec = self.pop()
+        else:
+            fmt_spec = ConstantVariable("")
+
+        value = self.pop()
+
+        if (flags & 0x03) == 0x01:
+            value = BuiltinVariable(str).call_function(self, [value], {})
+        elif (flags & 0x03) == 0x02:
+            value = BuiltinVariable(repr).call_function(self, [value], {})
+        elif (flags & 0x03) == 0x03:
+            value = BuiltinVariable(ascii).call_function(self, [value], {})
+
+        fmt_var = ConstantVariable(
+            "{:" + fmt_spec.as_python_constant() + "}"
+        ).add_options(fmt_spec)
+
+        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+
+    def BUILD_STRING(self, inst):
+        result = ""
+        for _ in range(inst.arg):
+            str_var = self.pop()
+            assert isinstance(str_var, ConstantVariable)
+            result = str_var.value + result
+        self.push(ConstantVariable(value=result))
+
+    def IS_OP(self, inst):
+        assert inst.argval == 0 or inst.argval == 1
+        if inst.argval == 0:
+            new_argval = "is"
+        else:
+            new_argval = "is not"
+        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
+        self.COMPARE_OP(new_inst)
+
+    def CONTAINS_OP(self, inst):
+        assert inst.argval == 0 or inst.argval == 1
+        left, right = self.popn(2)
+        op = inst.argval
+        self.push(right.call_method(self, "__contains__", [left], {}))
+        if op == 1:
+            self.UNARY_NOT(inst)
+
+    def LIST_EXTEND(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ListVariable)
+        assert obj.mutable_local
+        obj.call_method(self, "extend", [v], {})
+
+    def LIST_TO_TUPLE(self, inst):
+        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))
+
+    def DICT_MERGE(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, ConstDictVariable)
+        assert obj.mutable_local
+        obj.call_method(self, "update", [v], {})
+
+    def GEN_START(self, inst):
+        self.pop()
+
+    def GET_LEN(self, inst):
+        tos = self.stack[-1]
+        if tos.is_python_constant():
+            self.push(ConstantVariable(len(tos.as_python_constant())))
+        else:
+            self.push(tos.call_method(self, "__len__", [], {}))
+
+    def MATCH_MAPPING(self, inst):
+        tos = self.stack[-1]
+        assert isinstance(tos, ConstDictVariable)
+        if isinstance(tos.items, collections.abc.Mapping):
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(False))
+
+    def MATCH_SEQUENCE(self, inst):
+        tos = self.stack[-1]
+        assert tos.is_python_constant()
+        tos_value = tos.as_python_constant()
+        if isinstance(tos_value, collections.abc.Sequence) and not isinstance(
+            tos_value, (str, bytes, bytearray)
+        ):
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(False))
+
+    def MATCH_KEYS(self, inst):
+        tos = self.stack[-1]
+        assert tos.is_python_constant()
+        keys = tos.as_python_constant()
+        tos1 = self.stack[-2]
+        assert isinstance(tos1, ConstDictVariable)
+        match_obj = tos1.items
+        if all(key in match_obj for key in keys):
+            self.push(TupleVariable(list(match_obj[key] for key in keys)))
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(None))
+            self.push(ConstantVariable(False))
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -868,7 +991,7 @@ class InstructionTranslatorBase(object):
     BINARY_MODULO = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-    BINARY_SUBSCR = break_graph_if_unsupported(stack_op(operator.getitem))
+    BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
@@ -956,6 +1079,17 @@ class InstructionTranslatorBase(object):
 
         self.checkpoint = None
 
+        if sys.version_info >= (3, 10):
+            from .resume_execution import CO_ASYNC_GENERATOR
+            from .resume_execution import CO_COROUTINE
+            from .resume_execution import CO_GENERATOR
+            from .resume_execution import CO_ITERABLE_COROUTINE
+
+            if f_code.co_flags & (
+                CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+            ):
+                self.push(BuiltinVariable(None))
+
 
 class InstructionTranslator(InstructionTranslatorBase):
     def __init__(
@@ -989,7 +1123,9 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
         for val in self.symbolic_locals.values():
-            if isinstance(val, (ListIteratorVariable, BaseListVariable)):
+            if isinstance(
+                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+            ):
                 self.output.guards.update(val.guards)
 
         self._freevars_ids = dict()
@@ -1118,6 +1254,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             assert tracer.symbolic_result.as_python_constant() is None
             return ListIteratorVariable(
                 tracer.generated_items,
+                mutable_local=MutableLocal(),
                 **VariableTracker.propagate(tracer.symbolic_result),
             )
         else:
@@ -1146,8 +1283,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.symbolic_result = None
         self.closure_cells = closure_cells
-        # self.funcvar = funcvar
-        # self.parent = parent
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:

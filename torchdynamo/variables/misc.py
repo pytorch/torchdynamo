@@ -13,6 +13,7 @@ from ..guards import GuardBuilder
 from ..guards import GuardSource
 from ..source import AttrSource
 from ..utils import identity
+from ..utils import proxy_args_kwargs
 from .base import VariableTracker
 
 
@@ -34,8 +35,19 @@ class SuperVariable(VariableTracker):
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
         search_type = self.typevar.as_python_constant()
+
+        # We default to the python type of the object. However,
+        # 1. If this is a `type`, then the original object represents the user
+        # defined type.
+        # 2. If this is `torch._C._TensorMeta`, the original object is the user
+        # defined type of a custom tensor subclass.
+        # TODO(future PR): figure out how to do this in a less hacky way
+        type_to_use = self.objvar.python_type()
+        if type_to_use is type or type_to_use is torch._C._TensorMeta:
+            type_to_use = self.objvar.value
+
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
-        return getattr(super(search_type, self.objvar.python_type()), name)
+        return getattr(super(search_type, type_to_use), name)
 
     def call_method(
         self,
@@ -50,11 +62,16 @@ class SuperVariable(VariableTracker):
         inner_fn = self.const_getattr(self, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
-        if not isinstance(inner_fn, types.FunctionType):
-            unimplemented(f"non-function super: {inner_fn}")
-        return variables.UserFunctionVariable(inner_fn, **options).call_function(
-            tx, [self.objvar] + args, kwargs
-        )
+        elif isinstance(inner_fn, types.FunctionType):
+            return variables.UserFunctionVariable(inner_fn, **options).call_function(
+                tx, [self.objvar] + args, kwargs
+            )
+        elif isinstance(inner_fn, types.MethodType):
+            return variables.UserMethodVariable(
+                inner_fn.__func__, self.objvar, **options
+            ).call_function(tx, args, kwargs)
+        else:
+            unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class UnknownVariable(VariableTracker):
@@ -257,6 +274,58 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+
+        # This variable is True when it corresponds to user code such as
+        #
+        #   super().__torch_function__(...)
+        #
+        # and the super().__torch_function__ attribute resolves
+        # to torch.Tensor.__torch_function__.
+        is_original_tensor_torch_function = (
+            self.name == "__torch_function__"
+            and isinstance(self.obj, SuperVariable)
+            # for now, only support one level of inheritance
+            and len(self.obj.objvar.value.__mro__) > 1
+            and self.obj.objvar.value.__mro__[1] == torch.Tensor
+        )
+        if is_original_tensor_torch_function:
+            # Instead of tracing inside torch.Tensor.__torch_function__,
+            # record the `call_function` or `call_method` call into the graph.
+            from . import TensorVariable
+            from . import TorchVariable
+
+            original_torch_or_getattr_variable = args[0]
+            new_args = args[2].items
+            new_kwargs = args[3].items
+            options = VariableTracker.propagate(self, new_args, new_kwargs.values())
+            # Disable __torch_function__ here to prevent the clone of the
+            # example tensor from going into the override.
+            with torch._C.DisableTorchFunction():
+                if isinstance(args[0], TorchVariable):
+                    return TensorVariable.create(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function",
+                            original_torch_or_getattr_variable.value,
+                            *proxy_args_kwargs(new_args, new_kwargs),
+                        ),
+                        **options,
+                    )
+                elif isinstance(args[0], GetAttrVariable):
+                    return TensorVariable.create(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_method",
+                            original_torch_or_getattr_variable.name,
+                            *proxy_args_kwargs(new_args, new_kwargs),
+                        ),
+                        **options,
+                    )
+                else:
+                    unimplemented(
+                        f"GetAttrVariable.call_function original __torch_function__ {args}"
+                    )
+
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
@@ -306,7 +375,11 @@ class SkipFilesVariable(VariableTracker):
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented("call torchdynamo.disable() wrapped function")
         else:
-            unimplemented("call_function in skip_files " + inspect.getfile(self.value))
+            try:
+                path = inspect.getfile(self.value)
+            except TypeError:
+                path = f"Builtin {self.value.__name__}"
+            unimplemented("call_function in skip_files " + path)
 
 
 class NumpyVariable(VariableTracker):

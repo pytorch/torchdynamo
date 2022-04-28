@@ -8,6 +8,8 @@ from typing import List
 
 import torch
 
+from torchdynamo.variables.tensor import DynamicShapeVariable
+
 from .. import config
 from .. import variables
 from ..allowed_functions import is_disallowed
@@ -47,6 +49,7 @@ class BuiltinVariable(VariableTracker):
             round,
             set,
             str,
+            str.format,
             sum,
             tuple,
             type,
@@ -196,6 +199,10 @@ class BuiltinVariable(VariableTracker):
                 )
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+
+        # Handle cases like int(torch.seed())
+        if self.fn is int and isinstance(args[0], DynamicShapeVariable):
+            return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
 
@@ -433,6 +440,12 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
+        elif isinstance(obj, variables.TensorVariable) and name == "grad":
+            if source:
+                example_value = obj.proxy.node.meta["example_value"].grad
+                return VariableBuilder(tx, source)(example_value).add_options(options)
+            else:
+                unimplemented("tensor grad")
         elif isinstance(
             obj,
             (

@@ -26,6 +26,7 @@ def _disallowed_function_ids():
         torch.autocast_increment_nesting,
         torch.autograd.grad,
         torch.clear_autocast_cache,
+        torch.cuda.current_device,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
@@ -51,6 +52,8 @@ def _allowed_function_ids():
 
     def _find_torch_objects(module):
         if module.__name__.startswith("torch.distributions"):
+            return
+        if module.__name__.startswith("torch.testing"):
             return
         torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):

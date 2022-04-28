@@ -40,6 +40,7 @@ from .lists import ListIteratorVariable
 from .lists import ListVariable
 from .lists import NamedTupleVariable
 from .lists import RangeVariable
+from .lists import SliceVariable
 from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
 from .misc import InspectSignatureVariable
@@ -49,6 +50,7 @@ from .misc import PythonModuleVariable
 from .misc import SkipFilesVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
+from .tensor import TensorWithTFOverrideVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -114,7 +116,14 @@ class VariableBuilder:
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list)) or is_namedtuple(value):
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+            # One can index a tensor with a list/tuple. Therefore, we need to
+            # have a stricter match.
+            if istype(value, (tuple, list)) and all(
+                [isinstance(x, int) or x is None for x in value]
+            ):
+                guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
+            else:
+                guards = self.make_guards(GuardBuilder.LIST_LENGTH)
             output = [
                 VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
                     item
@@ -265,6 +274,13 @@ class VariableBuilder:
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)
             )
+        elif isinstance(value, slice):
+            start = ConstantVariable(value.start)
+            stop = ConstantVariable(value.stop)
+            step = ConstantVariable(value.step)
+            return SliceVariable(
+                [start, stop, step], guards=make_guards(GuardBuilder.CONSTANT_MATCH)
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -288,14 +304,26 @@ class VariableBuilder:
             )
         else:
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value))
-            return TensorVariable.create(
-                tx=self.tx,
-                proxy=self.tx.output.create_graph_input(
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                ),
-                example_value=value,
-                guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
-            )
+            # Disable __torch_function__ to prevent cloning of `value` to hit
+            # user code.
+            with torch._C.DisableTorchFunction():
+                tensor_variable = TensorVariable.create(
+                    tx=self.tx,
+                    proxy=self.tx.output.create_graph_input(
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                    ),
+                    example_value=value,
+                    guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                )
+            if torch.overrides.has_torch_function_unary(value):
+                subclass_torch_function__func = value.__torch_function__.__func__
+                subclass_type = type(value)
+                return TensorWithTFOverrideVariable(
+                    tensor_variable,
+                    subclass_torch_function__func,
+                    subclass_type,
+                )
+            return tensor_variable
 
 
 def _dataclasses_fields_lambda(obj):

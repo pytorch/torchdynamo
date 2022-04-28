@@ -17,6 +17,8 @@ from typing import Dict
 import torch
 from torch import fx
 
+from . import config
+
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
 
@@ -78,7 +80,9 @@ def istype(obj, allowed_types):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    return istype(obj, (torch.Tensor, torch.nn.Parameter))
+    return istype(
+        obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
+    )
 
 
 @functools.lru_cache(4096)
@@ -140,6 +144,14 @@ class CleanupManager(ExactWeakKeyDictionary):
 
 
 CleanupManager.instance = CleanupManager()
+
+
+def clone_tensor(x):
+    """Clone the tensor and its gradient"""
+    y = x.clone().requires_grad_(x.requires_grad)
+    if x.is_leaf and x.grad is not None:
+        y.grad = x.grad.clone()
+    return y
 
 
 def clone_input(x):
@@ -255,6 +267,8 @@ def namedtuple_fields(cls):
 def checkpoint_params(gm):
     with torch.no_grad():
         rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         saved_state = []
         for param in itertools.chain(gm.parameters(), gm.buffers()):
             saved_state.append((param, param._version, torch.clone(param)))
@@ -262,6 +276,8 @@ def checkpoint_params(gm):
     def restore():
         with torch.no_grad():
             torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
             for param, version, original_value in saved_state:
                 if param._version != version:
                     param.copy_(original_value)
@@ -312,10 +328,13 @@ def check_constant_args(args, kwargs):
 
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
-product = functools.partial(functools.reduce, operator.mul)
 tuple_iterator = type(iter(tuple()))
 tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
+
+
+def product(it):
+    return functools.reduce(operator.mul, it, 1)
 
 
 def tuple_iterator_getitem(it, index):

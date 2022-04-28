@@ -262,6 +262,9 @@ class ModuleList(torch.nn.Module):
         for idx, layer in enumerate(self.layers):
             x = layer(x) * idx
 
+        for idx, layer in enumerate(self.layers[::-1]):
+            x = layer(x) * idx
+
         return x
 
 
@@ -424,6 +427,24 @@ class SuperModule(BasicModule):
         return x + 10.0
 
 
+class ComplicatedSuperParent(torch.nn.Module):
+    @classmethod
+    def custom_add(cls, x):
+        x = x + x
+        return x
+
+
+class SuperChildCallsClassMethod(ComplicatedSuperParent):
+    @classmethod
+    def child_func(self, x):
+        x = super().custom_add(x)
+        return x
+
+    def forward(self, x):
+        x = self.child_func(x)
+        return x
+
+
 class HasAttrModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -528,6 +549,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
     test_super1 = make_test(SuperModule())
+    test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())
@@ -572,3 +594,29 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out3))
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_simple_torch_function(self):
+        def foo(x):
+            # function call, twice to test wrapping
+            x = F.sigmoid(x)
+            x = F.sigmoid(x)
+            # method call, twice to test wrapping
+            x = x.sigmoid()
+            x = x.sigmoid()
+            return x
+
+        class TensorProxy(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs)
+
+        torchdynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+
+        x = torch.randn(1).as_subclass(TensorProxy)
+        cnt = torchdynamo.testing.CompileCounter()
+        out1 = foo(x)
+        with torchdynamo.optimize(cnt, nopython=True):
+            out2 = foo(x)
+
+        self.assertEqual(cnt.op_count, 4)
+        self.assertTrue(torchdynamo.testing.same(out1, out2))

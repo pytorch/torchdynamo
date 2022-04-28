@@ -2,14 +2,18 @@
 import collections
 import copy
 import dataclasses
+import dis
 import functools
 import math
+import sys
 import typing
+import unittest
 
 import numpy as np
 import torch
 
 import torchdynamo.testing
+from torchdynamo import bytecode_transformation
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
@@ -1007,3 +1011,149 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertFalse(True)
         except torchdynamo.exc.Unsupported as e:
             self.assertIn("call torchdynamo.disable() wrapped function", str(e))
+
+    def test_torch_size(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            output_size = torch.Size([10, 10])
+            x = x.view(*output_size)
+            return (x,)
+
+        x = torch.randn(100, requires_grad=True)
+        x_clone = x.clone()
+        ref = fn(x)
+
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn(x_clone)
+
+        self.assertTrue(same(ref, res))
+
+    def test_torch_seed(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            attention_seed = int(torch.seed() % sys.maxsize)
+            torch.manual_seed(attention_seed)
+            return (x,)
+
+        x = torch.randn(100, requires_grad=True)
+        ref = fn(x)
+
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn(x)
+
+        self.assertTrue(same(ref, res))
+
+    def test_is_tensor_like(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def f(x):
+            if torch.overrides.is_tensor_like(x):
+                return (x * 2,)
+            return (torch.ones(10) + x,)
+
+        x = torch.randn(10)
+        ref0 = f(x)
+        ref1 = f(4)
+        with torchdynamo.optimize(cnts, nopython=True):
+            res0 = f(x)
+            res1 = f(4)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_rand(self):
+        cnts = torchdynamo.testing.CompileCounter()
+        device = "cuda"
+
+        def fn():
+            return torch.randn(10, device=device)
+
+        torch.manual_seed(10)
+        ref_run1 = fn()
+
+        torch.manual_seed(10)
+        ref_run2 = fn()
+        self.assertTrue(same(ref_run1, ref_run2))
+
+        torch.manual_seed(10)
+        with torchdynamo.optimize(cnts, nopython=True):
+            res = fn()
+
+        self.assertTrue(same(res, ref_run1))
+
+    def test_slice_input(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def getitem(a, idx):
+            if isinstance(idx, slice):
+                return (
+                    torch.zeros(1),
+                    a[idx]
+                    + [
+                        100,
+                    ],
+                )
+            else:
+                return (torch.zeros(1), a[idx])
+
+        layers = list(range(10))
+        ref0 = getitem(layers, slice(0, 2, 1))
+        ref1 = getitem(layers, 2)
+        ref2 = getitem(layers, slice(3, 8, 2))
+        with torchdynamo.optimize(cnts, nopython=True):
+            res0 = getitem(layers, slice(0, 2, 1))
+            res1 = getitem(layers, 2)
+            res2 = getitem(layers, slice(3, 8, 2))
+
+        self.assertTrue(ref0 == res0)
+        self.assertTrue(ref1 == res1)
+        self.assertTrue(ref2 == res2)
+
+    def test_grad(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        def fn(a, b):
+            out = a * b
+            out.sum().backward()
+            real_out = torch.sigmoid(a.grad + b)
+            return real_out
+
+        inps = [torch.randn(4, requires_grad=True) for _ in range(2)]
+        for inp in inps:
+            inp.grad = None
+        ref = fn(*inps)
+
+        for inp in inps:
+            inp.grad = None
+        with torchdynamo.optimize(cnts):
+            res = fn(*inps)
+
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(sys.version_info < (3, 10), "use linetable when python >= 3.10")
+    def test_linetable_writer(self):
+        def fn():
+            a = 10
+            b = 20
+            c = a + b
+            f = "linetable_writer"
+            return f"Test if {f} generates correct co_linetable: {c}"
+
+        inst = dis.get_instructions(fn)
+        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
+        self.assertTrue(result[1] == fn.__code__.co_linetable)
+
+    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
+    def test_lnotab_writer(self):
+        def fn():
+            a = 10
+            b = 20
+            c = a + b
+            f = "lnotab_writer"
+            return f"Test if {f} generates correct co_lnotab: {c}"
+
+        inst = dis.get_instructions(fn)
+        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
+        self.assertTrue(result[1] == fn.__code__.co_lnotab)

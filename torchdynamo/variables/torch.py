@@ -15,6 +15,7 @@ from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
+from .tensor import TensorWithTFOverrideVariable
 
 
 class TorchVariable(VariableTracker):
@@ -69,7 +70,11 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def can_constant_fold_through(self):
-        if self.value in (torch.is_tensor, torch.is_floating_point):
+        if self.value in (
+            torch.is_tensor,
+            torch.is_floating_point,
+            torch.overrides.is_tensor_like,
+        ):
             return True
         return getattr(self.value, "__module__", None) == "math"
 
@@ -101,11 +106,16 @@ class TorchVariable(VariableTracker):
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
         elif (
-            self.value in (torch.is_tensor, torch.is_floating_point)
+            self.value
+            in (
+                torch.is_tensor,
+                torch.is_floating_point,
+                torch.overrides.is_tensor_like,
+            )
             and isinstance(args[0], TensorVariable)
             and args[0].dtype is not None
         ):
-            if self.value is torch.is_tensor:
+            if self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
                 return ConstantVariable(True, **options)
             elif self.value is torch.is_floating_point:
                 return ConstantVariable(args[0].dtype.is_floating_point, **options)
@@ -138,6 +148,35 @@ class TorchVariable(VariableTracker):
             )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
+        elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
+            # This code block implements inlining the __torch_function__
+            # override of a tensor.
+
+            tensor_with_tf_override = args[0]
+
+            # TODO(future PR): make this implement the full __torch_function__ API
+            # instead of assuming the relevant override is in the first argument.
+            args[0] = args[0].tensor_variable
+
+            unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+                tx,
+                self,
+                tensor_with_tf_override.subclass_torch_function__func,
+                tensor_with_tf_override.subclass_type,
+                options,
+                args,
+                kwargs,
+            )
+
+            # The wrapping here follows the logic in
+            # `torch.Tensor.__torch_function__`.
+            if self.value in torch.overrides.get_default_nowrap_functions():
+                return unwrapped
+            return TensorWithTFOverrideVariable(
+                unwrapped,
+                tensor_with_tf_override.subclass_torch_function__func,
+                tensor_with_tf_override.subclass_type,
+            )
         else:
             return TensorVariable.create(
                 tx=tx,

@@ -20,6 +20,7 @@ from .utils import rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+from .variables.tensor import TensorWithTFOverrideVariable
 
 
 @dataclasses.dataclass
@@ -90,7 +91,10 @@ class PyCodegen(object):
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
-        elif isinstance(value, TensorVariable):
+        elif isinstance(value, (TensorVariable, TensorWithTFOverrideVariable)):
+            if isinstance(value, TensorWithTFOverrideVariable):
+                # unwrap back to tensor
+                value = value.tensor_variable
             graph_outputs_key = id(value.proxy)
             if graph_outputs_key not in graph_outputs:
                 graph_outputs[graph_outputs_key] = GraphOutputEntry(
@@ -201,8 +205,9 @@ class PyCodegen(object):
         assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
-    def _create_load_const(self, value):
-        co_consts = self.code_options["co_consts"]
+    @staticmethod
+    def get_const_index(code_options, value):
+        co_consts = code_options["co_consts"]
         assert istype(co_consts, tuple)
         index = None
         for i, v in enumerate(co_consts):
@@ -212,7 +217,11 @@ class PyCodegen(object):
         if index is None:
             index = len(co_consts)
             co_consts = co_consts + (value,)
-            self.code_options["co_consts"] = co_consts
+            code_options["co_consts"] = co_consts
+        return index
+
+    def _create_load_const(self, value):
+        index = self.get_const_index(self.code_options, value)
         return create_instruction("LOAD_CONST", index, value)
 
     create_load_output = _create_load_const
@@ -242,6 +251,8 @@ class PyCodegen(object):
             return [create_instruction("ROT_THREE")]
         elif n == 4 and sys.version_info >= (3, 8):
             return [create_instruction("ROT_FOUR")]
+        elif sys.version_info >= (3, 10):
+            return [create_instruction("ROT_N", n)]
         else:
             return [
                 create_instruction("BUILD_TUPLE", n),
