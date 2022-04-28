@@ -1066,3 +1066,42 @@ class ReproTests(torchdynamo.testing.TestCase):
             model(inp)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 12)
+
+    def test_exec_import(self):
+        def fn1():
+            exec("import math")
+
+        def fn2():
+            try:
+                math.sqrt(4)
+                return False
+            except NameError:
+                return True
+
+        def fn3():
+            fn1()
+            return fn2()
+
+        self.assertTrue(fn3())
+        with torchdynamo.optimize("eager"):
+            self.assertTrue(fn3())
+
+    def test_exec_wildcard_import(self):
+        # Test that globals are not carried over from frame to frame
+        def fn1():
+            exec("from torch import *")
+
+        def fn2():
+            x = torch.zeros(4)
+            for i in range(5):
+                x = x + i
+            return x
+
+        def fn3():
+            fn1()
+            return fn2()
+
+        ref = fn3()
+        with torchdynamo.optimize("eager"):
+            res = fn3()
+        self.assertTrue(same(ref, res))
