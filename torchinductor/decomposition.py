@@ -72,7 +72,7 @@ def tanh(x):
 
 
 @register_decomposition([aten.leaky_relu], decompositions)
-def leaky_relu(x, negative_slope):
+def leaky_relu(x, negative_slope=0.01):
     return torch.relu(x) + (-negative_slope * torch.relu(-x))
 
 
