@@ -2,7 +2,6 @@ import contextlib
 import dataclasses
 import functools
 import multiprocessing
-import re
 import textwrap
 from itertools import chain
 from typing import Dict
