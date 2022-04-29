@@ -325,6 +325,7 @@ class TritonKernel(Kernel):
 
     @contextlib.contextmanager
     def mask_loads(self, mask):
+        assert self._load_mask is None, "TODO: nesting"
         var = self.cse.newvar()
         if self.inside_reduction:
             old_mask = "mask_reduction"

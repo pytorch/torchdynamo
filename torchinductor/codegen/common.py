@@ -162,14 +162,14 @@ class KernelArgs:
         self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
-        assert name not in graph.removed_buffers
+        assert name not in graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        assert name not in graph.removed_buffers
-        assert name not in self.input_buffers
+        assert name not in graph.removed_buffers, name
+        assert name not in self.input_buffers, name
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def size(self, name):

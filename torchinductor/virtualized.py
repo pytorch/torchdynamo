@@ -53,6 +53,9 @@ class MockHandler:
 
         return inner
 
+    def masked(self, mask, body, other):
+        return f"masked({mask}, {body()}, {other})"
+
     @classmethod
     def _init_cls(cls):
         def make_handler(format_string):
