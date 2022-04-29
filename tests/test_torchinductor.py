@@ -670,6 +670,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_gelu(self):
+        def fn(x):
+            return aten.gelu(x) + 2, aten.gelu(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

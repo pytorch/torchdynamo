@@ -690,6 +690,7 @@ register_pointwise(aten.mul)
 register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.sigmoid)
+register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)

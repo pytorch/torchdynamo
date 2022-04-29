@@ -81,6 +81,10 @@ class OpOverrides:
     def square(x):
         return ops.mul(x, x)
 
+    @staticmethod
+    def sign(x):
+        return ops.where(f"{x} < 0", "-1", "1")
+
 
 class IndentedBuffer:
     tabwidth = 4

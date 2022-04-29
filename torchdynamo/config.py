@@ -46,4 +46,4 @@ normalize_ir = True
 traceable_tensor_subclasses = set()
 
 # Propagate backend exceptions up to torchdynamo.optimize
-raise_on_backend_error = False
+raise_on_backend_error = True

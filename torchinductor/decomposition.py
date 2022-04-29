@@ -1,3 +1,5 @@
+import math
+
 import torch
 from functorch._src.decompositions import register_decomposition
 
@@ -72,6 +74,41 @@ def tanh(x):
 @register_decomposition([aten.leaky_relu], decompositions)
 def leaky_relu(x, negative_slope):
     return torch.relu(x) + (-negative_slope * torch.relu(-x))
+
+
+@register_decomposition([aten.gelu], decompositions)
+def gelu(x):
+    # tanh approximation:
+    # return 0.5 * x * (1 + torch.tanh(math.sqrt(2/math.pi) * (x + 0.044715 * x * x * x)))
+    return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
+
+
+@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar], decompositions)
+def rsub(a, b):
+    if isinstance(b, (int, float)):
+        b = torch.tensor(b, dtype=a.dtype, device=a.device)
+    return b - a
+
+
+@register_decomposition([aten.special_erf], decompositions)
+def special_erf(x):
+    # note: triton may add a builtin for this
+    # from https://www.johndcook.com/blog/2009/01/19/stand-alone-error-function-erf/
+    a1 = 0.254829592
+    a2 = -0.284496736
+    a3 = 1.421413741
+    a4 = -1.453152027
+    a5 = 1.061405429
+    p = 0.3275911
+
+    sign = torch.sign(x)
+    x = torch.abs(x)
+
+    # A & S 7.1.26
+    t = 1.0 / (1.0 + p * x)
+    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * torch.exp(-x * x)
+
+    return sign * y
 
 
 def _batch_norm(
