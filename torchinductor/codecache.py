@@ -13,6 +13,7 @@ from ctypes import cdll
 from torch.utils import cpp_extension
 
 from . import config
+from . import exc
 
 
 def cache_dir():
@@ -43,6 +44,23 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
+@functools.lru_cache(None)
+def cpp_compiler():
+    if isinstance(config.cpp.cxx, str):
+        return config.cpp.cxx
+    for cxx in config.cpp.cxx:
+        try:
+            subprocess.check_output([cxx, "--version"])
+            return cxx
+        except (subprocess.SubprocessError, FileNotFoundError):
+            continue
+    raise exc.InvalidCxxCompiler()
+
+
+def is_gcc():
+    return re.search(r"(gcc|g\+\+)", cpp_compiler())
+
+
 def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
@@ -59,7 +77,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {config.cpp.cxx} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs}
             -march=native -O3 -ffast-math -fopenmp
             -o{output} {input}

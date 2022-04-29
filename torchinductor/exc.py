@@ -24,3 +24,12 @@ class LoweringException(OperatorIssue):
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
+
+
+class InvalidCxxCompiler(RuntimeError):
+    def __init__(self):
+        from . import config
+
+        super().__init__(
+            f"No working C++ compiler found in {config.__name__}.cpp.cxx: {config.cpp.cxx}"
+        )

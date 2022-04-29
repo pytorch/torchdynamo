@@ -472,7 +472,7 @@ class LoopLevel:
                 line1 = line1.replace(" for ", f" for {simd}")
         elif self.simd:
             line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_vars and re.search(r"(gcc|g\+\+)", config.cpp.cxx):
+        elif not self.reduction_vars and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
