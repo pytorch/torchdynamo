@@ -69,6 +69,11 @@ def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
+@register_decomposition([aten.leaky_relu], decompositions)
+def leaky_relu(x, negative_slope):
+    return torch.relu(x) + (-negative_slope * torch.relu(-x))
+
+
 def _batch_norm(
     input,
     weight,

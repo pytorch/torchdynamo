@@ -429,8 +429,8 @@ class TritonKernel(Kernel):
                             mask_reduction = (tl.reshape(mask, (BLOCK_SIZE, 1)) &
                                               tl.reshape(reduction < reduction_numel, (1, REDUCTION_SIZE)))
                         else:
-                            mask = None
-                            mask_reduction = None
+                            mask : tl.constexpr = None
+                            mask_reduction : tl.constexpr = None
                     """,
                     strip=True,
                 )
@@ -440,7 +440,7 @@ class TritonKernel(Kernel):
                     if NEED_MASK:
                         mask = indices < numel
                     else:
-                        mask = None
+                        mask : tl.constexpr = None
                 """,
                     strip=True,
                 )

@@ -661,6 +661,15 @@ class CommonTemplate:
             (torch.randn([3, 10, 16, 16]),),
         )
 
+    def test_leaky_relu(self):
+        def fn(x):
+            return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1, 0.01)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

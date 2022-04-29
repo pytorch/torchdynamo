@@ -8,4 +8,3 @@ pytest
 tabulate
 torch
 sympy
-triton>=2.0
