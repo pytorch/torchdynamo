@@ -475,9 +475,11 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0, "TODO(jansel): support padding"
+    assert padding == 0 or len(padding) == 2
     assert dilation == 1, "TODO(jansel): support dilation"
     assert len(x.get_size()) in (3, 4)
+    if padding == 0:
+        padding = [0, 0]
 
     x.realize()  # we will read this many times, so make sure it is computed
 
@@ -485,8 +487,13 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
 
     *batch, c, h, w = x.get_size()
 
-    h_out = ir.IndexingDiv(h - (kernel_size[0] - 1) + (stride[0] - 1), stride[0])
-    w_out = ir.IndexingDiv(h - (kernel_size[1] - 1) + (stride[1] - 1), stride[1])
+    h_out = ir.IndexingDiv(
+        h + 2 * padding[0] - (kernel_size[0] - 1) + (stride[0] - 1), stride[0]
+    )
+    w_out = ir.IndexingDiv(
+        w + 2 * padding[1] - (kernel_size[1] - 1) + (stride[1] - 1), stride[1]
+    )
+
     new_size = list(batch) + [c, h_out, w_out]
 
     def fn(idx, return_index):
@@ -494,10 +501,37 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
         maxval = None
         maxindex = None
         for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih
-            iw = bw * stride[1] + iw
+            ih = bh * stride[0] + ih - padding[0]
+            iw = bw * stride[1] + iw - padding[1]
+            if padding[0] or padding[1]:
+                mask = ops.and_(
+                    ops.and_(
+                        ops.ge(
+                            ops.index_expr(ih, torch.int64),
+                            ops.index_expr(sympy.Integer(0), torch.int64),
+                        ),
+                        ops.ge(
+                            ops.index_expr(iw, torch.int64),
+                            ops.index_expr(sympy.Integer(0), torch.int64),
+                        ),
+                    ),
+                    ops.and_(
+                        ops.lt(
+                            ops.index_expr(ih, torch.int64),
+                            ops.index_expr(h, torch.int64),
+                        ),
+                        ops.lt(
+                            ops.index_expr(iw, torch.int64),
+                            ops.index_expr(w, torch.int64),
+                        ),
+                    ),
+                )
+                val = ops.masked(
+                    mask, lambda: x_loader([*prefix, ih, iw]), float("-inf")
+                )
+            else:
+                val = x_loader([*prefix, ih, iw])
             index = ops.index_expr(ih * w + iw, torch.int64)
-            val = x_loader([*prefix, ih, iw])
             if maxval is None:
                 maxindex = index
                 maxval = val

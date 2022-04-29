@@ -67,3 +67,67 @@ def elu(self, alpha=1, scale=1, input_scale=1):
 @register_decomposition([aten.tanh], decompositions)
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
+def _batch_norm(
+    input,
+    weight,
+    bias,
+    running_mean,
+    running_var,
+    training: bool,
+    momentum: float,
+    eps: float,
+):
+    assert not training, "TODO: support training"
+    assert input.ndimension() == 4
+    view_size = [1, -1, 1, 1]
+
+    # TODO(jansel): try broadcasting earlier to get things into a single kernel
+
+    invstd = torch.reciprocal(torch.sqrt(running_var + eps))
+    if weight is None:
+        weight = 1
+    if bias is None:
+        bias = 0
+    alpha = invstd * weight
+    beta = bias - running_mean * alpha
+    result = input * alpha.view(view_size) + beta.view(view_size)
+    return result
+
+
+@register_decomposition([aten.native_batch_norm], decompositions)
+def native_batch_norm(
+    input,
+    weight,
+    bias,
+    running_mean,
+    running_var,
+    training: bool,
+    momentum: float,
+    eps: float,
+):
+    result = _batch_norm(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
+    null = torch.tensor([], device=input.device)
+    return (result, null, null)
+
+
+@register_decomposition([aten.cudnn_batch_norm], decompositions)
+def cudnn_batch_norm(
+    input,
+    weight,
+    bias,
+    running_mean,
+    running_var,
+    training: bool,
+    momentum: float,
+    eps: float,
+):
+    result = _batch_norm(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
+    null = torch.tensor([], device=input.device)
+    null_uint8 = torch.tensor([], device=input.device, dtype=torch.uint8)
+    return (result, null, null, null_uint8)

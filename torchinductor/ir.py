@@ -1079,7 +1079,6 @@ class Convolution(ExternKernelAlloc):
     ):
         x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
-        bias = cls.require_stride1(cls.realize_input(bias))
         stride = tuple(stride)
         padding = tuple(padding)
         dilation = tuple(dilation)
@@ -1091,13 +1090,17 @@ class Convolution(ExternKernelAlloc):
             sympy.Integer(graph.sizevars.guard_static_shape(s))
             for s in weight.get_size()
         ]
-        (bias_shape,) = [
-            sympy.Integer(graph.sizevars.guard_static_shape(s)) for s in bias.get_size()
-        ]
 
         out_channels, in_channels1, *kernel_size = weight_shape
         in_channels1 = in_channels1 * groups
-        assert bias_shape == out_channels
+
+        if bias is not None:
+            bias = cls.require_stride1(cls.realize_input(bias))
+            (bias_shape,) = [
+                sympy.Integer(graph.sizevars.guard_static_shape(s))
+                for s in bias.get_size()
+            ]
+            assert bias_shape == out_channels
 
         if len(x.get_size()) == 1 + len(kernel_size):
             in_channels2, *input_size = x.get_size()
@@ -1135,17 +1138,26 @@ class Convolution(ExternKernelAlloc):
                 graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        return Convolution(
-            FixedLayout(
-                x.get_device(),
-                x.get_dtype(),
-                output_size,
-                # TODO(jansel): fix channels last case
-                FlexibleLayout.contiguous_strides(output_size),
-            ),
-            (x, weight, bias),
-            (stride, padding, dilation, transposed, output_padding, groups),
+        output_layout = FixedLayout(
+            x.get_device(),
+            x.get_dtype(),
+            output_size,
+            # TODO(jansel): fix channels last case
+            FlexibleLayout.contiguous_strides(output_size),
         )
+
+        if bias is not None:
+            return Convolution(
+                output_layout,
+                (x, weight, bias),
+                (stride, padding, dilation, transposed, output_padding, groups),
+            )
+        else:
+            return Convolution(
+                output_layout,
+                (x, weight),
+                (bias, stride, padding, dilation, transposed, output_padding, groups),
+            )
 
 
 @dataclasses.dataclass

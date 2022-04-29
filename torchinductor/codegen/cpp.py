@@ -140,6 +140,26 @@ class CppOverrides(OpOverrides):
     def index_expr(expr, dtype):
         return ops.to_dtype(cexpr(kernel.rename_indexing(expr)), dtype)
 
+    @staticmethod
+    def masked(mask, body, other):
+        code = BracesBuffer()
+        var = kernel.cse.newvar()
+        assert isinstance(other, float)
+        if other == float("-inf"):
+            code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
+        else:
+            assert False
+        code.writeline(f"if({mask})")
+        with kernel.swap_buffers(code), code.indent():
+            result = body()
+            code.writeline(f"{var} = {result};")
+        kernel.compute.splice(code)
+        return var
+
+    @staticmethod
+    def and_(a, b):
+        return f"{a} && {b}"
+
 
 class CppKernel(Kernel):
     overrides = CppOverrides

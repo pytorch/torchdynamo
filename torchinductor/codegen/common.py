@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import functools
+import itertools
 import operator
 import re
 import textwrap
@@ -24,7 +25,7 @@ class ExprPrinter(Printer):
     def paren(string):
         if (
             re.match(r"^[a-z0-9_.]+$", string, re.I)
-            or re.match(r"^\(.*\)$", string, re.I)
+            or re.match(r"^\([^)]*\)$", string, re.I)
             or string == ""
         ):
             return string
@@ -204,22 +205,26 @@ class KernelArgs:
 class CSE:
     """Common subexpression elimination"""
 
-    def __init__(self, prefix="", suffix="", name_prefix="tmp"):
+    def __init__(self, prefix="", suffix="", name_prefix="tmp", iter_buffers=None):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
         self.store_cache = {}
+        self.iter_buffer_ids = iter_buffers or itertools.count()
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
         if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
             return expr
         if expr not in self.cache:
-            var = f"{self.name_prefix}{len(self.cache)}"
+            var = self.newvar()
             self.cache[expr] = var
             if write:
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
+
+    def newvar(self):
+        return f"{self.name_prefix}{next(self.iter_buffer_ids)}"
 
 
 class CodeGen:
@@ -249,6 +254,26 @@ class Kernel(CodeGen):
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
+
+    @contextlib.contextmanager
+    def swap_buffers(self, lb, cb=None, sb=None):
+        if cb is None:
+            cb = lb
+        loads = self.loads
+        compute = self.compute
+        stores = self.stores
+        cse = self.cse
+        self.loads = lb
+        self.compute = cb
+        self.stores = sb
+        self.cse = CSE(
+            self.newvar_prefix, self.suffix, iter_buffers=cse.iter_buffer_ids
+        )
+        yield
+        self.loads = loads
+        self.compute = compute
+        self.stores = stores
+        self.cse = cse
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()

@@ -498,20 +498,20 @@ class CommonTemplate:
             (torch.randn([2, 4, 16, 16]),),
         )
 
-    def test_max_pool2d1(self):
+    def test_adaptive_avg_pool2d1(self):
         def fn(x):
-            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
+            return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
+                x + 1, (4, 5)
+            )
 
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
         )
 
-    def test_adaptive_avg_pool2d1(self):
+    def test_max_pool2d1(self):
         def fn(x):
-            return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
-                x + 1, (4, 5)
-            )
+            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
 
         self.common(
             fn,
@@ -525,6 +525,16 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([16, 64, 55, 55]),),
+        )
+
+    def test_max_pool2d3(self):
+        def fn(x):
+            # with padding
+            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [1, 1])
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
     def test_alexnet_prefix(self):
@@ -634,6 +644,21 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([10, 4]), torch.randint(10, [8]), torch.tensor([0, 2, 6])),
+        )
+
+    def test_batch_norm_2d(self):
+        m = torch.nn.Sequential(
+            torch.nn.BatchNorm2d(10),
+            torch.nn.ReLU(),
+        )
+        m.eval()
+        self.common(
+            m,
+            (torch.randn([2, 10, 8, 8]),),
+        )
+        self.common(
+             m,
+             (torch.randn([3, 10, 16, 16]), ),
         )
 
 
