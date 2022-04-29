@@ -320,10 +320,13 @@ def fx2trt(subgraph, **kwargs):
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
     from fx2trt_oss.fx.trt_module import TRTModule
     from fx2trt_oss.fx.utils import LowerPrecision
+    from fx2trt_oss.fx.passes.lower_basic_pass import transform_setitem
 
     try:
         model = subgraph.model
         inputs = subgraph.example_inputs
+        # pass rewrite
+        model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)
         # Split out unsupported ops
         splitter_setting = TRTSplitterSetting()
