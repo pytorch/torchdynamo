@@ -86,6 +86,16 @@ class TritonOverrides(OpOverrides):
     def index_expr(expr, dtype):
         return kernel.indexing(expr)
 
+    @staticmethod
+    def masked(mask, body, other):
+        if other == float("-inf"):
+            other = 'float("-inf")'
+        else:
+            assert False, other
+        with kernel.mask_loads(mask) as new_mask:
+            result = body()
+        return ops.where(new_mask, result, other)
+
 
 @dataclasses.dataclass
 class RangeTree:
@@ -230,6 +240,7 @@ class TritonKernel(Kernel):
         self.indexing_code = IndentedBuffer()
         self.inside_reduction = reduction_numel != 1
         self.disabled_reduction_stores = dict()
+        self._load_mask = None
 
     def disable_reduction(self):
         @contextlib.contextmanager
@@ -304,11 +315,34 @@ class TritonKernel(Kernel):
         return expr
 
     def mask(self, reductions=True):
+        if self._load_mask:
+            return self._load_mask
         return (
             "mask=mask_reduction"
             if (self.inside_reduction and reductions)
             else "mask=mask"
         )
+
+    @contextlib.contextmanager
+    def mask_loads(self, mask):
+        var = self.cse.newvar()
+        if self.inside_reduction:
+            old_mask = "mask_reduction"
+        else:
+            old_mask = "mask"
+        self.compute.splice(
+            f"""
+                if NEED_MASK:
+                    {var} = {old_mask} & {mask}
+                else:
+                    {var} = {mask}
+            """
+        )
+        prior = self._load_mask
+        self._load_mask = var
+        with self.swap_buffers(self.compute, self.compute):
+            yield var
+        self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr):
         if (name, index) in self.disabled_reduction_stores:

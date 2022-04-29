@@ -657,8 +657,8 @@ class CommonTemplate:
             (torch.randn([2, 10, 8, 8]),),
         )
         self.common(
-             m,
-             (torch.randn([3, 10, 16, 16]), ),
+            m,
+            (torch.randn([3, 10, 16, 16]),),
         )
 
 
