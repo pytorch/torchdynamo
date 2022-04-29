@@ -316,6 +316,7 @@ def fx2trt(subgraph, **kwargs):
     import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
     from fx2trt_oss.fx.fx2trt import InputTensorSpec
     from fx2trt_oss.fx.fx2trt import TRTInterpreter
+    from fx2trt_oss.fx.passes.lower_basic_pass import transform_setitem
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitter
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
     from fx2trt_oss.fx.trt_module import TRTModule
@@ -324,6 +325,8 @@ def fx2trt(subgraph, **kwargs):
     try:
         model = subgraph.model
         inputs = subgraph.example_inputs
+        # pass rewrite
+        model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)
         # Split out unsupported ops
         splitter_setting = TRTSplitterSetting()
