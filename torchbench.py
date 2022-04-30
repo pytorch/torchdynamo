@@ -597,6 +597,7 @@ def cast_to_fp32(model, inputs):
         tree_map(
             lambda x: x.to(torch.float32)
             if getattr(x, "dtype", None) == torch.float16
+            or getattr(x, "dtype", None) == torch.float64
             else x,
             inputs,
         )

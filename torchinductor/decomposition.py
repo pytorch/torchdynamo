@@ -83,13 +83,6 @@ def gelu(x):
     return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar], decompositions)
-def rsub(a, b):
-    if isinstance(b, (int, float)):
-        b = torch.tensor(b, dtype=a.dtype, device=a.device)
-    return b - a
-
-
 @register_decomposition([aten.special_erf], decompositions)
 def special_erf(x):
     # note: triton may add a builtin for this
@@ -109,6 +102,36 @@ def special_erf(x):
     y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * torch.exp(-x * x)
 
     return sign * y
+
+
+@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar], decompositions)
+def rsub(a, b):
+    if isinstance(b, (int, float)):
+        b = torch.tensor(b, dtype=a.dtype, device=a.device)
+    return b - a
+
+
+@register_decomposition([aten.pow.Tensor_Scalar], decompositions)
+def pow(a, b):
+    # triton doesn't support pow, so need to rewrite it
+    if isinstance(b, float) and b == int(b):
+        return pow(a, int(b))
+    if isinstance(b, int) and b == 0:
+        return torch.ones_like(a)
+    elif isinstance(b, int) and b == 1:
+        return a
+    elif isinstance(b, int):
+        if b < 0:
+            return pow(torch.reciprocal(a), -b)
+
+        result = pow(a, b // 2)
+        result = result * result
+        if (b % 2) == 1:
+            result = result * a
+        return result
+    else:
+        assert False, "TODO: check correctness here"
+        return torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
 
 
 @register_decomposition([aten.masked_fill.Scalar], decompositions)

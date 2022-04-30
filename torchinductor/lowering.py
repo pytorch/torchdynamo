@@ -435,6 +435,35 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
     )
 
 
+DTYPE_ID_LOOKUP = {
+    6: torch.float32,
+    7: torch.float64,
+}
+
+
+def constant_like(n):
+    def _constant_like(x, *, dtype, device, layout, pin_memory=False):
+        assert not pin_memory
+        assert layout == 0
+        assert (
+            dtype in DTYPE_ID_LOOKUP
+        ), f"id {dtype}={x.get_dtype()} missing from DTYPE_ID_LOOKUP"
+        dtype = DTYPE_ID_LOOKUP[dtype]
+        assert dtype == x.get_dtype(), "is this correct?"
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=lambda index: ops.constant(n, dtype),
+            ranges=list(x.get_size()),
+        )
+
+    return _constant_like
+
+
+register_lowering(aten.zeros_like)(constant_like(0))
+register_lowering(aten.ones_like)(constant_like(1))
+
+
 @register_lowering(aten.gather, type_promote=False)
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
@@ -699,6 +728,7 @@ sub = register_pointwise(aten.sub)
 register_pointwise(aten.abs)
 register_pointwise(aten.add)
 register_pointwise(aten.log)
+register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
 register_pointwise(aten.mul)
@@ -707,7 +737,6 @@ register_pointwise(aten.reciprocal)
 register_pointwise(aten.sigmoid)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
-register_pointwise(aten.logical_not)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)

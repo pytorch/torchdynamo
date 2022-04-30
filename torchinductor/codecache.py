@@ -203,7 +203,7 @@ def pointwise_heuristics():
     # from triton import next_power_of_2
 
     def need_mask(args):
-        # return True
+        return True  # workaround for triton bug
         return (args["numel"] % args["BLOCK_SIZE"]) > 0
 
     def block_size(args):
@@ -221,6 +221,7 @@ def reduction_heuristics():
     from triton import next_power_of_2
 
     def need_mask(args):
+        return True  # workaround for triton bug
         return (args["numel"] % args["BLOCK_SIZE"]) > 0 or (
             args["reduction_numel"] % args["REDUCTION_SIZE"]
         ) > 0

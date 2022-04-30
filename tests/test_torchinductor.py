@@ -702,6 +702,33 @@ class CommonTemplate:
             ),
         )
 
+    def test_pow(self):
+        def fn(x):
+            return (
+                aten.pow(x, -8),
+                aten.pow(x, -7),
+                aten.pow(x, -6),
+                aten.pow(x, -5),
+                aten.pow(x, -4),
+                aten.pow(x, -3),
+                aten.pow(x, -2),
+                aten.pow(x, -1),
+                aten.pow(x, 0),
+                aten.pow(x, 1),
+                aten.pow(x, 2),
+                aten.pow(x, 3),
+                aten.pow(x, 4),
+                aten.pow(x, 5),
+                aten.pow(x, 6),
+                aten.pow(x, 7),
+                aten.pow(x, 8),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
