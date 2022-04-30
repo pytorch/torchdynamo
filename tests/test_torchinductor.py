@@ -679,6 +679,29 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_clone(self):
+        def fn(x):
+            return aten.clone(x) + 2, aten.clone(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_masked_fill(self):
+        def fn(mask, value):
+            return aten.masked_fill(value, mask, -1000000000.0) + 2, aten.masked_fill(
+                value / 2.0, torch.logical_not(mask), 667
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 1, [1, 16], dtype=torch.bool),
+                torch.randn([16, 16]),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

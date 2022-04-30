@@ -186,6 +186,8 @@ def where(cond, a, b):
 
 @register_lowering(aten.broadcast_tensors, broadcast=False, type_promote=False)
 def broadcast_tensors(*inputs):
+    if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
+        return broadcast_tensors(*inputs[0])
     target = functools.reduce(
         broadcast_symbolic_shapes, [x.get_size() for x in inputs], ()
     )
@@ -221,6 +223,8 @@ def squeeze(x, dim=None):
 
 @register_lowering(aten.expand)
 def expand(x, sizes):
+    if isinstance(x, ir.BaseConstant):
+        return ExpandView.create(x, tuple(sizes))
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
     if tuple(x.get_size()) == tuple(sizes):
@@ -394,6 +398,17 @@ def convolution(
             output_padding,
             groups,
         )
+    )
+
+
+@register_lowering(aten.clone)
+def clone(x, *, memory_format=0):
+    # TODO(jansel): memory format
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=x.make_loader(),
+        ranges=list(x.get_size()),
     )
 
 
@@ -692,6 +707,7 @@ register_pointwise(aten.reciprocal)
 register_pointwise(aten.sigmoid)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
+register_pointwise(aten.logical_not)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)

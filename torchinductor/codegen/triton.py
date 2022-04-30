@@ -96,6 +96,10 @@ class TritonOverrides(OpOverrides):
             result = body()
         return ops.where(new_mask, result, other)
 
+    @staticmethod
+    def logical_not(a):
+        return f"~{a}"
+
 
 @dataclasses.dataclass
 class RangeTree:

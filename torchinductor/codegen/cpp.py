@@ -33,6 +33,7 @@ DTYPE_TO_CPP = {
     torch.int16: "short",
     torch.int8: "signed char",
     torch.uint8: "unsigned char",
+    torch.bool: "bool",
 }
 INDEX_TYPE = "long"
 
@@ -159,6 +160,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def and_(a, b):
         return f"{a} && {b}"
+
+    @staticmethod
+    def logical_not(a):
+        return f"!{a}"
 
 
 class CppKernel(Kernel):
@@ -311,15 +316,16 @@ class CppKernel(Kernel):
 
     @contextlib.contextmanager
     def write_to_suffix(self):
-        prior = (self.loads, self.compute, self.stores)
+        prior = (self.loads, self.compute, self.stores, self.cse)
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
+        self.cse = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)
         self.reduction_suffix.splice(self.compute)
         self.reduction_suffix.splice(self.stores)
-        (self.loads, self.compute, self.stores) = prior
+        (self.loads, self.compute, self.stores, self.cse) = prior
 
     @classmethod
     def codegen(cls, wrapper):

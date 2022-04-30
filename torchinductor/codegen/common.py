@@ -209,13 +209,29 @@ class KernelArgs:
 class CSE:
     """Common subexpression elimination"""
 
-    def __init__(self, prefix="", suffix="", name_prefix="tmp", iter_buffers=None):
+    def __init__(
+        self,
+        prefix="",
+        suffix="",
+        name_prefix="tmp",
+        iter_buffers=None,
+        store_cache=None,
+    ):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
-        self.store_cache = {}
+        self.store_cache = store_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
+
+    def clone(self):
+        return CSE(
+            self.prefix,
+            self.suffix,
+            self.name_prefix,
+            self.iter_buffer_ids,
+            self.store_cache,
+        )
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
         if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
@@ -270,9 +286,7 @@ class Kernel(CodeGen):
         self.loads = lb
         self.compute = cb
         self.stores = sb
-        self.cse = CSE(
-            self.newvar_prefix, self.suffix, iter_buffers=cse.iter_buffer_ids
-        )
+        self.cse = cse.clone()
         yield
         self.loads = loads
         self.compute = compute

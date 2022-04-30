@@ -1230,5 +1230,5 @@ class StorageBox(MutableBox):
                 ),
                 data=self.data,
             ).get_read_writes()
-            if len(read_writes.reads) * users > 4:
+            if (len(read_writes.reads) - 1) * users > 2:
                 self.realize()

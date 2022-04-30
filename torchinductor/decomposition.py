@@ -73,7 +73,7 @@ def tanh(x):
 
 @register_decomposition([aten.leaky_relu], decompositions)
 def leaky_relu(x, negative_slope=0.01):
-    return torch.relu(x) + (-negative_slope * torch.relu(-x))
+    return torch.relu(x) + (-negative_slope) * torch.relu(-x)
 
 
 @register_decomposition([aten.gelu], decompositions)
@@ -109,6 +109,14 @@ def special_erf(x):
     y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * torch.exp(-x * x)
 
     return sign * y
+
+
+@register_decomposition([aten.masked_fill.Scalar], decompositions)
+def masked_fill(value, mask, other):
+    if isinstance(other, (int, float)):
+        other = torch.tensor(other, dtype=value.dtype, device=value.device)
+    value, mask, other = torch.broadcast_tensors(value, mask, other)
+    return torch.where(mask, other, value)
 
 
 def _batch_norm(
