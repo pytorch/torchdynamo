@@ -11,8 +11,7 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
-from ..virtualized import graph
-from ..virtualized import kernel
+from ..virtualized import V
 from ..virtualized import ops
 
 
@@ -166,13 +165,13 @@ class KernelArgs:
         self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
-        assert name not in graph.removed_buffers, name
+        assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        assert name not in graph.removed_buffers, name
+        assert name not in V.graph.removed_buffers, name
         assert name not in self.input_buffers, name
         return self._lookup("out_ptr", self.output_buffers, name)
 
@@ -189,9 +188,9 @@ class KernelArgs:
         from .cpp import INDEX_TYPE
 
         # TODO(jansel): replace this with data from scheduler
-        buffer_types = {x.get_name(): x.get_dtype() for x in graph.buffers}
+        buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         buffer_types.update(
-            {name: val.get_dtype() for name, val in graph.graph_inputs.items()}
+            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
         )
 
         argdefs = []
@@ -338,7 +337,7 @@ class Kernel(CodeGen):
             @staticmethod
             def store(name, index, value):
                 self.cse.store_cache[(name, index)] = value
-                if name not in graph.removed_buffers:
+                if name not in V.graph.removed_buffers:
                     return self.store(name, index, value)
 
             @staticmethod
@@ -346,15 +345,15 @@ class Kernel(CodeGen):
                 return self.reduction(name, dtype, reduction_type, index, value)
 
         super().__enter__()
-        parent_handler = self.overrides(ops.get_handler())
-        self.exit_stack.enter_context(ops.set_handler(CSEProxy()))
-        self.exit_stack.enter_context(kernel.set_handler(self))
+        parent_handler = self.overrides(V.get_ops_handler())
+        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
+        self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
-        index = sympy.simplify(index.subs(graph.sizevars.replacements))
+        index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
         subs = {
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
         }

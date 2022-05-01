@@ -13,9 +13,9 @@ from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 
 from . import config
-from . import virtualized
 from .decomposition import decompositions
 from .graph import GraphLowering
+from .virtualized import V
 
 
 class CheckEachNode(torch.fx.Interpreter):
@@ -41,7 +41,7 @@ class CheckEachNode(torch.fx.Interpreter):
 
         gm = torch.fx.GraphModule({}, g)
         graph = GraphLowering(gm)
-        with virtualized.graph.set_handler(graph):
+        with V.set_graph_handler(graph):
             graph.run(*args, **kwargs)
             actual = graph.compile_to_fn()(*a_args)
 
@@ -120,7 +120,7 @@ def compile_fx(
         wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
     graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
-    with virtualized.graph.set_handler(graph):
+    with V.set_graph_handler(graph):
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 

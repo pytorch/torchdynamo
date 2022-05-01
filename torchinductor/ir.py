@@ -15,8 +15,7 @@ from sympy import Integer
 from . import dependencies
 from .codegen.common import product
 from .dependencies import extract_read_writes
-from .virtualized import MockHandler
-from .virtualized import graph
+from .virtualized import V
 from .virtualized import ops
 
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -121,7 +120,7 @@ class Loops(IRNode):
 
     def inner_fn_str(self):
         try:
-            with ops.set_handler(MockHandler()):
+            with V.set_ops_handler(V.MockHandler()):
                 return self.inner_fn(self._index(self.ranges))
         except Exception as e:
             return f"inner_fn(): {e}"
@@ -173,7 +172,7 @@ class Reduction(Loops):
 
     def inner_fn_str(self):
         try:
-            with ops.set_handler(MockHandler()):
+            with V.set_ops_handler(V.MockHandler()):
                 return self.inner_fn(
                     self._index(self.ranges), self._index(self.reduction_ranges, "r")
                 )
@@ -361,7 +360,7 @@ class View(BaseView):
 
     @staticmethod
     def handle_negative_index(idx, size):
-        sizevars = graph.sizevars
+        sizevars = V.graph.sizevars
         if sizevars.size_hint(idx) < 0:
             sizevars.guard_lt(idx, 0)
             idx = idx + size
@@ -399,8 +398,12 @@ class View(BaseView):
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):
-        new_size = [sympy.expand(x).subs(graph.sizevars.replacements) for x in new_size]
-        old_size = [sympy.expand(x).subs(graph.sizevars.replacements) for x in old_size]
+        new_size = [
+            sympy.expand(x).subs(V.graph.sizevars.replacements) for x in new_size
+        ]
+        old_size = [
+            sympy.expand(x).subs(V.graph.sizevars.replacements) for x in old_size
+        ]
 
         new_size = list(new_size)
         for i in range(len(new_size)):
@@ -409,7 +412,7 @@ class View(BaseView):
                 new_size[i] = CleanDiv(product(old_size), product(new_size))
                 break
 
-        graph.sizevars.guard_equals(product(old_size), product(new_size))
+        V.graph.sizevars.guard_equals(product(old_size), product(new_size))
         return old_size, new_size
 
     @staticmethod
@@ -417,7 +420,7 @@ class View(BaseView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-        size_hint = graph.sizevars.size_hint
+        size_hint = V.graph.sizevars.size_hint
         vars = [sympy.Symbol(f"view{i}") for i in range(len(new_size))]
 
         stack_new = list(zip(vars, new_size))
@@ -434,14 +437,14 @@ class View(BaseView):
                 stack_old.append(size_old)  # re-add
             elif size_hint(size_new) == size_hint(size_old):
                 view_expr.append(var)
-                graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
                 divisor = sympy.Integer(1)
                 modulus = size_old
@@ -452,7 +455,7 @@ class View(BaseView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)
             else:
                 assert False
 
@@ -532,9 +535,9 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = graph.sizevars.codegen_shape_tuple(self.layout.size)
-        stride = graph.sizevars.codegen_shape_tuple(self.layout.stride)
-        offset = graph.sizevars.codegen_sizevar(self.layout.offset)
+        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
+        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
+        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
         if offset != "0":
             return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
         return f"as_strided({self.get_name()}, {size}, {stride})"
@@ -548,7 +551,7 @@ class SliceView(View):
         if start == 0 and end >= 2**63 and step == 1:
             return x
 
-        sizevars = graph.sizevars
+        sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
         start = cls.handle_negative_index(start, new_size[dim])
@@ -833,8 +836,8 @@ class ExternKernel(Buffer):
         return args
 
     def codegen_size_asserts(self, wrapper):
-        size = graph.sizevars.codegen_shape_tuple(self.get_size())
-        stride = graph.sizevars.codegen_shape_tuple(self.get_stride())
+        size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
+        stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
         wrapper.body.writeline(f"assert {self.get_name()}.size() == {size}")
         wrapper.body.writeline(f"assert {self.get_name()}.stride() == {stride}")
 
@@ -854,7 +857,7 @@ class ExternKernelOut(ExternKernel):
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
         super().__init__(None, layout, inputs, constant_args)
         self.output_view = output_view
-        self.name = graph.register_buffer(self)
+        self.name = V.graph.register_buffer(self)
 
     def should_allocate(self):
         return True
@@ -870,7 +873,7 @@ class ExternKernelAlloc(ExternKernel):
 
     def __init__(self, layout, inputs, constant_args=()):
         super().__init__(None, layout, inputs, constant_args)
-        self.name = graph.register_buffer(self)
+        self.name = V.graph.register_buffer(self)
 
     def should_allocate(self):
         return False
@@ -883,7 +886,7 @@ class MatrixMultiply(ExternKernelOut):
     def create(cls, a, b):
         *m, k1 = a.get_size()
         k2, n = b.get_size()
-        graph.sizevars.guard_equals(k1, k2)
+        V.graph.sizevars.guard_equals(k1, k2)
         a = cls.realize_input(a)
         b = cls.realize_input(b)
         if len(m) != 1 and not a.get_layout().is_contiguous():
@@ -908,8 +911,8 @@ class BatchMatrixMultiply(ExternKernelOut):
     def create(cls, a, b):
         b1, m, k1 = a.get_size()
         b2, k2, n = b.get_size()
-        b3 = graph.sizevars.guard_equals(b1, b2)
-        graph.sizevars.guard_equals(k1, k2)
+        b3 = V.graph.sizevars.guard_equals(b1, b2)
+        V.graph.sizevars.guard_equals(k1, k2)
         a = cls.require_stride1(cls.realize_input(a))
         b = cls.require_stride1(cls.realize_input(b))
 
@@ -999,7 +1002,7 @@ class FallbackKernel(ExternKernelAlloc):
         # TODO(jansel): replace this with dynamic shape formulas
         example_args = [
             torch.zeros(
-                [graph.sizevars.guard_static_shape(s) for s in x.get_size()],
+                [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
                 dtype=x.get_dtype(),
                 device=x.get_device(),
             )
@@ -1054,7 +1057,7 @@ class MultiOutput(ExternKernel):
 
     def __init__(self, layout, input, index):
         super().__init__(None, layout, [input], ())
-        self.name = graph.register_buffer(self)
+        self.name = V.graph.register_buffer(self)
         self.index = index
 
     def should_allocate(self):
@@ -1087,7 +1090,7 @@ class Convolution(ExternKernelAlloc):
         assert isinstance(groups, int)
 
         weight_shape = [
-            sympy.Integer(graph.sizevars.guard_static_shape(s))
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
             for s in weight.get_size()
         ]
 
@@ -1097,7 +1100,7 @@ class Convolution(ExternKernelAlloc):
         if bias is not None:
             bias = cls.require_stride1(cls.realize_input(bias))
             (bias_shape,) = [
-                sympy.Integer(graph.sizevars.guard_static_shape(s))
+                sympy.Integer(V.graph.sizevars.guard_static_shape(s))
                 for s in bias.get_size()
             ]
             assert bias_shape == out_channels
@@ -1110,7 +1113,7 @@ class Convolution(ExternKernelAlloc):
             batch, in_channels2, *input_size = x.get_size()
             output_size = [batch]
 
-        graph.sizevars.guard_equals(in_channels1, in_channels2)
+        V.graph.sizevars.guard_equals(in_channels1, in_channels2)
 
         output_size.append(out_channels)
 
@@ -1135,7 +1138,7 @@ class Convolution(ExternKernelAlloc):
                 + 2 * output_padding[i]
             )
             output_size[-1] = sympy.Integer(
-                graph.sizevars.guard_static_shape(output_size[-1])
+                V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
         output_layout = FixedLayout(
@@ -1214,7 +1217,7 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
-        self.data.name = graph.register_buffer(self.data)
+        self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
     def mark_reuse(self, users):

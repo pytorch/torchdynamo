@@ -6,6 +6,8 @@ forward_only = True
 
 dynamic_shapes = True
 
+static_weight_shapes = True
+
 
 class cpp:
     threads = -1  # set to cpu_count()

@@ -12,8 +12,7 @@ import torch
 from .. import codecache
 from .. import ir
 from ..scheduler import Scheduler
-from ..virtualized import graph
-from ..virtualized import kernel
+from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
 from .common import IndentedBuffer
@@ -84,7 +83,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        return kernel.indexing(expr)
+        return V.kernel.indexing(expr)
 
     @staticmethod
     def masked(mask, body, other):
@@ -92,7 +91,7 @@ class TritonOverrides(OpOverrides):
             other = 'float("-inf")'
         else:
             assert False, other
-        with kernel.mask_loads(mask) as new_mask:
+        with V.kernel.mask_loads(mask) as new_mask:
             result = body()
         return ops.where(new_mask, result, other)
 
@@ -124,10 +123,10 @@ class RangeTree:
     def child_node(self, length):
         if length not in self.children:
             node = RangeTreeEntry(
-                f"{self.prefix}{next(kernel.iter_vars_count)}", length, self
+                f"{self.prefix}{next(V.kernel.iter_vars_count)}", length, self
             )
             self.children[length] = node
-            kernel.range_tree_nodes[node.symbol()] = node
+            V.kernel.range_tree_nodes[node.symbol()] = node
             self.var_list.append(node.symbol())
         else:
             node = self.children[length]
@@ -173,19 +172,19 @@ class RangeTreeEntry(RangeTree):
         self.codegen_next = functools.lru_cache(None)(self._codegen_next)
 
     def _codegen_next(self):
-        denom = texpr(kernel.rename_indexing(self.length))
-        kernel.indexing_code.writeline(
+        denom = texpr(V.kernel.rename_indexing(self.length))
+        V.kernel.indexing_code.writeline(
             f"{self.name}_next = {self.parent.codegen_next()} // {TritonPrinter.paren(denom)}"
         )
         return f"{self.name}_next"
 
     def _codegen(self):
-        denom = texpr(kernel.rename_indexing(self.length))
+        denom = texpr(V.kernel.rename_indexing(self.length))
         if self.numel == 1:
             line = f"{self.name} = {self.parent.codegen_next()}"
         else:
             line = f"{self.name} = {self.parent.codegen_next()} % {TritonPrinter.paren(denom)}"
-        kernel.indexing_code.writeline(line)
+        V.kernel.indexing_code.writeline(line)
         return self.name
 
     def symbol(self):
@@ -485,7 +484,7 @@ class TritonKernel(Kernel):
             node.codegen(wrapper)
             scheduler.barrier()
 
-        scheduler = Scheduler(product, graph.buffers)
+        scheduler = Scheduler(product, V.graph.buffers)
 
         for group, reduction_group in scheduler.iter_runable_groups(
             codegen_extern_call

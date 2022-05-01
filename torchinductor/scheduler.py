@@ -4,9 +4,9 @@ import dataclasses
 from typing import Any
 from typing import Dict
 
-from torchinductor import ir
-from torchinductor.dependencies import StarDep
-from torchinductor.virtualized import graph
+from . import ir
+from .dependencies import StarDep
+from .virtualized import V
 
 
 class OutputNode:
@@ -43,7 +43,7 @@ class ExternKernelSchdulerNode(BaseSchedulerNode):
 
     def run(self, codegen_extern_call):
         if self.node.should_allocate():
-            graph.wrapper_code.codegen_allocation(self.node)
+            V.graph.wrapper_code.codegen_allocation(self.node)
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
         self.scheduler.kernels.append(self.node)
@@ -95,7 +95,7 @@ class SchedulerNode(BaseSchedulerNode):
         return bool(self.node.data.get_reduction_type())
 
     def run(self, vars, reduction_vars):
-        graph.wrapper_code.codegen_allocation(self.node)
+        V.graph.wrapper_code.codegen_allocation(self.node)
         self.scheduler.run_count += 1
         name = self.get_name()
         indexer = self.node.layout.make_indexer()
@@ -169,7 +169,7 @@ class Scheduler:
         self.run_count = 0
         self.nodes = []
         self.kernels = []
-        self.available_buffer_names = set(graph.graph_inputs.keys())
+        self.available_buffer_names = set(V.graph.graph_inputs.keys())
         self.pending_buffer_names = set()
         self.fusable_deps = set()
         for node in nodes:
@@ -182,7 +182,7 @@ class Scheduler:
 
     def compute_users(self):
         name_to_users = collections.defaultdict(list)
-        for node in graph.graph_outputs:
+        for node in V.graph.graph_outputs:
             name_to_users[node.get_name()].append(OutputNode(StarDep(node.get_name())))
         for node in reversed(self.nodes):
             node.users = name_to_users[node.get_name()]
@@ -196,12 +196,12 @@ class Scheduler:
                 updated_nodes.append(node)
             else:
                 # dead code
-                graph.removed_buffers.add(node.get_name())
+                V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
     def maybe_remove_buffer(self, node: SchedulerNode, broadcast_after_reduce=False):
         if node.can_remove_buffer(broadcast_after_reduce=broadcast_after_reduce):
-            graph.removed_buffers.add(node.get_name())
+            V.graph.removed_buffers.add(node.get_name())
 
     def enqueue(self, node):
         if isinstance(node, (tuple, list)):

@@ -6,8 +6,7 @@ from typing import Set
 
 import sympy
 
-from .virtualized import MockHandler
-from .virtualized import ops
+from .virtualized import V
 
 
 class MemoryDep(typing.NamedTuple):
@@ -31,7 +30,7 @@ class ReadWrites:
     writes: Set[MemoryDep]
 
 
-class RecordLoadStore(MockHandler):
+class RecordLoadStore(V.MockHandler):
     def __init__(self, size):
         super(RecordLoadStore, self).__init__()
         self._reads = set()
@@ -61,6 +60,6 @@ def extract_read_writes(fn, *argsizes):
         new_sizes.append(new_size)
         args.append(reindex([sympy.Symbol(f"d{next(cnt)}") for _ in new_size]))
     rw = RecordLoadStore(new_sizes[0])
-    with ops.set_handler(rw):
+    with V.set_ops_handler(rw):
         fn(*args)
     return ReadWrites(rw._reads, rw._writes)

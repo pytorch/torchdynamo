@@ -5,6 +5,8 @@ from threading import local
 from torch.fx.graph import inplace_methods
 from torch.fx.graph import magic_methods
 
+import torchdynamo
+
 threadlocal = local()
 
 
@@ -19,25 +21,25 @@ class Virtualized:
         self._key = f"__torchinductor_{vname}"
         self._default = default
 
-    def set_handler(self, value):
-        prior = self.get_handler()
+    def _set_handler(self, value):
+        prior = self._get_handler()
         setattr(threadlocal, self._key, value)
 
         @contextmanager
         def ctx():
             yield
-            self.set_handler(prior)
+            self._set_handler(prior)
 
         return ctx()
 
-    def get_handler(self):
+    def _get_handler(self):
         try:
             return getattr(threadlocal, self._key)
         except AttributeError:
             return self._default()
 
     def __getattr__(self, name):
-        return getattr(self.get_handler(), name)
+        return getattr(self._get_handler(), name)
 
 
 class NullHandler:
@@ -82,5 +84,33 @@ class WrapperHandler:
 MockHandler._init_cls()
 
 ops = Virtualized("ops", MockHandler)
-graph = Virtualized("graph", NullHandler)
-kernel = Virtualized("kernel", NullHandler)
+_graph = Virtualized("graph", NullHandler)
+_kernel = Virtualized("kernel", NullHandler)
+
+
+class _V:
+    MockHandler = MockHandler
+    WrapperHandler = WrapperHandler
+
+    set_ops_handler = ops._set_handler
+    get_ops_handler = ops._get_handler
+    set_graph_handler = _graph._set_handler
+    set_kernel_handler = _kernel._set_handler
+
+    @property
+    def ops(self) -> MockHandler:
+        """The operator handler specific to the current codegen task"""
+        return ops._get_handler()
+
+    @property
+    def graph(self) -> "torchdynamo.graph.Graph":
+        """The graph currently being generated"""
+        return _graph._get_handler()
+
+    @property
+    def kernel(self) -> "torchdynamo.codegen.common.Kernel":
+        """The kernel currently being generated"""
+        return _kernel._get_handler()
+
+
+V = _V()

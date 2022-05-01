@@ -14,8 +14,7 @@ from .. import codecache
 from .. import config
 from .. import ir
 from ..scheduler import Scheduler
-from ..virtualized import graph
-from ..virtualized import kernel
+from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
 from .common import ExprPrinter
@@ -139,22 +138,22 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        return ops.to_dtype(cexpr(kernel.rename_indexing(expr)), dtype)
+        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
-        var = kernel.cse.newvar()
+        var = V.kernel.cse.newvar()
         assert isinstance(other, float)
         if other == float("-inf"):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
         else:
             assert False
         code.writeline(f"if({mask})")
-        with kernel.swap_buffers(code), code.indent():
+        with V.kernel.swap_buffers(code), code.indent():
             result = body()
             code.writeline(f"{var} = {result};")
-        kernel.compute.splice(code)
+        V.kernel.compute.splice(code)
         return var
 
     @staticmethod
@@ -203,7 +202,7 @@ class CppKernel(Kernel):
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
         self.stores.writeline(f"{reduction_combine(reduction_type, tmpvar, value)};")
-        if name not in graph.removed_buffers:
+        if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
         self.cse.store_cache[(name, index)] = tmpvar
@@ -225,7 +224,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
-        return graph.sizevars.size_hint(product(self.call_ranges))
+        return V.graph.sizevars.size_hint(product(self.call_ranges))
 
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
@@ -303,7 +302,7 @@ class CppKernel(Kernel):
         par = 1
         depth = 0
         for expr in ranges:
-            hint = graph.sizevars.size_hint(expr)
+            hint = V.graph.sizevars.size_hint(expr)
             if par >= 2 * threads or par == threads:
                 break
             if seq // threads < config.cpp.min_chunk_size:
@@ -336,7 +335,7 @@ class CppKernel(Kernel):
             scheduler.barrier()
             kernel_group = KernelGroup()
 
-        scheduler = Scheduler(tuple, graph.buffers)
+        scheduler = Scheduler(tuple, V.graph.buffers)
         kernel_group = KernelGroup()
 
         for group, reduction_group in scheduler.iter_runable_groups(

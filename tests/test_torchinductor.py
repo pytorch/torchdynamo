@@ -704,25 +704,7 @@ class CommonTemplate:
 
     def test_pow(self):
         def fn(x):
-            return (
-                aten.pow(x, -8),
-                aten.pow(x, -7),
-                aten.pow(x, -6),
-                aten.pow(x, -5),
-                aten.pow(x, -4),
-                aten.pow(x, -3),
-                aten.pow(x, -2),
-                aten.pow(x, -1),
-                aten.pow(x, 0),
-                aten.pow(x, 1),
-                aten.pow(x, 2),
-                aten.pow(x, 3),
-                aten.pow(x, 4),
-                aten.pow(x, 5),
-                aten.pow(x, 6),
-                aten.pow(x, 7),
-                aten.pow(x, 8),
-            )
+            return [aten.pow(x, e) for e in range(-8, 9)]
 
         self.common(
             fn,
@@ -736,6 +718,16 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([8, 16, 8, 8]),),
+        )
+
+    @unittest.skip("TODO")
+    def test_cat(self):
+        def fn(a):
+            return torch.cat((a, a + 1, a + 2), 1)
+
+        self.common(
+            fn,
+            (torch.randn([8, 16]),),
         )
 
 

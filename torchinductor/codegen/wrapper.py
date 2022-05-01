@@ -1,7 +1,7 @@
 from itertools import count
 
 from .. import codecache
-from ..virtualized import graph
+from ..virtualized import V
 from .common import CodeGen
 from .common import IndentedBuffer
 from .common import Kernel
@@ -37,13 +37,13 @@ class WrapperCodeGen(CodeGen):
             """
         )
         self.prefix.writelines(
-            ["", "", f"def call({', '.join(graph.graph_inputs.keys())}):"]
+            ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
         with self.prefix.indent():
-            graph.sizevars.codegen(self.prefix, graph.graph_inputs)
+            V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
 
         empty_like_cache = dict()
-        for name, value in graph.graph_inputs.items():
+        for name, value in V.graph.graph_inputs.items():
             device = value.get_device()
             dtype = value.get_dtype()
             shape = tuple(value.get_size())
@@ -56,7 +56,7 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
-        if name in graph.removed_buffers:
+        if name in V.graph.removed_buffers:
             return
         device = buffer.get_device()
         dtype = buffer.get_dtype()
@@ -76,7 +76,7 @@ class WrapperCodeGen(CodeGen):
         result.splice(self.prefix)
         with result.indent():
             result.splice(self.body)
-            output_refs = [x.codegen_reference() for x in graph.graph_outputs]
+            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
             result.writeline("return (" + ", ".join(output_refs) + ", )")
         return result.getvalue()
 

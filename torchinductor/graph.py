@@ -49,11 +49,12 @@ class GraphLowering(torch.fx.Interpreter):
                     [(ex.stride(i), i) for i in range(len(stride)) if stride[i] is None]
                 )[0]
                 stride[i] = self.sizevars[val]
-
-        # print(f"{ex.size()} = {size}, {ex.stride()} = {stride}")
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
+        """
+        Primarily used to weights
+        """
         size = [sympy.Integer(i) for i in ex.size()]
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
@@ -84,17 +85,20 @@ class GraphLowering(torch.fx.Interpreter):
         if self.device is None:
             self.device = example.device
         assert example.device == self.device
-        if len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes:
+        if config.static_weight_shapes and (
+            len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
+        ):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
-        data = InputBuffer(
-            target,
-            FixedLayout(example.device, example.dtype, sizes, strides),
+        tensor = TensorBox.create(
+            InputBuffer(
+                target,
+                FixedLayout(example.device, example.dtype, sizes, strides),
+            )
         )
-        tensor = TensorBox.create(data)
         self.graph_inputs[target] = tensor
         return tensor
 

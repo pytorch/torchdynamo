@@ -16,7 +16,7 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
-from .virtualized import graph
+from .virtualized import V
 from .virtualized import ops
 
 lowerings = {}
@@ -94,7 +94,7 @@ def broadcast_symbolic_shapes(a, b):
         elif a == 1:
             output.append(b)
         else:
-            graph.sizevars.guard_equals(a, b)
+            V.graph.sizevars.guard_equals(a, b)
             if len(sympy.expand(b).free_symbols) < len(sympy.expand(a).free_symbols):
                 output.append(b)  # prefer shorter formula
             else:
@@ -229,7 +229,7 @@ def expand(x, sizes):
     assert isinstance(sizes, (list, tuple))
     if tuple(x.get_size()) == tuple(sizes):
         return x
-    x.mark_reuse(graph.sizevars.size_hint(product(sizes) / product(x.get_size())))
+    x.mark_reuse(V.graph.sizevars.size_hint(product(sizes) / product(x.get_size())))
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -262,7 +262,7 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    x.mark_reuse(graph.sizevars.size_hint(product(new_size) / product(old_size)))
+    x.mark_reuse(V.graph.sizevars.size_hint(product(new_size) / product(old_size)))
     x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),
@@ -303,7 +303,7 @@ def select(x, dim, idx):
 @register_lowering(aten.split)
 def split(x, sizes, dim):
     dim = _validate_dim(x, dim, 0)
-    x_size = graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, int):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
@@ -335,7 +335,7 @@ def _validate_dim(x, dim, offset):
 @register_lowering(aten.glu)
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
-    new_len = graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
