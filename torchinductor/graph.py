@@ -2,6 +2,7 @@ import collections
 import operator
 from itertools import chain
 
+import sympy
 import torch
 import torch.fx
 from sympy import Integer
@@ -52,7 +53,12 @@ class GraphLowering(torch.fx.Interpreter):
         # print(f"{ex.size()} = {size}, {ex.stride()} = {stride}")
         return size, stride
 
-    def __init__(self, gm: torch.fx.GraphModule):
+    def static_sizes_strides(self, ex: torch.Tensor):
+        size = [sympy.Integer(i) for i in ex.size()]
+        stride = [sympy.Integer(i) for i in ex.stride()]
+        return size, stride
+
+    def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs):
         super().__init__(gm)
         self.sizevars = SizeVarAllocator("s")
         self.graph_inputs = collections.OrderedDict()
@@ -61,6 +67,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers = []
         self.removed_buffers = set()
         self.wrapper_code = None
+        self.num_dynamic_inputs = num_dynamic_inputs
+        self.num_static_inputs = None
+
+    def run(self, *args):
+        self.num_static_inputs = len(args) - self.num_dynamic_inputs
+        return super().run(*args)
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         name = f"buf{len(self.buffers)}"
@@ -72,7 +84,11 @@ class GraphLowering(torch.fx.Interpreter):
         if self.device is None:
             self.device = example.device
         assert example.device == self.device
-        sizes, strides = self.symbolic_sizes_strides(example)
+        if len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes:
+            # the first N inputs are weights
+            sizes, strides = self.static_sizes_strides(example)
+        else:
+            sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
         data = InputBuffer(
             target,

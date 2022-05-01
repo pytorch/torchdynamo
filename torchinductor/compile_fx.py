@@ -119,7 +119,7 @@ def compile_fx(
     if False:
         wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
-    graph = GraphLowering(gm)
+    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
     with virtualized.graph.set_handler(graph):
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
