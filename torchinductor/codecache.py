@@ -65,11 +65,11 @@ def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python", "omp5"]
     else:
         ipaths = []
         lpaths = []
-        libs = ["gomp"]
+        libs = ["omp5"]
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -200,15 +200,15 @@ class TritonCodeCache:
 
 def pointwise_heuristics():
     """args to @triton.heuristics()"""
-    # from triton import next_power_of_2
+    from triton import next_power_of_2
 
     def need_mask(args):
-        return True  # workaround for triton bug
+        return True
         return (args["numel"] % args["BLOCK_SIZE"]) > 0
 
     def block_size(args):
-        # return min(1024, next_power_of_2(args["numel"]))
-        return 1024
+        return min(1024, next_power_of_2(args["numel"]))
+        # return 1024
 
     return {
         "BLOCK_SIZE": block_size,
@@ -221,7 +221,7 @@ def reduction_heuristics():
     from triton import next_power_of_2
 
     def need_mask(args):
-        return True  # workaround for triton bug
+        return True
         return (args["numel"] % args["BLOCK_SIZE"]) > 0 or (
             args["reduction_numel"] % args["REDUCTION_SIZE"]
         ) > 0

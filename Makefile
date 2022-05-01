@@ -36,6 +36,8 @@ lint:
 lint-deps:
 	grep -E '(black|flake8|isort|click)' requirements.txt | xargs pip install
 
+setup_lint: lint-deps
+
 setup:
 	pip install -r requirements.txt
 

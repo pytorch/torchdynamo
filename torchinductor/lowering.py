@@ -332,6 +332,15 @@ def _validate_dim(x, dim, offset):
     return dim
 
 
+@register_lowering(aten.glu)
+def glu(x, dim=-1):
+    dim = _validate_dim(x, dim, 0)
+    new_len = graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
+    a = slice_(x, dim, 0, new_len)
+    b = slice_(x, dim, new_len, new_len * 2)
+    return mul(a, sigmoid(b))
+
+
 @register_lowering(aten.mm)
 def mm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.MatrixMultiply.create(a, b))
@@ -720,7 +729,9 @@ register_lowering(aten.min)(make_reduction("min"))
 
 div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)
+mul = register_pointwise(aten.mul)
 relu = register_pointwise(aten.relu)
+sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub)
@@ -731,10 +742,8 @@ register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
-register_pointwise(aten.mul)
 register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
-register_pointwise(aten.sigmoid)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 

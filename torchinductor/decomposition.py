@@ -85,6 +85,8 @@ def gelu(x):
 
 @register_decomposition([aten.special_erf], decompositions)
 def special_erf(x):
+    # TODO(jansel): this might be crazy slow.  Triton doesn't have the cuda ::erf() builtin.
+
     # note: triton may add a builtin for this
     # from https://www.johndcook.com/blog/2009/01/19/stand-alone-error-function-erf/
     a1 = 0.254829592

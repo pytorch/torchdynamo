@@ -729,6 +729,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_glu(self):
+        def fn(x):
+            return aten.glu(x, -1), aten.glu(x, 1), aten.glu(x, 2)
+
+        self.common(
+            fn,
+            (torch.randn([8, 16, 8, 8]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
