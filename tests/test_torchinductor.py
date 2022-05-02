@@ -91,7 +91,9 @@ def check_model(self: TestCase, model, example_inputs):
 def check_model_cuda(self: TestCase, model, example_inputs):
     if hasattr(model, "to"):
         model = model.to("cuda")
-    example_inputs = tuple(x.to("cuda") for x in example_inputs)
+    # preserve strides of the input on the device
+    copy_fn = lambda x: torch.empty_strided(x.size(), x.stride(), device="cuda", dtype=x.dtype).copy_(x)
+    example_inputs = tuple(copy_fn(x) for x in example_inputs)
     check_model(self, model, example_inputs)
 
 
