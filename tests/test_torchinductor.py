@@ -582,7 +582,7 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
-    def test_tahn(self):
+    def test_tanh(self):
         def fn(x):
             return aten.tanh(x) + 2, aten.tanh(x + 1)
 
