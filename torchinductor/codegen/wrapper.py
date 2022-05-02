@@ -1,6 +1,7 @@
 from itertools import count
 
 from .. import codecache
+from .. import ir
 from ..virtualized import V
 from .common import CodeGen
 from .common import IndentedBuffer
@@ -50,14 +51,24 @@ class WrapperCodeGen(CodeGen):
             stride = tuple(value.get_stride())
             empty_like_cache.setdefault((device, dtype, shape, stride), name)
         self.empty_like_cache = empty_like_cache
+        self.allocated = set()
 
     def next_kernel_name(self):
         return f"kernel{next(self._names_iter)}"
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
-        if name in V.graph.removed_buffers:
+        if name in V.graph.removed_buffers or name in self.allocated:
             return
+        self.allocated.add(name)
+
+        layout = buffer.get_layout()
+        if isinstance(layout, ir.AliasedLayout):
+            assert isinstance(layout.view, ir.ReinterpretView)
+            self.codegen_allocation(layout.view.data)
+            self.body.writeline(f"{name} = {layout.view.codegen_reference()}")
+            return
+
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())

@@ -50,6 +50,17 @@ class ExternKernelSchdulerNode(BaseSchedulerNode):
         codegen_extern_call(self.node)
 
 
+class NopKernelSchdulerNode(BaseSchedulerNode):
+    def can_remove_buffer(self, **kwargs):
+        return False
+
+    def run(self):
+        if self.node.should_allocate():
+            V.graph.wrapper_code.codegen_allocation(self.node)
+        self.scheduler.run_count += 1
+        self.scheduler.pending_buffer_names.add(self.get_name())
+
+
 class SchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         super().__init__(scheduler, node)
@@ -177,6 +188,10 @@ class Scheduler:
                 self.nodes.append(SchedulerNode(self, node, self.group_fn))
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchdulerNode(self, node))
+            elif isinstance(node, ir.NopKernel):
+                self.nodes.append(NopKernelSchdulerNode(self, node))
+            else:
+                assert False, node
         self.compute_users()
         self.enqueue(self.nodes)
 
@@ -215,6 +230,8 @@ class Scheduler:
         else:
             if isinstance(node, ExternKernelSchdulerNode):
                 self.runable_extern_kernels.append(node)
+            elif isinstance(node, NopKernelSchdulerNode):
+                node.run()
             else:
                 self.runable_nodes[node.group].append(node)
                 if node.is_reduction():
@@ -228,14 +245,15 @@ class Scheduler:
         Mark all pending_buffer_names as available and enqueue any nodes
         that became runable.
         """
-        self.available_buffer_names.update(self.pending_buffer_names)
-        nodes_to_add = []
-        for name in self.pending_buffer_names:
-            for node in self.blocked_nodes.pop_name(name):
-                node.prune_deps()
-                nodes_to_add.append(node)
-        self.pending_buffer_names.clear()
-        self.enqueue(nodes_to_add)
+        while self.pending_buffer_names:
+            self.available_buffer_names.update(self.pending_buffer_names)
+            nodes_to_add = []
+            for name in self.pending_buffer_names:
+                for node in self.blocked_nodes.pop_name(name):
+                    node.prune_deps()
+                    nodes_to_add.append(node)
+            self.pending_buffer_names.clear()
+            self.enqueue(nodes_to_add)
 
     def kernel(self, kernel):
         self.fusable_deps.clear()

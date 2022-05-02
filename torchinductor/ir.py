@@ -548,8 +548,11 @@ class SliceView(View):
     def create(cls, x, dim, start, end, step=1):
         step = sympy.expand(step)
         assert step > 0
-        if start == 0 and end >= 2**63 and step == 1:
-            return x
+        try:
+            if start == 0 and end >= 2**63 and step == 1:
+                return x
+        except TypeError:
+            pass
 
         sizevars = V.graph.sizevars
         new_size = list(x.get_size())
@@ -713,6 +716,20 @@ class FlexibleLayout(Layout):
         )
 
 
+class AliasedLayout(Layout):
+    """Shares the same storage as another tensor"""
+
+    def __init__(self, view: "ReinterpretView"):
+        layout = view.get_layout()
+        super().__init__(
+            layout.device,
+            layout.dtype,
+            layout.size,
+            layout.stride,
+        )
+        self.view = view
+
+
 @dataclasses.dataclass
 class Buffer(IRNode):
     name: str
@@ -777,16 +794,111 @@ class ComputedBuffer(Buffer):
 
 
 @dataclasses.dataclass
-class ExternKernel(Buffer):
+class InputsKernel(Buffer):
     inputs: List[Buffer]
-    constant_args: List[Any] = ()
-    output_view: Optional[ReinterpretView] = None
 
     def get_read_writes(self):
         return dependencies.ReadWrites(
             {dependencies.StarDep(x.get_name()) for x in self.inputs},
             {dependencies.StarDep(self.get_name())},
         )
+
+    @staticmethod
+    def unwrap_storage(inputs):
+        inputs_new = []
+        for x in inputs:
+            if isinstance(x, StorageBox):
+                x = x.data
+            assert isinstance(x, (Buffer, ReinterpretView)), x
+            inputs_new.append(x)
+        return inputs_new
+
+
+class NopKernel(InputsKernel):
+    pass
+
+
+class ConcatKernel(NopKernel):
+    """
+    There isn't actually a real kernel for concat, we just change the
+    storage for the upstream data.
+    """
+    @classmethod
+    def create(cls, inputs, dim):
+        device = inputs[0].get_device()
+        dtype = inputs[0].get_dtype()
+        new_size = list(inputs[0].get_size())
+        offsets_start = [0]
+        offsets_end = [new_size[dim]]
+        assert 0 <= dim < len(new_size)
+        for i in range(1, len(inputs)):
+            input_size = inputs[i].get_size()
+            offsets_start.append(new_size[dim])
+            assert len(input_size) == len(new_size)
+            assert inputs[i].get_dtype() == dtype
+            assert inputs[i].get_device() == device
+            for j in range(len(new_size)):
+                if j == dim:
+                    new_size[j] = new_size[j] + input_size[j]
+                else:
+                    new_size[j] = V.graph.sizevars.guard_equals(
+                        new_size[j], input_size[j]
+                    )
+            offsets_end.append(new_size[dim])
+
+        kernel = ConcatKernel(
+            name=None,
+            layout=FixedLayout(
+                device=device,
+                dtype=dtype,
+                size=new_size,
+                stride=FlexibleLayout.contiguous_strides(new_size),
+            ),
+            inputs=[],
+        )
+        kernel = StorageBox(kernel)
+        for i in range(len(inputs)):
+            kernel.data.inputs.append(
+                cls.realize_into(
+                    inputs[i],
+                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+                )
+            )
+        kernel.data.name = V.graph.register_buffer(kernel.data)
+        kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+        return kernel
+
+    @classmethod
+    def realize_into(cls, src, dst):
+        assert isinstance(dst, ReinterpretView), dst
+        if isinstance(src, TensorBox):
+            # unwrap a TensorBox
+            return cls.realize_into(src.data, dst)
+        if isinstance(src, StorageBox):
+            src.realize()
+            if isinstance(src.data.layout, FlexibleLayout):
+                src.data.layout = AliasedLayout(dst)
+                return src.data
+        # introduce a copy
+        pw = Pointwise.create(
+            device=src.get_device(),
+            dtype=src.get_dtype(),
+            inner_fn=src.make_loader(),
+            ranges=[
+                V.graph.sizevars.guard_equals(a, b)
+                for a, b in zip(src.get_size(), dst.get_size())
+            ],
+        )
+        return cls.realize_into(pw, dst)
+
+    def should_allocate(self):
+        return True
+
+
+@dataclasses.dataclass
+class ExternKernel(InputsKernel):
+    constant_args: List[Any] = ()
+    output_view: Optional[ReinterpretView] = None
 
     @staticmethod
     def copy_input(x):
@@ -842,6 +954,8 @@ class ExternKernel(Buffer):
         wrapper.body.writeline(f"assert {self.get_name()}.stride() == {stride}")
 
 
+
+
 @dataclasses.dataclass
 class ExternKernelOut(ExternKernel):
     output_view: Optional[ReinterpretView] = None
@@ -855,7 +969,7 @@ class ExternKernelOut(ExternKernel):
         wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
 
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super().__init__(None, layout, inputs, constant_args)
+        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
 
@@ -872,7 +986,7 @@ class ExternKernelAlloc(ExternKernel):
             self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, inputs, constant_args=()):
-        super().__init__(None, layout, inputs, constant_args)
+        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
         self.name = V.graph.register_buffer(self)
 
     def should_allocate(self):
@@ -1205,7 +1319,7 @@ class TensorBox(MutableBox):
 
 class StorageBox(MutableBox):
     def realize(self):
-        if isinstance(self.data, (ComputedBuffer, ExternKernel, InputBuffer)):
+        if isinstance(self.data, (ComputedBuffer, InputsKernel, InputBuffer)):
             return self.data.name
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
         self.data = ComputedBuffer(

@@ -537,6 +537,17 @@ class CommonTemplate:
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
+    def test_max_pool2d4(self):
+        def fn(x):
+            # with padding
+            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [0, 0], [1, 1], True)
+
+        self.common(
+            fn,
+            (torch.randn([2, 8, 111, 111]),),
+        )
+
+
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -720,10 +731,10 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
-    @unittest.skip("TODO")
     def test_cat(self):
         def fn(a):
-            return torch.cat((a, a + 1, a + 2), 1)
+            tmp = a * 2
+            return torch.cat((a, a[:, :4] + 1, a + 2), -1), torch.cat((tmp, tmp), 0)
 
         self.common(
             fn,

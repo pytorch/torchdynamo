@@ -202,6 +202,7 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
+@register_lowering(aten.alias)
 @register_lowering(aten.detach)
 def detach(x):
     assert isinstance(x, TensorBox)
@@ -292,6 +293,14 @@ def slice_(x, dim, start, end, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
+
+
+@register_lowering(aten.cat)
+def cat(inputs, dim=0):
+    if len(inputs) == 1:
+        return inputs[0]
+    dim = _validate_dim(inputs[0], dim, 0)
+    return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
 @register_lowering(aten.select)
@@ -524,12 +533,12 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 
 @register_lowering(aten.max_pool2d_with_indices)
-def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1):
+def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1, ceil_mode=False):
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert padding == 0 or len(padding) == 2
-    assert dilation == 1, "TODO(jansel): support dilation"
+    assert dilation == 1 or tuple(dilation) == (1, 1), "TODO(jansel): support dilation"
     assert len(x.get_size()) in (3, 4)
     if padding == 0:
         padding = [0, 0]
@@ -547,6 +556,23 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
         w + 2 * padding[1] - (kernel_size[1] - 1) + (stride[1] - 1), stride[1]
     )
 
+    if ceil_mode:
+        h_out_ = ir.IndexingDiv(
+            h + 2 * padding[0] - (kernel_size[0] - 1) + 2*(stride[0] - 1), stride[0]
+        )
+        w_out_ = ir.IndexingDiv(
+            w + 2 * padding[1] - (kernel_size[1] - 1) + 2*(stride[1] - 1), stride[1]
+        )
+
+        if V.graph.sizevars.size_hint(h_out - h_out_) == 0 and V.graph.sizevars.size_hint(w_out - w_out_) == 0:
+            # ceil mode is actually a no-op, lets guard on that
+            V.graph.sizevars.guard_equals(h_out, h_out_)
+            V.graph.sizevars.guard_equals(w_out, w_out_)
+            ceil_mode = False
+        else:
+            h_out = h_out_
+            w_out = w_out_
+
     new_size = list(batch) + [c, h_out, w_out]
 
     def fn(idx, return_index):
@@ -556,7 +582,8 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
         for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
-            if padding[0] or padding[1]:
+            if padding[0] or padding[1] or ceil_mode:
+                # TODO(jansel): rewrite this to use a boundary condition helper
                 mask = ops.and_(
                     ops.and_(
                         ops.ge(

@@ -10,6 +10,7 @@ import sympy
 import torch
 
 from .. import codecache
+from .. import config
 from .. import ir
 from ..scheduler import Scheduler
 from ..virtualized import V
@@ -397,10 +398,15 @@ class TritonKernel(Kernel):
             # argdefs.append(f"{var}: tl.constexpr")
             argdefs.append(f"{var}")
 
+        if config.dynamic_shapes:
+            maybe_const = ""
+        else:
+            maybe_const = ": tl.constexpr"
+
         if self.inside_reduction:
             argdefs += [
-                "numel",
-                "reduction_numel",
+                f"numel{maybe_const}",
+                f"reduction_numel{maybe_const}",
                 "BLOCK_SIZE: tl.constexpr",
                 "REDUCTION_SIZE: tl.constexpr",
                 "NEED_MASK: tl.constexpr",
@@ -408,7 +414,7 @@ class TritonKernel(Kernel):
 
         else:
             argdefs += [
-                "numel",
+                f"numel{maybe_const}",
                 "BLOCK_SIZE: tl.constexpr",
                 "NEED_MASK: tl.constexpr",
             ]
