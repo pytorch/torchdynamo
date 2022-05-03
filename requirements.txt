@@ -7,5 +7,4 @@ ninja
 pytest
 tabulate
 torch
-functorch
 sympy
