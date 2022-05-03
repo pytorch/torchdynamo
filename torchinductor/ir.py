@@ -823,6 +823,7 @@ class ConcatKernel(NopKernel):
     There isn't actually a real kernel for concat, we just change the
     storage for the upstream data.
     """
+
     @classmethod
     def create(cls, inputs, dim):
         device = inputs[0].get_device()
@@ -952,8 +953,6 @@ class ExternKernel(InputsKernel):
         stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
         wrapper.body.writeline(f"assert {self.get_name()}.size() == {size}")
         wrapper.body.writeline(f"assert {self.get_name()}.stride() == {stride}")
-
-
 
 
 @dataclasses.dataclass

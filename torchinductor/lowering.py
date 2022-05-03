@@ -533,7 +533,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 
 @register_lowering(aten.max_pool2d_with_indices)
-def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1, ceil_mode=False):
+def max_pool2d_with_indices(
+    x, kernel_size, stride=(1, 1), padding=0, dilation=1, ceil_mode=False
+):
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
@@ -558,13 +560,16 @@ def max_pool2d_with_indices(x, kernel_size, stride=(1, 1), padding=0, dilation=1
 
     if ceil_mode:
         h_out_ = ir.IndexingDiv(
-            h + 2 * padding[0] - (kernel_size[0] - 1) + 2*(stride[0] - 1), stride[0]
+            h + 2 * padding[0] - (kernel_size[0] - 1) + 2 * (stride[0] - 1), stride[0]
         )
         w_out_ = ir.IndexingDiv(
-            w + 2 * padding[1] - (kernel_size[1] - 1) + 2*(stride[1] - 1), stride[1]
+            w + 2 * padding[1] - (kernel_size[1] - 1) + 2 * (stride[1] - 1), stride[1]
         )
 
-        if V.graph.sizevars.size_hint(h_out - h_out_) == 0 and V.graph.sizevars.size_hint(w_out - w_out_) == 0:
+        if (
+            V.graph.sizevars.size_hint(h_out - h_out_) == 0
+            and V.graph.sizevars.size_hint(w_out - w_out_) == 0
+        ):
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(h_out, h_out_)
             V.graph.sizevars.guard_equals(w_out, w_out_)

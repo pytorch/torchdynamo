@@ -41,6 +41,11 @@ setup_lint: lint-deps
 setup:
 	pip install -r requirements.txt
 
+setup_nightly:
+	pip install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install git+https://github.com/pytorch/functorch.git
+	pip install -r requirements.txt
+
 clean:
 	python setup.py clean
 	rm -rf build torchdynamo.egg-info torchdynamo/*.so __pycache__ .pytest_cache .benchmarks *.csv dist

@@ -12,8 +12,14 @@ from torch.nn import functional as F
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
-from torchinductor import config
-from torchinductor.compile_fx import compile_fx
+
+try:
+    importlib.import_module("functorch")
+    from torchinductor import config
+    from torchinductor.compile_fx import compile_fx
+except (ImportError, ModuleNotFoundError):
+    raise unittest.SkipTest("requires functorch")
+
 
 aten = torch.ops.aten
 
@@ -22,7 +28,7 @@ if torch.cuda.is_available():
     try:
         importlib.import_module("triton")
         HAS_CUDA = True
-    except ImportError:
+    except (ImportError, ModuleNotFoundError):
         pass
 
 
@@ -91,8 +97,13 @@ def check_model(self: TestCase, model, example_inputs):
 def check_model_cuda(self: TestCase, model, example_inputs):
     if hasattr(model, "to"):
         model = model.to("cuda")
-    # preserve strides of the input on the device
-    copy_fn = lambda x: torch.empty_strided(x.size(), x.stride(), device="cuda", dtype=x.dtype).copy_(x)
+
+    def copy_fn(x):
+        # preserve strides of the input on the device
+        return torch.empty_strided(
+            x.size(), x.stride(), device="cuda", dtype=x.dtype
+        ).copy_(x)
+
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
     check_model(self, model, example_inputs)
 
@@ -548,7 +559,6 @@ class CommonTemplate:
             fn,
             (torch.randn([2, 8, 111, 111]),),
         )
-
 
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
