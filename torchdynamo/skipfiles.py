@@ -32,8 +32,12 @@ import _weakrefset
 import torch
 
 
+def _strip_init_py(s):
+    return re.sub(r"__init__.py$", "", s)
+
+
 def _module_dir(m: types.ModuleType):
-    return re.sub(r"__init__.py$", "", m.__file__)
+    return _strip_init_py(m.__file__)
 
 
 SKIP_DIRS = [
@@ -79,21 +83,28 @@ SKIP_DIRS = [
         _weakrefset,
     )
 ]
-SKIP_DIRS_RE = None  # set in add() below
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
 }
+SKIP_DIRS_RE = None
 
 
-def add(module_spec: typing.Optional[importlib.machinery.ModuleSpec]):
+def _recompile_re():
+    global SKIP_DIRS_RE
+    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+
+
+def add(import_name: str):
+    assert isinstance(import_name, str)
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     global SKIP_DIRS_RE
-    name = module_spec.origin
-    if name is None:
+    origin = module_spec.origin
+    if origin is None:
         return
-    SKIP_DIRS.append(os.path.dirname(name))
-    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS.append(_strip_init_py(origin))
+    _recompile_re()
 
 
 def check(filename, allow_torch=False):
@@ -128,7 +139,9 @@ for _name in (
     "tvm",
     "fx2trt_oss",
 ):
-    add(importlib.util.find_spec(_name))
+    add(_name)
+else:
+    _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
