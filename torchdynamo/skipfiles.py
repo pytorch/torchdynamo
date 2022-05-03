@@ -95,14 +95,16 @@ def _recompile_re():
 
 
 def add(import_name: str):
+    if isinstance(import_name, types.ModuleType):
+        return add(import_name.__name__)
     assert isinstance(import_name, str)
     module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
-    global SKIP_DIRS_RE
     origin = module_spec.origin
     if origin is None:
         return
+    global SKIP_DIRS_RE
     SKIP_DIRS.append(_strip_init_py(origin))
     _recompile_re()
 
@@ -140,8 +142,8 @@ for _name in (
     "fx2trt_oss",
 ):
     add(_name)
-else:
-    _recompile_re()
+
+_recompile_re()
 
 
 def is_torch_inline_allowed(filename):
