@@ -1030,7 +1030,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, ifdyn(28, 14))
 
     def test_recursive_map(self):
-        # https://github.com/facebookresearch/torchdynamo/issues/132
+        # https://github.com/pytorch/torchdynamo/issues/132
         def _recursive_map(struct, batch_dim=0):
             for k, v in struct.items():
                 if v is not None:
