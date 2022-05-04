@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import logging
 import threading
@@ -24,26 +25,31 @@ def nothing():
     pass
 
 
+null_context = contextlib.nullcontext()
+
 unset = object()
 
 compile_lock = threading.Lock()
 
 
 class _TorchDynamoContext:
-    def __init__(self, callback, on_enter=nothing):
+    def __init__(self, callback, on_enter=nothing, extra_ctx=null_context):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback = callback
         self.prior = unset
         self.on_enter = on_enter
+        self.extra_ctx = extra_ctx
 
     def __enter__(self):
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
+        self.extra_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         set_eval_frame(self.prior)
         self.prior = unset
+        self.extra_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
         assert callable(fn)
@@ -69,8 +75,12 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback):
-        super().__init__(callback=callback, on_enter=install_generation_tagging_new)
+    def __init__(self, callback, extra_ctx):
+        super().__init__(
+            callback=callback,
+            on_enter=install_generation_tagging_new,
+            extra_ctx=extra_ctx,
+        )
 
 
 class RunOnlyContext(_TorchDynamoContext):
@@ -107,8 +117,8 @@ def catch_errors_wrapper(callback):
     return catch_errors
 
 
-def _optimize_catch_errors(compile_fn):
-    return OptimizeContext(catch_errors_wrapper(compile_fn))
+def _optimize_catch_errors(compile_fn, extra_ctx=null_context):
+    return OptimizeContext(catch_errors_wrapper(compile_fn), extra_ctx=extra_ctx)
 
 
 def optimize(backend, nopython=False):
@@ -136,16 +146,23 @@ def optimize(backend, nopython=False):
         with torchdynamo.optimize(my_compiler):
            ...
     """
+
+    extra_ctx = null_context
+    if hasattr(backend, "extra_ctx"):
+        extra_ctx = getattr(backend, "extra_ctx")
+
     if nopython:
-        return optimize_assert(backend)
-    return _optimize_catch_errors(convert_frame.convert_frame(backend))
+        return optimize_assert(backend, extra_ctx)
+    return _optimize_catch_errors(convert_frame.convert_frame(backend), extra_ctx)
 
 
-def optimize_assert(backend):
+def optimize_assert(backend, extra_ctx=null_context):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
-    return _optimize_catch_errors(convert_frame.convert_frame_assert(backend))
+    return _optimize_catch_errors(
+        convert_frame.convert_frame_assert(backend), extra_ctx
+    )
 
 
 def run(fn=None):
