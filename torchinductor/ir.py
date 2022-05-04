@@ -807,6 +807,8 @@ class InputsKernel(Buffer):
     def unwrap_storage(inputs):
         inputs_new = []
         for x in inputs:
+            if isinstance(x, TensorBox):
+                x = x.data
             if isinstance(x, StorageBox):
                 x = x.data
             assert isinstance(x, (Buffer, ReinterpretView)), x

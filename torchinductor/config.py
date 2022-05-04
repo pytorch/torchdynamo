@@ -13,6 +13,8 @@ dynamic_shapes = True
 # assuming weight matrices are fixed size
 static_weight_shapes = True
 
+# enable certain approximation algorithms
+approximations = False
 
 # config specific to codegen/cpp.pp
 class cpp:
