@@ -105,6 +105,32 @@ USE_SMALL_BATCH_SIZE = {
     "timm_efficientdet": 1,
 }
 
+# These benchmarks took >600s on an i9-11900K CPU
+VERY_SLOW_BENCHMARKS = {
+    "hf_BigBird",  # 3339s
+    "hf_Longformer",  # 3062s
+    "hf_T5",  # 930s
+}
+
+# These benchmarks took >60s on an i9-11900K CPU
+SLOW_BENCHMARKS = {
+    *{
+        "BERT_pytorch",  # 137s
+        "demucs",  # 116s
+        "fastNLP_Bert",  # 242s
+        "hf_Albert",  # 221s
+        "hf_Bart",  # 400s
+        "hf_Bert",  # 334s
+        "hf_DistilBert",  # 187s
+        "hf_GPT2",  # 470s
+        "hf_Reformer",  # 141s
+        "speech_transformer",  # 317s
+        "vision_maskrcnn",  # 99s
+    },
+    *VERY_SLOW_BENCHMARKS,
+}
+
+
 current_name = ""
 current_device = ""
 output_filename = None
@@ -646,6 +672,9 @@ def main():
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
     parser.add_argument("--float32", action="store_true", help="cast model to fp32")
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
+    parser.add_argument(
+        "--fast", "-f", action="store_true", help="skip slow benchmarks"
+    )
     parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
         "--minimum-call-count", type=int, help="filter out graphs with too few ops"
@@ -808,9 +837,6 @@ def main():
             }
         )
 
-    if args.no_skip:
-        SKIP.clear()
-
     if args.nvfuser:
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
@@ -834,6 +860,12 @@ def main():
         SKIP.update(SKIP_TRAIN)
     else:
         model_iter_fn = forward_pass
+
+    if args.fast:
+        SKIP.update(SLOW_BENCHMARKS)
+
+    if args.devices == ["cpu"]:
+        SKIP.update(VERY_SLOW_BENCHMARKS)
 
     if args.no_skip:
         SKIP.clear()
@@ -1173,7 +1205,7 @@ def run_one_model(
 
         if output_filename and "coverage" in output_filename:
             results.append(
-                f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:.0f}s"
+                f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:3.0f}s"
             )
 
         results.append(experiment(model, example_inputs))
