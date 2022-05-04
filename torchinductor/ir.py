@@ -807,6 +807,8 @@ class InputsKernel(Buffer):
     def unwrap_storage(inputs):
         inputs_new = []
         for x in inputs:
+            if isinstance(x, TensorBox):
+                x = x.data
             if isinstance(x, StorageBox):
                 x = x.data
             assert isinstance(x, (Buffer, ReinterpretView)), x
@@ -1209,6 +1211,8 @@ class Convolution(ExternKernelAlloc):
 
         out_channels, in_channels1, *kernel_size = weight_shape
         in_channels1 = in_channels1 * groups
+        if transposed:
+            out_channels, in_channels1 = in_channels1, out_channels
 
         if bias is not None:
             bias = cls.require_stride1(cls.realize_input(bias))
@@ -1216,7 +1220,7 @@ class Convolution(ExternKernelAlloc):
                 sympy.Integer(V.graph.sizevars.guard_static_shape(s))
                 for s in bias.get_size()
             ]
-            assert bias_shape == out_channels
+            assert bias_shape == out_channels, f"{bias_shape} == {out_channels}"
 
         if len(x.get_size()) == 1 + len(kernel_size):
             in_channels2, *input_size = x.get_size()
@@ -1239,17 +1243,26 @@ class Convolution(ExternKernelAlloc):
             == len(input_size)
         )
         for i in range(len(stride)):
-            output_size.append(
-                IndexingDiv(
-                    input_size[i]
-                    + 2 * padding[i]
-                    - dilation[i] * (kernel_size[i] - 1)
-                    - 1
-                    + stride[i],
-                    stride[i],
+            if transposed:
+                output_size.append(
+                    (input_size[i] - 1) * stride[i]
+                    - 2 * padding[i]
+                    + dilation[i] * (kernel_size[i] - 1)
+                    + output_padding[i]
+                    + 1
                 )
-                + 2 * output_padding[i]
-            )
+            else:
+                output_size.append(
+                    IndexingDiv(
+                        input_size[i]
+                        + 2 * padding[i]
+                        - dilation[i] * (kernel_size[i] - 1)
+                        - 1
+                        + stride[i],
+                        stride[i],
+                    )
+                    + 2 * output_padding[i]
+                )
             output_size[-1] = sympy.Integer(
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )

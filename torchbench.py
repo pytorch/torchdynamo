@@ -879,13 +879,12 @@ def main():
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.inductor:
-        import torchinductor
-        from torchinductor.compile_fx import compile_fx
-
         if args.threads:
+            import torchinductor.config
+
             torchinductor.config.cpp.threads = args.threads
 
-        optimize_ctx = torchdynamo.optimize(compile_fx, nopython=args.nopython)
+        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
         args.isolate = True
