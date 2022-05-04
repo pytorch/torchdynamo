@@ -147,7 +147,7 @@ class AOTAutogradMemoryEfficientFusionWithContext:
     """Pass nvfuser context to TorchDynamo"""
 
     def __init__(self):
-        self.extra_ctx = torch.jit.fuser("fuser2")
+        self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         return AOTAutogradMemoryEfficientFusion.compile_fn(gm, example_inputs)
