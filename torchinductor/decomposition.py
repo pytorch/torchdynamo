@@ -70,6 +70,25 @@ def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
+@register_decomposition([aten.hardtanh], decompositions)
+def hardtanh(x, min_val=-1.0, max_val=1.0):
+    return torch.clamp(x, min_val, max_val)
+
+
+@register_decomposition([aten.hardsigmoid], decompositions)
+def hardsigmoid(x):
+    return torch.clamp(x / 6.0 + 0.5, 0.0, 1.0)
+
+
+@register_decomposition([aten.hardswish], decompositions)
+def hardswish(x):
+    return torch.where(
+        torch.gt(x, -3),
+        torch.where(torch.lt(x, 3), x * (x + 3.0) / 6.0, x),
+        torch.tensor(0.0, device=x.device, dtype=x.dtype),
+    )
+
+
 @register_decomposition([aten.leaky_relu], decompositions)
 def leaky_relu(x, negative_slope=0.01):
     return torch.relu(x) + (-negative_slope) * torch.relu(-x)
