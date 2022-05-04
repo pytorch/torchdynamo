@@ -565,6 +565,8 @@ class InstructionTranslatorBase(object):
             and len(args) == 1
             and isinstance(args[0], SizeVariable)
             and not config.dynamic_shapes
+            and fn.obj.dtype is not None
+            and fn.obj.device is not None
         ):
             kwargs = dict()
             kwargs["dtype"] = TorchVariable(
@@ -573,12 +575,7 @@ class InstructionTranslatorBase(object):
             kwargs["device"] = TorchVariable(
                 fn.obj.device, **VariableTracker.propagate(fn.obj)
             )
-            kwargs["size"] = ConstantVariable(
-                tuple(
-                    [v.as_python_constant() for v in args[0].unpack_var_sequence(self)]
-                ),
-                **VariableTracker.propagate(args[0]),
-            )
+            kwargs["size"] = args[0]
 
             cg = PyCodegen(self)
             self.LOAD_GLOBAL(cg.create_load_global("torch", add=True))
