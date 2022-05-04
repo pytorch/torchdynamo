@@ -620,3 +620,40 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.op_count, 4)
         self.assertTrue(torchdynamo.testing.same(out1, out2))
+
+    def test_torch_function_with_closure(self):
+        def run():
+
+            counter = 0
+
+            def foo(x):
+                # function call, twice to test wrapping
+                x = F.sigmoid(x)
+                x = F.sigmoid(x)
+                # method call, twice to test wrapping
+                x = x.sigmoid()
+                x = x.sigmoid()
+                return x
+
+            class TensorProxy(torch.Tensor):
+                @classmethod
+                def __torch_function__(cls, func, types, args=(), kwargs=None):
+                    nonlocal counter
+                    # for now, only support reads from closure cells
+                    # TODO(future PR): support writes as well
+                    counter + 1
+                    return super().__torch_function__(func, types, args, kwargs)
+
+            torchdynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+
+            x = torch.randn(1).as_subclass(TensorProxy)
+            x = torch.randn(1)
+            cnt = torchdynamo.testing.CompileCounter()
+            out1 = foo(x)
+            with torchdynamo.optimize(cnt, nopython=True):
+                out2 = foo(x)
+
+            self.assertEqual(cnt.op_count, 4)
+            self.assertTrue(torchdynamo.testing.same(out1, out2))
+
+        run()

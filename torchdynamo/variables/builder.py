@@ -320,6 +320,7 @@ class VariableBuilder:
                 subclass_type = type(value)
                 return TensorWithTFOverrideVariable(
                     tensor_variable,
+                    self.get_source(),
                     subclass_torch_function__func,
                     subclass_type,
                 )
