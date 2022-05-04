@@ -116,7 +116,7 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
-        assert value.shape == ()
+        assert value.shape == (), value
         return Constant(value.item(), value.dtype, value.device)
 
     def call_module(self, target, args, kwargs):

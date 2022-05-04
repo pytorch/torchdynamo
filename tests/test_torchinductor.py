@@ -499,16 +499,30 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
-    def test_convolution(self):
+    def test_convolution1(self):
         m = torch.nn.Sequential(
-            torch.nn.Conv2d(4, 4, [3, 3]),
+            torch.nn.Conv2d(5, 6, [3, 3]),
             torch.nn.ReLU(),
             ToTuple(),
         )
 
         self.common(
             m,
-            (torch.randn([2, 4, 16, 16]),),
+            (torch.randn([2, 5, 16, 16]),),
+        )
+
+    def test_convolution2(self):
+        def fn(x, w, b):
+            # transposed conv
+            return (aten.convolution(x, w, b, [4], [0], [1], True, [0], 1),)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 32, 90]),
+                torch.randn([32, 16, 8]),
+                torch.randn([16]),
+            ),
         )
 
     def test_adaptive_avg_pool2d1(self):
