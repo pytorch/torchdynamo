@@ -56,6 +56,7 @@ from .variables.functions import UserFunctionVariable
 from .variables.lists import BaseListVariable
 from .variables.lists import ListIteratorVariable
 from .variables.lists import ListVariable
+from .variables.lists import SizeVariable
 from .variables.lists import SliceVariable
 from .variables.lists import TupleVariable
 from .variables.misc import ClosureVariable
@@ -553,6 +554,39 @@ class InstructionTranslatorBase(object):
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
         fn = self.pop()
+
+        # Hack to handle special case in some legacy code.
+        # Convert x.new(torch.Size) into torch.empty(tuple),
+        # as torch.Tensor.new acts differently with a Size input versus a tuple input.
+        if (
+            isinstance(fn, GetAttrVariable)
+            and isinstance(fn.obj, TensorVariable)
+            and fn.name == "new"
+            and len(args) == 1
+            and isinstance(args[0], SizeVariable)
+            and not config.dynamic_shapes
+        ):
+            kwargs = dict()
+            kwargs["dtype"] = TorchVariable(
+                fn.obj.dtype, **VariableTracker.propagate(fn.obj)
+            )
+            kwargs["device"] = TorchVariable(
+                fn.obj.device, **VariableTracker.propagate(fn.obj)
+            )
+            kwargs["size"] = ConstantVariable(
+                tuple(
+                    [v.as_python_constant() for v in args[0].unpack_var_sequence(self)]
+                ),
+                **VariableTracker.propagate(args[0]),
+            )
+
+            cg = PyCodegen(self)
+            self.LOAD_GLOBAL(cg.create_load_global("torch", add=True))
+            self.LOAD_ATTR(cg.create_load_attr("empty"))
+            fn = self.pop()
+
+            return self.call_function(fn, [], kwargs)
+
         self.call_function(fn, args, {})
 
     @break_graph_if_unsupported(push=1)
