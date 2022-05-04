@@ -61,9 +61,9 @@ log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # https://github.com/facebookresearch/torchdynamo/issues/101
+    # https://github.com/pytorch/torchdynamo/issues/101
     "detectron2_maskrcnn",
-    # https://github.com/facebookresearch/torchdynamo/issues/145
+    # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
 }
 

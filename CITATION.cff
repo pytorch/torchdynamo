@@ -5,4 +5,4 @@ authors:
     given-names: Jason
 title: "TorchDynamo"
 date-released: 2022-01-01
-url: https://github.com/facebookresearch/torchdynamot
+url: https://github.com/pytorch/torchdynamo

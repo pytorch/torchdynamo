@@ -16,7 +16,7 @@ compiled with an ensemble of different backends and autotuning.
 setup(
     name="torchdynamo",
     version="0.2.0",
-    url="https://github.com/facebookresearch/torchdynamo",
+    url="https://github.com/pytorch/torchdynamo",
     description="A Python-level JIT compiler designed to make unmodified PyTorch programs faster.",
     long_description=long_description,
     long_description_content_type="text/markdown",

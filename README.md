@@ -345,7 +345,7 @@ conda activate torchdynamo
 # for CUDA version, replace `cpuonly` with `cudatoolkit=11.3`
 conda install pytorch torchvision torchaudio torchtext cpuonly -c pytorch-nightly
 
-git clone git@github.com:facebookresearch/torchdynamo.git
+git clone git@github.com:pytorch/torchdynamo.git
 cd torchdynamo
 pip install -r requirements.txt
 
@@ -381,10 +381,10 @@ make lint-deps
 
 ## Tests
 
-[![Test Python 3.7](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py37.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py37.yml)
-[![Test Python 3.8](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml)
-[![Test Python 3.9](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml)
-[![Test Python 3.10](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py310.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml)
+[![Test Python 3.7](https://github.com/pytorch/torchdynamo/actions/workflows/test-py37.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/test-py37.yml)
+[![Test Python 3.8](https://github.com/pytorch/torchdynamo/actions/workflows/test-py38.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/test-py38.yml)
+[![Test Python 3.9](https://github.com/pytorch/torchdynamo/actions/workflows/test-py39.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/test-py39.yml)
+[![Test Python 3.10](https://github.com/pytorch/torchdynamo/actions/workflows/test-py310.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/test-py39.yml)
 
 Run tests with
 ```shell
@@ -430,7 +430,7 @@ generate `*.csv` files.  See `./torchbench.py --help` for more options.
 
 ## Linting and Automatic Code Formatting
 
-[![Lint](https://github.com/facebookresearch/torchdynamo/actions/workflows/lint.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/lint.yml)
+[![Lint](https://github.com/pytorch/torchdynamo/actions/workflows/lint.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/lint.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
