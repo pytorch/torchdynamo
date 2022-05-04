@@ -236,15 +236,11 @@ class SizeVariable(TupleVariable):
         return torch.Size
 
     def reconstruct(self, codegen):
-        load_torch_size = [
-            create_instruction("LOAD_GLOBAL", "torch"),
-            create_instruction("LOAD_METHOD", "Size"),
-        ]
-        codegen.extend_output(load_torch_size)
+        codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_METHOD", 1),
+            create_instruction("CALL_FUNCTION", 1),
         ]
         return build_torch_size
 

@@ -1113,6 +1113,8 @@ def run_one_model(
     cos_similarity=False,
     skip_accuracy_check=False,
 ):
+    t0 = time.perf_counter()
+
     tolerance = 1e-4
     # Increase the tolerance for torch allclose
     if is_training and current_device == "cuda" and name in REQUIRE_HIGHER_TOLERANCE:
@@ -1170,7 +1172,9 @@ def run_one_model(
             frames_third_pass = 0
 
         if output_filename and "coverage" in output_filename:
-            results.append(f"{ok:3}/{total:3} +{frames_third_pass} frames")
+            results.append(
+                f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:.0f}s"
+            )
 
         results.append(experiment(model, example_inputs))
         print(" ".join(map(str, results)))
