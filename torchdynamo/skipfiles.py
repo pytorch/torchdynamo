@@ -140,6 +140,7 @@ for _name in (
     "tree",
     "tvm",
     "fx2trt_oss",
+    "xarray",
 ):
     add(_name)
 
