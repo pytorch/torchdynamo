@@ -15,7 +15,7 @@ test: develop
 	pytest tests
 
 torchbench: develop
-	python torchbench.py
+	python torchbench.py --fast
 
 overhead: develop
 	python torchbench.py --overhead
@@ -129,12 +129,10 @@ baseline-gpu: develop
 
 baseline-gpu-inductor: develop
 	 rm -f baseline_*.csv
-	 python torchbench.py -dcuda --float32 --isolate -n50 --inductor
-	 python torchbench.py -dcuda --float32 --isolate -n50 --backend=cudagraphs && mv speedup_cudagraphs.csv baseline_cudagraphs.csv
-	 python torchbench.py -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts --nvfuser && mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	 python torchbench.py -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts && mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
-	 # python torchbench.py -dcuda --float32 --isolate -n50 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_ts_nvfuser.csv
-	 # python torchbench.py -dcuda --float32 --isolate -n50 --speedup-ts && mv baseline_ts.csv baseline_ts_nnc.csv
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --inductor
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs && mv speedup_cudagraphs.csv baseline_cudagraphs.csv
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts --nvfuser && mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts && mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	 paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > baseline_all.csv
 
 
