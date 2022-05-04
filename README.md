@@ -15,13 +15,16 @@ usability and performance.
 
 ![](TorchDynamo.png)
 
-For more information see progress updates posted on dev-discuss.pytorch.org:
+Links for more information and development progress updates:
+
 - [Update 1: An Experiment in Dynamic Python Bytecode Transformation](https://dev-discuss.pytorch.org/t/torchdynamo-an-experiment-in-dynamic-python-bytecode-transformation/361)
 - [Update 2: 1.48x Geomean Speedup on TorchBench CPU Inference](https://dev-discuss.pytorch.org/t/torchdynamo-update-1-48x-geomean-speedup-on-torchbench-cpu-inference/397)
 - [Update 3: GPU Inference Edition](https://dev-discuss.pytorch.org/t/torchdynamo-update-3-gpu-inference-edition/460)
 - [Update 4: LazyTensor & nvFuser Experiments](https://dev-discuss.pytorch.org/t/torchdynamo-update-4-lazytensor-nvfuser-experiments/496)
 - [Update 5: Improved Capture & Bigger Graphs](https://dev-discuss.pytorch.org/t/torchdynamo-update-5-improved-capture-bigger-graphs/556)
 - [Update 6: Training support with AOTAutograd](https://dev-discuss.pytorch.org/t/torchdynamo-update-6-training-support-with-aotautograd/570)
+- [Update 7: Inference with FX2TRT](https://dev-discuss.pytorch.org/t/torchdynamo-update-7-inference-with-fx2trt/576)
+- (Video) [Live deep-dive into TorchDynamo](https://www.youtube.com/watch?v=egZB5Uxki0I)
 
 *TorchDynamo is experimental* and under active development.
 You are welcome to try it out and contribute, but should expect to find
@@ -364,9 +367,10 @@ cd ..  # if still in torchdynamo/
 
 # download everything
 git clone git@github.com:jansel/benchmark.git torchbenchmark
-python torchbenchmark/install.py
+cd torchbenchmark
+python install.py
 
-cd torchdynamo
+cd ../torchdynamo
 
 # fix the version of black so `make format` / `make lint` work
 make lint-deps
@@ -380,6 +384,7 @@ make lint-deps
 [![Test Python 3.7](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py37.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py37.yml)
 [![Test Python 3.8](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py38.yml)
 [![Test Python 3.9](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml)
+[![Test Python 3.10](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py310.yml/badge.svg)](https://github.com/facebookresearch/torchdynamo/actions/workflows/test-py39.yml)
 
 Run tests with
 ```shell

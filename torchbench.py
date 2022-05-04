@@ -760,6 +760,11 @@ def main():
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
     )
     group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -841,6 +846,19 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
+    elif args.inductor:
+        import torchinductor
+        from torchinductor.compile_fx import compile_fx
+
+        if args.threads:
+            torchinductor.config.cpp.threads = args.threads
+
+        optimize_ctx = torchdynamo.optimize(compile_fx, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "inductor.csv"
+        args.isolate = True
+        args.float32 = True
+        args.cosine = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
