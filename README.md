@@ -376,7 +376,7 @@ cd ../torchdynamo
 make lint-deps
 
 # make sure it works
-./torchbench.py
+./torchbench.py --fast
 ```
 
 ## Tests
