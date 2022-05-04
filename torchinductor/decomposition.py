@@ -100,7 +100,11 @@ def leaky_relu(x, negative_slope=0.01):
 def gelu(x, approximate="none"):
     if config.approximations or approximate != "none":
         # tanh approximation is much faster
-        return 0.5 * x * (1 + torch.tanh(math.sqrt(2/math.pi) * (x + 0.044715 * x * x * x)))
+        return (
+            0.5
+            * x
+            * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * x * x * x)))
+        )
     else:
         return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
