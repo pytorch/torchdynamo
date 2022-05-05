@@ -330,6 +330,16 @@ class TensorVariable(VariableTracker):
             )
             return ConstantVariable(None, **options)
         else:
+            # Convert x.new(torch.Size) into x.new_empty(torch.Size),
+            # as Tensor.new acts differently with a Size input versus a tuple input.
+            if (
+                name == "new"
+                and len(args) == 1
+                and isinstance(args[0], SizeVariable)
+                and not config.dynamic_shapes
+            ):
+                name = "new_empty"
+
             return TensorVariable.create(
                 tx,
                 tx.output.create_proxy(
