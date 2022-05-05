@@ -62,6 +62,7 @@ from .variables.lists import TupleVariable
 from .variables.misc import ClosureVariable
 from .variables.misc import ContextManagerVariable
 from .variables.misc import GetAttrVariable
+from .variables.misc import GradModeVariable
 from .variables.misc import PythonModuleVariable
 from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable
@@ -149,7 +150,24 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
             self.output.compile_subgraph(self)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+
+            # Check if there is a block stack entry with GradModeVariable. And
+            # wrap the instruction causing the graph break inside a try..finally
+            # block. See more details at
+            # https://github.com/pytorch/torchdynamo/issues/207
+            cleanup = []
+            if len(self.block_stack) == 1 and isinstance(
+                self.block_stack[0].with_context, GradModeVariable
+            ):
+                ctx_variable = self.block_stack[0].with_context
+                cg = PyCodegen(self)
+                setup_finally, cleanup = ctx_variable.reconstruct(cg)
+                self.output.add_output_instructions(setup_finally)
+
             self.output.add_output_instructions([inst])
+
+            # Add the cleanup instructions from try..finally block
+            self.output.add_output_instructions(cleanup)
             for _ in range(push):
                 self.push(UnknownVariable())
             self.output.add_output_instructions(

@@ -135,6 +135,68 @@ class GradModeVariable(ContextManagerVariable):
         ),
         torch._C._set_grad_enabled(value)
 
+    def reconstruct(self, codegen):
+        """
+        Generate following Python Bytecode
+             0 LOAD_GLOBAL              0 (torch)
+             2 LOAD_ATTR                1 (_C)
+             4 LOAD_METHOD              2 (_set_grad_enable)
+             6 LOAD_CONST               1 (False)
+             8 CALL_METHOD              1
+            10 POP_TOP
+
+            12 SETUP_FINALLY           10 (to 24)
+
+            14 LOAD_GLOBAL              3 (user_inst)
+            16 CALL_FUNCTION            0
+            18 POP_TOP
+            20 POP_BLOCK
+            22 BEGIN_FINALLY
+
+            24 LOAD_GLOBAL              0 (torch)
+            26 LOAD_ATTR                1 (_C)
+            28 LOAD_METHOD              2 (_set_grad_enable)
+            30 LOAD_CONST               2 (True)
+            32 CALL_METHOD              1
+            34 POP_TOP
+            36 END_FINALLY
+            38 LOAD_CONST               0 (None)
+            40 RETURN_VALUE
+
+        Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
+
+        """
+        if self.target_mode == self.original_mode:
+            return ([], [])
+
+        def set_grad_insts(mode):
+            codegen.load_import_from("torch", "_C")
+            codegen.load_import_from("torch._C", "_set_grad_enabled")
+            return [
+                codegen.create_load_global("torch"),
+                codegen.create_load_attr("_C"),
+                create_instruction("LOAD_METHOD", 2, "_set_grad_enabled"),
+                codegen.create_load_const(mode),
+                create_instruction("CALL_METHOD", 1),
+                create_instruction("POP_TOP"),
+            ]
+
+        init_block = set_grad_insts(self.target_mode)
+        finally_block = set_grad_insts(self.original_mode)
+
+        # Generate the prologue that ends with setup_finally
+        setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
+        prologue = init_block + [setup_final_inst]
+
+        # Generate the epilogue - starts with 20 POP_BLOCK and ends at 34 POP_TOP
+        epilogue = [
+            create_instruction("POP_BLOCK"),
+            create_instruction("BEGIN_FINALLY"),
+            *finally_block,
+            create_instruction("END_FINALLY"),
+        ]
+        return (prologue, epilogue)
+
 
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
