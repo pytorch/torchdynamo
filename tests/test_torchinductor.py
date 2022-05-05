@@ -753,6 +753,29 @@ class CommonTemplate:
             (torch.randn([8, 16]),),
         )
 
+    def test_hardswish(self):
+        def fn(a):
+            return F.hardswish(a)
+
+        self.common(
+            fn,
+            (torch.randn([8, 8]),),
+        )
+
+    def test_hardtanh(self):
+        def fn(a):
+            return (
+                F.hardtanh(a),
+                F.hardtanh(a, -0.5),
+                F.hardtanh(a, max_val=0.5),
+                F.hardtanh(a, -0.5, 0.5),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([8, 8]),),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

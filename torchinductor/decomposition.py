@@ -16,6 +16,16 @@ def clamp(x, min=None, max=None):
     return x
 
 
+@register_decomposition([aten.hardswish], decompositions)
+def hardswish(x):
+    return x * torch.clamp(x + 3.0, 0.0, 6.0) / 6.0
+
+
+@register_decomposition([aten.hardtanh], decompositions)
+def hardtanh(x, min=-1, max=1):
+    return torch.clamp(x, min, max)
+
+
 @register_decomposition([aten._softmax], decompositions)
 def _softmax(x, dim, half_to_float):
     # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
