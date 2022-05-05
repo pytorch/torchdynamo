@@ -51,6 +51,14 @@ class TritonOverrides(OpOverrides):
         return f"{x}.to(tl.{triton_type_name})"
 
     @staticmethod
+    def constant(value, dtype):
+        if value == float("inf"):
+            return 'float("inf")'
+        elif value == float("-inf"):
+            return 'float("-inf")'
+        return super().constant(value, dtype)
+
+    @staticmethod
     def abs(x):
         return f"tl.abs({x})"
 
