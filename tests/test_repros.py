@@ -1112,8 +1112,6 @@ class ReproTests(torchdynamo.testing.TestCase):
             return torch.sin(torch.cos(x))
 
         def fn(x):
-            torch._C._set_grad_enabled(False)
-
             with torch.enable_grad():
                 a = torch.sin(x)
                 b = reversible(a)
@@ -1123,9 +1121,11 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         x = torch.randn(3, requires_grad=True)
         x.grad = None
-        ref = fn(x)
+        with torch.no_grad():
+            ref = fn(x)
 
         x.grad = None
         with torchdynamo.optimize("eager"):
-            res = fn(x)
+            with torch.no_grad():
+                res = fn(x)
         self.assertTrue(same(ref, res))
