@@ -130,10 +130,13 @@ def optimize(backend, nopython=False):
     backend() to optimize extracted graphs.
 
     Args:
-        backend: One of two things:
-            - Either, a function taking a torch.fx.GraphModule and
+        backend: One of the two things:
+            - Either, a function/callable taking a torch.fx.GraphModule and
             example_inputs and returning a python callable that runs the
             graph faster.
+            One can also provide additional context for the backend, like
+            torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
+            See AOTAutogradMemoryEfficientFusionWithContext for the usage.
             - Or, a string backend name in `torchdynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
