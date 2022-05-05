@@ -25,6 +25,7 @@ from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
 from . import config
+from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin
@@ -35,8 +36,6 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
-from .exc import RestartAnalysis
-from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .output_graph import OutputGraph
@@ -279,7 +278,12 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (Unsupported, RestartAnalysis, TorchRuntimeError):
+        except (
+            exc.Unsupported,
+            exc.RestartAnalysis,
+            exc.TorchRuntimeError,
+            exc.SkipFrame,
+        ):
             raise
         except Exception as e:
             sys.stderr.write(
@@ -1220,7 +1224,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def RETURN_VALUE(self, inst):
         if self.output.count_calls() == 0:
-            unimplemented("no graph found")
+            raise exc.SkipFrame()
         self.instruction_pointer = None
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
