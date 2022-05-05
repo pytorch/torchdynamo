@@ -31,6 +31,8 @@ import _collections_abc
 import _weakrefset
 import torch
 
+from . import config
+
 
 def _strip_init_py(s):
     return re.sub(r"__init__.py$", "", s)
@@ -148,8 +150,9 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    return filename.startswith(_module_dir(torch.nn)) or filename.startswith(
-        _module_dir(torch.distributions)
+    return any(
+        filename.startswith(_module_dir(mod))
+        for mod in config.skipfiles_inline_module_allowlist
     )
 
 
