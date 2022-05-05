@@ -161,6 +161,7 @@ class TorchVariable(VariableTracker):
             unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
                 tx,
                 self,
+                tensor_with_tf_override.orig_tensor_variable_source,
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
                 options,
@@ -174,6 +175,7 @@ class TorchVariable(VariableTracker):
                 return unwrapped
             return TensorWithTFOverrideVariable(
                 unwrapped,
+                tensor_with_tf_override.orig_tensor_variable_source,
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
