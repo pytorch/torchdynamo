@@ -12,6 +12,10 @@ class RestartAnalysis(RuntimeError):
     pass
 
 
+class SkipFrame(RuntimeError):
+    pass
+
+
 class TorchRuntimeError(RuntimeError):
     pass
 

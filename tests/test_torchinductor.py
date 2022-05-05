@@ -794,6 +794,12 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    def test_inf(self):
+        def fn(a):
+            return a + float("inf"), a + float("-inf"), a * -float("inf")
+
+        self.common(fn, (torch.randn(8),))
+
 
 class CpuTests(TestCase):
     common = check_model

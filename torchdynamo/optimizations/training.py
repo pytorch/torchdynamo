@@ -143,4 +143,14 @@ class AOTAutogradMemoryEfficientFusion(AOTAutogradStrategy):
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs)
 
 
-aot_autograd_speedup_strategy = AOTAutogradMemoryEfficientFusion.compile_fn
+class AOTAutogradMemoryEfficientFusionWithContext:
+    """Pass nvfuser context to TorchDynamo"""
+
+    def __init__(self):
+        self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        return AOTAutogradMemoryEfficientFusion.compile_fn(gm, example_inputs)
+
+
+aot_autograd_speedup_strategy = AOTAutogradMemoryEfficientFusionWithContext()

@@ -134,6 +134,10 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        if val == float("inf"):
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif val == float("-inf"):
+            return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         return ops.to_dtype(repr(val), dtype)
 
     @staticmethod

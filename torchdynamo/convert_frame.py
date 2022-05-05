@@ -12,13 +12,13 @@ import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
+from . import exc
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
 from .eval_frame import skip_code
 from .exc import InternalTorchDynamoError
-from .exc import RestartAnalysis
 from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
@@ -173,9 +173,11 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 try:
                     code = transform_code_object(frame.f_code, transform)
                     break
-                except RestartAnalysis:
+                except exc.RestartAnalysis:
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
+                except exc.SkipFrame:
+                    return None
             output_codes.add(code)
             if config.debug:
                 debug_print("ORIGINAL BYTECODE")
