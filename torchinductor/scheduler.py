@@ -1,12 +1,22 @@
 import collections
 import contextlib
 import dataclasses
+import functools
+from itertools import chain
 from typing import Any
 from typing import Dict
 
+import numpy
+import numpy as np
+
+from . import dependencies
 from . import ir
 from .dependencies import StarDep
 from .virtualized import V
+
+
+def cmp(a, b):
+    return int(a > b) - int(a < b)
 
 
 class OutputNode:
@@ -21,10 +31,13 @@ class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
         self.scheduler = scheduler
         self.node = node
-        self.read_writes = node.get_read_writes()
+        self.users = None
+        self.set_read_writes(node.get_read_writes())
+
+    def set_read_writes(self, rw):
+        self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
-        self.users = None
 
     def prune_deps(self):
         self.unmet_dependencies = {
@@ -61,17 +74,120 @@ class NopKernelSchdulerNode(BaseSchedulerNode):
         self.scheduler.pending_buffer_names.add(self.get_name())
 
 
+def pick_loop_order(stride_lengths, sizes):
+    """
+    A heuristic to decide loop iteration orders.  This has not been well
+    tuned and may be something we should autotune.
+    """
+
+    @functools.cmp_to_key
+    def index_cmp(a, b):
+        if sizes[a] == 1 or sizes[b] == 1:
+            # 1-sizes don't matter, just move them to the end
+            return cmp(sizes[a] == 1, sizes[b] == 1)
+
+        a_first = np.logical_or(
+            stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
+        ).all()
+        b_first = np.logical_or(
+            stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
+        ).all()
+
+        if a_first and not b_first:
+            return -1
+        if b_first and not a_first:
+            return 1
+
+        # otherwise contiguous
+        return cmp(b, a)
+
+    order = list(reversed(range(stride_lengths.shape[1])))
+    order.sort(key=index_cmp)
+    return order
+
+
+def inverse_reorder(order):
+    inv_order = dict(zip(order, range(len(order))))
+
+    def reindex(index):
+        assert len(index) == len(inv_order)
+        return [index[inv_order[i]] for i in range(len(index))]
+
+    return reindex
+
+
+def apply_loop_reordering(stides, sizes):
+    order = list(reversed(pick_loop_order(stides, sizes)))
+    sizes = [sizes[i] for i in order]
+    reindex2 = inverse_reorder(order)
+    sizes, reindex1 = ir.SqueezeView.squeezer(sizes)
+
+    def reindex(index):
+        return reindex2(reindex1(index))
+
+    return sizes, reindex
+
+
 class SchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         super().__init__(scheduler, node)
-        self._size, self._reindex = ir.SqueezeView.squeezer(node.data.get_size())
-        self._reduction_size, self._reduction_reindex = ir.SqueezeView.squeezer(
-            node.data.get_reduction_size()
+
+        _, (index_vars, reduction_vars) = dependencies.index_vars(
+            node.get_size(), node.get_reduction_size()
         )
+        rw = node.get_read_writes()
+        memory_addrs = [dep.index for dep in chain(rw.reads, rw.writes)]
+        stride_lengths = numpy.array(
+            [
+                V.graph.sizevars.stride_hints(expr, [*index_vars, *reduction_vars])
+                for expr in memory_addrs
+            ],
+            dtype=numpy.int64,
+        )
+
+        index_strides = stride_lengths[:, : len(index_vars)]
+        reduction_strides = stride_lengths[:, len(index_vars) :]
+        assert index_strides.shape == (len(memory_addrs), len(index_vars))
+        assert reduction_strides.shape == (len(memory_addrs), len(reduction_vars))
+
+        self._size, self._reindex = apply_loop_reordering(
+            index_strides, node.get_size()
+        )
+        self._reduction_size, self._reduction_reindex = apply_loop_reordering(
+            reduction_strides, node.get_reduction_size()
+        )
+
         self.group = (
             group_fn(self._size),
             group_fn(self._reduction_size),
         )
+
+        # need to recompute reads/writes with possible loop reordering
+        if node.get_reduction_type():
+
+            def store_fn(vars, reduction_vars):
+                return node.get_store_function()(
+                    self._reindex(vars), self._reduction_reindex(reduction_vars)
+                )
+
+            self.set_read_writes(
+                dependencies.extract_read_writes(
+                    store_fn,
+                    self._size,
+                    self._reduction_size,
+                )
+            )
+        else:
+
+            def store_fn(vars):
+                return node.get_store_function()(self._reindex(vars))
+
+            self.set_read_writes(
+                dependencies.extract_read_writes(
+                    store_fn,
+                    self._size,
+                )
+            )
 
     def can_remove_buffer(self, broadcast_after_reduce=False):
         if (

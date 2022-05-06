@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import functools
 import textwrap
@@ -6,7 +7,9 @@ from typing import Any
 from typing import Callable
 from typing import List
 from typing import Optional
+from unittest.mock import patch
 
+import numpy
 import sympy
 import torch
 from sympy import Expr
@@ -239,7 +242,7 @@ class ExpandView(BaseView):
             new_stride = [sympy.Integer(0)] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(stride if size != 1 else sympy.Integer(0))
-            new_layout = Layout(
+            new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
                 list(new_size),
@@ -281,7 +284,7 @@ class PermuteView(BaseView):
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
-            new_layout = Layout(
+            new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
                 [old_layout.size[i] for i in dims],
@@ -322,7 +325,7 @@ class SqueezeView(BaseView):
                 if size != 1:
                     new_size.append(size)
                     new_stride.append(stride)
-            new_layout = Layout(
+            new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
                 new_size,
@@ -385,7 +388,7 @@ class View(BaseView):
 
         if is_contiguous_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
-            new_layout = Layout(
+            new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
                 new_size,
@@ -521,9 +524,8 @@ class ReinterpretView(BaseView):
         return self.layout.stride
 
     def make_loader(self):
-        indexer = self.layout.make_indexer()
-
         def loader(index):
+            indexer = self.layout.make_indexer()
             return ops.load(self.get_name(), indexer(index))
 
         return loader
@@ -651,19 +653,6 @@ class Layout(IRNode):
 
     __repr__ = __str__
 
-    def make_indexer(self):
-        """A closure containing math to read a given element"""
-
-        def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
-            result = self.offset
-            for idx, stride, sz in zip(index, self.stride, self.size):
-                if sz != 1:
-                    result = result + idx * stride
-            return result
-
-        return indexer
-
     def is_contiguous(self):
         for left, right, size in zip(
             self.stride, FlexibleLayout.contiguous_strides(self.size), self.size
@@ -691,15 +680,34 @@ class Layout(IRNode):
             self.offset,
         )
 
+    def make_indexer(self):
+        assert (
+            FlexibleLayout.allow_indexing
+        ), f"convert {type(self).__name__} to FixedLayout first"
+        return self.as_fixed().make_indexer()
+
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
-    pass
+    def make_indexer(self):
+        """A closure containing math to read a given element"""
+
+        def indexer(index):
+            assert len(index) == len(self.stride) == len(self.size)
+            result = self.offset
+            for idx, stride, sz in zip(index, self.stride, self.size):
+                if sz != 1:
+                    result = result + idx * stride
+            return result
+
+        return indexer
 
 
 class FlexibleLayout(Layout):
     """A Tensor layout we are allowed to change"""
+
+    allow_indexing = False
 
     @staticmethod
     def contiguous_strides(sizes):
@@ -709,6 +717,27 @@ class FlexibleLayout(Layout):
         for size in reversed(sizes[1:]):
             reversed_strides.append(size * reversed_strides[-1])
         return list(reversed(reversed_strides))
+
+    @staticmethod
+    def ordered_strides(sizes, order):
+        assert set(range(len(sizes))) == set(order)
+        next_stride = sympy.Integer(1)
+        strides = [None] * len(order)
+
+        for i in order:
+            strides[i] = next_stride
+            next_stride = next_stride * sizes[i]
+        return strides
+
+    def as_stride_order(self, order):
+        assert len(self.size) == len(order)
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            self.ordered_strides(self.size, order),
+            self.offset,
+        )
 
     def __init__(self, device, dtype, size):
         super(FlexibleLayout, self).__init__(
@@ -728,6 +757,9 @@ class AliasedLayout(Layout):
             layout.stride,
         )
         self.view = view
+
+    def make_indexer(self):
+        return self.as_fixed().make_indexer()
 
 
 @dataclasses.dataclass
@@ -755,18 +787,25 @@ class Buffer(IRNode):
         return self.layout
 
     def freeze_layout(self):
-        self.layout = self.layout.as_fixed()
+        if not isinstance(self.layout, MultiOutputLayout):
+            self.layout = self.layout.as_fixed()
+
+    def freeze_layout_with_stride_order(self, order):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_stride_order(order)
 
     def make_loader(self):
-        indexer = self.layout.make_indexer()
-
         def loader(index):
+            indexer = self.layout.make_indexer()
             return ops.load(self.name, indexer(index))
 
         return loader
 
     def codegen_reference(self):
         return self.get_name()
+
+    def decide_layout(self):
+        pass
 
 
 @dataclasses.dataclass
@@ -779,18 +818,64 @@ class ComputedBuffer(Buffer):
     data: Loops
 
     def get_read_writes(self):
-        indexer = self.layout.make_indexer()
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            if self.data.get_reduction_type():
+                return extract_read_writes(
+                    self.get_store_function(),
+                    self.data.get_size(),
+                    self.data.get_reduction_size(),
+                )
+            else:
+                return extract_read_writes(
+                    self.get_store_function(),
+                    self.data.get_size(),
+                )
+
+    def get_store_function(self):
+        indexer = self.layout.as_fixed().make_indexer()
         if self.data.get_reduction_type():
-            return extract_read_writes(
-                partial(self.data.store_reduction, self.name, indexer),
-                self.data.get_size(),
-                self.data.get_reduction_size(),
-            )
+            return partial(self.data.store_reduction, self.name, indexer)
         else:
-            return extract_read_writes(
-                partial(self.data.store_output, self.name, indexer),
-                self.data.get_size(),
+            return partial(self.data.store_output, self.name, indexer)
+
+    def decide_layout(self):
+        """
+        If our layout is still flexible, try to set it based on stride orders of reads.
+
+        TODO(jansel): A better algorithm here would look at downstream consumers of this
+                      value and try to do global graph-level layout optimization.
+                      This is also something just begging to be autotuned.
+        """
+        if isinstance(self.layout, FlexibleLayout):
+            _, (index_vars, reduction_vars) = dependencies.index_vars(
+                self.data.get_size(), self.data.get_reduction_size()
             )
+            reads = self.get_read_writes().reads
+            # only consider reads to buffer of same size
+            reads = [
+                r.index.subs({v: sympy.Integer(0) for v in reduction_vars})
+                for r in reads
+            ]
+
+            if reads:
+                stride_lengths = numpy.array(
+                    [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
+                    dtype=numpy.int64,
+                )
+                from .scheduler import pick_loop_order
+
+                self.freeze_layout_with_stride_order(
+                    pick_loop_order(stride_lengths, self.get_size())
+                )
+
+        if isinstance(self.layout, FlexibleLayout):
+            self.freeze_layout()
+
+    def get_reduction_size(self):
+        return self.data.get_reduction_size()
+
+    def get_reduction_type(self):
+        return self.data.get_reduction_type()
 
 
 @dataclasses.dataclass
@@ -902,6 +987,9 @@ class ConcatKernel(NopKernel):
 class ExternKernel(InputsKernel):
     constant_args: List[Any] = ()
     output_view: Optional[ReinterpretView] = None
+
+    def decide_layout(self):
+        self.freeze_layout()
 
     @staticmethod
     def copy_input(x):
