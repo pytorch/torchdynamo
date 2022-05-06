@@ -1105,3 +1105,27 @@ class ReproTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize("eager"):
             res = fn3()
         self.assertTrue(same(ref, res))
+
+    def test_with_on_graph_break_inst(self):
+        def reversible(x):
+            print("Hello world")  # Cause graph break so inline fails
+            return torch.sin(torch.cos(x))
+
+        def fn(x):
+            with torch.enable_grad():
+                a = torch.sin(x)
+                b = reversible(a)
+                c = torch.sigmoid(b)
+                c.sum().backward()
+                return x.grad
+
+        x = torch.randn(3, requires_grad=True)
+        x.grad = None
+        with torch.no_grad():
+            ref = fn(x)
+
+        x.grad = None
+        with torchdynamo.optimize("eager"):
+            with torch.no_grad():
+                res = fn(x)
+        self.assertTrue(same(ref, res))
