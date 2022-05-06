@@ -47,3 +47,19 @@ traceable_tensor_subclasses = set()
 
 # Propagate backend exceptions up to torchdynamo.optimize
 raise_on_backend_error = True
+
+# If a PyTorch module is in this allowlist, torchdynamo will be allowed
+# to inline objects from it or its children.
+skipfiles_inline_module_allowlist = {
+    torch.nn,
+    torch.distributions,
+}
+
+# If a string representing a PyTorch module is in this ignorelist,
+# the `allowed_functions.is_allowed` function will not consider it
+# when creating a list of PyTorch functions that will appear in
+# FX IR.
+allowed_functions_module_string_ignorelist = {
+    "torch.distributions",
+    "torch.testing",
+}
