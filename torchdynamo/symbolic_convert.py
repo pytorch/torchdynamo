@@ -151,6 +151,10 @@ def break_graph_if_unsupported(*, push):
             self.output.compile_subgraph(self)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
+            for _ in range(push):
+                self.push(UnknownVariable())
+
+            resume_call_insts = self.create_call_resume_at(self.next_instruction)
             # Check if there is a block stack entry with GradModeVariable. And
             # wrap the instruction causing the graph break inside a try..finally
             # block. See more details at
@@ -160,18 +164,19 @@ def break_graph_if_unsupported(*, push):
                 self.block_stack[0].with_context, GradModeVariable
             ):
                 ctx_variable = self.block_stack[0].with_context
+
                 cg = PyCodegen(self)
-                setup_finally, cleanup = ctx_variable.reconstruct(cg)
+                setup_finally, cleanup = ctx_variable.reconstruct(
+                    cg, resume_call_insts[0]
+                )
                 self.output.add_output_instructions(setup_finally)
 
             self.output.add_output_instructions([inst])
 
             # Add the cleanup instructions from try..finally block
             self.output.add_output_instructions(cleanup)
-            for _ in range(push):
-                self.push(UnknownVariable())
             self.output.add_output_instructions(
-                self.create_call_resume_at(self.next_instruction)
+                resume_call_insts,
             )
 
         return wrapper

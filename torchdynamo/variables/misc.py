@@ -1,4 +1,5 @@
 import inspect
+import sys
 import types
 from typing import Dict
 from typing import List
@@ -135,9 +136,10 @@ class GradModeVariable(ContextManagerVariable):
         ),
         torch._C._set_grad_enabled(value)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen, target_inst=None):
         """
         Generate following Python Bytecode
+        Python 3.8
              0 LOAD_GLOBAL              0 (torch)
              2 LOAD_ATTR                1 (_C)
              4 LOAD_METHOD              2 (_set_grad_enable)
@@ -165,6 +167,41 @@ class GradModeVariable(ContextManagerVariable):
 
         Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
 
+        Python 3.9, 3.10
+             0 LOAD_GLOBAL              0 (torch)
+             2 LOAD_ATTR                1 (_C)
+             4 LOAD_METHOD              2 (_set_grad_enable)
+             6 LOAD_CONST               1 (False)
+             8 CALL_METHOD              1
+            10 POP_TOP
+
+            12 SETUP_FINALLY           22 (to 36)
+
+            14 LOAD_GLOBAL              3 (user_inst)
+            16 CALL_FUNCTION            0
+            18 POP_TOP
+            20 POP_BLOCK
+
+            22 LOAD_GLOBAL              0 (torch)
+            24 LOAD_ATTR                1 (_C)
+            26 LOAD_METHOD              2 (_set_grad_enable)
+            28 LOAD_CONST               2 (True)
+            30 CALL_METHOD              1
+            32 POP_TOP
+
+            34 JUMP_FORWARD            14 (to 50)
+
+            36 LOAD_GLOBAL              0 (torch)
+            38 LOAD_ATTR                1 (_C)
+            40 LOAD_METHOD              2 (_set_grad_enable)
+            42 LOAD_CONST               2 (True)
+            44 CALL_METHOD              1
+            46 POP_TOP
+            48 RERAISE
+
+            50 LOAD_CONST               0 (None)
+            52 RETURN_VALUE
+
         """
         if self.target_mode == self.original_mode:
             return ([], [])
@@ -183,18 +220,28 @@ class GradModeVariable(ContextManagerVariable):
 
         init_block = set_grad_insts(self.target_mode)
         finally_block = set_grad_insts(self.original_mode)
-
-        # Generate the prologue that ends with setup_finally
         setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
         prologue = init_block + [setup_final_inst]
 
         # Generate the epilogue - starts with 20 POP_BLOCK and ends at 34 POP_TOP
-        epilogue = [
-            create_instruction("POP_BLOCK"),
-            create_instruction("BEGIN_FINALLY"),
-            *finally_block,
-            create_instruction("END_FINALLY"),
-        ]
+        if sys.version_info < (3, 9):
+            # Generate the prologue that ends with setup_finally
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                create_instruction("BEGIN_FINALLY"),
+                *finally_block,
+                create_instruction("END_FINALLY"),
+            ]
+        else:
+            except_block = set_grad_insts(self.original_mode)
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                *except_block,
+                create_instruction("JUMP_FORWARD", target=target_inst),
+                *finally_block,
+                create_instruction("RERAISE"),
+            ]
+
         return (prologue, epilogue)
 
 
