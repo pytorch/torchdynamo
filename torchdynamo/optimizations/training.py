@@ -54,11 +54,6 @@ class AOTAutogradStrategy(object):
             if submod.__class__.__name__ == "LSTM":
                 self.use_fallback = True
 
-        has_param_as_input = False
-        for ex in example_inputs:
-            if isinstance(ex, torch.nn.parameter.Parameter):
-                has_param_as_input = True
-
         # 3) set_grad_enabled
         has_set_grad_enabled = False
         for node in self.gm.graph.nodes:
@@ -68,7 +63,6 @@ class AOTAutogradStrategy(object):
         if (
             has_mutation(self.gm, self.example_inputs)
             or len(gm_inputs) == 0
-            or has_param_as_input
             or has_set_grad_enabled
         ):
             self.use_fallback = True
