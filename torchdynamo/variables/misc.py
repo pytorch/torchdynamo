@@ -228,7 +228,7 @@ class GradModeVariable(ContextManagerVariable):
             # Generate the prologue that ends with setup_finally
             epilogue = [
                 create_instruction("POP_BLOCK"),
-                create_instruction("BEGIN_FINALLY"),
+                codegen.create_begin_finally(),
                 *finally_block,
                 create_instruction("END_FINALLY"),
             ]
