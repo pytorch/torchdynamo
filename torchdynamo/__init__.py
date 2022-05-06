@@ -36,4 +36,4 @@ def list_backends():
     """
     from .optimizations import BACKENDS
 
-    return list(sorted(BACKENDS.keys()))
+    return [*sorted([*BACKENDS.keys(), "inductor"])]

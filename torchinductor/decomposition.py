@@ -3,6 +3,8 @@ import math
 import torch
 from functorch._src.decompositions import register_decomposition
 
+from torchinductor import config
+
 aten = torch.ops.aten
 decompositions = {}
 
@@ -32,7 +34,6 @@ def _log_softmax(x, dim, half_to_float):
     # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
     if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
         x = x.to(torch.float32)
-    assert half_to_float is False, "TODO"
     x_sum = torch.log(torch.sum(torch.exp(x), dim, keepdim=True))
     return x - x_sum
 
@@ -96,17 +97,24 @@ def leaky_relu(x, negative_slope=0.01):
 
 
 @register_decomposition([aten.gelu], decompositions)
-def gelu(x):
-    # tanh approximation:
-    # return 0.5 * x * (1 + torch.tanh(math.sqrt(2/math.pi) * (x + 0.044715 * x * x * x)))
-    return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
+def gelu(x, approximate="none"):
+    if config.approximations or approximate != "none":
+        # tanh approximation is much faster
+        return (
+            0.5
+            * x
+            * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * x * x * x)))
+        )
+    else:
+        return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
 @register_decomposition([aten.special_erf], decompositions)
 def special_erf(x):
-    # TODO(jansel): this might be crazy slow.  Triton doesn't have the cuda ::erf() builtin.
+    # TODO(jansel): this might be crazy slow.  Triton doesn't have the
+    #               cuda ::erf() builtin.  I've made a feature request for this,
+    #               so it may be coming soon.
 
-    # note: triton may add a builtin for this
     # from https://www.johndcook.com/blog/2009/01/19/stand-alone-error-function-erf/
     a1 = 0.254829592
     a2 = -0.284496736
@@ -134,6 +142,7 @@ def rsub(a, b):
 
 @register_decomposition([aten.pow.Tensor_Scalar], decompositions)
 def pow(a, b):
+    # see https://github.com/openai/triton/issues/506
     # triton doesn't support pow, so need to rewrite it
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
@@ -152,7 +161,9 @@ def pow(a, b):
         return result
     else:
         assert False, "TODO: check correctness here"
-        return torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
+        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
+        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
+        # else: torch.exp(torch.log(a) * b)
 
 
 @register_decomposition([aten.masked_fill.Scalar], decompositions)
