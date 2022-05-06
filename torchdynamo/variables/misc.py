@@ -207,10 +207,11 @@ class GradModeVariable(ContextManagerVariable):
             return ([], [])
 
         def set_grad_insts(mode):
+            global_torch_source = codegen.tx.import_source("torch")
+            attr_source = AttrSource(global_torch_source, "_C._set_grad_enabled")
+            load_set_grad_enabled_insts = attr_source.reconstruct(codegen)
             return [
-                codegen.create_load_global("torch"),
-                codegen.create_load_attr("_C"),
-                codegen.create_load_attr("_set_grad_enabled"),
+                *load_set_grad_enabled_insts,
                 codegen.create_load_const(mode),
                 create_instruction("CALL_FUNCTION", 1),
                 create_instruction("POP_TOP"),
