@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import functools
 import textwrap
@@ -811,7 +812,6 @@ class Buffer(IRNode):
 
     def is_no_op(self):
         return False
-
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
