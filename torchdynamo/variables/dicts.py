@@ -14,11 +14,12 @@ from .base import VariableTracker
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, dict_cls=collections.OrderedDict, **kwargs):
         super(ConstDictVariable, self).__init__(**kwargs)
-        self._python_type = type(items)
+        self.dict_cls = dict_cls
         if not isinstance(items, collections.OrderedDict):
             assert isinstance(items, dict)
+            self.dict_cls = dict
             items = collections.OrderedDict((k, items[k]) for k in sorted(items.keys()))
         self.items = items
 
@@ -26,7 +27,7 @@ class ConstDictVariable(VariableTracker):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
     def python_type(self):
-        return self._python_type
+        return self.dict_cls
 
     def reconstruct(self, codegen):
         if len(self.items) == 0:
@@ -138,14 +139,6 @@ class ConstDictVariable(VariableTracker):
     def modifed(self, items, **options):
         """a copy of self with different items"""
         return self.clone(items=items, **options)
-
-    def clone(self, **kwargs):
-        """Shallow copy with some (optional) changes"""
-        args = dict(self.__dict__)
-        args.pop("_python_type", None)  # _python_type is used internally
-        kwargs.pop("_python_type", None)
-        args.update(kwargs)
-        return self.__class__(**args)
 
 
 class DataClassVariable(ConstDictVariable):
