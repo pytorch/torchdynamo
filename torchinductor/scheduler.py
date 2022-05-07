@@ -68,6 +68,7 @@ class NopKernelSchdulerNode(BaseSchedulerNode):
         return False
 
     def run(self):
+        print("RUN NOP", self.get_name())
         if self.node.should_allocate():
             V.graph.wrapper_code.codegen_allocation(self.node)
         self.scheduler.run_count += 1
