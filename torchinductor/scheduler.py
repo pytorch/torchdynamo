@@ -47,7 +47,7 @@ class BaseSchedulerNode:
         }
 
     def get_name(self):
-        return self.node.name
+        return self.node.get_name()
 
 
 class ExternKernelSchdulerNode(BaseSchedulerNode):
@@ -68,6 +68,7 @@ class NopKernelSchdulerNode(BaseSchedulerNode):
         return False
 
     def run(self):
+        print("RUN NOP", self.get_name())
         if self.node.should_allocate():
             V.graph.wrapper_code.codegen_allocation(self.node)
         self.scheduler.run_count += 1
@@ -296,16 +297,19 @@ class Scheduler:
         self.run_count = 0
         self.nodes = []
         self.kernels = []
-        self.available_buffer_names = set(V.graph.graph_inputs.keys())
+        self.available_buffer_names = {
+            *V.graph.graph_inputs.keys(),
+            *V.graph.constants.keys(),
+        }
         self.pending_buffer_names = set()
         self.fusable_deps = set()
         for node in nodes:
-            if isinstance(node, ir.ComputedBuffer):
+            if node.is_no_op():
+                self.nodes.append(NopKernelSchdulerNode(self, node))
+            elif isinstance(node, ir.ComputedBuffer):
                 self.nodes.append(SchedulerNode(self, node, self.group_fn))
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchdulerNode(self, node))
-            elif isinstance(node, ir.NopKernel):
-                self.nodes.append(NopKernelSchdulerNode(self, node))
             else:
                 assert False, node
         self.compute_users()
