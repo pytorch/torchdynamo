@@ -804,14 +804,15 @@ class Buffer(IRNode):
 
         return loader
 
+    def is_no_op(self):
+        return False
+
     def codegen_reference(self):
         return self.get_name()
 
     def decide_layout(self):
         pass
 
-    def is_no_op(self):
-        return False
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
@@ -886,6 +887,12 @@ class ComputedBuffer(Buffer):
 
     def get_reduction_type(self):
         return self.data.get_reduction_type()
+
+    def is_no_op(self):
+        return self.data.is_zero_elements()
+
+    def should_allocate(self):
+        return True
 
     def is_no_op(self):
         return self.data.is_zero_elements()
