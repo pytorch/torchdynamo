@@ -1,3 +1,4 @@
+import hashlib
 from itertools import count
 
 from .. import codecache
@@ -51,6 +52,12 @@ class WrapperCodeGen(CodeGen):
             stride = tuple(value.get_stride())
             empty_like_cache.setdefault((device, dtype, shape, stride), name)
         self.empty_like_cache = empty_like_cache
+
+        for name, value in V.graph.constants.items():
+            # include a hash so our code cache gives different constants different files
+            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            self.header.writeline(f"{name} = None  # {hashed}")
+
         self.allocated = set()
 
     def next_kernel_name(self):

@@ -264,6 +264,37 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_linspace(self):
+        def fn(x):
+            return torch.linspace(0.125, 0.875, 7, device=x.device) + x
+
+        self.common(fn, (torch.randn(1, 7),))
+
+    def test_tensor1(self):
+        def fn(x):
+            return torch.tensor([1], device=x.device) + x, torch.tensor(
+                5, device=x.device
+            )
+
+        self.common(fn, (torch.randn(10),))
+
+    def test_tensor2(self):
+        def fn(x):
+            return torch.tensor(list(range(2, 40, 2)), device=x.device) + x
+
+        self.common(fn, (torch.randn(1),))
+
+    def test_tensor3(self):
+        def fn(x):
+            return (
+                torch.tensor([], device=x.device),
+                torch.tensor([1, 2], device=x.device) + 1,
+                torch.tensor([1, 2, 3], device=x.device) + 2,
+                torch.tensor([1, 2, 3, 4], device=x.device) + x,
+            )
+
+        self.common(fn, [torch.randn(4)])
+
     def test_views1(self):
         def fn1(x, y):
             return (x.view(size2) + y,)
