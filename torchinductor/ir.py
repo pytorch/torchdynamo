@@ -1,4 +1,3 @@
-import collections
 import dataclasses
 import functools
 import textwrap
