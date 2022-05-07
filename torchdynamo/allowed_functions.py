@@ -12,6 +12,8 @@ from functools import lru_cache
 import numpy
 import torch
 
+from . import config
+
 
 @lru_cache(None)
 def _disallowed_function_ids():
@@ -51,9 +53,10 @@ def _allowed_function_ids():
     torch_object_ids = dict()
 
     def _find_torch_objects(module):
-        if module.__name__.startswith("torch.distributions"):
-            return
-        if module.__name__.startswith("torch.testing"):
+        if any(
+            module.__name__.startswith(mod_name)
+            for mod_name in config.allowed_functions_module_string_ignorelist
+        ):
             return
         torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):
