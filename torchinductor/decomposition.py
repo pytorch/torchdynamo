@@ -140,7 +140,7 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.pow.Tensor_Scalar], decompositions)
+@register_decomposition([aten.pow], decompositions)
 def pow(a, b):
     # see https://github.com/openai/triton/issues/506
     # triton doesn't support pow, so need to rewrite it
