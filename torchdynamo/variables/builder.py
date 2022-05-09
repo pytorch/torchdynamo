@@ -168,7 +168,7 @@ class VariableBuilder:
                 )
                 for k in keys
             )
-            result = ConstDictVariable(result, guards=guards)
+            result = ConstDictVariable(result, collections.OrderedDict, guards=guards)
             if istype(value, dict):
                 return self.tx.output.side_effects.track_dict(
                     self.source, value, result

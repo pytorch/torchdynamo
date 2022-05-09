@@ -21,6 +21,8 @@ class ConstDictVariable(VariableTracker):
             assert isinstance(items, dict)
             self.dict_cls = dict
             items = collections.OrderedDict((k, items[k]) for k in sorted(items.keys()))
+        else:
+            assert self.dict_cls == collections.OrderedDict
         self.items = items
 
     def as_proxy(self):

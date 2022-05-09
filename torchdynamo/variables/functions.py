@@ -20,7 +20,7 @@ from .base import typestr
 def wrap_bound_arg(val, options):
     if isinstance(val, dict):
         return variables.ConstDictVariable(
-            {k: wrap_bound_arg(v, options) for k, v in val.items()}, **options
+            {k: wrap_bound_arg(v, options) for k, v in val.items()}, dict, **options
         )
     elif isinstance(val, (tuple, list)):
         cls = variables.BaseListVariable.cls_for(type(val))
