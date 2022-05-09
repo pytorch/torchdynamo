@@ -56,7 +56,7 @@ class TritonOverrides(OpOverrides):
             return 'float("inf")'
         elif value == float("-inf"):
             return 'float("-inf")'
-        return super().constant(value, dtype)
+        return OpOverrides.constant(value, dtype)
 
     @staticmethod
     def abs(x):
