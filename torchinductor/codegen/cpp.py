@@ -337,6 +337,7 @@ class CppKernel(Kernel):
             kernel_group.codegen_define_and_call(wrapper)
             node.codegen(wrapper)
             scheduler.barrier()
+            scheduler.maybe_free_buffers()
             kernel_group = KernelGroup()
 
         scheduler = Scheduler(tuple, V.graph.buffers)
@@ -426,7 +427,7 @@ class KernelGroup:
             call_args.append(f"c_void_p({name}.data_ptr())")
         for name in args.sizevars.keys():
             call_args.append(f"c_long({name})")
-        wrapper.body.writeline(
+        wrapper.writeline(
             "{}({})".format(kernel_name, ", ".join(call_args)),
         )
 

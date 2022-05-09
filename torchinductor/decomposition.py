@@ -96,6 +96,11 @@ def leaky_relu(x, negative_slope=0.01):
     return torch.relu(x) + (-negative_slope) * torch.relu(-x)
 
 
+@register_decomposition([aten.rsqrt], decompositions)
+def rsqrt(x):
+    return torch.reciprocal(torch.sqrt(x))
+
+
 @register_decomposition([aten.gelu], decompositions)
 def gelu(x, approximate="none"):
     if config.approximations or approximate != "none":

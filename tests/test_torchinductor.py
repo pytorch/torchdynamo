@@ -91,7 +91,7 @@ def check_model(self: TestCase, model, example_inputs):
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
         actual = run(*example_inputs)
-    self.assertTrue(same(actual, correct))
+    self.assertTrue(same(actual, correct, equal_nan=True))
 
 
 def check_model_cuda(self: TestCase, model, example_inputs):
@@ -446,11 +446,24 @@ class CommonTemplate:
             ),
         )
 
-    def test_linear(self):
+    def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
             torch.nn.Sigmoid(),
             ToTuple(),
+        )
+        self.common(mod, (torch.randn(2, 8),))
+
+    def test_linear2(self):
+        mod = torch.nn.Sequential(
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
         )
         self.common(mod, (torch.randn(2, 8),))
 
@@ -834,6 +847,32 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([64]),),
+        )
+
+    def test_rsqrt(self):
+        def fn(x):
+            return torch.rsqrt(x), torch.rsqrt(x + 1) - 2
+
+        self.common(
+            fn,
+            (torch.randn([64]),),
+        )
+
+    def test_bitwise(self):
+        def fn(x, y):
+            return (
+                torch.bitwise_not(x),
+                torch.bitwise_or(x, y),
+                torch.bitwise_xor(x, y),
+                torch.bitwise_and(x, y),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 2**30, [64], dtype=torch.int32),
+                torch.randint(0, 2**30, [64], dtype=torch.int32),
+            ),
         )
 
     def test_inf(self):

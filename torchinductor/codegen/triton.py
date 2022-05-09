@@ -472,8 +472,7 @@ class TritonKernel(Kernel):
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
-    def call_kernel(self, schedule, name: str):
-        code = schedule.body
+    def call_kernel(self, wrapper, name: str):
         call_args = list(
             chain(
                 self.args.input_buffers.keys(),
@@ -481,15 +480,13 @@ class TritonKernel(Kernel):
                 self.args.sizevars.keys(),
             )
         )
-        code.writeline(f"{name}_numel = {texpr(self.numel)}")
+        wrapper.writeline(f"{name}_numel = {texpr(self.numel)}")
         call_args.append(f"{name}_numel")
         if self.inside_reduction:
-            code.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
+            wrapper.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
             call_args.append(f"{name}_reduction_numel")
-        code.writeline(f"{name}[grid({name}_numel)](")
-        with code.indent():
-            code.writeline(", ".join(call_args))
-        code.writeline(")")
+        call_args = ", ".join(call_args)
+        wrapper.writeline(f"{name}[grid({name}_numel)]({call_args})")
 
     @classmethod
     def codegen(cls, wrapper):
@@ -540,6 +537,7 @@ class TritonKernel(Kernel):
 
             scheduler.enqueue(reschedule)
             scheduler.barrier()
+            scheduler.maybe_free_buffers()
 
 
 def split_sizes(sizes, prod1, prod2):

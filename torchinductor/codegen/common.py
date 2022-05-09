@@ -84,6 +84,22 @@ class OpOverrides:
     def sign(x):
         return ops.where(f"{x} < 0", "-1", "1")
 
+    @staticmethod
+    def bitwise_not(x):
+        return f"~{ExprPrinter.paren(x)}"
+
+    @staticmethod
+    def bitwise_and(x, y):
+        return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
+
+    @staticmethod
+    def bitwise_or(x, y):
+        return f"{ExprPrinter.paren(x)} | {ExprPrinter.paren(y)}"
+
+    @staticmethod
+    def bitwise_xor(x, y):
+        return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
+
 
 class IndentedBuffer:
     tabwidth = 4

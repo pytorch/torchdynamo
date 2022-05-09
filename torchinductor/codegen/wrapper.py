@@ -1,3 +1,5 @@
+import collections
+import dataclasses
 import hashlib
 from itertools import count
 
@@ -7,9 +9,39 @@ from ..virtualized import V
 from .common import CodeGen
 from .common import IndentedBuffer
 from .common import Kernel
+from .common import product
 from .triton import texpr
 
 pexpr = texpr
+
+
+def buffer_reuse_key(node: ir.Buffer):
+    return (node.get_device(), node.get_dtype(), product(node.get_size()))
+
+
+def make_buffer_reuse(old, new):
+    assert old.get_dtype() == new.get_dtype()
+    if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
+        return f"{new.get_name()} = {old.get_name()}; del {old.get_name()}"
+
+    return (
+        f"{new.get_name()} = as_strided({old.get_name()}, "
+        f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
+        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}); del {old.get_name()}"
+    )
+
+
+@dataclasses.dataclass
+class FreedBuffer:
+    node: ir.Buffer
+    reused_as: ir.Buffer = None
+
+    def codegen(self, code: IndentedBuffer):
+        name = self.node.get_name()
+        if self.reused_as is not None:
+            code.writeline(make_buffer_reuse(self.node, self.reused_as))
+        else:
+            code.writeline(f"del {name}")
 
 
 class WrapperCodeGen(CodeGen):
@@ -22,7 +54,7 @@ class WrapperCodeGen(CodeGen):
         self._names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
-        self.body = IndentedBuffer()
+        self.lines = []
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -50,6 +82,8 @@ class WrapperCodeGen(CodeGen):
             self.header.writeline(f"{name} = None  # {hashed}")
 
         self.allocated = set()
+        self.freed = set()
+        self.reuse_pool = collections.defaultdict(list)
 
     def next_kernel_name(self):
         return f"kernel{next(self._names_iter)}"
@@ -64,26 +98,59 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
-            self.body.writeline(f"{name} = {layout.view.codegen_reference()}")
+            self.writeline(f"{name} = {layout.view.codegen_reference()}")
+            return
+
+        # try to reuse a recently freed buffer
+        key = buffer_reuse_key(buffer)
+        if self.reuse_pool.get(key, None):
+            fb = self.reuse_pool[key].pop()
+            fb.reused_as = buffer
             return
 
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        self.body.writeline(
+        self.writeline(
             f"{name} = empty_strided("
             f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
             f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
             f"device='{device.type}', dtype={dtype})"
         )
 
+    def codegen_free(self, buffer):
+        name = buffer.get_name()
+        if (
+            name in V.graph.removed_buffers
+            or name in V.graph.graph_inputs
+            or name in V.graph.constants
+            or name in self.freed
+        ):
+            return
+        self.freed.add(name)
+
+        layout = buffer.get_layout()
+        if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
+            self.writeline(f"del {name}")
+            return
+
+        fb = FreedBuffer(buffer)
+        self.reuse_pool[buffer_reuse_key(buffer)].append(fb)
+        self.writeline(fb)
+
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
         with result.indent():
-            result.splice(self.body)
+            while self.lines and isinstance(self.lines[-1], FreedBuffer):
+                self.lines.pop()
+            for line in self.lines:
+                if isinstance(line, FreedBuffer):
+                    line.codegen(result)
+                else:
+                    result.writeline(line)
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
             result.writeline("return (" + ", ".join(output_refs) + ", )")
         return result.getvalue()
@@ -92,4 +159,12 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{name} = {kernel}")
 
     def call_kernel(self, name: str, kernel: Kernel):
-        kernel.call_kernel(self, self.body, name)
+        tmp = IndentedBuffer()
+        kernel.call_kernel(self, tmp, name)
+        for line in tmp.getvalue().split("\n"):
+            line = line.strip()
+            if line:
+                self.writeline(line)
+
+    def writeline(self, line):
+        self.lines.append(line)

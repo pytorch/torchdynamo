@@ -8,13 +8,19 @@ dce = False
 forward_only = True
 
 # set to False to burn in all shapes
-dynamic_shapes = True
+dynamic_shapes = False
 
 # assuming weight matrices are fixed size
 static_weight_shapes = True
 
 # enable certain approximation algorithms
 approximations = False
+
+# put correctness assertions in generated code
+size_asserts = True
+
+# enable loop reordering based on input orders
+pick_loop_orders = True
 
 
 # config specific to codegen/cpp.pp

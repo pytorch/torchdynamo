@@ -5,10 +5,12 @@ import functools
 from itertools import chain
 from typing import Any
 from typing import Dict
+from typing import List
 
 import numpy
 import numpy as np
 
+from . import config
 from . import dependencies
 from . import ir
 from .dependencies import StarDep
@@ -22,9 +24,13 @@ def cmp(a, b):
 class OutputNode:
     def __init__(self, dep):
         self.unmet_dependencies = {dep}
+        self.inverse_users = []
 
     def is_reduction(self):
         return False
+
+    def get_alias_names(self):
+        return ()
 
 
 class BaseSchedulerNode:
@@ -32,7 +38,23 @@ class BaseSchedulerNode:
         self.scheduler = scheduler
         self.node = node
         self.users = None
+        self.inverse_users = []
         self.set_read_writes(node.get_read_writes())
+
+    def set_users(self, users: List["NodeUser"]):
+        # deduplicate
+        result = dict()
+        for use in users:
+            if id(use.node) in result:
+                result[id(use.node)] = NodeUser(
+                    use.node, result[id(use.node)].can_inplace and use.can_inplace
+                )
+            else:
+                result[id(use.node)] = use
+        self.users = list(result.values())
+
+    def get_aliases(self):
+        return self.node.get_alias_names()
 
     def set_read_writes(self, rw):
         self.read_writes = rw
@@ -49,14 +71,29 @@ class BaseSchedulerNode:
     def get_name(self):
         return self.node.get_name()
 
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        return False
+
+    def allocate(self):
+        if self.node.should_allocate():
+            V.graph.wrapper_code.codegen_allocation(self.node)
+
+    def can_free(self):
+        for use in self.users:
+            if isinstance(use.node, OutputNode):
+                return False
+            name = use.get_name()
+            if name not in self.scheduler.available_buffer_names:
+                return False
+        return True
+
 
 class ExternKernelSchdulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
     def run(self, codegen_extern_call):
-        if self.node.should_allocate():
-            V.graph.wrapper_code.codegen_allocation(self.node)
+        self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
         self.scheduler.kernels.append(self.node)
@@ -68,8 +105,7 @@ class NopKernelSchdulerNode(BaseSchedulerNode):
         return False
 
     def run(self):
-        if self.node.should_allocate():
-            V.graph.wrapper_code.codegen_allocation(self.node)
+        self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
 
@@ -102,7 +138,8 @@ def pick_loop_order(stride_lengths, sizes):
         return cmp(b, a)
 
     order = list(reversed(range(stride_lengths.shape[1])))
-    order.sort(key=index_cmp)
+    if config.pick_loop_orders:
+        order.sort(key=index_cmp)
     return order
 
 
@@ -193,9 +230,9 @@ class SchedulerNode(BaseSchedulerNode):
         if (
             self.is_reduction()
             and len(self.users) == 1
-            and len(self.users[0].unmet_dependencies) == 1
+            and len(self.users[0].node.unmet_dependencies) == 1
         ):
-            user = self.users[0]
+            user = self.users[0].node
             dep = next(iter(user.unmet_dependencies))
             writes = self.read_writes.writes
             if broadcast_after_reduce:
@@ -234,6 +271,12 @@ class SchedulerNode(BaseSchedulerNode):
             vars = self._reindex([*vars, *reduction_vars])
             self.node.data.store_output(name, indexer, vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
+
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
+            write_dep = next(iter(self.read_writes.writes))
+            return read_dep.index == write_dep.index and read_dep.size == write_dep.size
+        return False
 
 
 @dataclasses.dataclass
@@ -284,6 +327,15 @@ class BlockedNodes:
         return result
 
 
+@dataclasses.dataclass
+class NodeUser:
+    node: BaseSchedulerNode
+    can_inplace: bool = False
+
+    def get_name(self):
+        return self.node.get_name()
+
+
 class Scheduler:
     def __init__(self, group_fn, nodes):
         super(Scheduler, self).__init__()
@@ -301,6 +353,7 @@ class Scheduler:
             *V.graph.constants.keys(),
         }
         self.pending_buffer_names = set()
+        self.check_can_free = set()
         self.fusable_deps = set()
         for node in nodes:
             if node.is_no_op():
@@ -312,17 +365,42 @@ class Scheduler:
             else:
                 assert False, node
         self.compute_users()
+        self.name_to_node = {node.get_name(): node for node in self.nodes}
         self.enqueue(self.nodes)
 
     def compute_users(self):
         name_to_users = collections.defaultdict(list)
         for node in V.graph.graph_outputs:
-            name_to_users[node.get_name()].append(OutputNode(StarDep(node.get_name())))
+            name_to_users[node.get_name()].append(
+                NodeUser(OutputNode(StarDep(node.get_name())))
+            )
+
+        # handle aliasing
+        for node1 in self.nodes:
+            node1_name = node1.get_name()
+            for node2_name in node1.get_aliases():
+                if node1_name in name_to_users and node2_name in name_to_users:
+                    # merge the two
+                    list1 = name_to_users[node1_name]
+                    list2 = name_to_users[node2_name]
+                    combined = list1 + list2
+                    for key in name_to_users.keys():
+                        if name_to_users[key] is list1 or name_to_users[key] is list2:
+                            name_to_users[key] = combined
+                elif node1_name in name_to_users:
+                    name_to_users[node2_name] = name_to_users[node1_name]
+                else:
+                    name_to_users[node1_name] = name_to_users[node2_name]
+
         for node in reversed(self.nodes):
-            node.users = name_to_users[node.get_name()]
+            node.set_users(name_to_users[node.get_name()])
             name_to_users[node.get_name()] = None
             for read in node.read_writes.reads:
-                name_to_users[read.name].append(node)
+                name_to_users[read.name].append(NodeUser(node, node.can_inplace(read)))
+
+        for node in self.nodes:
+            for user in node.users:
+                user.node.inverse_users.append(node)
 
         updated_nodes = []
         for node in self.nodes:
@@ -368,11 +446,21 @@ class Scheduler:
             self.available_buffer_names.update(self.pending_buffer_names)
             nodes_to_add = []
             for name in self.pending_buffer_names:
+                self.check_can_free.update(self.pending_buffer_names)
                 for node in self.blocked_nodes.pop_name(name):
                     node.prune_deps()
                     nodes_to_add.append(node)
             self.pending_buffer_names.clear()
             self.enqueue(nodes_to_add)
+
+    def maybe_free_buffers(self):
+        # perhaps there are some unused buffers we can free
+        for done_name in self.check_can_free:
+            done_node = self.name_to_node[done_name]
+            for node in done_node.inverse_users:
+                if node.can_free():
+                    V.graph.wrapper_code.codegen_free(node.node)
+        self.check_can_free.clear()
 
     def kernel(self, kernel):
         self.fusable_deps.clear()
