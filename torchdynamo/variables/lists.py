@@ -9,6 +9,7 @@ from ..exc import unimplemented
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
+from ..source import GetItemSource
 
 
 class BaseListVariable(VariableTracker):
@@ -40,9 +41,11 @@ class BaseListVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
         if isinstance(index, slice):
-            return self.clone(items=self.items[index], mutable_local=None).add_options(
-                arg, self
-            )
+            return self.clone(
+                items=self.items[index],
+                source=GetItemSource(self.source, index),
+                mutable_local=None,
+            ).add_options(arg, self)
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
