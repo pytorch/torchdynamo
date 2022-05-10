@@ -365,3 +365,12 @@ class OutputGraph(fx.Tracer):
 
     def install_global(self, name, value):
         self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
+
+    def cleanup(self):
+        # There is a reference cycle between tracer and OutputGraph, causing
+        # some of the tensor objects to be held alive for longer than necessary.
+        self.root_tx = None
+
+        # Cleanup graphargs
+        for graph_arg in self.graphargs:
+            graph_arg.erase()
