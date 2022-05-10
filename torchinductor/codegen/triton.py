@@ -398,13 +398,7 @@ class TritonKernel(Kernel):
             """
         )
 
-        argdefs = [
-            *self.args.input_buffers.values(),
-            *self.args.output_buffers.values(),
-        ]
-        for var in self.args.sizevars.values():
-            # argdefs.append(f"{var}: tl.constexpr")
-            argdefs.append(f"{var}")
+        argdefs, _ = self.args.python_argdefs()
 
         if config.dynamic_shapes:
             maybe_const = ""
@@ -429,6 +423,9 @@ class TritonKernel(Kernel):
 
         code.writeline(f"def kernel({', '.join(argdefs)}):")
         with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"{old} = {new}")
+
             code.splice(
                 """
                     offset = tl.program_id(0) * BLOCK_SIZE
@@ -472,21 +469,15 @@ class TritonKernel(Kernel):
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
-    def call_kernel(self, wrapper, name: str):
-        call_args = list(
-            chain(
-                self.args.input_buffers.keys(),
-                self.args.output_buffers.keys(),
-                self.args.sizevars.keys(),
-            )
-        )
-        wrapper.writeline(f"{name}_numel = {texpr(self.numel)}")
+    def call_kernel(self, code, name: str):
+        _, call_args = self.args.python_argdefs()
+        code.writeline(f"{name}_numel = {texpr(self.numel)}")
         call_args.append(f"{name}_numel")
         if self.inside_reduction:
-            wrapper.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
+            code.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
             call_args.append(f"{name}_reduction_numel")
         call_args = ", ".join(call_args)
-        wrapper.writeline(f"{name}[grid({name}_numel)]({call_args})")
+        code.writeline(f"{name}[grid({name}_numel)]({call_args})")
 
     @classmethod
     def codegen(cls, wrapper):

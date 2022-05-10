@@ -121,12 +121,7 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
-        if (
-            name in V.graph.removed_buffers
-            or name in V.graph.graph_inputs
-            or name in V.graph.constants
-            or name in self.freed
-        ):
+        if not self.can_reuse(buffer):
             return
         self.freed.add(name)
 
@@ -138,6 +133,24 @@ class WrapperCodeGen(CodeGen):
         fb = FreedBuffer(buffer)
         self.reuse_pool[buffer_reuse_key(buffer)].append(fb)
         self.writeline(fb)
+
+    def can_reuse(self, buffer):
+        name = buffer.get_name()
+        if (
+                name in V.graph.removed_buffers
+                or name in V.graph.graph_inputs
+                or name in V.graph.constants
+                or name in self.freed
+        ):
+            return False
+        return True
+
+    def codegen_inplace_reuse(self, input_buffer, output_buffer):
+        assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
+        self.codegen_allocation(input_buffer)
+        self.freed.add(input_buffer.get_name())
+        self.allocated.add(output_buffer.get_name())
+        self.writeline(FreedBuffer(input_buffer, output_buffer))
 
     def generate(self):
         result = IndentedBuffer()

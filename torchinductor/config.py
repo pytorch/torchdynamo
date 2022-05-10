@@ -22,6 +22,9 @@ size_asserts = True
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
+# generate inplace computations
+inplace_buffers = False
+
 
 # config specific to codegen/cpp.pp
 class cpp:

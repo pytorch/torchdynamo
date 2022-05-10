@@ -406,10 +406,13 @@ class KernelGroup:
         if self.count == 0:
             return
 
-        argdefs = ",\n".ljust(25).join(self.args.cpp_argdefs())
+        arg_defs, call_args = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
         code = BracesBuffer()
-        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({argdefs})'])
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
@@ -421,12 +424,6 @@ class KernelGroup:
         wrapper.define_kernel(kernel_name, codecache_def.getvalue())
 
         # generate the code to call this
-        args = self.args
-        call_args = []
-        for name in chain(args.input_buffers.keys(), args.output_buffers.keys()):
-            call_args.append(f"c_void_p({name}.data_ptr())")
-        for name in args.sizevars.keys():
-            call_args.append(f"c_long({name})")
         wrapper.writeline(
             "{}({})".format(kernel_name, ", ".join(call_args)),
         )

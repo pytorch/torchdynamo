@@ -5,6 +5,7 @@ import itertools
 import operator
 import re
 import textwrap
+import typing
 from io import StringIO
 from itertools import chain
 
@@ -166,6 +167,15 @@ class BracesBuffer(IndentedBuffer):
         return ctx()
 
 
+class InplacedBuffer(typing.NamedTuple):
+    inner_name: str
+    other_names: typing.List[str]
+
+
+def unique(it):
+    return {id(x): x for x in it}.values()
+
+
 class KernelArgs:
     @staticmethod
     def _lookup(prefix, odict, name):
@@ -178,6 +188,7 @@ class KernelArgs:
     def __init__(self, sizevars=None):
         self.input_buffers = collections.OrderedDict()
         self.output_buffers = collections.OrderedDict()
+        self.inplace_buffers = collections.OrderedDict()
         self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
@@ -190,6 +201,11 @@ class KernelArgs:
         assert name not in V.graph.removed_buffers, name
         assert name not in self.input_buffers, name
         return self._lookup("out_ptr", self.output_buffers, name)
+
+    def make_inplace(self, input_name, output_name):
+        buf = InplacedBuffer(f"in_out_ptr{len(self.inplace_buffers)}", [input_name, output_name])
+        self.inplace_buffers[input_name] = buf
+        self.inplace_buffers[output_name] = buf
 
     def size(self, name):
         return self._lookup("ks", self.sizevars, name)
@@ -212,16 +228,56 @@ class KernelArgs:
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
 
-        argdefs = []
+        call_args = []
+        arg_defs = []
+        for inplaced in unique(self.inplace_buffers.values()):
+            outer = inplaced.other_names[0]
+            inner = inplaced.inner_name
+            dtype = buffer_types[outer]
+            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            name = inplaced.other_names[-1]
+            call_args.append(f"c_void_p({name}.data_ptr())")
         for outer, inner in self.input_buffers.items():
+            if outer in self.inplace_buffers:
+                continue
             dtype = buffer_types[outer]
-            argdefs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.output_buffers.items():
+            if outer in self.inplace_buffers:
+                continue
             dtype = buffer_types[outer]
-            argdefs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.sizevars.items():
-            argdefs.append(f"const {INDEX_TYPE} {inner}")
-        return argdefs
+            arg_defs.append(f"const {INDEX_TYPE} {inner}")
+            call_args.append(f"c_long({name})")
+        return arg_defs, call_args
+
+    def python_argdefs(self):
+        arg_defs = []
+        call_args = []
+        for inplaced in unique(self.inplace_buffers.values()):
+            arg_defs.append(inplaced.inner_name)
+            call_args.append(inplaced.other_names[-1])
+        for outer, inner in chain(self.input_buffers.items(), self.output_buffers.items()):
+            if outer in self.inplace_buffers:
+                continue
+            arg_defs.append(inner)
+            call_args.append(outer)
+        for outer, inner in self.sizevars.items():
+            arg_defs.append(inner)
+            call_args.append(outer)
+        return arg_defs, call_args
+
+    def aliases(self):
+        for inplaced in unique(self.inplace_buffers.values()):
+            for other in inplaced.other_names:
+                if other in self.input_buffers:
+                    yield self.input_buffers[other], inplaced.inner_name
+                if other in self.output_buffers:
+                    yield self.output_buffers[other], inplaced.inner_name
+
 
 
 class CSE:

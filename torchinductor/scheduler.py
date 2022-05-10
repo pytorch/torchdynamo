@@ -32,6 +32,9 @@ class OutputNode:
     def get_alias_names(self):
         return ()
 
+    def get_name(self):
+        return "OUTPUT"
+
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
@@ -43,7 +46,7 @@ class BaseSchedulerNode:
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
-        result = dict()
+        result = {}
         for use in users:
             if id(use.node) in result:
                 result[id(use.node)] = NodeUser(
@@ -258,8 +261,31 @@ class SchedulerNode(BaseSchedulerNode):
     def is_reduction(self):
         return bool(self.node.data.get_reduction_type())
 
+    def allocate(self):
+        if not self.node.should_allocate() or self.node.get_alias_names():
+            return False
+
+        if config.inplace_buffers:
+            for read in self.read_writes.reads:
+                input_node : BaseSchedulerNode = self.scheduler.name_to_node.get(read.name)
+                if (
+                        input_node
+                        and V.graph.wrapper_code.can_reuse(input_node)
+                ):
+                    remaining_uses = [x for x in input_node.users
+                                      if x.node.get_name() not in self.scheduler.available_buffer_names]
+                    if (
+                            len(remaining_uses) == 1 and
+                            remaining_uses[0].can_inplace and
+                            remaining_uses[0].node is self
+                    ):
+                        V.graph.wrapper_code.codegen_inplace_reuse(input_node.node, self.node)
+                        V.kernel.args.make_inplace(input_node.get_name(), self.get_name())
+                        return
+        super().allocate()
+
     def run(self, vars, reduction_vars):
-        V.graph.wrapper_code.codegen_allocation(self.node)
+        self.allocate()
         self.scheduler.run_count += 1
         name = self.get_name()
         indexer = self.node.layout.make_indexer()
@@ -273,6 +299,8 @@ class SchedulerNode(BaseSchedulerNode):
         self.scheduler.pending_buffer_names.add(self.get_name())
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
+        if self.node.get_alias_names():
+            return False
         if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
