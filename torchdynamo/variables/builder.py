@@ -70,6 +70,9 @@ class GraphArg:
     def __len__(self):
         return 1
 
+    def erase(self):
+        self.example = None
+
 
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
