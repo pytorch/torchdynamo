@@ -238,7 +238,7 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, type):
+        elif inspect.isclass(value):
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )

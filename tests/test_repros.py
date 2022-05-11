@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+from abc import ABC
 import collections
 import copy
 import inspect
@@ -1129,3 +1130,33 @@ class ReproTests(torchdynamo.testing.TestCase):
             with torch.no_grad():
                 res = fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_abc_setattr(self):
+        # tests that we correctly bail out of __setattr__ calls
+
+        # TODO: does not ensure ABC classes are correctly inferred as ClassVariables
+        # (doesn't test the fix for 'super()')
+
+        class BaseModule(torch.nn.Module, ABC):
+            def blah(self, x):
+                return x + 1
+
+        class Derived(BaseModule):
+            def __setattr__(self, name, value) -> None:
+                super().__setattr__(name, value)
+
+            def forward(self, x):
+                # expect a graph break on __setattr__
+                self.foo = 0
+                return self.blah(x)
+
+            def blah(self, x):
+                return super().blah(x)
+
+        x = torch.randn(3, requires_grad=True)
+        with torchdynamo.optimize("eager"):
+            mod = Derived()
+            mod(x)
+
+        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
+        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["total"], 3)
