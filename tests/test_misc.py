@@ -1169,3 +1169,14 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             z = fn([1, 2, 3, 5])
         self.assertEqual(z, 8)
+
+    def test_const_dict_variable_python_type(self):
+        from torchdynamo.variables import ConstDictVariable
+
+        d1 = {"a": 10, "b": 20}
+        d2 = collections.OrderedDict([("x", 12), ("y", 22)])
+        self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
+        self.assertEqual(
+            ConstDictVariable(d2, collections.OrderedDict).python_type(),
+            collections.OrderedDict,
+        )
