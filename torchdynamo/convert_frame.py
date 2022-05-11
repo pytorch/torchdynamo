@@ -149,7 +149,6 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             )
             tracer.run()
             output = tracer.output
-            output.cleanup()
             assert output.output_instructions
             instructions[:] = output.output_instructions
             code_options.update(output.code_options)

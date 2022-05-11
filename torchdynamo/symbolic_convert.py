@@ -314,6 +314,8 @@ class InstructionTranslatorBase(object):
                 f"{self.lineno} {typestr(e)}\n"
             )
             raise
+        finally:
+            self.output.cleanup()
 
     def push(self, val):
         assert val is None or isinstance(

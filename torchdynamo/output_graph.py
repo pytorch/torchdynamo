@@ -374,3 +374,7 @@ class OutputGraph(fx.Tracer):
         # Cleanup graphargs
         for graph_arg in self.graphargs:
             graph_arg.erase()
+
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
