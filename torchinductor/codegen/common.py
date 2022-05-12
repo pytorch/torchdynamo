@@ -203,7 +203,9 @@ class KernelArgs:
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):
-        buf = InplacedBuffer(f"in_out_ptr{len(self.inplace_buffers)}", [input_name, output_name])
+        buf = InplacedBuffer(
+            f"in_out_ptr{len(self.inplace_buffers)}", [input_name, output_name]
+        )
         self.inplace_buffers[input_name] = buf
         self.inplace_buffers[output_name] = buf
 
@@ -260,7 +262,9 @@ class KernelArgs:
         for inplaced in unique(self.inplace_buffers.values()):
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
-        for outer, inner in chain(self.input_buffers.items(), self.output_buffers.items()):
+        for outer, inner in chain(
+            self.input_buffers.items(), self.output_buffers.items()
+        ):
             if outer in self.inplace_buffers:
                 continue
             arg_defs.append(inner)
@@ -277,7 +281,6 @@ class KernelArgs:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
-
 
 
 class CSE:

@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import multiprocessing
 import textwrap
-from itertools import chain
 from typing import Dict
 from typing import List
 

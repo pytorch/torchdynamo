@@ -137,10 +137,10 @@ class WrapperCodeGen(CodeGen):
     def can_reuse(self, buffer):
         name = buffer.get_name()
         if (
-                name in V.graph.removed_buffers
-                or name in V.graph.graph_inputs
-                or name in V.graph.constants
-                or name in self.freed
+            name in V.graph.removed_buffers
+            or name in V.graph.graph_inputs
+            or name in V.graph.constants
+            or name in self.freed
         ):
             return False
         return True

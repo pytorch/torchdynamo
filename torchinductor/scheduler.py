@@ -263,24 +263,31 @@ class SchedulerNode(BaseSchedulerNode):
 
     def allocate(self):
         if not self.node.should_allocate() or self.node.get_alias_names():
-            return False
+            return super().allocate()
 
         if config.inplace_buffers:
             for read in self.read_writes.reads:
-                input_node : BaseSchedulerNode = self.scheduler.name_to_node.get(read.name)
-                if (
-                        input_node
-                        and V.graph.wrapper_code.can_reuse(input_node)
-                ):
-                    remaining_uses = [x for x in input_node.users
-                                      if x.node.get_name() not in self.scheduler.available_buffer_names]
+                input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
+                    read.name
+                )
+                if input_node and V.graph.wrapper_code.can_reuse(input_node):
+                    remaining_uses = [
+                        x
+                        for x in input_node.users
+                        if x.node.get_name()
+                        not in self.scheduler.available_buffer_names
+                    ]
                     if (
-                            len(remaining_uses) == 1 and
-                            remaining_uses[0].can_inplace and
-                            remaining_uses[0].node is self
+                        len(remaining_uses) == 1
+                        and remaining_uses[0].can_inplace
+                        and remaining_uses[0].node is self
                     ):
-                        V.graph.wrapper_code.codegen_inplace_reuse(input_node.node, self.node)
-                        V.kernel.args.make_inplace(input_node.get_name(), self.get_name())
+                        V.graph.wrapper_code.codegen_inplace_reuse(
+                            input_node.node, self.node
+                        )
+                        V.kernel.args.make_inplace(
+                            input_node.get_name(), self.get_name()
+                        )
                         return
         super().allocate()
 

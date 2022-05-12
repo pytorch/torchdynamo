@@ -760,7 +760,9 @@ def make_reduction(reduction_type: str):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
-        assert reduction_type in ("sum", "amax", "amin") or axis is None, "TODO: max with index"
+        assert (
+            reduction_type in ("sum", "amax", "amin") or axis is None
+        ), "TODO: max with index"
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 
@@ -843,6 +845,49 @@ def var_(x, axis, correction=1, keepdim=False):
 @register_lowering(aten.std)
 def std(x, axis, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
+
+
+def pow_recursive(x, y, dtype):
+    if y < 0:
+        return pow_recursive(ops.reciprocal(x), -y, dtype)
+    if y == 0:
+        return ops.constant(1, dtype)
+    if y == 1:
+        return x
+
+    result = pow_recursive(x, y // 2, dtype)
+    result = ops.mul(result, result)
+    if (y % 2) == 1:
+        result = ops.mul(result, x)
+    return result
+
+
+@register_lowering(aten.pow, broadcast=True)
+def pow(a, b):
+    # see https://github.com/openai/triton/issues/506
+    # triton doesn't support pow, so need to rewrite it
+    # this is a lowering not a decomp, due to upstream pytorch being unstable
+    if isinstance(b, float) and b == int(b):
+        return pow(a, int(b))
+    elif isinstance(b, int) and b == 1:
+        return a
+    elif isinstance(b, int):
+        loader = a.make_loader()
+
+        def fn(idx):
+            return pow_recursive(loader(idx), b, a.get_dtype())
+
+        return Pointwise.create(
+            device=a.get_device(),
+            dtype=a.get_dtype(),
+            inner_fn=fn,
+            ranges=a.get_size(),
+        )
+    else:
+        assert False, "TODO: check correctness here"
+        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
+        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
+        # else: torch.exp(torch.log(a) * b)
 
 
 sum_ = register_lowering(aten.sum)(make_reduction("sum"))

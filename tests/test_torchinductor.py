@@ -822,6 +822,18 @@ class CommonTemplate:
             (torch.randn([8, 16]),),
         )
 
+    def test_stack(self):
+        def fn(a, b):
+            return torch.stack(
+                [
+                    a.expand(12, 16),
+                    b.expand(12, 16),
+                ],
+                2,
+            )
+
+        self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
+
     def test_hardtanh(self):
         def fn(x):
             return F.hardtanh(x), F.hardtanh(x + 1), F.hardtanh(x - 1)
@@ -864,7 +876,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (torch.randn([64])+10,),
+            (torch.randn([64]) + 10,),
         )
 
     def test_logsumexp(self):
@@ -873,9 +885,8 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (torch.randn([8, 8])+10,),
+            (torch.randn([8, 8]) + 10,),
         )
-
 
     def test_bitwise(self):
         def fn(x, y):

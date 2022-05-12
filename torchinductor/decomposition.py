@@ -1,9 +1,9 @@
 import math
+from typing import List
 
 import torch
-from torch import Tensor
-from typing import List
 from functorch._src.decompositions import register_decomposition
+from torch import Tensor
 
 from torchinductor import config
 
@@ -15,6 +15,7 @@ aten = torch.ops.aten
 
 # AOT Autograd decomps are included by default
 decompositions = {}
+
 
 @register_decomposition([aten.clamp], decompositions)
 def clamp(x, min=None, max=None):
@@ -157,38 +158,6 @@ def rsub(a, b):
     return b - a
 
 
-def pow(a, b):
-    # see https://github.com/openai/triton/issues/506
-    # triton doesn't support pow, so need to rewrite it
-    if isinstance(b, float) and b == int(b):
-        return pow(a, int(b))
-    if isinstance(b, int) and b == 0:
-        return torch.ones_like(a)
-    elif isinstance(b, int) and b == 1:
-        return a
-    elif isinstance(b, int):
-        if b < 0:
-            return pow(torch.reciprocal(a), -b)
-
-        result = pow(a, b // 2)
-        result = result * result
-        if (b % 2) == 1:
-            result = result * a
-        return result
-    else:
-        assert False, "TODO: check correctness here"
-        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
-        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
-        # else: torch.exp(torch.log(a) * b)
-
-
-try:
-    register_decomposition([aten.pow], decompositions)(pow)
-except AttributeError:
-    # older versions of PyTorch
-    register_decomposition([aten.pow.Tensor_Scalar], decompositions)(pow)
-
-
 @register_decomposition([aten.masked_fill.Scalar], decompositions)
 def masked_fill(value, mask, other):
     if isinstance(other, (int, float)):
@@ -264,7 +233,7 @@ def cudnn_batch_norm(
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     for idx in range(ndim - 1, -1, -1):
-        if idx in dims or idx-ndim in dims:
+        if idx in dims or idx - ndim in dims:
             self = self.squeeze(idx)
     return self
 
@@ -276,6 +245,67 @@ def logsumexp(self, dim, keepdim=False) -> Tensor:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
+    maxes_squeezed = torch.masked_fill(
+        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
+    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
+
+
+def check_stack_inputs(tensors: List[Tensor]):
+    entry_shape = tensors[0].shape
+    for i in range(1, len(tensors)):
+        assert tensors[i].shape == entry_shape, (
+            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+            f"and {tensors[i].shape} at entry {i}"
+        )
+
+
+def get_stack_inputs(tensors: List[Tensor], dim: int):
+    check_stack_inputs(tensors)
+    return [t.unsqueeze(dim) for t in tensors]
+
+
+# https://github.com/pytorch/pytorch/blob/f6eb81178633e/torch/_decomp/decompositions.py#L1235
+@register_decomposition([aten.stack.default], decompositions)
+def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
+    assert len(tensors) > 0, "stack expects a non-empty TensorList"
+    wrapped_dim = canonicalize_dim(tensors[0].dim() + 1, dim)
+    if wrapped_dim < tensors[0].dim() and not tensors[0].is_sparse:
+        check_stack_inputs(tensors)
+        result_sizes = list(tensors[0].shape)
+        result_sizes.insert(wrapped_dim, len(tensors))
+        out = torch.cat(tensors, wrapped_dim)
+        return out.view(result_sizes)
+    else:
+        return torch.cat(get_stack_inputs(tensors, wrapped_dim), dim)
+
+
+# https://github.com/pytorch/pytorch/blob/c25bdeea26f95/torch/_prims/utils.py#L250
+def canonicalize_dim(rank: int, idx: int) -> int:
+    # TODO: add a comment for why this is
+    _rank = rank if rank != 0 else 1
+
+    if idx >= 0 and idx < _rank:
+        return idx
+
+    if idx < 0:
+        _idx = idx + _rank
+    else:
+        _idx = idx
+
+    if _idx < 0 or _idx > _rank:
+        msg = "Received out of bounds index {0} for tensor of rank {1}!".format(
+            idx, rank
+        )
+        raise ValueError(msg)
+
+    return _idx
+
+
+# https://github.com/pytorch/pytorch/blob/c25bdeea26f95d/torch/_prims/utils.py#L273
+def canonicalize_dims(rank: int, indices):
+    if isinstance(indices, int):
+        return canonicalize_dim(rank, indices)
+
+    return tuple(canonicalize_dim(rank, x) for x in indices)
