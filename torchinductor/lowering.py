@@ -29,10 +29,9 @@ DTYPE_ID_LOOKUP = {
     7: torch.float64,
 }
 
+
 def decode_dtype(dtype: int):
-    assert (
-            dtype in DTYPE_ID_LOOKUP
-    ), f"id {dtype}={x.get_dtype()} missing from DTYPE_ID_LOOKUP"
+    assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
 
@@ -169,15 +168,20 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
 def to_device(x: TensorBox, device=torch.device):
     if x.get_device() == device:
         return x
-
-    assert False
-
+    return TensorBox.create(ir.DeviceCopy.create(x, device))
 
 
 @register_lowering(aten._to_copy)
-def _to_copy(x, *, dtype=None, layout=None,
-             device=None, pin_memory=None, non_blocking=False,
-             memory_format=None):
+def _to_copy(
+    x,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    non_blocking=False,
+    memory_format=None,
+):
     assert not layout, "TODO"
     assert not pin_memory, "TODO"
     assert not memory_format, "TODO"
@@ -186,7 +190,6 @@ def _to_copy(x, *, dtype=None, layout=None,
     if device is not None and device != x.get_device():
         x = to_device(x, device)
     return x
-
 
 
 def register_pointwise(
@@ -588,7 +591,6 @@ def tensor(data, *, dtype=None, device=None):
         inner_fn=inner_fn,
         ranges=ranges,
     )
-
 
 
 def constant_like(n):

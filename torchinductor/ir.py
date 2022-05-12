@@ -1178,19 +1178,25 @@ class BatchMatrixMultiply(ExternKernelOut):
 class DeviceCopy(ExternKernelOut):
     @staticmethod
     def create(x, device):
-        return DeviceCopy(FlexibleLayout(
-            device=device,
-            dtype=x.get_dtype(),
-            size=x.get_size(),
-        ), [x])
+        return DeviceCopy(
+            FlexibleLayout(
+                device=device,
+                dtype=x.get_dtype(),
+                size=x.get_size(),
+            ),
+            [x],
+        )
 
     def codegen(self, wrapper):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.writeline(f"{self.output_view.codegen_reference()}.copy_({args[0]})")
+            wrapper.writeline(
+                f"{self.output_view.codegen_reference()}.copy_({args[0]})"
+            )
         else:
             wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
+
 
 class AdaptiveAvgPool2d(ExternKernelAlloc):
     kernel = "aten._adaptive_avg_pool2d"

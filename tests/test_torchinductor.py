@@ -545,7 +545,7 @@ class CommonTemplate:
 
     def test_to_dtype(self):
         def fn(a, b):
-            return aten._to_copy(a, dtype=6), aten._to_copy(b+1, dtype=6)
+            return aten._to_copy(a, dtype=6), aten._to_copy(b + 1, dtype=6)
 
         self.common(
             fn,
@@ -565,12 +565,8 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (
-                torch.randn([2, 2, 10]),
-            ),
+            (torch.randn([2, 2, 10]),),
         )
-
-
 
     def test_unbind(self):
         def fn(a):
