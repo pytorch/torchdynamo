@@ -760,7 +760,7 @@ def make_reduction(reduction_type: str):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
-        assert reduction_type == "sum" or axis is None, "TODO: max with index"
+        assert reduction_type in ("sum", "amax", "amin") or axis is None, "TODO: max with index"
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 
@@ -804,7 +804,7 @@ def make_reduction(reduction_type: str):
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
-            reduction_type=reduction_type,
+            reduction_type=reduction_type.lstrip("a"),  # amax=>max
         )
         result.realize()
         return result
@@ -848,6 +848,8 @@ def std(x, axis, correction=1, keepdim=False):
 sum_ = register_lowering(aten.sum)(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
+register_lowering(aten.amax)(make_reduction("amax"))
+register_lowering(aten.amin)(make_reduction("amin"))
 
 div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)

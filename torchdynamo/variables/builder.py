@@ -70,6 +70,9 @@ class GraphArg:
     def __len__(self):
         return 1
 
+    def erase(self):
+        self.example = None
+
 
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
@@ -154,21 +157,16 @@ class VariableBuilder:
             map(ConstantVariable.is_literal, value.keys())
         ):
             guards = self.make_guards(GuardBuilder.DICT_KEYS)
-            keys = (
-                value.keys()
-                if istype(value, collections.OrderedDict)
-                else sorted(value.keys())
-            )
-            result = collections.OrderedDict(
+            result = dict(
                 (
                     k,
                     VariableBuilder(self.tx, GetItemSource(self.get_source(), k))(
                         value[k]
                     ).add_guards(guards),
                 )
-                for k in keys
+                for k in value.keys()
             )
-            result = ConstDictVariable(result, guards=guards)
+            result = ConstDictVariable(result, type(value), guards=guards)
             if istype(value, dict):
                 return self.tx.output.side_effects.track_dict(
                     self.source, value, result

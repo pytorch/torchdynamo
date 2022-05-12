@@ -1,17 +1,20 @@
 import math
 
 import torch
-from torch import _decomp as decomp
+from torch import Tensor
+from typing import List
 from functorch._src.decompositions import register_decomposition
 
 from torchinductor import config
 
 aten = torch.ops.aten
 
+# at some future date:
+# from torch import _decomp as decomp
+# decompositions = decomp.get_decompositions([])
+
 # AOT Autograd decomps are included by default
-decompositions = decomp.get_decompositions([
-#    aten.logsumexp, aten.stack,
-])
+decompositions = {}
 
 @register_decomposition([aten.clamp], decompositions)
 def clamp(x, min=None, max=None):
@@ -154,7 +157,6 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.pow], decompositions)
 def pow(a, b):
     # see https://github.com/openai/triton/issues/506
     # triton doesn't support pow, so need to rewrite it
@@ -178,6 +180,13 @@ def pow(a, b):
         # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
         # even integer: torch.exp(torch.log(torch.abs(a)) * b)
         # else: torch.exp(torch.log(a) * b)
+
+
+try:
+    register_decomposition([aten.pow], decompositions)(pow)
+except AttributeError:
+    # older versions of PyTorch
+    register_decomposition([aten.pow.Tensor_Scalar], decompositions)(pow)
 
 
 @register_decomposition([aten.masked_fill.Scalar], decompositions)
@@ -250,3 +259,23 @@ def cudnn_batch_norm(
     null = torch.tensor([], device=input.device)
     null_uint8 = torch.tensor([], device=input.device, dtype=torch.uint8)
     return (result, null, null, null_uint8)
+
+
+def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
+    ndim = self.dim()
+    for idx in range(ndim - 1, -1, -1):
+        if idx in dims or idx-ndim in dims:
+            self = self.squeeze(idx)
+    return self
+
+
+# based on https://github.com/pytorch/pytorch/pull/77219
+@register_decomposition([aten.logsumexp.default], decompositions)
+def logsumexp(self, dim, keepdim=False) -> Tensor:
+    if self.numel() == 0:
+        return torch.sum(torch.exp(self), dim, keepdim).log()
+    maxes = torch.amax(self, dim, keepdim=True)
+    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
+    maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
+    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
+    return result.log().add(maxes_squeezed)

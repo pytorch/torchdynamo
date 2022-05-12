@@ -867,6 +867,16 @@ class CommonTemplate:
             (torch.randn([64])+10,),
         )
 
+    def test_logsumexp(self):
+        def fn(x):
+            return torch.logsumexp(x, -1), torch.logsumexp(x, 0) - 2
+
+        self.common(
+            fn,
+            (torch.randn([8, 8])+10,),
+        )
+
+
     def test_bitwise(self):
         def fn(x, y):
             return (
