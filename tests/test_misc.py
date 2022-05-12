@@ -947,6 +947,36 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 11)
 
+    def test_write_to_closures_in_inlining(self):
+        out = []
+        for use_dynamo in [False, True]:
+            def make_counter():
+                x = torch.randn(10)
+
+                def counter():
+                    nonlocal x
+                    x = x + 1
+                    return x
+
+                return counter
+
+            torch.manual_seed(0)
+            counter = make_counter()
+            if not use_dynamo:
+                out.append(counter() + counter())
+            else:
+                cnts = torchdynamo.testing.CompileCounter()
+                @torchdynamo.optimize(cnts, nopython=True)
+                def fn(counter):
+                    return counter() + counter()
+
+                out.append(fn(counter))
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 3)
+                self.assertFalse(same(counter() + counter(), out[-1]))
+
+        self.assertTrue(same(out[0], out[1]))
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx

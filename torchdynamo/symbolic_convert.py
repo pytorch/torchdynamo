@@ -1293,7 +1293,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            unimplemented("write to __closure__ while inlining")
+            if isinstance(self.symbolic_locals.get(inst.argval), torchdynamo.variables.NewCellVariable):
+                self.output.side_effects.store_cell(self.symbolic_locals[inst.argval], self.pop())
+            else:
+                unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:
@@ -1303,7 +1306,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.push(self.output.side_effects.load_cell(cell))
         else:
-            super().LOAD_DEREF(inst)
+            maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
+            if isinstance(maybe_sym_local, torchdynamo.variables.NewCellVariable):
+                self.push(self.output.side_effects.load_cell(maybe_sym_local))
+            else:
+                super().LOAD_DEREF(inst)
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
