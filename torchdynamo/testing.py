@@ -69,12 +69,12 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce")
 
 
-def same(a, b, cos_similarity=False, tol=1e-4):
+def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return len(a) == len(b) and all(
-            same(ai, bi, cos_similarity, tol) for ai, bi in zip(a, b)
+            same(ai, bi, cos_similarity, tol, equal_nan) for ai, bi in zip(a, b)
         )
     elif isinstance(a, dict):
         assert isinstance(b, dict)
@@ -82,7 +82,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
             b.keys()
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         for k in a.keys():
-            if not (same(a[k], b[k], cos_similarity, tol)):
+            if not (same(a[k], b[k], cos_similarity, tol, equal_nan=equal_nan)):
                 print("Accuracy failed for key name", k)
                 return False
         return True
@@ -101,7 +101,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
                 print(f"Similarity score={res.cpu().numpy()}")
             return res >= 0.99
         else:
-            return torch.allclose(a, b, atol=tol, rtol=tol)
+            return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
     elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
         return a == b
     elif type(a).__name__ in (
@@ -119,7 +119,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
     ):
         assert type(a) is type(b)
         return all(
-            same(getattr(a, key), getattr(b, key), cos_similarity, tol)
+            same(getattr(a, key), getattr(b, key), cos_similarity, tol, equal_nan)
             for key in a.__dict__.keys()
         )
     else:
