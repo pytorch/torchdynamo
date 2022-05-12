@@ -140,7 +140,6 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.pow], decompositions)
 def pow(a, b):
     # see https://github.com/openai/triton/issues/506
     # triton doesn't support pow, so need to rewrite it
@@ -164,6 +163,13 @@ def pow(a, b):
         # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
         # even integer: torch.exp(torch.log(torch.abs(a)) * b)
         # else: torch.exp(torch.log(a) * b)
+
+
+try:
+    register_decomposition([aten.pow], decompositions)(pow)
+except AttributeError:
+    # older versions of PyTorch
+    register_decomposition([aten.pow.Tensor_Scalar], decompositions)(pow)
 
 
 @register_decomposition([aten.masked_fill.Scalar], decompositions)
