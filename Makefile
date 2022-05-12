@@ -85,6 +85,7 @@ build-deps: clone-deps
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../functorch   && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py)
+	make setup_lint
 
 offline-autotune-cpu: develop
 	rm -rf subgraphs

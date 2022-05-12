@@ -858,6 +858,15 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    def test_log2(self):
+        def fn(x):
+            return torch.log2(x), torch.log2(x + 1) - 2
+
+        self.common(
+            fn,
+            (torch.randn([64])+10,),
+        )
+
     def test_bitwise(self):
         def fn(x, y):
             return (

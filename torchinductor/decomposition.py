@@ -1,13 +1,17 @@
 import math
 
 import torch
+from torch import _decomp as decomp
 from functorch._src.decompositions import register_decomposition
 
 from torchinductor import config
 
 aten = torch.ops.aten
-decompositions = {}
 
+# AOT Autograd decomps are included by default
+decompositions = decomp.get_decompositions([
+#    aten.logsumexp, aten.stack,
+])
 
 @register_decomposition([aten.clamp], decompositions)
 def clamp(x, min=None, max=None):
@@ -99,6 +103,11 @@ def leaky_relu(x, negative_slope=0.01):
 @register_decomposition([aten.rsqrt], decompositions)
 def rsqrt(x):
     return torch.reciprocal(torch.sqrt(x))
+
+
+@register_decomposition([aten.log2], decompositions)
+def log2(x):
+    return torch.log(x) / math.log(2.0)
 
 
 @register_decomposition([aten.gelu], decompositions)
