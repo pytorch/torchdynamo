@@ -585,7 +585,7 @@ class InstructionTranslatorBase(object):
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
-            kwargsvars = ConstDictVariable({})
+            kwargsvars = ConstDictVariable({}, dict)
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -716,12 +716,14 @@ class InstructionTranslatorBase(object):
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         options = VariableTracker.propagate(items)
-        result = collections.OrderedDict()
+        result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable)
             result[k.value] = v
         assert len(result) == len(items) / 2
-        self.push(ConstDictVariable(result, mutable_local=MutableLocal(), **options))
+        self.push(
+            ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
+        )
 
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
@@ -733,7 +735,8 @@ class InstructionTranslatorBase(object):
         assert len(keys) == len(values)
         self.push(
             ConstDictVariable(
-                collections.OrderedDict(zip(keys, values)),
+                dict(zip(keys, values)),
+                dict,
                 mutable_local=MutableLocal(),
                 **options,
             )
@@ -749,12 +752,13 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
-        items = collections.OrderedDict(obj.items)
+        items = dict(obj.items)
         items[k.as_python_constant()] = v
         self.replace_all(
             obj,
             ConstDictVariable(
                 items,
+                obj.user_cls,
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )

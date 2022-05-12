@@ -14,18 +14,16 @@ from .base import VariableTracker
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, user_cls, **kwargs):
         super(ConstDictVariable, self).__init__(**kwargs)
-        if not isinstance(items, collections.OrderedDict):
-            assert isinstance(items, dict)
-            items = collections.OrderedDict((k, items[k]) for k in sorted(items.keys()))
         self.items = items
+        self.user_cls = user_cls
 
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
 
     def python_type(self):
-        return dict
+        return self.user_cls
 
     def reconstruct(self, codegen):
         if len(self.items) == 0:
@@ -198,7 +196,7 @@ class DataClassVariable(ConstDictVariable):
             unimplemented("DataClassVariable iterator constructor")
             # TODO(jansel): implement unpacking logic in ModelOutput.__post_init__
 
-        return cls(user_cls, items, **options)
+        return cls(items, user_cls, **options)
 
     @classmethod
     def wrap(cls, builder, obj):
@@ -219,19 +217,15 @@ class DataClassVariable(ConstDictVariable):
                 else:
                     excluded.append(var)
         return cls(
-            user_cls, items, **VariableTracker.propagate(excluded, items.values())
+            items, user_cls, **VariableTracker.propagate(excluded, items.values())
         )
 
-    def __init__(self, user_cls, items, **options):
-        super(DataClassVariable, self).__init__(items=items, **options)
-        self.user_cls = user_cls
+    def __init__(self, items, user_cls, **options):
+        super(DataClassVariable, self).__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
         raise NotImplementedError()
-
-    def python_type(self):
-        return self.user_cls
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
