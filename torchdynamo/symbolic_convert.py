@@ -315,7 +315,13 @@ class InstructionTranslatorBase(object):
             )
             raise
         finally:
-            self.output.cleanup()
+            # Cleanup the outputGraph to delete the held tensors. We perform the
+            # cleanup only for InstructionTranslator and not
+            # InliningInstructionTranslator. The InliningInstructionTranslator
+            # mutates the output object and is restored to original state if
+            # there was an exception.
+            if isinstance(self, InstructionTranslator):
+                self.output.cleanup()
 
     def push(self, val):
         assert val is None or isinstance(
