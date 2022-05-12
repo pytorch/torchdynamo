@@ -127,6 +127,9 @@ class Loops(IRNode):
         except Exception as e:
             return f"inner_fn(): {e}"
 
+    def is_zero_elements(self):
+        return any(r == 0 for r in self.ranges)
+
 
 class Pointwise(Loops):
     def make_loader(self):
@@ -800,6 +803,9 @@ class Buffer(IRNode):
 
         return loader
 
+    def is_no_op(self):
+        return False
+
     def codegen_reference(self):
         return self.get_name()
 
@@ -809,6 +815,11 @@ class Buffer(IRNode):
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
+    pass
+
+
+@dataclasses.dataclass
+class ConstantBuffer(InputBuffer):
     pass
 
 
@@ -876,6 +887,12 @@ class ComputedBuffer(Buffer):
     def get_reduction_type(self):
         return self.data.get_reduction_type()
 
+    def is_no_op(self):
+        return self.data.is_zero_elements()
+
+    def should_allocate(self):
+        return True
+
 
 @dataclasses.dataclass
 class InputsKernel(Buffer):
@@ -901,7 +918,8 @@ class InputsKernel(Buffer):
 
 
 class NopKernel(InputsKernel):
-    pass
+    def is_no_op(self):
+        return True
 
 
 class ConcatKernel(NopKernel):

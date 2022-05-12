@@ -1,3 +1,4 @@
+import hashlib
 from itertools import count
 
 from .. import codecache
@@ -42,6 +43,11 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
+
+        for name, value in V.graph.constants.items():
+            # include a hash so our code cache gives different constants different files
+            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            self.header.writeline(f"{name} = None  # {hashed}")
 
         self.allocated = set()
 

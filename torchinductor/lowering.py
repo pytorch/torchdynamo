@@ -392,6 +392,21 @@ def _embedding_bag(
     )
 
 
+"""
+@register_lowering(aten._cudnn_rnn, type_promote=False)
+def _cudnn_rnn(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(
+                aten._cudnn_rnn,
+                *args
+            ),
+        )
+    )
+"""
+
+
 @register_lowering(aten.convolution)
 def convolution(
     x: TensorBox,
@@ -450,6 +465,81 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
         dtype=dtype,
         inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
         ranges=[sympy.Integer(length)],
+    )
+
+
+@register_lowering(torch.linspace)
+def linspace(start, end, steps, *, dtype=None, device=None):
+    dtype = dtype or torch.get_default_dtype()
+
+    step_size = (end - start) / (steps - 1)
+
+    def inner_fn(index):
+        return ops.add(
+            ops.mul(ops.constant(step_size, dtype), ops.index_expr(index[0], dtype)),
+            ops.constant(start, dtype),
+        )
+
+    return Pointwise.create(
+        device=device or torch.tensor(0.0).device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=[sympy.Integer(steps)],
+    )
+
+
+def _unwrap(x):
+    if isinstance(x, (list, tuple)) and len(x) > 0:
+        return _unwrap(x[0])
+    return x
+
+
+@register_lowering(torch.tensor)
+def tensor(data, *, dtype=None, device=None):
+    if isinstance(_unwrap(data), int):
+        dtype = dtype or torch.int64
+    else:
+        dtype = dtype or torch.get_default_dtype()
+
+    if isinstance(data, (float, int)):
+        ranges = []
+
+        def inner_fn(index):
+            return ops.constant(data, dtype)
+
+    elif len(data) == 0 or isinstance(data[0], (float, int)) and len(data) <= 8:
+        # inline small tensors
+        ranges = [sympy.Integer(len(data))]
+
+        def inner_fn(index):
+            def binary_search(start, end):
+                assert start < end
+                if end - start == 1:
+                    return ops.constant(data[start], dtype)
+                mid = (end - start) // 2 + start
+                return ops.where(
+                    ops.lt(
+                        ops.index_expr(index[0], torch.int64),
+                        ops.constant(mid, torch.int64),
+                    ),
+                    binary_search(start, mid),
+                    binary_search(mid, end),
+                )
+
+            if len(data) == 0:
+                return ops.constant(0, dtype)
+            return binary_search(0, len(data))
+
+    else:
+        return V.graph.add_tensor_constant(
+            torch.tensor(data, dtype=dtype, device=device)
+        )
+
+    return Pointwise.create(
+        device=device or torch.tensor(0.0).device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=ranges,
     )
 
 

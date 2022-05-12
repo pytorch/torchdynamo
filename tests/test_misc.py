@@ -1157,3 +1157,26 @@ class MiscTests(torchdynamo.testing.TestCase):
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
+
+    def test_python_slice(self):
+        def fn(input):
+            y = 0
+            for i, x in enumerate(input[2:], 1):
+                y = y + x
+            return y
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            z = fn([1, 2, 3, 5])
+        self.assertEqual(z, 8)
+
+    def test_const_dict_variable_python_type(self):
+        from torchdynamo.variables import ConstDictVariable
+
+        d1 = {"a": 10, "b": 20}
+        d2 = collections.OrderedDict([("x", 12), ("y", 22)])
+        self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
+        self.assertEqual(
+            ConstDictVariable(d2, collections.OrderedDict).python_type(),
+            collections.OrderedDict,
+        )
