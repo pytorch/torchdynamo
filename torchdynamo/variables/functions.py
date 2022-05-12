@@ -151,7 +151,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             closure_cell, "cell_contents"
                         )
 
-                        # cells are written to with "cell_contents", so the source should just be the closure_cell, not its contents
+                        # cells are written to with "cell_contents",
+                        # so the source should just be the closure_cell, not its contents
                         out = side_effects.track_cell_existing(closure_cell, cell)
                         side_effects.store_cell(
                             out,
@@ -161,6 +162,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         )
 
                     result[name] = out
+
                 else:
                     unimplemented("inline with __closure__")
 
