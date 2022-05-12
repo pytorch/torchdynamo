@@ -192,6 +192,9 @@ class KernelArgs:
         buffer_types.update(
             {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
         )
+        buffer_types.update(
+            {name: val.dtype for name, val in V.graph.constants.items()}
+        )
 
         argdefs = []
         for outer, inner in self.input_buffers.items():
