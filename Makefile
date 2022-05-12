@@ -42,8 +42,8 @@ setup:
 	pip install -r requirements.txt
 
 setup_nightly:
-	pip install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install git+https://github.com/pytorch/functorch.git
+	pip install --pre torch==1.12.0.dev20220501+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install git+https://github.com/pytorch/functorch.git@a92854f668728d5da74a6d727ee519010a956720
 	pip install -r requirements.txt
 	python setup.py develop
 
