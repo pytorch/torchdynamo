@@ -950,6 +950,7 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_write_to_closures_in_inlining(self):
         out = []
         for use_dynamo in [False, True]:
+
             def make_counter():
                 x = torch.randn(10)
 
@@ -966,6 +967,7 @@ class MiscTests(torchdynamo.testing.TestCase):
                 out.append(counter() + counter())
             else:
                 cnts = torchdynamo.testing.CompileCounter()
+
                 @torchdynamo.optimize(cnts, nopython=True)
                 def fn(counter):
                     return counter() + counter()

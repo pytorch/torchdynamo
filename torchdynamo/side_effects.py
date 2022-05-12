@@ -187,11 +187,7 @@ class SideEffects(object):
         self.keepalive.append(obj)
         return variable
 
-    def track_cell_existing(
-        self,
-        source: Source,
-        item: Any
-    ):
+    def track_cell_existing(self, source: Source, item: Any):
         variable = variables.NewCellVariable(
             mutable_local=AttributeMutationExisting(source),
         )
@@ -244,9 +240,9 @@ class SideEffects(object):
         ]
 
         for var in modified_vars:
-            if isinstance(var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)) and isinstance(
-                var, variables.NewCellVariable
-            ):
+            if isinstance(
+                var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
+            ) and isinstance(var, variables.NewCellVariable):
                 cg.load_import_from(utils.__name__, "make_cell")
                 cg.extend_output([create_instruction("CALL_FUNCTION", 0)])
                 cg.add_cache(var)

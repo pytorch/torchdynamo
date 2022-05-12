@@ -1293,8 +1293,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            if isinstance(self.symbolic_locals.get(inst.argval), torchdynamo.variables.NewCellVariable):
-                self.output.side_effects.store_cell(self.symbolic_locals[inst.argval], self.pop())
+            if isinstance(
+                self.symbolic_locals.get(inst.argval),
+                torchdynamo.variables.NewCellVariable,
+            ):
+                self.output.side_effects.store_cell(
+                    self.symbolic_locals[inst.argval], self.pop()
+                )
             else:
                 unimplemented("write to __closure__ while inlining")
 

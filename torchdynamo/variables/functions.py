@@ -144,12 +144,21 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     if cell in side_effects:
                         out = side_effects[cell]
                     else:
-                        closure_cell = GetItemSource(AttrSource(self.source, "__closure__"), idx)
-                        closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                        closure_cell = GetItemSource(
+                            AttrSource(self.source, "__closure__"), idx
+                        )
+                        closure_cell_contents = AttrSource(
+                            closure_cell, "cell_contents"
+                        )
 
                         # cells are written to with "cell_contents", so the source should just be the closure_cell, not its contents
                         out = side_effects.track_cell_existing(closure_cell, cell)
-                        side_effects.store_cell(out, VariableBuilder(parent, closure_cell_contents)(cell.cell_contents))
+                        side_effects.store_cell(
+                            out,
+                            VariableBuilder(parent, closure_cell_contents)(
+                                cell.cell_contents
+                            ),
+                        )
 
                     result[name] = out
                 else:
