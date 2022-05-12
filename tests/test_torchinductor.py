@@ -543,6 +543,44 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    def test_to_dtype(self):
+        def fn(a, b):
+            return aten._to_copy(a, dtype=6), aten._to_copy(b+1, dtype=6)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 2, 10]),
+                torch.randn([2, 2, 10], dtype=torch.float64),
+            ),
+        )
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_to_device(self):
+        def fn(a):
+            if a.device.type == "cpu":
+                return aten._to_copy(a, device=torch.device("cuda"), dtype=6, layout=0)
+            else:
+                return aten._to_copy(a, device=torch.device("cpu"), dtype=6, layout=0)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 2, 10]),
+            ),
+        )
+
+
+
+    def test_unbind(self):
+        def fn(a):
+            return torch.unbind(a), torch.unbind(a, -1)
+
+        self.common(
+            fn,
+            (torch.randn([4, 4, 4]),),
+        )
+
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),

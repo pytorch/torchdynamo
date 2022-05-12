@@ -22,6 +22,20 @@ from .virtualized import ops
 lowerings = {}
 aten = torch.ops.aten
 
+# TODO(jansel): figure out a way generate this automatically
+#               these come as dtype args to kernels
+DTYPE_ID_LOOKUP = {
+    6: torch.float32,
+    7: torch.float64,
+}
+
+def decode_dtype(dtype: int):
+    assert (
+            dtype in DTYPE_ID_LOOKUP
+    ), f"id {dtype}={x.get_dtype()} missing from DTYPE_ID_LOOKUP"
+    dtype = DTYPE_ID_LOOKUP[dtype]
+    return dtype
+
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
     """
@@ -150,6 +164,29 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
         return ops.to_dtype(x, dtype)
 
     return make_pointwise(_to_dtype, override_dtype=dtype)(x)
+
+
+def to_device(x: TensorBox, device=torch.device):
+    if x.get_device() == device:
+        return x
+
+    assert False
+
+
+
+@register_lowering(aten._to_copy)
+def _to_copy(x, *, dtype=None, layout=None,
+             device=None, pin_memory=None, non_blocking=False,
+             memory_format=None):
+    assert not layout, "TODO"
+    assert not pin_memory, "TODO"
+    assert not memory_format, "TODO"
+    if dtype is not None:
+        x = to_dtype(x, decode_dtype(dtype))
+    if device is not None and device != x.get_device():
+        x = to_device(x, device)
+    return x
+
 
 
 def register_pointwise(
@@ -321,6 +358,16 @@ def split(x, sizes, dim):
         end = start + size
         result.append(slice_(x, dim, start, end))
         start = end
+    return result
+
+
+@register_lowering(aten.unbind)
+def unbind(x, dim=0):
+    dim = _validate_dim(x, dim, 0)
+    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    result = []
+    for i in range(x_size):
+        result.append(select(x, dim, i))
     return result
 
 
@@ -543,20 +590,12 @@ def tensor(data, *, dtype=None, device=None):
     )
 
 
-DTYPE_ID_LOOKUP = {
-    6: torch.float32,
-    7: torch.float64,
-}
-
 
 def constant_like(n):
     def _constant_like(x, *, dtype, device, layout, pin_memory=False):
         assert not pin_memory
         assert layout == 0
-        assert (
-            dtype in DTYPE_ID_LOOKUP
-        ), f"id {dtype}={x.get_dtype()} missing from DTYPE_ID_LOOKUP"
-        dtype = DTYPE_ID_LOOKUP[dtype]
+        dtype = decode_dtype(dtype)
         assert dtype == x.get_dtype(), "is this correct?"
         return Pointwise.create(
             device=device,
