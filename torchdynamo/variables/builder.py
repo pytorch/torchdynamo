@@ -1,10 +1,10 @@
-from abc import ABCMeta
 import collections
 import dataclasses
 import functools
 import inspect
 import re
 import types
+from abc import ABCMeta
 from typing import Any
 
 import numpy as np
@@ -239,9 +239,9 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif (istype(value, (type, ABCMeta))):
-        # TODO(whc) the following seems preferable but breaks some tests, debug
-        # elif inspect.isclass(value):
+        elif istype(value, (type, ABCMeta)):
+            # TODO(whc) the following seems preferable but breaks some tests, debug
+            # elif inspect.isclass(value):
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )

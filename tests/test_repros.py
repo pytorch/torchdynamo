@@ -1,8 +1,8 @@
 #!/usr/bin/env pytest
-from abc import ABC
 import collections
 import copy
 import inspect
+from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
