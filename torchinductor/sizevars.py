@@ -2,6 +2,7 @@ import collections
 import dataclasses
 import functools
 from typing import Dict
+from typing import List
 
 import sympy
 from sympy import Expr
@@ -116,6 +117,41 @@ class SizeVarAllocator(object):
 
     def size_hint(self, expr: Expr):
         return int(sympy.expand(expr).subs(self.var_to_val))
+
+    def stride_vars(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+        """Convert an indexing expression back into strides"""
+        strides = []
+        index = index.subs(self.replacements)
+        # remove any offset
+        index = index - index.subs({v: sympy.Integer(0) for v in vars if v != 0})
+        for i in range(len(vars)):
+            # drop all the other dims
+            index_dim = index.subs(
+                {
+                    vars[j]: sympy.Integer(0)
+                    for j in range(len(vars))
+                    if i != j and vars[j] != 0
+                }
+            )
+            v = vars[i]
+            if v == 0:
+                strides.append(sympy.Integer(0))
+            else:
+                # TODO(jansel): should we use sympy.diff here?
+                strides.append(
+                    index_dim.subs({v: sympy.Integer(1)})
+                    - index_dim.subs({v: sympy.Integer(0)})
+                )
+        return strides
+
+    def stride_hints(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+        return [self.size_hint(s) for s in self.stride_vars(index, vars)]
+
+    def stride_order(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+        strides = tuple(map(abs, self.stride_hints(index, vars)))
+        order = list(range(len(strides)))
+        order.sort(key=lambda x: (strides[x] == 0, strides[x]))
+        return order
 
     def codegen(self, code, graph_inputs):
         """Assign all symbolic shapes to locals"""

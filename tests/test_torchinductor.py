@@ -687,6 +687,17 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_transposed_propagates(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def fn(x, y):
+            return x + y
+
+        a = torch.randn(1, 4, 4, 4, device=self.device).permute(0, 2, 3, 1)
+        b = torch.randn(4, 4, 4, device=self.device).permute(1, 2, 0)
+        c = fn(a, b)
+        self.assertEqual(a.stride(), c.stride())
+        self.assertEqual(c.stride()[2], 1)
+
     def test_std(self):
         def fn(x):
             return (
@@ -834,6 +845,7 @@ class CommonTemplate:
 
 class CpuTests(TestCase):
     common = check_model
+    device = "cpu"
 
 
 CommonTemplate.install(CpuTests, "cpu")
@@ -847,6 +859,7 @@ if HAS_CUDA:
 
     class GpuTests(TestCase):
         common = check_model_cuda
+        device = "cuda"
 
         def test_simplify_dims(self):
             def fn(a):

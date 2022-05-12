@@ -27,7 +27,7 @@ class WrapperCodeGen(CodeGen):
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
-                from torch import empty, empty_like, as_strided
+                from torch import empty_strided, as_strided
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache, grid
                 try:
                     import triton
@@ -43,15 +43,6 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
-
-        empty_like_cache = dict()
-        for name, value in V.graph.graph_inputs.items():
-            device = value.get_device()
-            dtype = value.get_dtype()
-            shape = tuple(value.get_size())
-            stride = tuple(value.get_stride())
-            empty_like_cache.setdefault((device, dtype, shape, stride), name)
-        self.empty_like_cache = empty_like_cache
 
         for name, value in V.graph.constants.items():
             # include a hash so our code cache gives different constants different files
@@ -80,13 +71,12 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        key = (device, dtype, shape, stride)
-        if key in self.empty_like_cache:
-            self.body.writeline(f"{name} = empty_like({self.empty_like_cache[key]})")
-        else:
-            self.body.writeline(
-                f"{name} = empty([{', '.join(map(pexpr, shape))}], device='{device.type}', dtype={dtype})"
-            )
+        self.body.writeline(
+            f"{name} = empty_strided("
+            f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
+            f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
+            f"device='{device.type}', dtype={dtype})"
+        )
 
     def generate(self):
         result = IndentedBuffer()
