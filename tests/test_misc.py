@@ -1158,6 +1158,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    @unittest.skip("disabled for now")
     def test_python_slice(self):
         def fn(input):
             y = 0
