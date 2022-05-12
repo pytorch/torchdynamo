@@ -111,7 +111,7 @@ def rsqrt(x):
 
 @register_decomposition([aten.log2], decompositions)
 def log2(x):
-    return torch.log(x) / math.log(2.0)
+    return torch.log(x) * (1.0 / math.log(2.0))
 
 
 @register_decomposition([aten.gelu], decompositions)
