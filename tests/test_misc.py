@@ -3,6 +3,7 @@ import collections
 import copy
 import dataclasses
 import dis
+import enum
 import functools
 import math
 import sys
@@ -1181,3 +1182,25 @@ class MiscTests(torchdynamo.testing.TestCase):
             ConstDictVariable(d2, collections.OrderedDict).python_type(),
             collections.OrderedDict,
         )
+
+    def test_enum_no_graphbreaks(self):
+        class Foo(enum.Enum):
+            FOO = 0
+            BAR = 1
+
+        def fn(x, foo):
+            if foo is Foo.FOO:
+                x = torch.add(x, 1.0)
+            x = torch.mul(x, 1.0)
+            return x
+
+        x = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, Foo.FOO)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, Foo.BAR)
+        self.assertEqual(cnts.op_count, 1)
