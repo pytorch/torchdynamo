@@ -1,23 +1,27 @@
 import math
 from typing import List
 
+import functorch._src.decompositions
 import torch
-from functorch._src.decompositions import register_decomposition
 from torch import Tensor
 
 from torchinductor import config
 
 aten = torch.ops.aten
 
-# at some future date:
-# from torch import _decomp as decomp
-# decompositions = decomp.get_decompositions([])
+# python key tracing is broken in the latest pytorch, but when we update we can do:
+# from torch._decomp import get_decompositions
+# decompositions = get_decompositions([...])
 
-# AOT Autograd decomps are included by default
+# note AOT Autograd decomps are included by default in torchdynamo
 decompositions = {}
 
 
-@register_decomposition([aten.clamp], decompositions)
+def register_decomposition(ops):
+    return functorch._src.decompositions.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.clamp])
 def clamp(x, min=None, max=None):
     if min is not None:
         x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
@@ -26,7 +30,7 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten._softmax], decompositions)
+@register_decomposition([aten._softmax])
 def _softmax(x, dim, half_to_float):
     # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
     if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
@@ -37,7 +41,7 @@ def _softmax(x, dim, half_to_float):
     return x * scale
 
 
-@register_decomposition([aten._log_softmax], decompositions)
+@register_decomposition([aten._log_softmax])
 def _log_softmax(x, dim, half_to_float):
     # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
     if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
@@ -46,7 +50,7 @@ def _log_softmax(x, dim, half_to_float):
     return x - x_sum
 
 
-@register_decomposition([aten.t], decompositions)
+@register_decomposition([aten.t])
 def t(x):
     ndim = x.ndimension()
     if x.ndim in (0, 1):
@@ -55,19 +59,19 @@ def t(x):
     return torch.transpose(x, 0, 1)
 
 
-@register_decomposition([aten.transpose.int], decompositions)
+@register_decomposition([aten.transpose.int])
 def transpose(x, dim0: int, dim1: int):
     dims = list(range(x.ndim))
     dims[dim0], dims[dim1] = dims[dim1], dims[dim0]
     return torch.permute(x, dims)
 
 
-@register_decomposition([aten.addmm], decompositions)
+@register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2):
     return torch.mm(mat1, mat2) + input
 
 
-@register_decomposition([aten.elu], decompositions)
+@register_decomposition([aten.elu])
 def elu(self, alpha=1, scale=1, input_scale=1):
     negcoef = alpha * scale
     return torch.where(
@@ -75,22 +79,22 @@ def elu(self, alpha=1, scale=1, input_scale=1):
     )
 
 
-@register_decomposition([aten.tanh], decompositions)
+@register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
-@register_decomposition([aten.hardtanh], decompositions)
+@register_decomposition([aten.hardtanh])
 def hardtanh(x, min_val=-1.0, max_val=1.0):
     return torch.clamp(x, min_val, max_val)
 
 
-@register_decomposition([aten.hardsigmoid], decompositions)
+@register_decomposition([aten.hardsigmoid])
 def hardsigmoid(x):
     return torch.clamp(x / 6.0 + 0.5, 0.0, 1.0)
 
 
-@register_decomposition([aten.hardswish], decompositions)
+@register_decomposition([aten.hardswish])
 def hardswish(x):
     return torch.where(
         torch.gt(x, -3),
@@ -99,22 +103,22 @@ def hardswish(x):
     )
 
 
-@register_decomposition([aten.leaky_relu], decompositions)
+@register_decomposition([aten.leaky_relu])
 def leaky_relu(x, negative_slope=0.01):
     return torch.relu(x) + (-negative_slope) * torch.relu(-x)
 
 
-@register_decomposition([aten.rsqrt], decompositions)
+@register_decomposition([aten.rsqrt])
 def rsqrt(x):
     return torch.reciprocal(torch.sqrt(x))
 
 
-@register_decomposition([aten.log2], decompositions)
+@register_decomposition([aten.log2])
 def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))
 
 
-@register_decomposition([aten.gelu], decompositions)
+@register_decomposition([aten.gelu])
 def gelu(x, approximate="none"):
     if config.approximations or approximate != "none":
         # tanh approximation is much faster
@@ -127,7 +131,7 @@ def gelu(x, approximate="none"):
         return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
-@register_decomposition([aten.special_erf], decompositions)
+@register_decomposition([aten.special_erf])
 def special_erf(x):
     # TODO(jansel): this might be crazy slow.  Triton doesn't have the
     #               cuda ::erf() builtin.  I've made a feature request for this,
@@ -151,14 +155,14 @@ def special_erf(x):
     return sign * y
 
 
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar], decompositions)
+@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
 def rsub(a, b):
     if isinstance(b, (int, float)):
         b = torch.tensor(b, dtype=a.dtype, device=a.device)
     return b - a
 
 
-@register_decomposition([aten.masked_fill.Scalar], decompositions)
+@register_decomposition([aten.masked_fill.Scalar])
 def masked_fill(value, mask, other):
     if isinstance(other, (int, float)):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
@@ -193,7 +197,7 @@ def _batch_norm(
     return result
 
 
-@register_decomposition([aten.native_batch_norm], decompositions)
+@register_decomposition([aten.native_batch_norm])
 def native_batch_norm(
     input,
     weight,
@@ -211,7 +215,7 @@ def native_batch_norm(
     return (result, null, null)
 
 
-@register_decomposition([aten.cudnn_batch_norm], decompositions)
+@register_decomposition([aten.cudnn_batch_norm])
 def cudnn_batch_norm(
     input,
     weight,
@@ -239,7 +243,7 @@ def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
 
 
 # based on https://github.com/pytorch/pytorch/pull/77219
-@register_decomposition([aten.logsumexp.default], decompositions)
+@register_decomposition([aten.logsumexp.default])
 def logsumexp(self, dim, keepdim=False) -> Tensor:
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
@@ -267,7 +271,7 @@ def get_stack_inputs(tensors: List[Tensor], dim: int):
 
 
 # https://github.com/pytorch/pytorch/blob/f6eb81178633e/torch/_decomp/decompositions.py#L1235
-@register_decomposition([aten.stack.default], decompositions)
+@register_decomposition([aten.stack.default])
 def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
     assert len(tensors) > 0, "stack expects a non-empty TensorList"
     wrapped_dim = canonicalize_dim(tensors[0].dim() + 1, dim)

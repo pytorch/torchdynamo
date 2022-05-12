@@ -24,9 +24,27 @@ aten = torch.ops.aten
 
 # TODO(jansel): figure out a way generate this automatically
 #               these come as dtype args to kernels
+# based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
 DTYPE_ID_LOOKUP = {
+    0: torch.uint8,
+    1: torch.int8,
+    2: torch.int16,
+    3: torch.int32,
+    4: torch.int64,
+    5: torch.float16,
     6: torch.float32,
     7: torch.float64,
+    8: torch.complex32,
+    9: torch.complex64,
+    10: torch.complex32,
+    11: torch.bool,
+    15: torch.bfloat16,
+    # TODO(jansel): add quantized types?
+    #  _(c10::qint8, QInt8) /* 12 */
+    # _(c10::quint8, QUInt8) /* 13 */
+    # _(c10::qint32, QInt32) /* 14 */
+    # _(c10::quint4x2, QUInt4x2) /* 16 */
+    # _(c10::quint2x4, QUInt2x4) /* 17 */
 }
 
 
@@ -598,7 +616,6 @@ def constant_like(n):
         assert not pin_memory
         assert layout == 0
         dtype = decode_dtype(dtype)
-        assert dtype == x.get_dtype(), "is this correct?"
         return Pointwise.create(
             device=device,
             dtype=dtype,
@@ -611,6 +628,29 @@ def constant_like(n):
 
 register_lowering(aten.zeros_like)(constant_like(0))
 register_lowering(aten.ones_like)(constant_like(1))
+
+
+def tensor_constructor(fill_value):
+    # torch.zeros, torch.ones, etc
+    def inner(*size, dtype=None, device=None):
+        device = device or torch.tensor(1.0).device
+        dtype = dtype or torch.get_default_dtype()
+        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+            size = tuple(size[0])
+        size = [sympy.Integer(s) for s in size]
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=lambda index: ops.constant(fill_value, dtype),
+            ranges=size,
+        )
+
+    return inner
+
+
+register_lowering(torch.empty)(tensor_constructor(0))
+register_lowering(torch.zeros)(tensor_constructor(0))
+register_lowering(torch.ones)(tensor_constructor(1))
 
 
 @register_lowering(aten.gather, type_promote=False)

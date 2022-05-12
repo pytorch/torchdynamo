@@ -734,6 +734,7 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @patch.object(config, "pick_loop_orders", True)
     def test_transposed_propagates(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def fn(x, y):
@@ -942,6 +943,28 @@ class CommonTemplate:
     def test_inf(self):
         def fn(a):
             return a + float("inf"), a + float("-inf"), a * -float("inf")
+
+        self.common(fn, (torch.randn(8),))
+
+    def test_zeros(self):
+        def fn(a):
+            return (
+                a + 1,
+                torch.zeros(
+                    (1, 8, 64, 64),
+                    dtype=torch.float32,
+                    device=a.device,
+                ),
+                torch.zeros(
+                    1,
+                    8,
+                    64,
+                    64,
+                    dtype=torch.float32,
+                    device=a.device,
+                ),
+                a + torch.ones(8, device=a.device),
+            )
 
         self.common(fn, (torch.randn(8),))
 

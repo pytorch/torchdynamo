@@ -7,13 +7,13 @@ dce = False
 # assume there will be no backwards
 forward_only = True
 
-# set to False to burn in all shapes
+# assume input tensors are dynamic
 dynamic_shapes = False
 
-# assuming weight matrices are fixed size
+# assume weight tensors are fixed size
 static_weight_shapes = True
 
-# enable certain approximation algorithms
+# enable some approximation algorithms
 approximations = False
 
 # put correctness assertions in generated code
@@ -37,4 +37,4 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
-    pass
+    cudagraphs = True

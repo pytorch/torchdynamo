@@ -253,7 +253,7 @@ class KernelArgs:
             call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.sizevars.items():
             arg_defs.append(f"const {INDEX_TYPE} {inner}")
-            call_args.append(f"c_long({name})")
+            call_args.append(f"c_long({outer})")
         return arg_defs, call_args
 
     def python_argdefs(self):
