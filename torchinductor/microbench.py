@@ -8,6 +8,7 @@ import time
 import numpy as np
 import tabulate
 import torch
+import torch.nn.functional as F
 from torch.cuda import synchronize
 
 import torchinductor
@@ -94,6 +95,81 @@ class MicroBenchmarks:
     def add_relu_softmax(x, a):
         return (torch.softmax(torch.relu(x + a), -1),)
 
+class UnaryElementwiseOps:
+    @staticmethod
+    def all_ops():
+        ops = [
+            F.celu,
+            F.elu,
+            F.gelu,
+            # F.glu,            # missing decomp
+            F.hardsigmoid,
+            F.hardswish,
+            F.hardtanh,
+            F.leaky_relu,
+            F.mish,
+            F.silu,
+            F.softplus,
+            # F.softshrink,     # AttributeError: 'int' object has no attribute 'get_dtype'
+            torch.abs,
+            torch.acos,
+            # torch.acosh,      # need special input range [1, inf)
+            torch.asin,
+            torch.asinh,
+            torch.atan,
+            torch.atanh,
+            torch.ceil,
+            torch.cos,
+            torch.cosh,
+            torch.deg2rad,
+            # torch.digamma,    # skip, too complicated
+            torch.erf,
+            torch.erfc,
+            torch.erfinv,
+            torch.exp,
+            torch.exp2,
+            torch.expm1,
+            torch.floor,
+            torch.frac,
+            # torch.frexp,      # needs 2 outputs
+            # torch.i0,         #skip, too complicated
+            # torch.isinf,      # returns bool
+            # torch.isnan,      # failing return bool
+            # torch.isneginf,   # failing due to ::numeric_limits<T>::infinity() not a valid cuda code
+            # torch.isposinf,   # failing due to ::numeric_limits<T>::infinity() not a valid cuda code
+            torch.lgamma,
+            torch.log,
+            torch.log10,
+            torch.log1p,
+            torch.log2,
+            torch.logit,
+            # torch.nan_to_num,  # failing due to ::numeric_limits<T>::infinity() not a valid cuda code
+            torch.neg,
+            # torch.ops.aten.log_sigmoid_forward,   # why we have this op???
+            torch.rad2deg,
+            torch.reciprocal,
+            torch.relu,
+            torch.round,
+            torch.rsqrt,
+            # torch.sgn,        # for complex number
+            torch.sigmoid,
+            torch.sign,
+            # torch.signbit,    # output is bool type
+            torch.sin,
+            # torch.sinc,       # failing due to 'float' object has no attribute 'get_dtype'
+            torch.sinh,
+            torch.sqrt,
+            torch.tan,
+            torch.tanh,
+            torch.trunc,
+        ]
+
+        for op in ops:
+            print(op.__name__)
+            def fn(x):
+                return (op(x), )
+            yield fn
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -145,7 +221,8 @@ def main():
         torchinductor.config.debug = True
 
     rows = []
-    for model in (MicroBenchmarks.add_relu_softmax,):
+    for model in UnaryElementwiseOps.all_ops():
+    # for model in (MicroBenchmarks.add_relu_softmax,):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:

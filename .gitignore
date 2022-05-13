@@ -1,6 +1,7 @@
 *.so
 __pycache__
 .idea
+.vscode/
 build
 *.egg-info
 subgraphs

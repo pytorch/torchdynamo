@@ -1,6 +1,8 @@
 import math
+from typing import Optional
 
 import torch
+from torch import Tensor
 from functorch._src.decompositions import register_decomposition
 
 from torchinductor import config
@@ -236,3 +238,73 @@ def cudnn_batch_norm(
     null = torch.tensor([], device=input.device)
     null_uint8 = torch.tensor([], device=input.device, dtype=torch.uint8)
     return (result, null, null, null_uint8)
+
+
+@register_decomposition(aten.frac.default, decompositions)
+def frac(input: Tensor) -> Tensor:
+    return input - torch.trunc(input)
+
+
+@register_decomposition(aten.celu.default, decompositions)
+def celu(input: Tensor, alpha: float = 1.0) -> Tensor:
+    inv_alpha = 1.0 / alpha
+    return aten.elu(input, alpha, 1.0, inv_alpha)
+
+
+@register_decomposition(aten.mish.default, decompositions)
+# @pw_cast_for_opmath
+def mish(x: Tensor) -> Tensor:
+    return x * x.exp().log1p().tanh()
+
+
+@register_decomposition(aten.softplus.default, decompositions)
+def softplus(a: Tensor, beta: float = 1.0, threshold: float = 20.0) -> Tensor:
+    a_beta = a * beta
+    return torch.where((a_beta) > threshold, a, (a_beta).exp().log1p() / beta)
+
+
+@register_decomposition(aten.softshrink.default, decompositions)
+def softshrink(a: Tensor, lambd: float = 0.5) -> Tensor:
+    return torch.where(a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, 0))
+
+
+@register_decomposition(aten.deg2rad.default, decompositions)
+def deg2rad(a: Tensor) -> Tensor:
+    M_PI_180 = 0.017453292519943295769236907684886127134428718885417
+    return a * M_PI_180
+
+
+@register_decomposition(aten.rad2deg.default, decompositions)
+def rad2deg(a: Tensor) -> Tensor:
+    M_180_PI = 57.295779513082320876798154814105170332405472466564
+    return a * M_180_PI
+
+
+@register_decomposition(aten.relu.default, decompositions)
+def relu(a: Tensor) -> Tensor:
+    return torch.clamp(a, min=0)
+
+
+@register_decomposition(aten.sinc.default, decompositions)
+# @pw_cast_for_int_to_real
+def sinc(a: Tensor) -> Tensor:
+    PI = 3.14159265358979323846
+    pi_a = PI * a
+    return torch.where(a == 0.0, 1.0, torch.sin(pi_a) / pi_a)
+
+
+@register_decomposition(aten.heaviside.default, decompositions)
+def heaviside(input: Tensor, value: Tensor) -> Tensor:
+    sign = torch.where(input > 0, 1, 0)
+    return torch.where(input == 0, value, sign)
+
+
+@register_decomposition(aten.logit, decompositions)
+# @pw_cast_for_int_to_real
+def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
+    if eps is None:
+        eps = -1.0
+    lo = eps
+    hi = 1 - eps
+    self = torch.clamp(self, lo, hi)
+    return (self / (1 - self)).log()

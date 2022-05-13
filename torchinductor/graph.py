@@ -139,11 +139,14 @@ class GraphLowering(torch.fx.Interpreter):
     def codegen(self):
         from .codegen.cpp import CppKernel
         from .codegen.triton import TritonKernel
+        from .codegen.jiterator import JiteratorKernel
 
         wrapper = WrapperCodeGen()
         self.wrapper_code = wrapper
 
-        backends = {"cpu": CppKernel, "cuda": TritonKernel}
+        backends = {"cpu": CppKernel,
+                    "cuda": JiteratorKernel if config.cuda_backend == "Jiteraor" else TritonKernel}
+
         backend_cls = backends[self.device.type]
         backend_cls.codegen(wrapper)
         # TODO(jansel): manage a dependency graph
