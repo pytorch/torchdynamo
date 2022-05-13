@@ -66,6 +66,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = None
         self.device = None
         self.buffers = []
+        self.constants = dict()
         self.removed_buffers = set()
         self.wrapper_code = None
         self.num_dynamic_inputs = num_dynamic_inputs
@@ -79,6 +80,26 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         return name
+
+    def add_tensor_constant(self, data):
+        if self.device is None:
+            self.device = data.device
+        assert data.device == self.device
+
+        def allocate():
+            for name, value in self.constants.items():
+                if data is value:
+                    return name
+            name = f"constant{len(self.constants)}"
+            self.constants[name] = data
+            return name
+
+        return TensorBox.create(
+            ir.ConstantBuffer(
+                allocate(),
+                FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
+            )
+        )
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
@@ -116,8 +137,18 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
-        assert value.shape == (), value
-        return Constant(value.item(), value.dtype, value.device)
+        if value.shape == ():
+            return Constant(value.item(), value.dtype, value.device)
+        if len(value.shape) == 1 and value.shape[0] <= 8:
+            # tensor lowering has constant inlining logic
+            from .lowering import tensor
+
+            return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+
+        # we should not be hitting this case if
+        # python key tracing is working properly, see:
+        # https://github.com/pytorch/torchdynamo/issues/203
+        return self.add_tensor_constant(value)
 
     def call_module(self, target, args, kwargs):
         assert False
@@ -127,6 +158,11 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, tuple)
         assert all(isinstance(x, TensorBox) for x in result), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+        self.finalize()
+
+    def finalize(self):
+        for buf in self.buffers:
+            buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
@@ -144,8 +180,12 @@ class GraphLowering(torch.fx.Interpreter):
         wrapper = WrapperCodeGen()
         self.wrapper_code = wrapper
 
-        backends = {"cpu": CppKernel,
-                    "cuda": JiteratorKernel if config.cuda_backend == "Jiteraor" else TritonKernel}
+        backends = {
+            "cpu": CppKernel,
+            "cuda": TritonKernel
+            if config.cuda_backend != "Jiteraor"
+            else JiteratorKernel,
+        }
 
         backend_cls = backends[self.device.type]
         backend_cls.codegen(wrapper)
@@ -158,4 +198,10 @@ class GraphLowering(torch.fx.Interpreter):
         code = self.codegen()
         if config.debug:
             print(code)
-        return PyCodeCache.load(code).call
+
+        mod = PyCodeCache.load(code)
+
+        for name, value in self.constants.items():
+            setattr(mod, name, value)
+
+        return mod.call

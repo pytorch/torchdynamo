@@ -73,7 +73,7 @@ class ConstantVariable(VariableTracker):
         if istype(self.value, tuple):
             # empty tuple constant etc
             return variables.TupleVariable(
-                self.unpack_var_sequence(tx), **options
+                items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
         try:

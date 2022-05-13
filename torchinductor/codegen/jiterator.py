@@ -129,6 +129,7 @@ class JiteratorKernelArgs(KernelArgs):
             argdefs.append(f"const T {inner}")
         return argdefs
 
+
 class KernelGroup:
     def __init__(self):
         super().__init__()
@@ -155,7 +156,7 @@ class KernelGroup:
 
         argdefs = ",\n".ljust(25).join(self.args.argdefs())
         code = BracesBuffer()
-        code.writelines([f'template <typename T> T kernel({argdefs})'])
+        code.writelines([f"template <typename T> T kernel({argdefs})"])
 
         with code.indent():
             code.splice(self.loops_code)
@@ -182,6 +183,8 @@ class KernelGroup:
             f"jitted_{kernel_name} = torch.cuda.jiterator._create_jit_fn({kernel_name})",
         )
 
-        wrapper.body.writeline(
-            "{} = jitted_{}({})".format(output_args[0], kernel_name, ", ".join(call_args)),
+        wrapper.writeline(
+            "{} = jitted_{}({})".format(
+                output_args[0], kernel_name, ", ".join(call_args)
+            )
         )

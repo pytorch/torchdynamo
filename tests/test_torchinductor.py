@@ -91,7 +91,7 @@ def check_model(self: TestCase, model, example_inputs):
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
         actual = run(*example_inputs)
-    self.assertTrue(same(actual, correct))
+    self.assertTrue(same(actual, correct, equal_nan=True))
 
 
 def check_model_cuda(self: TestCase, model, example_inputs):
@@ -264,6 +264,37 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_linspace(self):
+        def fn(x):
+            return torch.linspace(0.125, 0.875, 7, device=x.device) + x
+
+        self.common(fn, (torch.randn(1, 7),))
+
+    def test_tensor1(self):
+        def fn(x):
+            return torch.tensor([1], device=x.device) + x, torch.tensor(
+                5, device=x.device
+            )
+
+        self.common(fn, (torch.randn(10),))
+
+    def test_tensor2(self):
+        def fn(x):
+            return torch.tensor(list(range(2, 40, 2)), device=x.device) + x
+
+        self.common(fn, (torch.randn(1),))
+
+    def test_tensor3(self):
+        def fn(x):
+            return (
+                torch.tensor([], device=x.device),
+                torch.tensor([1, 2], device=x.device) + 1,
+                torch.tensor([1, 2, 3], device=x.device) + 2,
+                torch.tensor([1, 2, 3, 4], device=x.device) + x,
+            )
+
+        self.common(fn, [torch.randn(4)])
+
     def test_views1(self):
         def fn1(x, y):
             return (x.view(size2) + y,)
@@ -415,11 +446,24 @@ class CommonTemplate:
             ),
         )
 
-    def test_linear(self):
+    def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
             torch.nn.Sigmoid(),
             ToTuple(),
+        )
+        self.common(mod, (torch.randn(2, 8),))
+
+    def test_linear2(self):
+        mod = torch.nn.Sequential(
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.ReLU(),
         )
         self.common(mod, (torch.randn(2, 8),))
 
@@ -499,6 +543,40 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    def test_to_dtype(self):
+        def fn(a, b):
+            return aten._to_copy(a, dtype=6), aten._to_copy(b + 1, dtype=6)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 2, 10]),
+                torch.randn([2, 2, 10], dtype=torch.float64),
+            ),
+        )
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_to_device(self):
+        def fn(a):
+            if a.device.type == "cpu":
+                return aten._to_copy(a, device=torch.device("cuda"), dtype=6, layout=0)
+            else:
+                return aten._to_copy(a, device=torch.device("cpu"), dtype=6, layout=0)
+
+        self.common(
+            fn,
+            (torch.randn([2, 2, 10]),),
+        )
+
+    def test_unbind(self):
+        def fn(a):
+            return torch.unbind(a), torch.unbind(a, -1)
+
+        self.common(
+            fn,
+            (torch.randn([4, 4, 4]),),
+        )
+
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -568,6 +646,42 @@ class CommonTemplate:
         def fn(x):
             # with padding
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [0, 0], [1, 1], True)
+
+        self.common(
+            fn,
+            (torch.randn([2, 8, 111, 111]),),
+        )
+
+    def test_avg_pool2d1(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2])
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+        )
+
+    def test_avg_pool2d2(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2])
+
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+
+    def test_avg_pool2d3(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1])
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+        )
+
+    def test_avg_pool2d4(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [0, 0], True)
 
         self.common(
             fn,
@@ -655,6 +769,18 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]),),
         )
+
+    @patch.object(config, "pick_loop_orders", True)
+    def test_transposed_propagates(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def fn(x, y):
+            return x + y
+
+        a = torch.randn(1, 4, 4, 4, device=self.device).permute(0, 2, 3, 1)
+        b = torch.randn(4, 4, 4, device=self.device).permute(1, 2, 0)
+        c = fn(a, b)
+        self.assertEqual(a.stride(), c.stride())
+        self.assertEqual(c.stride()[2], 1)
 
     def test_std(self):
         def fn(x):
@@ -767,6 +893,18 @@ class CommonTemplate:
             (torch.randn([8, 16]),),
         )
 
+    def test_stack(self):
+        def fn(a, b):
+            return torch.stack(
+                [
+                    a.expand(12, 16),
+                    b.expand(12, 16),
+                ],
+                2,
+            )
+
+        self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
+
     def test_hardtanh(self):
         def fn(x):
             return F.hardtanh(x), F.hardtanh(x + 1), F.hardtanh(x - 1)
@@ -794,15 +932,102 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    def test_rsqrt(self):
+        def fn(x):
+            return torch.rsqrt(x), torch.rsqrt(x + 1) - 2
+
+        self.common(
+            fn,
+            (torch.randn([64]),),
+        )
+
+    def test_log2(self):
+        def fn(x):
+            return torch.log2(x), torch.log2(x + 1) - 2
+
+        self.common(
+            fn,
+            (torch.randn([64]) + 10,),
+        )
+
+    def test_logsumexp(self):
+        def fn(x):
+            return torch.logsumexp(x, -1), torch.logsumexp(x, 0) - 2
+
+        self.common(
+            fn,
+            (torch.randn([8, 8]) + 10,),
+        )
+
+    def test_bitwise(self):
+        def fn(x, y):
+            return (
+                torch.bitwise_not(x),
+                torch.bitwise_or(x, y),
+                torch.bitwise_xor(x, y),
+                torch.bitwise_and(x, y),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 2**30, [64], dtype=torch.int32),
+                torch.randint(0, 2**30, [64], dtype=torch.int32),
+            ),
+        )
+
     def test_inf(self):
         def fn(a):
             return a + float("inf"), a + float("-inf"), a * -float("inf")
 
         self.common(fn, (torch.randn(8),))
 
+    def test_zeros(self):
+        def fn(a):
+            return (
+                a + 1,
+                torch.zeros(
+                    (1, 8, 64, 64),
+                    dtype=torch.float32,
+                    device=a.device,
+                ),
+                torch.zeros(
+                    1,
+                    8,
+                    64,
+                    64,
+                    dtype=torch.float32,
+                    device=a.device,
+                ),
+                a + torch.ones(8, device=a.device),
+                torch.full((2, 3), 3.1416, device=a.device),
+            )
+
+        self.common(fn, (torch.randn(8),))
+
+    def test_full_like(self):
+        def fn(a):
+            return torch.full_like(a, 7.777) - 1
+
+        self.common(fn, (torch.randn(8),))
+
+    def test_index(self):
+        def fn(a, b, c):
+            return aten.index(a, [b, c])
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 8),
+                torch.tensor([0, 0, 2, 2], dtype=torch.int64),
+                torch.tensor([3, 4, 4, 3], dtype=torch.int64),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
+    device = "cpu"
 
 
 CommonTemplate.install(CpuTests, "cpu")
@@ -817,6 +1042,7 @@ if HAS_CUDA:
 
     class GpuTests(TestCase):
         common = check_model_cuda
+        device = "cuda"
 
         def test_simplify_dims(self):
             def fn(a):

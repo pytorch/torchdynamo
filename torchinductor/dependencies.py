@@ -49,7 +49,7 @@ class RecordLoadStore(V.MockHandler):
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 
 
-def extract_read_writes(fn, *argsizes):
+def index_vars(*argsizes):
     from .ir import SqueezeView
 
     args = []
@@ -59,6 +59,11 @@ def extract_read_writes(fn, *argsizes):
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
         args.append(reindex([sympy.Symbol(f"d{next(cnt)}") for _ in new_size]))
+    return new_sizes, args
+
+
+def extract_read_writes(fn, *argsizes):
+    new_sizes, args = index_vars(*argsizes)
     rw = RecordLoadStore(new_sizes[0])
     with V.set_ops_handler(rw):
         fn(*args)

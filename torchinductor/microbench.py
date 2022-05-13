@@ -95,6 +95,7 @@ class MicroBenchmarks:
     def add_relu_softmax(x, a):
         return (torch.softmax(torch.relu(x + a), -1),)
 
+
 class UnaryElementwiseOps:
     @staticmethod
     def all_ops():
@@ -221,8 +222,7 @@ def main():
         torchinductor.config.debug = True
 
     rows = []
-    for model in UnaryElementwiseOps.all_ops():
-    # for model in (MicroBenchmarks.add_relu_softmax,):
+    for model in (MicroBenchmarks.add_relu_softmax,):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:

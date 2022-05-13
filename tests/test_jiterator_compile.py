@@ -44,7 +44,10 @@ if HAS_CUDA:
 
     class JiteratorTests(TestCase):
         common = check_model_jiterator
+        device = "cuda"
 
+    # Jiteratort currently only support elementwise ops
+    # Any tests that uses non-elementwise ops should be skipped here
     exclude_tests = {
         "test_addmm",
         "test_alexnet_prefix",
@@ -63,7 +66,7 @@ if HAS_CUDA:
         "test_mean",
         "test_min_max_reduction",
         "test_permute",
-        "test_pow",         # should work with jiterator, failing during decomp
+        "test_pow",         # TODO: should work with jiterator, failing during decomp
         "test_repeat",
         "test_slice1",
         "test_slice2",
@@ -82,6 +85,23 @@ if HAS_CUDA:
         "test_unsqueeze",
         "test_views1",
         "test_views2",
+        "test_avg_pool2d1",
+        "test_avg_pool2d2",
+        "test_avg_pool2d3",
+        "test_avg_pool2d4",
+        "test_expand",
+        "test_full_like",
+        "test_index",
+        "test_linear2",
+        "test_linspace",
+        "test_logsumexp",
+        "test_tensor1",
+        "test_tensor2",
+        "test_tensor3",
+        "test_to_device",
+        "test_to_dtype",
+        "test_unbind",
+        "test_zeros",
     }
 
     CommonTemplate.install(JiteratorTests, config.cuda_backend, exclude_tests)

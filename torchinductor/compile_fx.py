@@ -99,7 +99,7 @@ def dump_to_repro(gm, *args):
 
 
 def compile_fx(
-    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=True
+    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
 ):
     """Main entrypoint to a compile given FX graph"""
     assert isinstance(model, torch.fx.GraphModule)
@@ -112,6 +112,8 @@ def compile_fx(
         gm.graph.eliminate_dead_code()
     if config.debug:
         gm.graph.print_tabular()
+    if cudagraphs is None:
+        cudagraphs = config.triton.cudagraphs
 
     if False:
         wrap(CheckEachNode(gm).run)(*example_inputs)

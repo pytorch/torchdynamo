@@ -13,3 +13,4 @@ env
 tags
 *.swp
 dist
+.~lock*

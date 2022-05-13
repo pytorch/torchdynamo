@@ -22,6 +22,37 @@ from .virtualized import ops
 lowerings = {}
 aten = torch.ops.aten
 
+# TODO(jansel): figure out a way generate this automatically
+#               these come as dtype args to kernels
+# based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
+DTYPE_ID_LOOKUP = {
+    0: torch.uint8,
+    1: torch.int8,
+    2: torch.int16,
+    3: torch.int32,
+    4: torch.int64,
+    5: torch.float16,
+    6: torch.float32,
+    7: torch.float64,
+    8: torch.complex32,
+    9: torch.complex64,
+    10: torch.complex32,
+    11: torch.bool,
+    15: torch.bfloat16,
+    # TODO(jansel): add quantized types?
+    #  _(c10::qint8, QInt8) /* 12 */
+    # _(c10::quint8, QUInt8) /* 13 */
+    # _(c10::qint32, QInt32) /* 14 */
+    # _(c10::quint4x2, QUInt4x2) /* 16 */
+    # _(c10::quint2x4, QUInt2x4) /* 17 */
+}
+
+
+def decode_dtype(dtype: int):
+    assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
+    dtype = DTYPE_ID_LOOKUP[dtype]
+    return dtype
+
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
     """
@@ -150,6 +181,33 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
         return ops.to_dtype(x, dtype)
 
     return make_pointwise(_to_dtype, override_dtype=dtype)(x)
+
+
+def to_device(x: TensorBox, device=torch.device):
+    if x.get_device() == device:
+        return x
+    return TensorBox.create(ir.DeviceCopy.create(x, device))
+
+
+@register_lowering(aten._to_copy)
+def _to_copy(
+    x,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    non_blocking=False,
+    memory_format=None,
+):
+    assert not layout, "TODO"
+    assert not pin_memory, "TODO"
+    assert not memory_format, "TODO"
+    if dtype is not None:
+        x = to_dtype(x, decode_dtype(dtype))
+    if device is not None and device != x.get_device():
+        x = to_device(x, device)
+    return x
 
 
 def register_pointwise(
@@ -324,6 +382,16 @@ def split(x, sizes, dim):
     return result
 
 
+@register_lowering(aten.unbind)
+def unbind(x, dim=0):
+    dim = _validate_dim(x, dim, 0)
+    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    result = []
+    for i in range(x_size):
+        result.append(select(x, dim, i))
+    return result
+
+
 @register_lowering(aten.unsqueeze)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
@@ -392,6 +460,21 @@ def _embedding_bag(
     )
 
 
+"""
+@register_lowering(aten._cudnn_rnn, type_promote=False)
+def _cudnn_rnn(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(
+                aten._cudnn_rnn,
+                *args
+            ),
+        )
+    )
+"""
+
+
 @register_lowering(aten.convolution)
 def convolution(
     x: TensorBox,
@@ -453,33 +536,130 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
     )
 
 
-DTYPE_ID_LOOKUP = {
-    6: torch.float32,
-    7: torch.float64,
-}
+@register_lowering(torch.linspace)
+def linspace(start, end, steps, *, dtype=None, device=None):
+    dtype = dtype or torch.get_default_dtype()
+
+    step_size = (end - start) / (steps - 1)
+
+    def inner_fn(index):
+        return ops.add(
+            ops.mul(ops.constant(step_size, dtype), ops.index_expr(index[0], dtype)),
+            ops.constant(start, dtype),
+        )
+
+    return Pointwise.create(
+        device=device or torch.tensor(0.0).device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=[sympy.Integer(steps)],
+    )
 
 
-def constant_like(n):
+def _unwrap(x):
+    if isinstance(x, (list, tuple)) and len(x) > 0:
+        return _unwrap(x[0])
+    return x
+
+
+@register_lowering(torch.tensor)
+def tensor(data, *, dtype=None, device=None):
+    if isinstance(_unwrap(data), int):
+        dtype = dtype or torch.int64
+    else:
+        dtype = dtype or torch.get_default_dtype()
+
+    if isinstance(data, (float, int)):
+        ranges = []
+
+        def inner_fn(index):
+            return ops.constant(data, dtype)
+
+    elif len(data) == 0 or isinstance(data[0], (float, int)) and len(data) <= 8:
+        # inline small tensors
+        ranges = [sympy.Integer(len(data))]
+
+        def inner_fn(index):
+            def binary_search(start, end):
+                assert start < end
+                if end - start == 1:
+                    return ops.constant(data[start], dtype)
+                mid = (end - start) // 2 + start
+                return ops.where(
+                    ops.lt(
+                        ops.index_expr(index[0], torch.int64),
+                        ops.constant(mid, torch.int64),
+                    ),
+                    binary_search(start, mid),
+                    binary_search(mid, end),
+                )
+
+            if len(data) == 0:
+                return ops.constant(0, dtype)
+            return binary_search(0, len(data))
+
+    else:
+        return V.graph.add_tensor_constant(
+            torch.tensor(data, dtype=dtype, device=device)
+        )
+
+    return Pointwise.create(
+        device=device or torch.tensor(0.0).device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=ranges,
+    )
+
+
+def _full(fill_value, device, dtype, size):
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=lambda index: ops.constant(fill_value, dtype),
+        ranges=list(size),
+    )
+
+
+def constant_like(fill_value):
     def _constant_like(x, *, dtype, device, layout, pin_memory=False):
         assert not pin_memory
         assert layout == 0
-        assert (
-            dtype in DTYPE_ID_LOOKUP
-        ), f"id {dtype}={x.get_dtype()} missing from DTYPE_ID_LOOKUP"
-        dtype = DTYPE_ID_LOOKUP[dtype]
-        assert dtype == x.get_dtype(), "is this correct?"
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=lambda index: ops.constant(n, dtype),
-            ranges=list(x.get_size()),
-        )
+        dtype = decode_dtype(dtype)
+        return _full(fill_value, device, dtype, x.get_size())
 
     return _constant_like
 
 
 register_lowering(aten.zeros_like)(constant_like(0))
 register_lowering(aten.ones_like)(constant_like(1))
+
+
+@register_lowering(aten.full_like)
+def full_like(x, fill_value, **kwargs):
+    return constant_like(fill_value)(x, **kwargs)
+
+
+def tensor_constructor(fill_value):
+    # torch.zeros, torch.ones, etc
+    def inner(*size, dtype=None, device=None):
+        device = device or torch.tensor(1.0).device
+        dtype = dtype or torch.get_default_dtype()
+        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+            size = tuple(size[0])
+        size = [sympy.Integer(s) for s in size]
+        return _full(fill_value, device, dtype, size)
+
+    return inner
+
+
+register_lowering(torch.empty)(tensor_constructor(0))
+register_lowering(torch.zeros)(tensor_constructor(0))
+register_lowering(torch.ones)(tensor_constructor(1))
+
+
+@register_lowering(torch.full)
+def full(size, fill_value, **kwargs):
+    return tensor_constructor(fill_value)(size, **kwargs)
 
 
 @register_lowering(aten.gather, type_promote=False)
@@ -521,7 +701,7 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [sympy.Symbol(str(var_index))] + [*idx[indices_ndim:]]
+        weight_idx = [ops.indirect_indexing(var_index)] + [*idx[indices_ndim:]]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -532,53 +712,113 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     )
 
 
+@register_lowering(aten.index, type_promote=False)
+def index(x, indices):
+    assert isinstance(indices, (list, tuple))
+    x_loader = x.make_loader()
+    indices_loaders = [i.make_loader() for i in indices]
+
+    sizes = [i.get_size() for i in indices]
+    assert all(len(s) == 1 for s in sizes)
+    size = functools.reduce(V.graph.sizevars.guard_equals, [s[0] for s in sizes])
+
+    sizes = [size, *x.get_size()[len(indices) :]]
+
+    def fn(idx):
+        assert len(idx) == len(sizes)
+        new_index = [
+            ops.indirect_indexing(loader([idx[0]])) for loader in indices_loaders
+        ]
+        new_index.extend(idx[1:])
+        return x_loader(new_index)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=sizes,
+    )
+
+
+def constant_boundary_condition_2d(x, fill_value, padding):
+    *_, h, w = x.get_size()
+    x_loader = x.make_loader()
+
+    def load(index):
+        *prefix, ih, iw = index
+        mask = ops.and_(
+            ops.and_(
+                ops.ge(
+                    ops.index_expr(ih, torch.int64),
+                    ops.index_expr(sympy.Integer(0), torch.int64),
+                ),
+                ops.ge(
+                    ops.index_expr(iw, torch.int64),
+                    ops.index_expr(sympy.Integer(0), torch.int64),
+                ),
+            ),
+            ops.and_(
+                ops.lt(
+                    ops.index_expr(ih, torch.int64),
+                    ops.index_expr(h, torch.int64),
+                ),
+                ops.lt(
+                    ops.index_expr(iw, torch.int64),
+                    ops.index_expr(w, torch.int64),
+                ),
+            ),
+        )
+        return ops.masked(mask, lambda: x_loader([*prefix, ih, iw]), fill_value)
+
+    return load
+
+
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+
+    x_out = ir.IndexingDiv(
+        x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
+    )
+
+    if ceil_mode:
+        x_alt = ir.IndexingDiv(
+            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
+        )
+
+        if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
+            # ceil mode is actually a no-op, lets guard on that
+            V.graph.sizevars.guard_equals(x_out, x_alt)
+            ceil_mode = False
+        else:
+            x_out = x_alt
+    return x_out, ceil_mode
+
+
 @register_lowering(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x, kernel_size, stride=(1, 1), padding=0, dilation=1, ceil_mode=False
 ):
+    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert padding == 0 or len(padding) == 2
-    assert dilation == 1 or tuple(dilation) == (1, 1), "TODO(jansel): support dilation"
     assert len(x.get_size()) in (3, 4)
     if padding == 0:
         padding = [0, 0]
 
     x.realize()  # we will read this many times, so make sure it is computed
 
-    x_loader = x.make_loader()
+    *batch, h, w = x.get_size()
 
-    *batch, c, h, w = x.get_size()
+    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
-    h_out = ir.IndexingDiv(
-        h + 2 * padding[0] - (kernel_size[0] - 1) + (stride[0] - 1), stride[0]
-    )
-    w_out = ir.IndexingDiv(
-        w + 2 * padding[1] - (kernel_size[1] - 1) + (stride[1] - 1), stride[1]
-    )
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition_2d(x, float("-inf"), padding)
+    else:
+        x_loader = x.make_loader()
 
-    if ceil_mode:
-        h_out_ = ir.IndexingDiv(
-            h + 2 * padding[0] - (kernel_size[0] - 1) + 2 * (stride[0] - 1), stride[0]
-        )
-        w_out_ = ir.IndexingDiv(
-            w + 2 * padding[1] - (kernel_size[1] - 1) + 2 * (stride[1] - 1), stride[1]
-        )
-
-        if (
-            V.graph.sizevars.size_hint(h_out - h_out_) == 0
-            and V.graph.sizevars.size_hint(w_out - w_out_) == 0
-        ):
-            # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.guard_equals(h_out, h_out_)
-            V.graph.sizevars.guard_equals(w_out, w_out_)
-            ceil_mode = False
-        else:
-            h_out = h_out_
-            w_out = w_out_
-
-    new_size = list(batch) + [c, h_out, w_out]
+    new_size = list(batch) + [h_out, w_out]
 
     def fn(idx, return_index):
         *prefix, bh, bw = idx
@@ -587,35 +827,7 @@ def max_pool2d_with_indices(
         for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
-            if padding[0] or padding[1] or ceil_mode:
-                # TODO(jansel): rewrite this to use a boundary condition helper
-                mask = ops.and_(
-                    ops.and_(
-                        ops.ge(
-                            ops.index_expr(ih, torch.int64),
-                            ops.index_expr(sympy.Integer(0), torch.int64),
-                        ),
-                        ops.ge(
-                            ops.index_expr(iw, torch.int64),
-                            ops.index_expr(sympy.Integer(0), torch.int64),
-                        ),
-                    ),
-                    ops.and_(
-                        ops.lt(
-                            ops.index_expr(ih, torch.int64),
-                            ops.index_expr(h, torch.int64),
-                        ),
-                        ops.lt(
-                            ops.index_expr(iw, torch.int64),
-                            ops.index_expr(w, torch.int64),
-                        ),
-                    ),
-                )
-                val = ops.masked(
-                    mask, lambda: x_loader([*prefix, ih, iw]), float("-inf")
-                )
-            else:
-                val = x_loader([*prefix, ih, iw])
+            val = x_loader([*prefix, ih, iw])
             index = ops.index_expr(ih * w + iw, torch.int64)
             if maxval is None:
                 maxindex = index
@@ -644,6 +856,70 @@ def max_pool2d_with_indices(
     return r1, r2
 
 
+@register_lowering(aten.avg_pool2d)
+def avg_pool2d(
+    x,
+    kernel_size,
+    stride=[],
+    padding=0,
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    assert count_include_pad
+    assert not divisor_override
+    if not stride:
+        stride = [1, 1]
+    if not padding:
+        padding = [0, 0]
+
+    assert isinstance(x, TensorBox)
+    assert len(kernel_size) == 2
+    assert len(stride) == 2
+    assert len(padding) == 2
+    assert len(x.get_size()) in (3, 4)
+
+    # TODO(jansel): realize after padding?
+    x.realize()  # we will read this many times, so make sure it is computed
+
+    *batch, h, w = x.get_size()
+
+    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
+
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition_2d(x, 0.0, padding)
+    else:
+        x_loader = x.make_loader()
+
+    new_size = list(batch) + [h_out, w_out]
+
+    scale = 1.0 / (kernel_size[0] * kernel_size[1])
+    dtype = x.get_dtype()
+
+    def fn(idx):
+        *prefix, bh, bw = idx
+        total = None
+        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
+            ih = bh * stride[0] + ih - padding[0]
+            iw = bw * stride[1] + iw - padding[1]
+            val = x_loader([*prefix, ih, iw])
+            if total is None:
+                total = val
+            else:
+                total = ops.add(val, total)
+        return ops.mul(total, ops.constant(scale, dtype))
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
+    # TODO(jansel): should we force these to be realized?
+    return rv
+
+
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
     assert isinstance(x, TensorBox)
@@ -670,7 +946,9 @@ def make_reduction(reduction_type: str):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
-        assert reduction_type == "sum" or axis is None, "TODO: max with index"
+        assert (
+            reduction_type in ("sum", "amax", "amin") or axis is None
+        ), "TODO: max with index"
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 
@@ -714,7 +992,7 @@ def make_reduction(reduction_type: str):
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
-            reduction_type=reduction_type,
+            reduction_type=reduction_type.lstrip("a"),  # amax=>max
         )
         result.realize()
         return result
@@ -755,9 +1033,54 @@ def std(x, axis, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
 
 
+def pow_recursive(x, y, dtype):
+    if y < 0:
+        return pow_recursive(ops.reciprocal(x), -y, dtype)
+    if y == 0:
+        return ops.constant(1, dtype)
+    if y == 1:
+        return x
+
+    result = pow_recursive(x, y // 2, dtype)
+    result = ops.mul(result, result)
+    if (y % 2) == 1:
+        result = ops.mul(result, x)
+    return result
+
+
+@register_lowering(aten.pow, broadcast=True)
+def pow(a, b):
+    # see https://github.com/openai/triton/issues/506
+    # triton doesn't support pow, so need to rewrite it
+    # this is a lowering not a decomp, due to upstream pytorch being unstable
+    if isinstance(b, float) and b == int(b):
+        return pow(a, int(b))
+    elif isinstance(b, int) and b == 1:
+        return a
+    elif isinstance(b, int):
+        loader = a.make_loader()
+
+        def fn(idx):
+            return pow_recursive(loader(idx), b, a.get_dtype())
+
+        return Pointwise.create(
+            device=a.get_device(),
+            dtype=a.get_dtype(),
+            inner_fn=fn,
+            ranges=a.get_size(),
+        )
+    else:
+        assert False, "TODO: check correctness here"
+        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
+        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
+        # else: torch.exp(torch.log(a) * b)
+
+
 sum_ = register_lowering(aten.sum)(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
+register_lowering(aten.amax)(make_reduction("amax"))
+register_lowering(aten.amin)(make_reduction("amin"))
 
 div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)
@@ -770,6 +1093,10 @@ sub = register_pointwise(aten.sub)
 
 register_pointwise(aten.abs)
 register_pointwise(aten.add)
+register_pointwise(aten.bitwise_and)
+register_pointwise(aten.bitwise_not)
+register_pointwise(aten.bitwise_or)
+register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)

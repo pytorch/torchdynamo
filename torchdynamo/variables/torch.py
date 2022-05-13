@@ -71,6 +71,7 @@ class TorchVariable(VariableTracker):
 
     def can_constant_fold_through(self):
         if self.value in (
+            torch.device,
             torch.is_tensor,
             torch.is_floating_point,
             torch.overrides.is_tensor_like,

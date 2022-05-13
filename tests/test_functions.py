@@ -110,6 +110,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return constant3(a, b=1.0) + b
 
     @make_test
+    def test_device_constant(a):
+        return a + torch.ones(1, device=torch.device("cpu"))
+
+    @make_test
     def test_tuple1(a, b):
         args = (a, b)
         return sub(*args)

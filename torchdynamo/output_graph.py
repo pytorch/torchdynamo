@@ -104,6 +104,10 @@ class OutputGraph(fx.Tracer):
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
             if node not in graph_nodes:
+                # Erasing node alone does not remove the meta information
+                # So, remove the help tensor explicitly
+                if "example_value" in node.meta:
+                    del node.meta["example_value"]
                 self.graph.erase_node(node)
 
     def count_calls(self):
@@ -351,6 +355,8 @@ class OutputGraph(fx.Tracer):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
+                if "example_value" in node.meta:
+                    del node.meta["example_value"]
                 self.graph.erase_node(node)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
@@ -374,3 +380,7 @@ class OutputGraph(fx.Tracer):
         # Cleanup graphargs
         for graph_arg in self.graphargs:
             graph_arg.erase()
+
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
