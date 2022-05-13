@@ -1190,18 +1190,26 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
-    @unittest.skip("disabled for now")
     def test_python_slice(self):
-        def fn(input):
+        def f1(input):
             y = 0
             for i, x in enumerate(input[2:], 1):
                 y = y + x
             return y
 
+        def f2(input):
+            y = 0
+            for i, x in enumerate(input.shape[2:], 1):
+                y = y + x
+            return y
+
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
-            z = fn([1, 2, 3, 5])
-        self.assertEqual(z, 8)
+            res1 = f1([1, 2, 3, 5])
+            res2 = f2(torch.rand([2, 3, 4, 5]))
+
+        self.assertEqual(res1, 8)
+        self.assertEqual(res2, 9)
 
     def test_const_dict_variable_python_type(self):
         from torchdynamo.variables import ConstDictVariable
