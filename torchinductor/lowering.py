@@ -740,53 +740,85 @@ def index(x, indices):
     )
 
 
+def constant_boundary_condition_2d(x, fill_value, padding):
+    *_, h, w = x.get_size()
+    x_loader = x.make_loader()
+
+    def load(index):
+        *prefix, ih, iw = index
+        mask = ops.and_(
+            ops.and_(
+                ops.ge(
+                    ops.index_expr(ih, torch.int64),
+                    ops.index_expr(sympy.Integer(0), torch.int64),
+                ),
+                ops.ge(
+                    ops.index_expr(iw, torch.int64),
+                    ops.index_expr(sympy.Integer(0), torch.int64),
+                ),
+            ),
+            ops.and_(
+                ops.lt(
+                    ops.index_expr(ih, torch.int64),
+                    ops.index_expr(h, torch.int64),
+                ),
+                ops.lt(
+                    ops.index_expr(iw, torch.int64),
+                    ops.index_expr(w, torch.int64),
+                ),
+            ),
+        )
+        return ops.masked(mask, lambda: x_loader([*prefix, ih, iw]), fill_value)
+
+    return load
+
+
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+
+    x_out = ir.IndexingDiv(
+        x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
+    )
+
+    if ceil_mode:
+        x_alt = ir.IndexingDiv(
+            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
+        )
+
+        if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
+            # ceil mode is actually a no-op, lets guard on that
+            V.graph.sizevars.guard_equals(x_out, x_alt)
+            ceil_mode = False
+        else:
+            x_out = x_alt
+    return x_out, ceil_mode
+
+
 @register_lowering(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x, kernel_size, stride=(1, 1), padding=0, dilation=1, ceil_mode=False
 ):
+    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert padding == 0 or len(padding) == 2
-    assert dilation == 1 or tuple(dilation) == (1, 1), "TODO(jansel): support dilation"
     assert len(x.get_size()) in (3, 4)
     if padding == 0:
         padding = [0, 0]
 
     x.realize()  # we will read this many times, so make sure it is computed
 
-    x_loader = x.make_loader()
+    *batch, h, w = x.get_size()
 
-    *batch, c, h, w = x.get_size()
+    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
-    h_out = ir.IndexingDiv(
-        h + 2 * padding[0] - (kernel_size[0] - 1) + (stride[0] - 1), stride[0]
-    )
-    w_out = ir.IndexingDiv(
-        w + 2 * padding[1] - (kernel_size[1] - 1) + (stride[1] - 1), stride[1]
-    )
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition_2d(x, float("-inf"), padding)
+    else:
+        x_loader = x.make_loader()
 
-    if ceil_mode:
-        h_out_ = ir.IndexingDiv(
-            h + 2 * padding[0] - (kernel_size[0] - 1) + 2 * (stride[0] - 1), stride[0]
-        )
-        w_out_ = ir.IndexingDiv(
-            w + 2 * padding[1] - (kernel_size[1] - 1) + 2 * (stride[1] - 1), stride[1]
-        )
-
-        if (
-            V.graph.sizevars.size_hint(h_out - h_out_) == 0
-            and V.graph.sizevars.size_hint(w_out - w_out_) == 0
-        ):
-            # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.guard_equals(h_out, h_out_)
-            V.graph.sizevars.guard_equals(w_out, w_out_)
-            ceil_mode = False
-        else:
-            h_out = h_out_
-            w_out = w_out_
-
-    new_size = list(batch) + [c, h_out, w_out]
+    new_size = list(batch) + [h_out, w_out]
 
     def fn(idx, return_index):
         *prefix, bh, bw = idx
@@ -795,35 +827,7 @@ def max_pool2d_with_indices(
         for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
-            if padding[0] or padding[1] or ceil_mode:
-                # TODO(jansel): rewrite this to use a boundary condition helper
-                mask = ops.and_(
-                    ops.and_(
-                        ops.ge(
-                            ops.index_expr(ih, torch.int64),
-                            ops.index_expr(sympy.Integer(0), torch.int64),
-                        ),
-                        ops.ge(
-                            ops.index_expr(iw, torch.int64),
-                            ops.index_expr(sympy.Integer(0), torch.int64),
-                        ),
-                    ),
-                    ops.and_(
-                        ops.lt(
-                            ops.index_expr(ih, torch.int64),
-                            ops.index_expr(h, torch.int64),
-                        ),
-                        ops.lt(
-                            ops.index_expr(iw, torch.int64),
-                            ops.index_expr(w, torch.int64),
-                        ),
-                    ),
-                )
-                val = ops.masked(
-                    mask, lambda: x_loader([*prefix, ih, iw]), float("-inf")
-                )
-            else:
-                val = x_loader([*prefix, ih, iw])
+            val = x_loader([*prefix, ih, iw])
             index = ops.index_expr(ih * w + iw, torch.int64)
             if maxval is None:
                 maxindex = index
@@ -850,6 +854,70 @@ def max_pool2d_with_indices(
     )
     # TODO(jansel): should we force these to be realized?
     return r1, r2
+
+
+@register_lowering(aten.avg_pool2d)
+def avg_pool2d(
+    x,
+    kernel_size,
+    stride=[],
+    padding=0,
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    assert count_include_pad
+    assert not divisor_override
+    if not stride:
+        stride = [1, 1]
+    if not padding:
+        padding = [0, 0]
+
+    assert isinstance(x, TensorBox)
+    assert len(kernel_size) == 2
+    assert len(stride) == 2
+    assert len(padding) == 2
+    assert len(x.get_size()) in (3, 4)
+
+    # TODO(jansel): realize after padding?
+    x.realize()  # we will read this many times, so make sure it is computed
+
+    *batch, h, w = x.get_size()
+
+    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
+
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition_2d(x, 0.0, padding)
+    else:
+        x_loader = x.make_loader()
+
+    new_size = list(batch) + [h_out, w_out]
+
+    scale = 1.0 / (kernel_size[0] * kernel_size[1])
+    dtype = x.get_dtype()
+
+    def fn(idx):
+        *prefix, bh, bw = idx
+        total = None
+        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
+            ih = bh * stride[0] + ih - padding[0]
+            iw = bw * stride[1] + iw - padding[1]
+            val = x_loader([*prefix, ih, iw])
+            if total is None:
+                total = val
+            else:
+                total = ops.add(val, total)
+        return ops.mul(total, ops.constant(scale, dtype))
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
+    # TODO(jansel): should we force these to be realized?
+    return rv
 
 
 @register_lowering(aten._adaptive_avg_pool2d)

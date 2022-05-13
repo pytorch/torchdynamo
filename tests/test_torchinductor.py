@@ -652,6 +652,43 @@ class CommonTemplate:
             (torch.randn([2, 8, 111, 111]),),
         )
 
+
+    def test_avg_pool2d1(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2])
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+        )
+
+    def test_avg_pool2d2(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2])
+
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+
+    def test_avg_pool2d3(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1])
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+        )
+
+    def test_avg_pool2d4(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [0, 0], True)
+
+        self.common(
+            fn,
+            (torch.randn([2, 8, 111, 111]),),
+        )
+
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(

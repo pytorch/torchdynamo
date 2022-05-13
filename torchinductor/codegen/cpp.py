@@ -150,8 +150,10 @@ class CppOverrides(OpOverrides):
         assert isinstance(other, float)
         if other == float("-inf"):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
+        elif other == float("inf"):
+            code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
         else:
-            assert False
+            code.writeline(f"float {var} = {other!r};")
         code.writeline(f"if({mask})")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
