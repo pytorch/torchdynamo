@@ -964,7 +964,14 @@ class CommonTemplate:
                     device=a.device,
                 ),
                 a + torch.ones(8, device=a.device),
+                torch.full((2, 3), 3.1416, device=a.device),
             )
+
+        self.common(fn, (torch.randn(8),))
+
+    def test_full_like(self):
+        def fn(a):
+            return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
 

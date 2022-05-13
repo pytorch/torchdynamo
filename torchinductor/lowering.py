@@ -611,23 +611,32 @@ def tensor(data, *, dtype=None, device=None):
     )
 
 
-def constant_like(n):
+def _full(fill_value, device, dtype, size):
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=lambda index: ops.constant(fill_value, dtype),
+        ranges=list(size),
+    )
+
+
+def constant_like(fill_value):
     def _constant_like(x, *, dtype, device, layout, pin_memory=False):
         assert not pin_memory
         assert layout == 0
         dtype = decode_dtype(dtype)
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=lambda index: ops.constant(n, dtype),
-            ranges=list(x.get_size()),
-        )
+        return _full(fill_value, device, dtype, x.get_size())
 
     return _constant_like
 
 
 register_lowering(aten.zeros_like)(constant_like(0))
 register_lowering(aten.ones_like)(constant_like(1))
+
+
+@register_lowering(aten.full_like)
+def full_like(x, fill_value, **kwargs):
+    return constant_like(fill_value)(x, **kwargs)
 
 
 def tensor_constructor(fill_value):
@@ -638,12 +647,7 @@ def tensor_constructor(fill_value):
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
         size = [sympy.Integer(s) for s in size]
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=lambda index: ops.constant(fill_value, dtype),
-            ranges=size,
-        )
+        return _full(fill_value, device, dtype, size)
 
     return inner
 
@@ -651,6 +655,11 @@ def tensor_constructor(fill_value):
 register_lowering(torch.empty)(tensor_constructor(0))
 register_lowering(torch.zeros)(tensor_constructor(0))
 register_lowering(torch.ones)(tensor_constructor(1))
+
+
+@register_lowering(torch.full)
+def full(size, fill_value, **kwargs):
+    return tensor_constructor(fill_value)(size, **kwargs)
 
 
 @register_lowering(aten.gather, type_promote=False)
