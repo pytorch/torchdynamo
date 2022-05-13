@@ -11,7 +11,13 @@ try:
 except (ImportError, ModuleNotFoundError):
     raise unittest.SkipTest("requires functorch")
 
-from .test_torchinductor import TestCase, SweepInputs2, InputGen, CommonTemplate, check_model_cuda
+from tests.test_torchinductor import (
+    TestCase,
+    SweepInputs2,
+    InputGen,
+    CommonTemplate,
+    check_model_cuda,
+)
 
 aten = torch.ops.aten
 
@@ -31,11 +37,11 @@ if HAS_CUDA:
         # Jiterator currently only supports single output
         # TODO: remove this workaround when jiterator supports multiple outputs
         for i in range(len(sample_outputs)):
+
             def single_output_fn(*args, **kwargs):
                 return model(*args, **kwargs)[i]
 
             check_model_cuda(self, single_output_fn, example_inputs)
-
 
     class SweepInputsJiteratorTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
@@ -66,7 +72,7 @@ if HAS_CUDA:
         "test_mean",
         "test_min_max_reduction",
         "test_permute",
-        "test_pow",         # TODO: should work with jiterator, failing during decomp
+        "test_pow",  # TODO: should work with jiterator, failing during decomp
         "test_repeat",
         "test_slice1",
         "test_slice2",

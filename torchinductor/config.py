@@ -17,7 +17,7 @@ static_weight_shapes = True
 approximations = False
 
 # select compiler backend for cuda
-cuda_backend = 'Triton'
+cuda_backend = "Triton"
 
 # put correctness assertions in generated code
 size_asserts = True

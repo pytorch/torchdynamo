@@ -167,8 +167,10 @@ class UnaryElementwiseOps:
 
         for op in ops:
             print(op.__name__)
+
             def fn(x):
-                return (op(x), )
+                return (op(x),)
+
             yield fn
 
 

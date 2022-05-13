@@ -17,6 +17,7 @@ jobs:
         cache: 'pip'
     - run: make setup_nightly
     - run: pytest ./tests/test_torchinductor.py
+    - run: pytest .tests/test_jiterator_compile.py
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}

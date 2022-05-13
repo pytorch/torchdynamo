@@ -24,6 +24,7 @@ from .cpp import CppPrinter, CppOverrides, DTYPE_TO_CPP
 
 cexpr = CppPrinter().doprint
 
+
 class JiteratorOverrides(CppOverrides):
     """Map element-wise ops to CUDA code"""
 
@@ -42,6 +43,7 @@ class JiteratorOverrides(CppOverrides):
         elif val == float("-inf"):
             return f"NEG_INFINITY"
         return ops.to_dtype(repr(val), dtype)
+
 
 class JiteratorKernel(Kernel):
     overrides = JiteratorOverrides
@@ -118,6 +120,7 @@ class JiteratorKernel(Kernel):
             kernel_group.finalize_kernel(kernel, scheduler)
 
         kernel_group.codegen_define_and_call(wrapper)
+
 
 class JiteratorKernelArgs(KernelArgs):
     def argdefs(self):
