@@ -100,7 +100,9 @@ class TritonOverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, TritonOverrides.constant(other, torch.float32))
+        return ops.where(
+            new_mask, result, TritonOverrides.constant(other, torch.float32)
+        )
 
     @staticmethod
     def logical_not(a):

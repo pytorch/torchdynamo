@@ -652,7 +652,6 @@ class CommonTemplate:
             (torch.randn([2, 8, 111, 111]),),
         )
 
-
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
