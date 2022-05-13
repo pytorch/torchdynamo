@@ -174,8 +174,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def codegen(self):
         from .codegen.cpp import CppKernel
-        from .codegen.triton import TritonKernel
         from .codegen.jiterator import JiteratorKernel
+        from .codegen.triton import TritonKernel
 
         wrapper = WrapperCodeGen()
         self.wrapper_code = wrapper

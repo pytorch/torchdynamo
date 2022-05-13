@@ -1,26 +1,17 @@
-import collections
 import contextlib
-import dataclasses
-import functools
-from itertools import chain
-from typing import List
 
 import sympy
-import torch
 
-from .. import codecache
-from .. import config
 from .. import ir
 from ..scheduler import Scheduler
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
-from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import KernelArgs
-from .cpp import CppPrinter, CppOverrides, DTYPE_TO_CPP
-
+from .cpp import CppOverrides
+from .cpp import CppPrinter
 
 cexpr = CppPrinter().doprint
 
@@ -39,9 +30,9 @@ class JiteratorOverrides(CppOverrides):
     @staticmethod
     def constant(val, dtype):
         if val == float("inf"):
-            return f"POS_INFINITY"
+            return "POS_INFINITY"
         elif val == float("-inf"):
-            return f"NEG_INFINITY"
+            return "NEG_INFINITY"
         return ops.to_dtype(repr(val), dtype)
 
 
@@ -67,7 +58,7 @@ class JiteratorKernel(Kernel):
     # Jiterator handles indexing internally
     def store(self, name: str, index, value):
         assert "buf" in name
-        var = self.args.output(name)
+        self.args.output(name)  # create a output name
         self.stores.writeline(f"return {value};")
 
     def set_ranges(self, lengths, reduction_lengths):
@@ -108,7 +99,7 @@ class JiteratorKernel(Kernel):
             codegen_extern_call
         ):
             if reduction_group:
-                assert False, "Jiteartor doesn't support reduction yet"
+                raise Exception("Jiteartor doesn't support reduction yet")
             with scheduler.kernel(kernel_group.new_kernel()) as kernel:
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
 
@@ -126,7 +117,7 @@ class JiteratorKernelArgs(KernelArgs):
     def argdefs(self):
         # TODO: reconsider type specialization
         argdefs = []
-        for outer, inner in self.input_buffers.items():
+        for _, inner in self.input_buffers.items():
             # dtype = buffer_types[outer]
             # argdefs.append(f"const {DTYPE_TO_CPP[dtype]} {inner}")
             argdefs.append(f"const T {inner}")

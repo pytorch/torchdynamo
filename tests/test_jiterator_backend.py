@@ -3,7 +3,6 @@ import importlib
 import unittest
 
 import torch
-from torch.nn import functional as F
 
 try:
     importlib.import_module("functorch")
@@ -11,13 +10,11 @@ try:
 except (ImportError, ModuleNotFoundError):
     raise unittest.SkipTest("requires functorch")
 
-from tests.test_torchinductor import (
-    TestCase,
-    SweepInputs2,
-    InputGen,
-    CommonTemplate,
-    check_model_cuda,
-)
+from tests.test_torchinductor import CommonTemplate
+from tests.test_torchinductor import InputGen
+from tests.test_torchinductor import SweepInputs2
+from tests.test_torchinductor import TestCase
+from tests.test_torchinductor import check_model_cuda
 
 aten = torch.ops.aten
 
@@ -108,6 +105,7 @@ if HAS_CUDA:
         "test_to_dtype",
         "test_unbind",
         "test_zeros",
+        "test_stack",
     }
 
     CommonTemplate.install(JiteratorTests, config.cuda_backend, exclude_tests)
