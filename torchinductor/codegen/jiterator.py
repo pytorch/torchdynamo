@@ -18,50 +18,14 @@ from .common import BracesBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
-# from .common import KernelArgs
-from .common import OpOverrides
-
-DTYPE_TO_CPP = {
-    torch.float32: "float",
-    torch.float64: "double",
-    torch.int64: "long",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
-    torch.uint8: "unsigned char",
-    torch.bool: "bool",
-}
-INDEX_TYPE = "long"
-
-
-class CppPrinter(ExprPrinter):
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} / {div})"
-        return f"{x} % {mod}"
-
-    def _print_IndexingDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"({x} / {div})"
+from .common import KernelArgs
+from .cpp import CppPrinter, CppOverrides, DTYPE_TO_CPP
 
 
 cexpr = CppPrinter().doprint
-class JiteratorOverrides(OpOverrides):
+
+class JiteratorOverrides(CppOverrides):
     """Map element-wise ops to CUDA code"""
-
-    @staticmethod
-    def to_dtype(x, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
-
-    @staticmethod
-    def relu(x):
-        return f"{x} * ({x}>0)"
 
     @staticmethod
     def minimum(a, b):
@@ -72,45 +36,12 @@ class JiteratorOverrides(OpOverrides):
         return f"::max({a}, {b})"
 
     @staticmethod
-    def where(a, b, c):
-        return f"{a} ? {b} : {c}"
-
-    @staticmethod
     def constant(val, dtype):
         if val == float("inf"):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            return f"POS_INFINITY"
         elif val == float("-inf"):
-            return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            return f"NEG_INFINITY"
         return ops.to_dtype(repr(val), dtype)
-
-    @staticmethod
-    def index_expr(expr, dtype):
-        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
-
-    @staticmethod
-    def masked(mask, body, other):
-        code = BracesBuffer()
-        var = V.kernel.cse.newvar()
-        assert isinstance(other, float)
-        if other == float("-inf"):
-            code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
-        else:
-            assert False
-        code.writeline(f"if({mask})")
-        with V.kernel.swap_buffers(code), code.indent():
-            result = body()
-            code.writeline(f"{var} = {result};")
-        V.kernel.compute.splice(code)
-        return var
-
-    @staticmethod
-    def and_(a, b):
-        return f"{a} && {b}"
-
-    @staticmethod
-    def logical_not(a):
-        return f"!{a}"
-
 
 class JiteratorKernel(Kernel):
     overrides = JiteratorOverrides
@@ -126,12 +57,13 @@ class JiteratorKernel(Kernel):
         self.reduction_depth = None
         self.reduction_vars = {}
 
+    # Jiterator handles indexing internally
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
-        index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}")
 
-    def store(self, name, index, value):
+    # Jiterator handles indexing internally
+    def store(self, name: str, index, value):
         assert "buf" in name
         var = self.args.output(name)
         self.stores.writeline(f"return {value};")
@@ -152,7 +84,7 @@ class JiteratorKernel(Kernel):
             self.itervars[self.reduction_depth :],
         )
 
-    def codegen_loops(self, code):
+    def codegen_kernel(self, code):
         with contextlib.ExitStack():
             code.splice(self.loads)
             code.splice(self.compute)
@@ -187,42 +119,9 @@ class JiteratorKernel(Kernel):
 
         kernel_group.codegen_define_and_call(wrapper)
 
-class JiteratorKernelArgs:
-    @staticmethod
-    def _lookup(prefix, odict, name):
-        assert isinstance(name, (str, sympy.Symbol))
-        name = str(name)
-        if name not in odict:
-            odict[name] = f"{prefix}{len(odict)}"
-        return odict[name]
-
-    def __init__(self, sizevars=None):
-        self.input_buffers = collections.OrderedDict()
-        self.output_buffers = collections.OrderedDict()
-        self.sizevars = sizevars or collections.OrderedDict()
-
-    def input(self, name):
-        assert name not in V.graph.removed_buffers, name
-        if name in self.output_buffers:
-            return self.output_buffers[name]
-        return self._lookup("in", self.input_buffers, name)
-
-    def output(self, name):
-        assert name not in V.graph.removed_buffers, name
-        assert name not in self.input_buffers, name
-        return self._lookup("out", self.output_buffers, name)
-
-    def size(self, name):
-        return self._lookup("ks", self.sizevars, name)
-
-    def call_names(self):
-        return chain(
-            self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
-        )
-
+class JiteratorKernelArgs(KernelArgs):
     def argdefs(self):
-        # from .cpp import DTYPE_TO_CPP
-        # from .cpp import INDEX_TYPE
+        # TODO: reconsider type specialization
         argdefs = []
         for outer, inner in self.input_buffers.items():
             # dtype = buffer_types[outer]
@@ -244,7 +143,7 @@ class KernelGroup:
     def finalize_kernel(self, new_kernel, scheduler):
         self.count += 1
         code = self.loops_code
-        new_kernel.codegen_loops(code)
+        new_kernel.codegen_kernel(code)
 
         if not scheduler.runable_nodes and scheduler.pending_buffer_names:
             scheduler.barrier()
@@ -279,7 +178,7 @@ class KernelGroup:
         for name in args.output_buffers.keys():
             output_args.append(f"{name}")
 
-        wrapper.body.writeline(
+        wrapper.header.writeline(
             f"jitted_{kernel_name} = torch.cuda.jiterator._create_jit_fn({kernel_name})",
         )
 

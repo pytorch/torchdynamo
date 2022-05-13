@@ -127,7 +127,7 @@ class SweepInputs2:
         return (a + b,)
 
     @classmethod
-    def gen_template(cls, name1, name2):
+    def gen_template(cls, name1, name2, suffix):
         def test(self):
             check_model(
                 self,
@@ -138,28 +138,28 @@ class SweepInputs2:
                 ),
             )
 
-        test.__name__ = f"test_{cls.gen.device}_{name1}_{name2}"
+        test.__name__ = f"test_{cls.gen.device}_{suffix}_{name1}_{name2}"
         setattr(cls, test.__name__, test)
 
     @classmethod
-    def populate(cls):
+    def populate(cls, suffix):
         for name1 in cls.input_gen_types1:
             for name2 in cls.input_gen_types2:
-                cls.gen_template(name1, name2)
+                cls.gen_template(name1, name2, suffix)
 
 
 class SweepInputsCpuTest(SweepInputs2, TestCase):
     gen = InputGen(10, "cpu")
 
 
-SweepInputsCpuTest.populate()
+SweepInputsCpuTest.populate("cpp")
 
 
 class CommonTemplate:
     @classmethod
-    def install(my_cls, other_cls, suffix):
+    def install(my_cls, other_cls, suffix, excludes={}):
         for name, value in my_cls.__dict__.items():
-            if name.startswith("test_"):
+            if name.startswith("test_") and name not in excludes:
                 setattr(other_cls, f"{name}_{suffix}", value)
 
     def test_add_const_int(self):
@@ -808,11 +808,12 @@ class CpuTests(TestCase):
 CommonTemplate.install(CpuTests, "cpu")
 
 if HAS_CUDA:
+    config.cuda_backend = "triton"
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
 
-    SweepInputsCudaTest.populate()
+    SweepInputsCudaTest.populate(config.cuda_backend)
 
     class GpuTests(TestCase):
         common = check_model_cuda
@@ -825,4 +826,4 @@ if HAS_CUDA:
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
 
-    CommonTemplate.install(GpuTests, "cuda")
+    CommonTemplate.install(GpuTests, config.cuda_backend)

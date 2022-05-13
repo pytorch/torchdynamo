@@ -17,7 +17,7 @@ static_weight_shapes = True
 approximations = False
 
 # select compiler backend for cuda
-cuda_backend = 'Jiteraor'
+cuda_backend = 'Triton'
 
 # config specific to codegen/cpp.pp
 class cpp:
