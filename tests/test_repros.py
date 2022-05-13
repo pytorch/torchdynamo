@@ -1181,8 +1181,8 @@ class ReproTests(torchdynamo.testing.TestCase):
                 ]
             )
 
-            x_vals = (True,)
-            y_vals = (8.0, *tensors)
+            x_vals = (5.0, *tensors)
+            y_vals = (6.0, *tensors)
 
             @torchdynamo.disable
             def get_expected(condition, x, y):
@@ -1192,21 +1192,18 @@ class ReproTests(torchdynamo.testing.TestCase):
                     np.where(condition.cpu().numpy(), x_np, y_np)
                 ).to(common_dtype)
 
-            for x in x_vals:
-                for y in y_vals:
-                    condition = torch.empty(
-                        *condition_shape, dtype=torch.bool
-                    ).bernoulli_()
-                    common_dtype = torch.result_type(x, y)
+            for x, y in zip(x_vals, y_vals):
+                condition = torch.empty(*condition_shape, dtype=torch.bool).bernoulli_()
+                common_dtype = torch.result_type(x, y)
 
-                    def check_equal(condition, x, y):
-                        # NumPy aggressively promotes to double, hence cast to output to correct dtype
-                        expected = get_expected(condition, x, y)
-                        result = torch.where(condition, x, y)
-                        assert torch.allclose(expected, result)
+                def check_equal(condition, x, y):
+                    # NumPy aggressively promotes to double, hence cast to output to correct dtype
+                    expected = get_expected(condition, x, y)
+                    result = torch.where(condition, x, y)
+                    assert torch.allclose(expected, result)
 
-                    check_equal(condition, x, y)
-                    check_equal(condition, y, x)
+                check_equal(condition, x, y)
+                check_equal(condition, y, x)
 
         fn()
         with torchdynamo.optimize("eager"):
