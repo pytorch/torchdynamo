@@ -401,6 +401,10 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
+            def indirect_indexing(index_var):
+                return sympy.Symbol(str(index_var))
+
+            @staticmethod
             def load(name: str, index: sympy.Expr):
                 if "tmp" in str(index):
                     return self.indirect_load(name, index)

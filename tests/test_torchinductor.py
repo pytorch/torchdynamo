@@ -975,6 +975,19 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_index(self):
+        def fn(a, b, c):
+            return aten.index(a, [b, c])
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 8),
+                torch.tensor([0, 0, 2, 2], dtype=torch.int64),
+                torch.tensor([3, 4, 4, 3], dtype=torch.int64),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model

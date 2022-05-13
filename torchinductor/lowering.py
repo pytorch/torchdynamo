@@ -701,7 +701,7 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [sympy.Symbol(str(var_index))] + [*idx[indices_ndim:]]
+        weight_idx = [ops.indirect_indexing(var_index)] + [*idx[indices_ndim:]]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -709,6 +709,34 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
         dtype=weight.get_dtype(),
         inner_fn=fn,
         ranges=new_size,
+    )
+
+
+@register_lowering(aten.index, type_promote=False)
+def index(x, indices):
+    assert isinstance(indices, (list, tuple))
+    x_loader = x.make_loader()
+    indices_loaders = [i.make_loader() for i in indices]
+
+    sizes = [i.get_size() for i in indices]
+    assert all(len(s) == 1 for s in sizes)
+    size = functools.reduce(V.graph.sizevars.guard_equals, [s[0] for s in sizes])
+
+    sizes = [size, *x.get_size()[len(indices) :]]
+
+    def fn(idx):
+        assert len(idx) == len(sizes)
+        new_index = [
+            ops.indirect_indexing(loader([idx[0]])) for loader in indices_loaders
+        ]
+        new_index.extend(idx[1:])
+        return x_loader(new_index)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=sizes,
     )
 
 
