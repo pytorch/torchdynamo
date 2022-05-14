@@ -79,7 +79,7 @@ static void ignored(void *obj) {}
 static PyObject *_custom_eval_frame_shim(PyThreadState *tstate, PyFrameObject *frame,
                                     int throw_flag);
 static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
-                                    int throw_flag);
+                                    int throw_flag, PyObject *callback);
 static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
                                              PyFrameObject *frame,
                                              int throw_flag);
@@ -299,12 +299,12 @@ static PyObject *_custom_eval_frame_shim(PyThreadState *tstate, PyFrameObject *f
     } else if (callback == Py_False) {
       return _custom_eval_frame_run_only(tstate, frame, throw_flag);
     } else {
-      return _custom_eval_frame(tstate, frame, throw_flag);
+      return _custom_eval_frame(tstate, frame, throw_flag, callback);
     }
 }
 
 static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
-                                    int throw_flag) {
+                                    int throw_flag, PyObject* callback) {
   DEBUG_TRACE("begin %s %s %i %i %i %i", name(frame),
               PyUnicode_AsUTF8(frame->f_code->co_filename), frame->f_lineno,
               frame->f_lasti, frame->f_iblock, frame->f_executing);
@@ -321,9 +321,6 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  // don't run _custom_eval_frame() for guard function
-  // Grab current one
-  PyObject *callback = eval_frame_callback_get();
   // Disable it
   eval_frame_callback_set(Py_None);
   
