@@ -2,6 +2,7 @@
 #include <Python.h>
 #include <frameobject.h>
 #include <pystate.h>
+#include <pthread.h>
 
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
@@ -73,23 +74,6 @@ inline static void eval_frame_callback_set(PyObject *obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-static Py_tss_t eval_frame_pause_for_guard_key = Py_tss_NEEDS_INIT;
-
-inline static bool eval_frame_is_paused_for_guard(void) {
-  void *result = PyThread_tss_get(&eval_frame_pause_for_guard_key);
-  if (result != NULL) {
-    return true;
-  }
-  return false;
-}
-
-inline static void eval_frame_paused_for_guard() {
-  PyThread_tss_set(&eval_frame_pause_for_guard_key, true);
-}
-
-inline static void eval_frame_unpaused() {
-  PyThread_tss_set(&eval_frame_pause_for_guard_key, NULL);
-}
 
 static void ignored(void *obj) {}
 static PyObject *_custom_eval_frame_shim(PyThreadState *tstate, PyFrameObject *frame,
@@ -136,28 +120,10 @@ inline static void enable_eval_frame_shim(PyThreadState *tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &custom_eval_frame_shim);
 #else
-  if (tstate->interp->eval_frame == &custom_eval_frame_shim) { 
-    // Repeated call just sets a flag
-    eval_frame_unpaused();
-  } else {
+  if (tstate->interp->eval_frame != &custom_eval_frame_shim) { 
     // First call
     tstate->interp->eval_frame = &custom_eval_frame_shim;
   }
-#endif
-}
-
-inline static void disable_eval_frame(PyThreadState *tstate) {
-#if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
-                                       &_PyEval_EvalFrameDefault);
-#else
-  if (tstate->interp->eval_frame == &custom_eval_frame_shim) { 
-    // Shim is already installed, pause it
-    eval_frame_paused_for_guard();
-  } else {
-    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-  }
-
 #endif
 }
 
@@ -319,9 +285,6 @@ static PyObject *_custom_eval_frame_shim(PyThreadState *tstate, PyFrameObject *f
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
   //  - Python callable(): enables TorchDynamo
-    if (eval_frame_is_paused_for_guard() == true) {
-      return eval_frame_default(tstate, frame, throw_flag);
-    }
     PyObject *callback = eval_frame_callback_get();
     
     if (callback == Py_None) {
@@ -352,14 +315,17 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
   // don't run custom_eval_frame() for guard function
+  // Grab current one
   PyObject *callback = eval_frame_callback_get();
-  disable_eval_frame(tstate);
-
+  // Disable it
+  eval_frame_callback_set(Py_None);
+  
   PyCodeObject *cached_code = lookup(extra, frame->f_locals);
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    enable_eval_frame_shim(tstate);
+    // Re-enable
+    eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
@@ -376,13 +342,15 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
     set_extra(frame->f_code, extra);
-    enable_eval_frame_shim(tstate);
+    // Re-enable
+    eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     set_extra(frame->f_code, SKIP_CODE);
-    enable_eval_frame_shim(tstate);
+    // Re-enable
+    eval_frame_callback_set(callback);
     return eval_frame_default(tstate, frame, throw_flag);
   }
 }
@@ -411,6 +379,30 @@ static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
     DEBUG_TRACE("cache miss %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
+}
+
+static int active_dynamo_threads = 0;
+
+pthread_mutex_t active_dynamo_threads_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static PyObject *increment_working_threads(PyThreadState *tstate) {
+  pthread_mutex_lock(&active_dynamo_threads_mutex);
+  active_dynamo_threads = active_dynamo_threads + 1;
+  if (active_dynamo_threads == 0) {
+    enable_eval_frame_shim(tstate);
+  }
+  pthread_mutex_unlock(&active_dynamo_threads_mutex);
+  Py_RETURN_NONE;
+}
+
+static PyObject *decrement_working_threads(PyThreadState *tstate) {
+  pthread_mutex_lock(&active_dynamo_threads_mutex);
+  active_dynamo_threads = active_dynamo_threads - 1;
+  if (active_dynamo_threads == 0) {
+    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
+  }
+  pthread_mutex_unlock(&active_dynamo_threads_mutex);
+  Py_RETURN_NONE;
 }
 
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
@@ -525,6 +517,8 @@ static PyObject *set_guard_error_hook(PyObject *dummy, PyObject *args) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
+    {"decrement_working_threads", decrement_working_threads, METH_VARARGS, NULL},
+    {"increment_working_threads", increment_working_threads, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_VARARGS, NULL},
@@ -541,8 +535,6 @@ PyMODINIT_FUNC PyInit__eval_frame(void) {
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
-  CHECK(result == 0);
-  result = PyThread_tss_create(&eval_frame_pause_for_guard_key);
   CHECK(result == 0);
 
   Py_INCREF(Py_None);
