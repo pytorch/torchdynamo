@@ -321,14 +321,15 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  // Disable it
+  // We don't run the current custom_eval_frame behavior for guards.
+  // So we temporarily set the callback to Py_None to drive the correct behavior in the shim.
   eval_frame_callback_set(Py_None);
   
   PyCodeObject *cached_code = lookup(extra, frame->f_locals);
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    // Re-enable
+    // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
@@ -346,14 +347,14 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
     set_extra(frame->f_code, extra);
-    // Re-enable
+    // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     set_extra(frame->f_code, SKIP_CODE);
-    // Re-enable
+    // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_frame_default(tstate, frame, throw_flag);
   }
