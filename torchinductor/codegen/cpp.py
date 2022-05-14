@@ -64,6 +64,13 @@ def cpp_prefix():
             #include <limits>
             #define SLEEF_ENABLE_OMP_SIMD
             //#include <sleef.h>
+
+            template<typename T>
+            inline T mod(T a, T b) { return a % b; }
+            template<>
+            inline float mod(float a, float b) { return std::fmod(a, b); }
+            template<>
+            inline double mod(double a, double b) { return std::fmod(a, b); }
             """
         ),
         "h",
@@ -130,6 +137,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
+
+    @staticmethod
+    def mod(a, b):
+        return f"mod({a}, {b})"
 
     @staticmethod
     def constant(val, dtype):

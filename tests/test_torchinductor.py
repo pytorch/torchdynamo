@@ -982,6 +982,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_remainder(self):
+        def fn(a, b):
+            return (
+                torch.remainder(a, b),
+                torch.remainder(a + 1, b - 1),
+                torch.remainder(a - 1, b + 1),
+            )
+
+        self.common(fn, (torch.randn(64), torch.randn(64)))
+
     def test_zeros(self):
         def fn(a):
             return (

@@ -98,7 +98,11 @@ class CppCodeCache:
                 cmd = cpp_compile_command(input=input_path, output=output_path).split(
                     " "
                 )
-                subprocess.check_call(cmd)
+                try:
+                    subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError as e:
+                    raise exc.CppCompileError(cmd, e.output)
+
             cls.cache[key] = cdll.LoadLibrary(output_path)
             cls.cache[key].key = key
         return cls.cache[key]
