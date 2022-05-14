@@ -504,3 +504,13 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnt):
             self.assertEqual(fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
         self.assertEqual(list(it1), [4, 5, 6, 7, 8, 9])
+
+    def test_enumerate_not_break_graph(self):
+        def fn(a, b):
+            for i, x in enumerate(a.shape):
+                b = b + x
+            for i, x in enumerate(b.shape, 0):
+                b = b + x * i
+            return b
+
+        self._common(fn, 1, 2)
