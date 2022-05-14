@@ -19,8 +19,6 @@ unsupported = _eval_frame.unsupported
 skip_code = _eval_frame.skip_code
 set_guard_fail_hook = _eval_frame.set_guard_fail_hook
 set_guard_error_hook = _eval_frame.set_guard_error_hook
-decrement_working_threads = _eval_frame.decrement_working_threads
-increment_working_threads = _eval_frame.increment_working_threads
 
 
 def nothing():
@@ -45,14 +43,13 @@ class _TorchDynamoContext:
 
     def __enter__(self):
         self.on_enter()
-        increment_working_threads()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # decrement_working_threads()
         set_eval_frame(self.prior)
-        decrement_working_threads()
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
@@ -64,13 +61,11 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             on_enter()
-            increment_working_threads()
             prior = set_eval_frame(callback)
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                decrement_working_threads()
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):

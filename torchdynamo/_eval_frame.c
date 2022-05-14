@@ -123,9 +123,14 @@ inline static void enable_eval_frame_shim(PyThreadState *tstate) {
 
 inline static void enable_eval_frame_default(PyThreadState *tstate) {
 #if PY_VERSION_HEX >= 0x03090000
+  if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) != &_PyEval_EvalFrameDefault) {
     _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &_PyEval_EvalFrameDefault);
+  }
 #else
-    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;  
+  if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) { 
+    // First call
+    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
+  }
 #endif
 }
 
@@ -390,7 +395,7 @@ static pthread_mutex_t dynamo_frame_swap_mutex = PTHREAD_MUTEX_INITIALIZER;
 static PyObject *increment_working_threads(PyThreadState *tstate) {
   pthread_mutex_lock(&dynamo_frame_swap_mutex);
   active_dynamo_threads = active_dynamo_threads + 1;
-  if (active_dynamo_threads == 0) {
+  if (active_dynamo_threads > 0) {
     enable_eval_frame_shim(tstate);
   }
   pthread_mutex_unlock(&dynamo_frame_swap_mutex);
@@ -399,9 +404,11 @@ static PyObject *increment_working_threads(PyThreadState *tstate) {
 
 static PyObject *decrement_working_threads(PyThreadState *tstate) {
   pthread_mutex_lock(&dynamo_frame_swap_mutex);
-  active_dynamo_threads = active_dynamo_threads - 1;
-  if (active_dynamo_threads == 0) {
-    enable_eval_frame_default(tstate);
+  if (active_dynamo_threads > 0) {
+    active_dynamo_threads = active_dynamo_threads - 1;
+    if (active_dynamo_threads == 0) {
+      enable_eval_frame_default(tstate);
+    }
   }
   pthread_mutex_unlock(&dynamo_frame_swap_mutex);
   Py_RETURN_NONE;
@@ -416,12 +423,12 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   
   // owned by caller
   Py_INCREF(old_callback);
-  
-  // Always enable eval frame shim.
-  pthread_mutex_lock(&dynamo_frame_swap_mutex);
-  enable_eval_frame_shim(tstate);
-  pthread_mutex_unlock(&dynamo_frame_swap_mutex);
-
+    
+  if (new_callback == Py_None) {
+    decrement_working_threads(tstate);
+  } else {
+    increment_working_threads(tstate);
+  }
 
   Py_INCREF(new_callback);
   Py_DECREF(eval_frame_callback_get());
@@ -522,8 +529,6 @@ static PyObject *set_guard_error_hook(PyObject *dummy, PyObject *args) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
-    {"decrement_working_threads", decrement_working_threads, METH_VARARGS, NULL},
-    {"increment_working_threads", increment_working_threads, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_VARARGS, NULL},
