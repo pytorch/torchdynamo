@@ -88,18 +88,10 @@ static PyObject *custom_eval_frame_shim(PyThreadState *tstate, PyFrameObject *fr
                                    int throw_flag) {
   return _custom_eval_frame_shim(tstate, frame, throw_flag);
 }
-static PyObject *custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
-                                   int throw_flag) {
-  return _custom_eval_frame(tstate, frame, throw_flag);
-}
 #else
 static PyObject *custom_eval_frame_shim(PyFrameObject *frame, int throw_flag) {
   PyThreadState *tstate = PyThreadState_GET();
   return _custom_eval_frame_shim(tstate, frame, throw_flag);
-}
-static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
-  PyThreadState *tstate = PyThreadState_GET();
-  return _custom_eval_frame(tstate, frame, throw_flag);
 }
 #endif
 
@@ -118,12 +110,22 @@ inline static PyObject *eval_frame_default(PyThreadState *tstate,
 
 inline static void enable_eval_frame_shim(PyThreadState *tstate) {
 #if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &custom_eval_frame_shim);
+  if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) != &custom_eval_frame_shim) {
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &custom_eval_frame_shim);
+  }
 #else
   if (tstate->interp->eval_frame != &custom_eval_frame_shim) { 
     // First call
     tstate->interp->eval_frame = &custom_eval_frame_shim;
   }
+#endif
+}
+
+inline static void enable_eval_frame_default(PyThreadState *tstate) {
+#if PY_VERSION_HEX >= 0x03090000
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &_PyEval_EvalFrameDefault);
+#else
+    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;  
 #endif
 }
 
@@ -314,7 +316,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  // don't run custom_eval_frame() for guard function
+  // don't run _custom_eval_frame() for guard function
   // Grab current one
   PyObject *callback = eval_frame_callback_get();
   // Disable it
@@ -383,25 +385,25 @@ static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
 
 static int active_dynamo_threads = 0;
 
-pthread_mutex_t active_dynamo_threads_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t dynamo_frame_swap_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static PyObject *increment_working_threads(PyThreadState *tstate) {
-  pthread_mutex_lock(&active_dynamo_threads_mutex);
+  pthread_mutex_lock(&dynamo_frame_swap_mutex);
   active_dynamo_threads = active_dynamo_threads + 1;
   if (active_dynamo_threads == 0) {
     enable_eval_frame_shim(tstate);
   }
-  pthread_mutex_unlock(&active_dynamo_threads_mutex);
+  pthread_mutex_unlock(&dynamo_frame_swap_mutex);
   Py_RETURN_NONE;
 }
 
 static PyObject *decrement_working_threads(PyThreadState *tstate) {
-  pthread_mutex_lock(&active_dynamo_threads_mutex);
+  pthread_mutex_lock(&dynamo_frame_swap_mutex);
   active_dynamo_threads = active_dynamo_threads - 1;
   if (active_dynamo_threads == 0) {
-    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
+    enable_eval_frame_default(tstate);
   }
-  pthread_mutex_unlock(&active_dynamo_threads_mutex);
+  pthread_mutex_unlock(&dynamo_frame_swap_mutex);
   Py_RETURN_NONE;
 }
 
@@ -416,7 +418,10 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   Py_INCREF(old_callback);
   
   // Always enable eval frame shim.
+  pthread_mutex_lock(&dynamo_frame_swap_mutex);
   enable_eval_frame_shim(tstate);
+  pthread_mutex_unlock(&dynamo_frame_swap_mutex);
+
 
   Py_INCREF(new_callback);
   Py_DECREF(eval_frame_callback_get());
