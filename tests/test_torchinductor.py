@@ -1024,6 +1024,22 @@ class CommonTemplate:
             ),
         )
 
+    def test_index_select(self):
+        def fn(a, b):
+            return (
+                torch.index_select(a, 0, b),
+                torch.index_select(a, 1, b),
+                torch.index_select(torch.index_select(a, 2, b), 1, b),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 8),
+                torch.tensor([0, 0, 2, 1], dtype=torch.int64),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
