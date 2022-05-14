@@ -390,27 +390,21 @@ static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
 
 static int active_dynamo_threads = 0;
 
-static pthread_mutex_t dynamo_frame_swap_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static PyObject *increment_working_threads(PyThreadState *tstate) {
-  pthread_mutex_lock(&dynamo_frame_swap_mutex);
   active_dynamo_threads = active_dynamo_threads + 1;
   if (active_dynamo_threads > 0) {
     enable_eval_frame_shim(tstate);
   }
-  pthread_mutex_unlock(&dynamo_frame_swap_mutex);
   Py_RETURN_NONE;
 }
 
 static PyObject *decrement_working_threads(PyThreadState *tstate) {
-  pthread_mutex_lock(&dynamo_frame_swap_mutex);
   if (active_dynamo_threads > 0) {
     active_dynamo_threads = active_dynamo_threads - 1;
     if (active_dynamo_threads == 0) {
       enable_eval_frame_default(tstate);
     }
   }
-  pthread_mutex_unlock(&dynamo_frame_swap_mutex);
   Py_RETURN_NONE;
 }
 
