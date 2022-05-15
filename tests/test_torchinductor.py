@@ -1150,6 +1150,29 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
+    @unittest.skip("unfinished")
+    def test_upsample_bilinear2d(self):
+        def fn(a):
+            return (
+                aten.upsample_bilinear2d(a, [74, 76], None),
+                # aten.upsample_bilinear2d(a, [70, 75], None),
+                # aten.upsample_bilinear2d(a, [45, 74], None),
+                # aten.upsample_bilinear2d(a, [36, 39], None),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_reflection_pad2d(self):
+        def fn(a):
+            return (
+                aten.reflection_pad2d(a, [1, 1, 1, 1]),
+                aten.reflection_pad2d(a, [1, 2, 3, 4]),
+            )
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
