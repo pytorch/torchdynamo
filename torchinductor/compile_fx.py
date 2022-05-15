@@ -115,10 +115,10 @@ def compile_fx(
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
-    if False:
+    if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
         wrap(CheckEachNode(gm).run)(*example_inputs)
 
-    if False:
+    if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
         wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
     graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))

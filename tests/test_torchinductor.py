@@ -1150,14 +1150,11 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
-    @unittest.skip("unfinished")
     def test_upsample_bilinear2d(self):
         def fn(a):
             return (
-                aten.upsample_bilinear2d(a, [74, 76], None),
-                # aten.upsample_bilinear2d(a, [70, 75], None),
-                # aten.upsample_bilinear2d(a, [45, 74], None),
-                # aten.upsample_bilinear2d(a, [36, 39], None),
+                aten.upsample_bilinear2d(a, [45, 45], False, None),
+                aten.upsample_bilinear2d(a, None, True, [2.0, 2.0]),
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
@@ -1167,6 +1164,17 @@ class CommonTemplate:
             return (
                 aten.reflection_pad2d(a, [1, 1, 1, 1]),
                 aten.reflection_pad2d(a, [1, 2, 3, 4]),
+            )
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_constant_pad_2d(self):
+        def fn(a):
+            return (
+                aten.constant_pad_nd(a, [1, 1, 1, 1], 6.0),
+                aten.constant_pad_nd(a, [1, 2, 3, 4], 99.0),
             )
 
         self.common(

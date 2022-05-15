@@ -59,7 +59,7 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs):
+    def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs=None):
         super().__init__(gm)
         self.sizevars = SizeVarAllocator("s")
         self.graph_inputs = collections.OrderedDict()
@@ -73,6 +73,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = None
 
     def run(self, *args):
+        if self.num_dynamic_inputs is None:
+            self.num_dynamic_inputs = len(args)
         self.num_static_inputs = len(args) - self.num_dynamic_inputs
         return super().run(*args)
 

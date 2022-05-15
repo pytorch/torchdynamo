@@ -11,6 +11,7 @@ from unittest.mock import patch
 import numpy
 import sympy
 import torch
+import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
 
@@ -1254,8 +1255,6 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args):
-        from functorch._src.aot_autograd import pytree
-
         args_flat, args_spec = pytree.tree_flatten(args)
 
         is_arg_tensor = []

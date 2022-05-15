@@ -851,6 +851,15 @@ def upsample_bilinear2d(x, output_size=None, align_corners=False, scale_factors=
 """
 
 
+@register_lowering(aten.upsample_bilinear2d)
+def upsample_bilinear2d(x, output_size=None, align_corners=False, scale_factors=None):
+    return TensorBox.create(
+        ir.FallbackKernel.create(
+            aten.upsample_bilinear2d, x, output_size, align_corners, scale_factors
+        )
+    )
+
+
 @register_lowering(aten.reflection_pad2d)
 def reflection_pad2d(x, padding):
     assert len(padding) == 4
@@ -881,6 +890,34 @@ def reflection_pad2d(x, padding):
         inner_fn=fn,
         ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
     )
+
+
+def constant_pad_2d(x, padding, fill_value):
+    assert len(padding) == 4
+    left, right, top, bot = padding
+    x.realize()  # elements are reused
+
+    x_loader = constant_boundary_condition_2d(x, fill_value, padding)
+    *batch, h, w = x.get_size()
+    h = V.graph.sizevars.guard_static_shape(h)
+    w = V.graph.sizevars.guard_static_shape(w)
+
+    def fn(idx):
+        *b, x, y = idx
+        return x_loader([*b, x - top, y - left])
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+    )
+
+
+@register_lowering(aten.constant_pad_nd)
+def constant_pad_nd(x, padding, fill_value):
+    assert len(padding) == 4
+    return constant_pad_2d(x, padding, fill_value)
 
 
 def constant_boundary_condition_2d(x, fill_value, padding):
