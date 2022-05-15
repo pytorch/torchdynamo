@@ -460,19 +460,14 @@ def _embedding_bag(
     )
 
 
-"""
 @register_lowering(aten._cudnn_rnn, type_promote=False)
 def _cudnn_rnn(*args):
     return list(
         map(
             TensorBox.create,
-            ir.FallbackKernel.create(
-                aten._cudnn_rnn,
-                *args
-            ),
+            ir.FallbackKernel.create(aten._cudnn_rnn, *args),
         )
     )
-"""
 
 
 @register_lowering(aten.convolution)

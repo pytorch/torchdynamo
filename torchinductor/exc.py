@@ -35,22 +35,3 @@ class InvalidCxxCompiler(RuntimeError):
         super().__init__(
             f"No working C++ compiler found in {config.__name__}.cpp.cxx: {config.cpp.cxx}"
         )
-
-
-class CppCompileError(RuntimeError):
-    def __init__(self, cmd, output):
-        super().__init__(
-            textwrap.dedent(
-                """
-                C++ Compiler Failed
-
-                Command:
-                {0}
-
-                Output:
-                {1}
-                """
-            )
-            .strip()
-            .format(" ".join(cmd), output.decode("utf-8"))
-        )

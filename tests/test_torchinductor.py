@@ -1050,6 +1050,95 @@ class CommonTemplate:
             ),
         )
 
+    def test_cudnn_rnn(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(
+            a0,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+            b8,
+            b9,
+            b10,
+            b11,
+            b12,
+            b13,
+            b14,
+            b15,
+            a3,
+            a4,
+            a5,
+        ):
+            a1 = [
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14,
+                b15,
+            ]
+            return aten._cudnn_rnn(
+                a0,
+                a1,
+                4,
+                a3,
+                a4,
+                a5,
+                2,
+                2048,
+                0,
+                2,
+                False,
+                0.0,
+                False,
+                True,
+                [],
+                None,
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([92, 8, 2048]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([8192, 4096]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([8192, 4096]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([167837696]),
+                torch.randn([4, 8, 2048]),
+                torch.randn([4, 8, 2048]),
+            ),
+        )
+
 
 class CpuTests(TestCase):
     common = check_model
