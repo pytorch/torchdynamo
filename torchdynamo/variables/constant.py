@@ -61,7 +61,6 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError()
         return member
 
-
     def call_method(
         self,
         tx,
@@ -94,12 +93,8 @@ class ConstantVariable(VariableTracker):
             search = args[0].as_python_constant()
             result = search in self.value
             return ConstantVariable(result, **options)
-        elif (
-            name == "__subclasses__"
-            and len(args) == 0
-            and not kwargs
-        ):
-            subs_as_vars : List[VariableTracker] = list()
+        elif name == "__subclasses__" and len(args) == 0 and not kwargs:
+            subs_as_vars: List[VariableTracker] = list()
             for sub in self.value.__subclasses__():
                 subs_as_vars.append(variables.ConstantVariable(sub))
             return variables.ListVariable(subs_as_vars, **options)
