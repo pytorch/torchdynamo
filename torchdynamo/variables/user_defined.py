@@ -46,6 +46,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super(UserDefinedClassVariable, self).var_getattr(tx, name)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if (
+            name == "__subclasses__"
+            and len(args) == 0
+            and not kwargs
+        ):
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            options["mutable_local"] = MutableLocal()
+            subs_as_vars : List[VariableTracker] = list()
+            for sub in self.value.__subclasses__():
+                subs_as_vars.append(variables.ConstantVariable(sub))
+
+            return variables.ListVariable(subs_as_vars, **options)
+
+        return super().call_method(tx, args, kwargs)
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
