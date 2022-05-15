@@ -1139,6 +1139,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_upsample_nearest2d(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest2d(a, [74, 76], None),
+                aten.upsample_nearest2d(a, [70, 75], None),
+                aten.upsample_nearest2d(a, [45, 74], None),
+                aten.upsample_nearest2d(a, [36, 39], None),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
 
 class CpuTests(TestCase):
     common = check_model

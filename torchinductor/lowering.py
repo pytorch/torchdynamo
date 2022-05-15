@@ -758,6 +758,38 @@ def index_select(x, dim, indices):
     )
 
 
+@register_lowering(aten.upsample_nearest2d)
+def upsample_nearest2d(x, output_size=None, scale_factors=None):
+    assert not scale_factors, "TODO"
+    assert len(output_size) == 2
+    x.realize()  # elements are reused
+    x_loader = x.make_loader()
+    oh, ow = output_size
+    *batch, ih, iw = x.get_size()
+    ih = V.graph.sizevars.guard_static_shape(ih)
+    iw = V.graph.sizevars.guard_static_shape(iw)
+
+    scale_h = ih / oh
+    scale_w = iw / ow
+
+    def scale(x, scale):
+        x = ops.index_expr(x, torch.float32)
+        x = ops.mul(x, ops.constant(scale, torch.float32))
+        x = ops.to_dtype(x, torch.int32)
+        return ops.indirect_indexing(x)
+
+    def fn(idx):
+        *b, x, y = idx
+        return x_loader([*b, scale(x, scale_h), scale(y, scale_w)])
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
+    )
+
+
 def constant_boundary_condition_2d(x, fill_value, padding):
     *_, h, w = x.get_size()
     x_loader = x.make_loader()
