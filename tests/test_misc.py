@@ -1221,3 +1221,70 @@ class MiscTests(torchdynamo.testing.TestCase):
             ConstDictVariable(d2, collections.OrderedDict).python_type(),
             collections.OrderedDict,
         )
+
+    def test_builtin_subclasses_as_method_on_class_type(self):
+        class Foo:
+            def __init__(name):
+                name_ = name
+            
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                name_ = name
+            
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Foo):
+            def __init__(name):
+                name_ = name
+            
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+
+        subs_of_foo_optim = list()
+        counter = CompileCounter()
+        with torchdynamo.optimize_assert(counter):
+            subs_of_foo_optim = Foo.__subclasses__()
+        
+        self.assertEqual(len(subs_of_foo_reg), 2)
+        self.assertEqual(subs_of_foo_reg, subs_of_foo_optim) 
+
+    def test_builtin_subclasses_as_method_on_var(self):
+        class Foo:
+            def __init__(name):
+                name_ = name
+            
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                name_ = name
+            
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Bar):
+            def __init__(name):
+                name_ = name
+            
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+        sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
+
+        sub_of_foo_subclass_var_optim = list()
+        counter = CompileCounter()
+        with torchdynamo.optimize_assert(counter):
+            subs_of_foo_optim = Foo.__subclasses__()
+            sub_of_foo_subclass_var_optim = subs_of_foo_optim[0].__subclasses__()
+
+        
+        self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
+        self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg) 
