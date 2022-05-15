@@ -975,7 +975,7 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
 @register_lowering(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
-    x, kernel_size, stride=(1, 1), padding=0, dilation=1, ceil_mode=False
+    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
 ):
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -985,6 +985,8 @@ def max_pool2d_with_indices(
     assert len(x.get_size()) in (3, 4)
     if padding == 0:
         padding = [0, 0]
+    if stride is None:
+        stride = kernel_size
 
     x.realize()  # we will read this many times, so make sure it is computed
 
@@ -1049,7 +1051,7 @@ def avg_pool2d(
     assert count_include_pad
     assert not divisor_override
     if not stride:
-        stride = [1, 1]
+        stride = kernel_size
     if not padding:
         padding = [0, 0]
 

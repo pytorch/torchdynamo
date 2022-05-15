@@ -31,6 +31,8 @@ if torch.cuda.is_available():
     except (ImportError, ModuleNotFoundError):
         pass
 
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 
 class TestCase(unittest.TestCase):
     @classmethod
@@ -555,13 +557,37 @@ class CommonTemplate:
             ),
         )
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda()
     def test_to_device(self):
         def fn(a):
             if a.device.type == "cpu":
                 return aten._to_copy(a, device=torch.device("cuda"), dtype=6, layout=0)
             else:
                 return aten._to_copy(a, device=torch.device("cpu"), dtype=6, layout=0)
+
+        self.common(
+            fn,
+            (torch.randn([2, 2, 10]),),
+        )
+
+    @requires_cuda()
+    def test_multi_device(self):
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.cuda()
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            x = x.cuda()
+            x = x + 7
+            x = x + 8
+            x = x.cpu()
+            x = x + 9
+            x = x + 10
+            return x
 
         self.common(
             fn,

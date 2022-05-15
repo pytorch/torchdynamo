@@ -64,7 +64,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator("s")
         self.graph_inputs = collections.OrderedDict()
         self.graph_outputs = None
-        self.device = None
+        self.device_types = set()
         self.buffers = []
         self.constants = dict()
         self.removed_buffers = set()
@@ -84,10 +84,6 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def add_tensor_constant(self, data):
-        if self.device is None:
-            self.device = data.device
-        assert data.device == self.device
-
         def allocate():
             for name, value in self.constants.items():
                 if data is value:
@@ -105,9 +101,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if self.device is None:
-            self.device = example.device
-        assert example.device == self.device
         if config.static_weight_shapes and (
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
         ):
@@ -175,17 +168,11 @@ class GraphLowering(torch.fx.Interpreter):
         return result
 
     def codegen(self):
-        from .codegen.cpp import CppKernel
-        from .codegen.triton import TritonKernel
+        from .scheduler import Scheduler
 
-        wrapper = WrapperCodeGen()
-        self.wrapper_code = wrapper
-
-        backends = {"cpu": CppKernel, "cuda": TritonKernel}
-        backend_cls = backends[self.device.type]
-        backend_cls.codegen(wrapper)
-        # TODO(jansel): manage a dependency graph
-        return wrapper.generate()
+        self.wrapper_code = WrapperCodeGen()
+        Scheduler(self.buffers).codegen()
+        return self.wrapper_code.generate()
 
     def compile_to_fn(self):
         from .codecache import PyCodeCache

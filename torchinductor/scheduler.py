@@ -9,6 +9,7 @@ from typing import List
 
 import numpy
 import numpy as np
+import torch
 
 from . import config
 from . import dependencies
@@ -73,6 +74,9 @@ class BaseSchedulerNode:
 
     def get_name(self):
         return self.node.get_name()
+
+    def get_device(self):
+        return self.node.get_device()
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
@@ -198,6 +202,7 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         self.group = (
+            node.get_device(),
             group_fn(self._size),
             group_fn(self._reduction_size),
         )
@@ -372,9 +377,10 @@ class NodeUser:
 
 
 class Scheduler:
-    def __init__(self, group_fn, nodes):
+    def __init__(self, nodes):
         super(Scheduler, self).__init__()
-        self.group_fn = group_fn
+        self.backends = {}
+        self.current_device = None
         self.runable_reduction_groups = collections.defaultdict(int)
         self.runable_pointwise_groups = collections.defaultdict(int)
         self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
@@ -394,7 +400,8 @@ class Scheduler:
             if node.is_no_op():
                 self.nodes.append(NopKernelSchdulerNode(self, node))
             elif isinstance(node, ir.ComputedBuffer):
-                self.nodes.append(SchedulerNode(self, node, self.group_fn))
+                group_fn = self.get_backend(node.get_device()).group_fn
+                self.nodes.append(SchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchdulerNode(self, node))
             else:
@@ -508,14 +515,14 @@ class Scheduler:
 
         return ctx()
 
-    def iter_runable_groups(self, codegen_extern_call):
+    def iter_runable_groups(self):
         while (
             self.runable_reduction_groups
             or self.runable_pointwise_groups
             or self.runable_extern_kernels
         ):
             if self.runable_extern_kernels:
-                self.runable_extern_kernels.popleft().run(codegen_extern_call)
+                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
             elif self.runable_reduction_groups:
                 yield next(iter(self.runable_reduction_groups.keys()))
             else:
@@ -532,7 +539,8 @@ class Scheduler:
             prior_run_count = self.run_count
             yield
 
-    def pop_group(self, group):
+    def pop_group(self, group_without_device):
+        group = (self.current_device, *group_without_device)
         while group in self.runable_nodes:
             self.runable_reduction_groups.pop(group, None)
             self.runable_pointwise_groups.pop(group, None)
@@ -542,3 +550,38 @@ class Scheduler:
             while fusable:
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
+
+    def flush(self):
+        for backend in self.backends.values():
+            backend.flush()
+
+    def codegen_extern_call(self, node: ir.ExternKernel):
+        assert isinstance(node, ir.ExternKernel)
+        self.flush()
+        node.codegen(V.graph.wrapper_code)
+        self.barrier()
+        self.maybe_free_buffers()
+
+    def create_backend(self, device: torch.device):
+        V.graph.device_types.add(device.type)
+        if device.type == "cpu":
+            from .codegen.cpp import CppScheduling
+
+            return CppScheduling(self)
+        else:
+            from .codegen.triton import TritonScheduling
+
+            return TritonScheduling(self)
+
+    def get_backend(self, device: torch.device):
+        if device not in self.backends:
+            self.backends[device] = self.create_backend(device)
+        return self.backends[device]
+
+    def codegen(self):
+        for device, group, reduction_group in self.iter_runable_groups():
+            if device != self.current_device:
+                self.flush()
+                self.current_device = device
+            self.get_backend(device).codegen(group, reduction_group)
+        self.flush()

@@ -1177,8 +1177,9 @@ class BatchMatrixMultiply(ExternKernelOut):
 
 
 class DeviceCopy(ExternKernelOut):
-    @staticmethod
-    def create(x, device):
+    @classmethod
+    def create(cls, x, device):
+        x = cls.realize_input(x)
         return DeviceCopy(
             FlexibleLayout(
                 device=device,

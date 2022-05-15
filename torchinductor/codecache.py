@@ -206,16 +206,11 @@ def pointwise_heuristics():
     """args to @triton.heuristics()"""
     from triton import next_power_of_2
 
-    def need_mask(args):
-        return (args["numel"] % args["BLOCK_SIZE"]) > 0
-
     def block_size(args):
         return min(1024, next_power_of_2(args["numel"]))
-        # return 1024
 
     return {
         "BLOCK_SIZE": block_size,
-        "NEED_MASK": need_mask,
     }
 
 
@@ -223,28 +218,15 @@ def reduction_heuristics():
     """args to @triton.heuristics()"""
     from triton import next_power_of_2
 
-    def need_mask(args):
-        return (args["numel"] % args["BLOCK_SIZE"]) > 0 or (
-            args["reduction_numel"] % args["REDUCTION_SIZE"]
-        ) > 0
-
     def reduction_size(args):
         return next_power_of_2(args["reduction_numel"])
 
     def block_size(args):
         return max(next_power_of_2(1024 // args["REDUCTION_SIZE"]), 1)
 
-    # def num_warps(args):
-    #     n = args["numel"] * args["reduction_numel"]
-    #     if n <= 65536:
-    #         return 2
-    #     return 8
-
     return {
-        # "num_warps": num_warps,
         "REDUCTION_SIZE": reduction_size,
         "BLOCK_SIZE": block_size,
-        "NEED_MASK": need_mask,
     }
 
 
