@@ -794,6 +794,11 @@ def main():
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--inductor-dynamic",
+        action="store_true",
+        help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -878,11 +883,15 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
-    elif args.inductor:
-        if args.threads:
-            import torchinductor.config
+    elif args.inductor or args.inductor_dynamic:
+        import torchinductor.config
 
+        if args.threads:
             torchinductor.config.cpp.threads = args.threads
+
+        if args.inductor_dynamic:
+            torchinductor.config.triton.cudagraphs = False
+            torchinductor.config.dynamic_shapes = True
 
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment

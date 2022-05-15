@@ -1047,7 +1047,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
-    def test_index(self):
+    def test_index1(self):
         def fn(a, b, c):
             return aten.index(a, [b, c])
 
@@ -1057,6 +1057,18 @@ class CommonTemplate:
                 torch.randn(8, 8, 8),
                 torch.tensor([0, 0, 2, 2], dtype=torch.int64),
                 torch.tensor([3, 4, 4, 3], dtype=torch.int64),
+            ),
+        )
+
+    def test_index2(self):
+        def fn(a, b):
+            return aten.index(a, [b])
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 8),
+                torch.tensor([[0, 0, 2, 2]], dtype=torch.int64),
             ),
         )
 
@@ -1172,6 +1184,7 @@ class CommonTemplate:
                 aten.upsample_nearest2d(a, [70, 75], None),
                 aten.upsample_nearest2d(a, [45, 74], None),
                 aten.upsample_nearest2d(a, [36, 39], None),
+                aten.upsample_nearest2d(a, None, [2.0, 2.0]),
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))

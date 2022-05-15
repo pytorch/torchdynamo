@@ -714,24 +714,29 @@ def index(x, indices):
     indices_loaders = [i.make_loader() for i in indices]
 
     sizes = [i.get_size() for i in indices]
-    assert all(len(s) == 1 for s in sizes)
-    size = functools.reduce(V.graph.sizevars.guard_equals, [s[0] for s in sizes])
+    output_size = list(sizes[0])
+    num_indirect = len(output_size)
+    for i in range(1, len(sizes)):
+        assert len(sizes[i]) == len(output_size)
+        for j in range(len(output_size)):
+            output_size[j] = V.graph.sizevars.guard_equals(output_size[j], sizes[i][j])
 
-    sizes = [size, *x.get_size()[len(indices) :]]
+    output_size.extend(x.get_size()[len(indices) :])
 
     def fn(idx):
-        assert len(idx) == len(sizes)
+        assert len(idx) == len(output_size)
         new_index = [
-            ops.indirect_indexing(loader([idx[0]])) for loader in indices_loaders
+            ops.indirect_indexing(loader(idx[:num_indirect]))
+            for loader in indices_loaders
         ]
-        new_index.extend(idx[1:])
+        new_index.extend(idx[num_indirect:])
         return x_loader(new_index)
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=sizes,
+        ranges=output_size,
     )
 
 
@@ -760,14 +765,20 @@ def index_select(x, dim, indices):
 
 @register_lowering(aten.upsample_nearest2d)
 def upsample_nearest2d(x, output_size=None, scale_factors=None):
-    assert not scale_factors, "TODO"
-    assert len(output_size) == 2
     x.realize()  # elements are reused
     x_loader = x.make_loader()
-    oh, ow = output_size
+
     *batch, ih, iw = x.get_size()
     ih = V.graph.sizevars.guard_static_shape(ih)
     iw = V.graph.sizevars.guard_static_shape(iw)
+
+    if scale_factors:
+        assert not output_size
+        sh, sw = scale_factors
+        oh = int(ih * sh)
+        ow = int(iw * sw)
+    else:
+        oh, ow = output_size
 
     scale_h = ih / oh
     scale_w = iw / ow
