@@ -17,7 +17,8 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
-from .eval_frame import WrapperBackend, skip_code
+from .eval_frame import WrapperBackend
+from .eval_frame import skip_code
 from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
 from .exc import Unsupported
@@ -65,7 +66,7 @@ def wrap_compiler_fn(compiler_fn):
         # currently, compiler_fn's backend is not callable
         # if it use default BACKENDS
         # set compiler_fn.backend as the callable function
-        wrapper_compiler_fn = compiler_fn    
+        wrapper_compiler_fn = compiler_fn
     else:
         # convert to WrapperBackend class
         wrapper_compiler_fn = WrapperBackend(compiler_fn)
@@ -79,7 +80,7 @@ def wrap_compiler_fn(compiler_fn):
         from .optimizations import BACKENDS
 
         wrapper_compiler_fn.backend = wrap_compiler_fn(BACKENDS[compiler_fn_backend])
-    
+
     return wrapper_compiler_fn
 
 

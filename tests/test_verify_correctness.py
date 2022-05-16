@@ -1,17 +1,17 @@
 #!/usr/bin/env pytest
 import importlib
-import unittest
-import warnings
 import operator
+import unittest
 
 import torch
 
 import torchdynamo
-from torchdynamo.optimizations import backends
-from torchdynamo.optimizations.inference import offline_autotuner
-from torchdynamo.optimizations.inference import fixed_strategy1
-from torchdynamo.testing import same
 import torchdynamo.config as config
+from torchdynamo.optimizations import backends
+from torchdynamo.optimizations.inference import fixed_strategy1
+from torchdynamo.optimizations.inference import offline_autotuner
+from torchdynamo.testing import same
+
 
 def has_onnxruntime():
     try:
@@ -60,26 +60,28 @@ def toy_example(a, b):
         b = b * -1
     return x * b
 
+
 def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
         # Checks if we're calling a function (i.e:
         # operator.add)
-        if node.op == 'call_function':
+        if node.op == "call_function":
             # The target attribute is the function
             # that call_function calls.
             if node.target == operator.mul:
                 node.target = operator.add
 
-    gm.graph.lint() # Does some checks to make sure the
-                 # Graph is well-formed.
+    gm.graph.lint()  # Does some checks to make sure the
+    # Graph is well-formed.
 
     gm.recompile()
     return gm
 
+
 config.verify_correctness = True
 
-class TestVerifyCorrectness(torchdynamo.testing.TestCase):
 
+class TestVerifyCorrectness(torchdynamo.testing.TestCase):
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
@@ -120,13 +122,13 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
 
     def test_incorrect_verify_true(self):
-        '''
-        Even the bad optimization return a graph that 
+        """
+        Even the bad optimization return a graph that
         is not functionally equal to the original graph;
         When config.verify_correctness=True, it will
-        check the correctness of outputs and fallback using 
+        check the correctness of outputs and fallback using
         the original graph
-        '''
+        """
         i1 = torch.randn(10)
         i2 = torch.randn(10)
 
@@ -140,12 +142,12 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
 
     def test_incorrect_verify_false(self):
         config.verify_correctness = False
-        '''
-        The bad optimization return a graph that 
+        """
+        The bad optimization return a graph that
         is not functionally equal to the original graph;
-        When config.verify_correctness=False, wrong outputs 
+        When config.verify_correctness=False, wrong outputs
         will return
-        '''
+        """
         i1 = torch.randn(10)
         i2 = torch.randn(10)
 

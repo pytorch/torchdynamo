@@ -3,16 +3,16 @@ import copy
 import functools
 import logging
 import threading
-import itertools
+
+import torch
+
+from torchdynamo.utils import checkpoint_params
+from torchdynamo.utils import clone_inputs
 
 from . import config
 from . import convert_frame
 from . import skipfiles
 from .mutation_guard import install_generation_tagging_new
-from torchdynamo.utils import checkpoint_params, clone_inputs
-#from torchdynamo.testing import same
-import torch
-from torchdynamo.optimizations.normalize import normalize_ir
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +139,6 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
 
 
 class WrapperBackend:
-
     def __init__(self, backend=None):
         self.backend = backend
 
