@@ -1246,7 +1246,6 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         subs_of_foo_reg = Foo.__subclasses__()
 
-        subs_of_foo_optim = list()
         counter = CompileCounter()
 
         @torchdynamo.optimize_assert(counter)

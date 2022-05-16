@@ -53,7 +53,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name == "__subclasses__" and len(args) == 0 and not kwargs:
+        if (
+            name == "__subclasses__"
+            and len(args) == 0
+            and not kwargs
+            and "__subclasses__" not in self.value.__dict__
+        ):
             options = VariableTracker.propagate(self, args, kwargs.values())
             options["mutable_local"] = MutableLocal()
             subs_as_vars: List[VariableTracker] = list()
