@@ -14,6 +14,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
 from . import exc
+from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
@@ -118,14 +119,13 @@ def wrap_convert_context(fn):
 
 def has_tensor_in_frame(frame):
     # Check if the passed arguments are of type Tensor
-    for _, value in frame.f_locals.items():
-        if value is not None and isinstance(value, torch.Tensor):
+    for value in frame.f_locals.values():
+        if isinstance(value, torch.Tensor):
             return True
 
     # Check if there is global import of torch.*
-    allowed_modules = ["torch"]
-    for _, value in frame.f_globals.items():
-        if inspect.ismodule(value) and value.__name__ in allowed_modules:
+    for value in frame.f_globals.values():
+        if is_allowed(value):
             return True
 
     if config.debug:
