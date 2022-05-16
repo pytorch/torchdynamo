@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import enum
 import functools
 import inspect
 import re
@@ -34,6 +35,7 @@ from ..utils import tuple_iterator_len
 from .base import MutableLocal
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
+from .constant import EnumVariable
 from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
 from .functions import UserFunctionVariable
@@ -199,6 +201,11 @@ class VariableBuilder:
             return ConstantVariable(
                 value=value,
                 guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+            )
+        elif isinstance(value, enum.Enum):
+            return EnumVariable(
+                value=value,
+                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif is_builtin(value):
             return BuiltinVariable(
