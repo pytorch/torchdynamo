@@ -491,7 +491,12 @@ def grid_sampler_2d(*args):
 def native_dropout(x, p, train):
     # There is a decomp in core for this, but it produces different answers than eager
     if train:
-        return list(map(TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)))
+        return list(
+            map(
+                TensorBox.create,
+                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
+            )
+        )
     return x, ones_like(x, dtype=torch.bool)
 
 
