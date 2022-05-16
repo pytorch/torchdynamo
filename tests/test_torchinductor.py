@@ -547,7 +547,7 @@ class CommonTemplate:
 
     def test_to_dtype(self):
         def fn(a, b):
-            return aten._to_copy(a, dtype=6), aten._to_copy(b + 1, dtype=6)
+            return aten._to_copy(a, dtype=6), aten._to_copy(b + 1, dtype=6), aten.to(b, torch.float64)
 
         self.common(
             fn,
@@ -796,6 +796,20 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+
+    def test_var_mean(self):
+        def fn(x):
+            return (
+                *torch.var_mean(x, -1),
+                *torch.var_mean(x, [1, 3]),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
+        )
+
+
     @patch.object(config, "pick_loop_orders", True)
     def test_transposed_propagates(self):
         @torchdynamo.optimize("inductor", nopython=True)
@@ -1041,6 +1055,15 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_new_ones(self):
+        def fn(a):
+            return (
+                aten.new_ones(a, [], device=a.device, dtype=6, layout=0, pin_memory=False),
+                aten.new_zeros(a, [], device=a.device, dtype=6, layout=0, pin_memory=False)
+            )
+
+        self.common(fn, (torch.randn(8),))
+
     def test_full_like(self):
         def fn(a):
             return torch.full_like(a, 7.777) - 1
@@ -1219,6 +1242,15 @@ class CommonTemplate:
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
+
+    def test_l1_loss(self):
+        def fn(a,b):
+            return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
+
+        self.common(fn, (
+            torch.randn([2, 3, 16, 16]),
+            torch.randn([2, 3, 16, 16]),
+        ))
 
 
 class CpuTests(TestCase):

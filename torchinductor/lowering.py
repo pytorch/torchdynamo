@@ -49,6 +49,8 @@ DTYPE_ID_LOOKUP = {
 
 
 def decode_dtype(dtype: int):
+    if not isinstance(dtype, int):
+        return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
@@ -208,6 +210,17 @@ def _to_copy(
     if device is not None and device != x.get_device():
         x = to_device(x, device)
     return x
+
+
+@register_lowering(aten.to)
+def to(x, device_or_dtype, non_blocking=False, copy=False, memory_format=None):
+    assert not memory_format, "TODO"
+    if isinstance(device_or_dtype, torch.dtype):
+        return to_dtype(x, device_or_dtype)
+    if isinstance(device_or_dtype, torch.device):
+        return to_device(x, device_or_dtype)
+    assert False, device_or_dtype
+
 
 
 def register_pointwise(
@@ -470,6 +483,11 @@ def _cudnn_rnn(*args):
     )
 
 
+@register_lowering(aten.grid_sampler_2d, type_promote=False)
+def grid_sampler_2d(*args):
+    return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
+
+
 @register_lowering(aten.convolution)
 def convolution(
     x: TensorBox,
@@ -616,10 +634,14 @@ def _full(fill_value, device, dtype, size):
 
 
 def constant_like(fill_value):
-    def _constant_like(x, *, dtype, device, layout, pin_memory=False):
+    def _constant_like(x, *, dtype=None, device=None, layout=0, pin_memory=False):
         assert not pin_memory
         assert layout == 0
-        dtype = decode_dtype(dtype)
+        if dtype is None:
+            dtype = x.get_dtype()
+        else:
+            dtype = decode_dtype(dtype)
+        device = device or x.get_device()
         return _full(fill_value, device, dtype, x.get_size())
 
     return _constant_like
@@ -650,6 +672,23 @@ def tensor_constructor(fill_value):
 register_lowering(torch.empty)(tensor_constructor(0))
 register_lowering(torch.zeros)(tensor_constructor(0))
 register_lowering(torch.ones)(tensor_constructor(1))
+
+
+def new_constant(fill_value):
+    def _new_constant(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+        assert isinstance(size, (list, type))
+        assert not pin_memory
+        assert not layout
+        dtype = decode_dtype(dtype) or x.get_dtype()
+        device = device or x.get_device()
+        size = [sympy.Integer(s) for s in size]
+        return _full(fill_value, device, dtype, size)
+
+    return _new_constant
+
+register_lowering(aten.new_empty)(new_constant(0))
+register_lowering(aten.new_zeros)(new_constant(0))
+register_lowering(aten.new_ones)(new_constant(1))
 
 
 @register_lowering(torch.full)
@@ -1221,6 +1260,16 @@ def var_(x, axis, correction=1, keepdim=False):
     return div(sum_result, denom)
 
 
+@register_lowering(aten.var_mean)
+def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
+    if correction is None:
+        correction = int(unbiased)
+    return [
+        var_(x, dim, correction=correction, keepdim=keepdim),
+        mean(x, dim, keepdim=keepdim),
+    ]
+
+
 @register_lowering(aten.std)
 def std(x, axis, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
@@ -1267,6 +1316,34 @@ def pow(a, b):
         # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
         # even integer: torch.exp(torch.log(torch.abs(a)) * b)
         # else: torch.exp(torch.log(a) * b)
+
+
+def mutate_to(changed, val):
+    if isinstance(changed, TensorBox):
+        changed_data = changed.data
+    else:
+        changed_data = changed
+    if isinstance(val, TensorBox):
+        val = val.data
+    assert isinstance(changed_data, ir.StorageBox)
+    assert isinstance(val, ir.StorageBox)
+    changed_data.data = val.data
+    return changed
+
+
+@register_lowering(aten.fill_)
+def fill_(x, fill_value):
+    return mutate_to(x, full_like(x, fill_value))
+
+
+@register_lowering(aten.zero_)
+def zero_(x):
+    return mutate_to(x, full_like(x, 0))
+
+
+
+
+
 
 
 sum_ = register_lowering(aten.sum)(make_reduction("sum"))
