@@ -487,6 +487,14 @@ def grid_sampler_2d(*args):
     return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
 
 
+@register_lowering(aten.native_dropout, type_promote=False)
+def native_dropout(x, p, train):
+    # There is a decomp in core for this, but it produces different answers than eager
+    if train:
+        return list(map(TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)))
+    return x, ones_like(x, dtype=torch.bool)
+
+
 @register_lowering(aten.convolution)
 def convolution(
     x: TensorBox,
@@ -670,8 +678,8 @@ def constant_like(fill_value):
     return _constant_like
 
 
-register_lowering(aten.zeros_like)(constant_like(0))
-register_lowering(aten.ones_like)(constant_like(1))
+zeros_like = register_lowering(aten.zeros_like)(constant_like(0))
+ones_like = register_lowering(aten.ones_like)(constant_like(1))
 
 
 @register_lowering(aten.full_like)
