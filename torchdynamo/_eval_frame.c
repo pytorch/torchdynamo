@@ -429,7 +429,8 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   Py_INCREF(new_callback);
   Py_DECREF(old_callback);
 
-  // Set thread local, or global callback
+  // Set thread local callback. This will drive behavior of our shim, if/when it
+  // is installed.
   eval_frame_callback_set(new_callback);
 
   return old_callback;
