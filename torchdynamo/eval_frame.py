@@ -1,12 +1,20 @@
 import contextlib
+import copy
 import functools
 import logging
 import threading
+import itertools
 
 from . import config
 from . import convert_frame
 from . import skipfiles
 from .mutation_guard import install_generation_tagging_new
+from torchdynamo.utils import checkpoint_params, clone_inputs
+#from torchdynamo.testing import same
+import torch
+from torchdynamo.optimizations.normalize import normalize_ir
+
+log = logging.getLogger(__name__)
 
 try:
     from . import _eval_frame
@@ -23,6 +31,42 @@ set_guard_error_hook = _eval_frame.set_guard_error_hook
 
 def nothing():
     pass
+
+
+def same(left, right):
+    return len(left) == len(right) and all(
+        torch.allclose(a, b, atol=1e-4, rtol=1e-4) for a, b in zip(left, right)
+    )
+
+
+def check_requires_grad(gm, example_inputs):
+    if torch.is_grad_enabled():
+        if any(
+            getattr(x, "requires_grad", False)
+            for x in itertools.chain(example_inputs, gm.parameters(True))
+        ):
+            return True
+    return False
+
+
+def jit_trace(gm, example_inputs):
+    """Wrapper around jit.trace to handle hooks"""
+    restore_backward_hooks = []
+
+    def visit(mod):
+        if mod._backward_hooks:
+            restore_backward_hooks.append((mod, mod._backward_hooks))
+            mod._backward_hooks = []
+
+    if not check_requires_grad(gm, example_inputs):
+        # in inference mode it is safe to ignore backwards hooks to allow tracing
+        gm.apply(visit)
+
+    try:
+        return torch.jit.trace(gm.forward, example_inputs)
+    finally:
+        for mod, hooks in restore_backward_hooks:
+            mod._backward_hooks = hooks
 
 
 null_context = contextlib.nullcontext
@@ -124,6 +168,51 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
     )
 
 
+class WrapperBackend:
+
+    def __init__(self, backend=None):
+        self.backend = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+
+        if not callable(self.backend):
+            print("self.backend is not callable")
+
+        if self.backend is None or self.backend is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.backend(self.gm, self.original_example_inputs)
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            copy_gm = copy.deepcopy(self.gm)
+            candidate = self.backend(copy_gm, self.original_example_inputs)
+            result = candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return candidate
+
+            print(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            return self.gm.forward
+        finally:
+            self.restore()
+
+
 def optimize(backend, nopython=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -157,10 +246,11 @@ def optimize(backend, nopython=False):
     if hasattr(backend, "backend_ctx_ctor"):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
 
+    wrapper_backend = WrapperBackend(backend)
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor)
+        return optimize_assert(wrapper_backend, backend_ctx_ctor)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend), backend_ctx_ctor
+        convert_frame.convert_frame(wrapper_backend), backend_ctx_ctor
     )
 
 

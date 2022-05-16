@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import multiprocessing
 import textwrap
-from itertools import chain
 from typing import Dict
 from typing import List
 
@@ -151,8 +150,10 @@ class CppOverrides(OpOverrides):
         assert isinstance(other, float)
         if other == float("-inf"):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
+        elif other == float("inf"):
+            code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
         else:
-            assert False
+            code.writeline(f"float {var} = {other!r};")
         code.writeline(f"if({mask})")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
@@ -337,6 +338,7 @@ class CppKernel(Kernel):
             kernel_group.codegen_define_and_call(wrapper)
             node.codegen(wrapper)
             scheduler.barrier()
+            scheduler.maybe_free_buffers()
             kernel_group = KernelGroup()
 
         scheduler = Scheduler(tuple, V.graph.buffers)
@@ -405,10 +407,13 @@ class KernelGroup:
         if self.count == 0:
             return
 
-        argdefs = ",\n".ljust(25).join(self.args.cpp_argdefs())
+        arg_defs, call_args = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
         code = BracesBuffer()
-        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({argdefs})'])
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
@@ -420,13 +425,7 @@ class KernelGroup:
         wrapper.define_kernel(kernel_name, codecache_def.getvalue())
 
         # generate the code to call this
-        args = self.args
-        call_args = []
-        for name in chain(args.input_buffers.keys(), args.output_buffers.keys()):
-            call_args.append(f"c_void_p({name}.data_ptr())")
-        for name in args.sizevars.keys():
-            call_args.append(f"c_long({name})")
-        wrapper.body.writeline(
+        wrapper.writeline(
             "{}({})".format(kernel_name, ", ".join(call_args)),
         )
 

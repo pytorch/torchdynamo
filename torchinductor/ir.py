@@ -14,6 +14,7 @@ import torch
 from sympy import Expr
 from sympy import Integer
 
+from . import config
 from . import dependencies
 from .codegen.common import product
 from .dependencies import extract_read_writes
@@ -122,7 +123,9 @@ class Loops(IRNode):
 
     def inner_fn_str(self):
         try:
-            with V.set_ops_handler(V.MockHandler()):
+            with V.set_ops_handler(V.MockHandler()), patch.object(
+                FlexibleLayout, "allow_indexing", True
+            ):
                 return self.inner_fn(self._index(self.ranges))
         except Exception as e:
             return f"inner_fn(): {e}"
@@ -177,7 +180,9 @@ class Reduction(Loops):
 
     def inner_fn_str(self):
         try:
-            with V.set_ops_handler(V.MockHandler()):
+            with V.set_ops_handler(V.MockHandler()), patch.object(
+                FlexibleLayout, "allow_indexing", True
+            ):
                 return self.inner_fn(
                     self._index(self.ranges), self._index(self.reduction_ranges, "r")
                 )
@@ -812,6 +817,11 @@ class Buffer(IRNode):
     def decide_layout(self):
         pass
 
+    def get_alias_names(self):
+        if isinstance(self.layout, AliasedLayout):
+            return [self.layout.view.get_name()]
+        return ()
+
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
@@ -1056,10 +1066,11 @@ class ExternKernel(InputsKernel):
         return args
 
     def codegen_size_asserts(self, wrapper):
-        size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
-        stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
-        wrapper.body.writeline(f"assert {self.get_name()}.size() == {size}")
-        wrapper.body.writeline(f"assert {self.get_name()}.stride() == {stride}")
+        if config.size_asserts:
+            size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
+            stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
+            wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
+            wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
 
 
 @dataclasses.dataclass
@@ -1072,7 +1083,7 @@ class ExternKernelOut(ExternKernel):
             args.append(f"out={self.output_view.codegen_reference()}")
         else:
             args.append(f"out={self.codegen_reference()}")
-        wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
+        wrapper.writeline(f"{self.kernel}({', '.join(args)})")
 
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
         super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
@@ -1085,7 +1096,7 @@ class ExternKernelOut(ExternKernel):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
-        wrapper.body.writeline(
+        wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
         if isinstance(self.layout, Layout):
@@ -1162,6 +1173,29 @@ class BatchMatrixMultiply(ExternKernelOut):
                 inputs=[a, b],
             )
         return data
+
+
+class DeviceCopy(ExternKernelOut):
+    @staticmethod
+    def create(x, device):
+        return DeviceCopy(
+            FlexibleLayout(
+                device=device,
+                dtype=x.get_dtype(),
+                size=x.get_size(),
+            ),
+            [x],
+        )
+
+    def codegen(self, wrapper):
+        args = self.codegen_args()
+        assert len(args) == 1
+        if self.output_view:
+            wrapper.writeline(
+                f"{self.output_view.codegen_reference()}.copy_({args[0]})"
+            )
+        else:
+            wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
 
 
 class AdaptiveAvgPool2d(ExternKernelAlloc):
@@ -1270,7 +1304,7 @@ class MultiOutputLayout(IRNode):
 
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
-        wrapper.body.writeline(
+        wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}[{self.index}]"
         )
         self.codegen_size_asserts(wrapper)

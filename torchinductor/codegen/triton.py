@@ -48,6 +48,8 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         triton_type_name = str(dtype).split(".")[-1]
+        if triton_type_name == "bool":
+            triton_type_name = "int1"
         return f"{x}.to(tl.{triton_type_name})"
 
     @staticmethod
@@ -96,13 +98,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        if other == float("-inf"):
-            other = 'float("-inf")'
-        else:
-            assert False, other
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, other)
+        return ops.where(
+            new_mask, result, TritonOverrides.constant(other, torch.float32)
+        )
 
     @staticmethod
     def logical_not(a):
@@ -398,13 +398,7 @@ class TritonKernel(Kernel):
             """
         )
 
-        argdefs = [
-            *self.args.input_buffers.values(),
-            *self.args.output_buffers.values(),
-        ]
-        for var in self.args.sizevars.values():
-            # argdefs.append(f"{var}: tl.constexpr")
-            argdefs.append(f"{var}")
+        argdefs, _ = self.args.python_argdefs()
 
         if config.dynamic_shapes:
             maybe_const = ""
@@ -429,6 +423,9 @@ class TritonKernel(Kernel):
 
         code.writeline(f"def kernel({', '.join(argdefs)}):")
         with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"{old} = {new}")
+
             code.splice(
                 """
                     offset = tl.program_id(0) * BLOCK_SIZE
@@ -472,24 +469,15 @@ class TritonKernel(Kernel):
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
-    def call_kernel(self, schedule, name: str):
-        code = schedule.body
-        call_args = list(
-            chain(
-                self.args.input_buffers.keys(),
-                self.args.output_buffers.keys(),
-                self.args.sizevars.keys(),
-            )
-        )
+    def call_kernel(self, code, name: str):
+        _, call_args = self.args.python_argdefs()
         code.writeline(f"{name}_numel = {texpr(self.numel)}")
         call_args.append(f"{name}_numel")
         if self.inside_reduction:
             code.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
             call_args.append(f"{name}_reduction_numel")
-        code.writeline(f"{name}[grid({name}_numel)](")
-        with code.indent():
-            code.writeline(", ".join(call_args))
-        code.writeline(")")
+        call_args = ", ".join(call_args)
+        code.writeline(f"{name}[grid({name}_numel)]({call_args})")
 
     @classmethod
     def codegen(cls, wrapper):
@@ -540,6 +528,7 @@ class TritonKernel(Kernel):
 
             scheduler.enqueue(reschedule)
             scheduler.barrier()
+            scheduler.maybe_free_buffers()
 
 
 def split_sizes(sizes, prod1, prod2):

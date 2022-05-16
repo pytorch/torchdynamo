@@ -355,6 +355,8 @@ class OutputGraph(fx.Tracer):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
+                if "example_value" in node.meta:
+                    del node.meta["example_value"]
                 self.graph.erase_node(node)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
