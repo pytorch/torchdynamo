@@ -2,7 +2,6 @@
 #include <Python.h>
 #include <frameobject.h>
 #include <pystate.h>
-#include <pthread.h>
 
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
@@ -416,9 +415,9 @@ static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   // owned by caller
   Py_INCREF(old_callback);
     
-  if (new_callback == Py_None) {
+  if (old_callback != Py_None && new_callback == Py_None) {
     decrement_working_threads(tstate);
-  } else {
+  } else if (old_callback == Py_None && new_callback != PyNone) {
     increment_working_threads(tstate);
   }
 
