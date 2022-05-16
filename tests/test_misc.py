@@ -1321,4 +1321,3 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts, nopython=True):
             fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
-
