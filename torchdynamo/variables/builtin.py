@@ -299,6 +299,7 @@ class BuiltinVariable(VariableTracker):
         if len(args) == 1:
             start = 0
         else:
+            assert len(args) == 2
             assert isinstance(args[1], variables.ConstantVariable)
             start = args[1].as_python_constant()
         if args[0].has_unpack_var_sequence(tx):

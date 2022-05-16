@@ -509,7 +509,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         def fn(a, b):
             for i, x in enumerate(a.shape):
                 b = b + x
-            for i, x in enumerate(b.shape, 0):
+            for i, x in enumerate(b.shape, 8):
                 b = b + x * i
             return b
 
