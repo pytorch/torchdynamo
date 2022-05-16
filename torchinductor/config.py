@@ -8,7 +8,7 @@ dce = False
 forward_only = True
 
 # assume input tensors are dynamic
-dynamic_shapes = True
+dynamic_shapes = False
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
@@ -38,3 +38,4 @@ class cpp:
 # config specific to codegen/triton.py
 class triton:
     cudagraphs = True
+    hackery = False

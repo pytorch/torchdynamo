@@ -31,6 +31,8 @@ if torch.cuda.is_available():
     except (ImportError, ModuleNotFoundError):
         pass
 
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 
 class TestCase(unittest.TestCase):
     @classmethod
@@ -545,7 +547,11 @@ class CommonTemplate:
 
     def test_to_dtype(self):
         def fn(a, b):
-            return aten._to_copy(a, dtype=6), aten._to_copy(b + 1, dtype=6)
+            return (
+                aten._to_copy(a, dtype=6),
+                aten._to_copy(b + 1, dtype=6),
+                aten.to(b, torch.float64),
+            )
 
         self.common(
             fn,
@@ -555,13 +561,37 @@ class CommonTemplate:
             ),
         )
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda()
     def test_to_device(self):
         def fn(a):
             if a.device.type == "cpu":
                 return aten._to_copy(a, device=torch.device("cuda"), dtype=6, layout=0)
             else:
                 return aten._to_copy(a, device=torch.device("cpu"), dtype=6, layout=0)
+
+        self.common(
+            fn,
+            (torch.randn([2, 2, 10]),),
+        )
+
+    @requires_cuda()
+    def test_multi_device(self):
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.cuda()
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            x = x.cuda()
+            x = x + 7
+            x = x + 8
+            x = x.cpu()
+            x = x + 9
+            x = x + 10
+            return x
 
         self.common(
             fn,
@@ -763,6 +793,18 @@ class CommonTemplate:
                 x.mean(-1),
                 torch.mean(x, -2, keepdim=True),
                 x.mean([0, 1]),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
+        )
+
+    def test_var_mean(self):
+        def fn(x):
+            return (
+                *torch.var_mean(x, -1),
+                *torch.var_mean(x, [1, 3]),
             )
 
         self.common(
@@ -982,6 +1024,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_remainder(self):
+        def fn(a, b):
+            return (
+                torch.remainder(a, b),
+                torch.remainder(a + 1, b - 1),
+                torch.remainder(a - 1, b + 1),
+            )
+
+        self.common(fn, (torch.randn(64), torch.randn(64)))
+
     def test_zeros(self):
         def fn(a):
             return (
@@ -1005,13 +1057,26 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    def test_new_ones(self):
+        def fn(a):
+            return (
+                aten.new_ones(
+                    a, [], device=a.device, dtype=6, layout=0, pin_memory=False
+                ),
+                aten.new_zeros(
+                    a, [], device=a.device, dtype=6, layout=0, pin_memory=False
+                ),
+            )
+
+        self.common(fn, (torch.randn(8),))
+
     def test_full_like(self):
         def fn(a):
             return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
 
-    def test_index(self):
+    def test_index1(self):
         def fn(a, b, c):
             return aten.index(a, [b, c])
 
@@ -1023,6 +1088,187 @@ class CommonTemplate:
                 torch.tensor([3, 4, 4, 3], dtype=torch.int64),
             ),
         )
+
+    def test_index2(self):
+        def fn(a, b):
+            return (
+                aten.index(a, [b]),
+                aten.index(a, [None, b]),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 8),
+                torch.tensor([[0, 0, 2, 2]], dtype=torch.int64),
+            ),
+        )
+
+    def test_index_select(self):
+        def fn(a, b):
+            return (
+                torch.index_select(a, 0, b),
+                torch.index_select(a, 1, b),
+                torch.index_select(torch.index_select(a, 2, b), 1, b),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 8),
+                torch.tensor([0, 0, 2, 1], dtype=torch.int64),
+            ),
+        )
+
+    def test_cudnn_rnn(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(
+            a0,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+            b8,
+            b9,
+            b10,
+            b11,
+            b12,
+            b13,
+            b14,
+            b15,
+            a3,
+            a4,
+            a5,
+        ):
+            a1 = [
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14,
+                b15,
+            ]
+            return aten._cudnn_rnn(
+                a0,
+                a1,
+                4,
+                a3,
+                a4,
+                a5,
+                2,
+                2048,
+                0,
+                2,
+                False,
+                0.0,
+                False,
+                True,
+                [],
+                None,
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([92, 8, 2048]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([8192, 4096]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([8192, 4096]),
+                torch.randn([8192, 2048]),
+                torch.randn([8192]),
+                torch.randn([8192]),
+                torch.randn([167837696]),
+                torch.randn([4, 8, 2048]),
+                torch.randn([4, 8, 2048]),
+            ),
+        )
+
+    def test_upsample_nearest2d(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest2d(a, [74, 76], None),
+                aten.upsample_nearest2d(a, [70, 75], None),
+                aten.upsample_nearest2d(a, [45, 74], None),
+                aten.upsample_nearest2d(a, [36, 39], None),
+                aten.upsample_nearest2d(a, None, [2.0, 2.0]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_bilinear2d(self):
+        def fn(a):
+            return (
+                aten.upsample_bilinear2d(a, [45, 45], False, None),
+                aten.upsample_bilinear2d(a, None, True, [2.0, 2.0]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_reflection_pad2d(self):
+        def fn(a):
+            return (
+                aten.reflection_pad2d(a, [1, 1, 1, 1]),
+                aten.reflection_pad2d(a, [1, 2, 3, 4]),
+            )
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_constant_pad_2d(self):
+        def fn(a):
+            return (
+                aten.constant_pad_nd(a, [1, 1, 1, 1], 6.0),
+                aten.constant_pad_nd(a, [1, 2, 3, 4], 99.0),
+            )
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_l1_loss(self):
+        def fn(a, b):
+            return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 16, 16]),
+                torch.randn([2, 3, 16, 16]),
+            ),
+        )
+
+    def test_triu(self):
+        def fn(a):
+            return aten.triu(a, 1), aten.triu(a, 0), aten.triu(a, 2)
+
+        self.common(fn, (torch.randn([2, 10, 10]),))
 
 
 class CpuTests(TestCase):
