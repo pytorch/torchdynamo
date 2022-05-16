@@ -48,7 +48,6 @@ class _TorchDynamoContext:
         self.backend_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # decrement_working_threads()
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
