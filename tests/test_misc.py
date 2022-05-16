@@ -1223,6 +1223,83 @@ class MiscTests(torchdynamo.testing.TestCase):
             collections.OrderedDict,
         )
 
+    def test_builtin_subclasses_as_method_on_class_type(self):
+        class Foo:
+            def __init__(name):
+                self.ame_ = name
+
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+
+        counter = CompileCounter()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn():
+            return Foo.__subclasses__()
+
+        subs_of_foo_optim = fn()
+
+        self.assertEqual(len(subs_of_foo_reg), 2)
+        self.assertEqual(subs_of_foo_reg, subs_of_foo_optim)
+
+    def test_builtin_subclasses_as_method_on_var(self):
+        class Foo:
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Bar):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+        sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
+
+        sub_of_foo_subclass_var_optim = list()
+        counter = CompileCounter()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn():
+            return Foo.__subclasses__()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn_single(subs_of_foo_optim):
+            return subs_of_foo_optim[0].__subclasses__()
+
+        subs_of_foo_optim = fn()
+        sub_of_foo_subclass_var_optim = fn_single(subs_of_foo_optim)
+
+        self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
+        self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
+
     def test_enum_no_graphbreaks(self):
         class Foo(enum.Enum):
             FOO = 0
