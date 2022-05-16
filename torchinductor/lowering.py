@@ -882,67 +882,6 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
     )
 
 
-"""
-TODO(jansel): debug this
-
-@register_lowering(aten.upsample_bilinear2d)
-def upsample_bilinear2d(x, output_size=None, align_corners=False, scale_factors=None):
-    assert not scale_factors, "TODO"
-    assert not align_corners, "TODO"
-    assert len(output_size) == 2
-    x.realize()  # elements are reused
-    x_loader = x.make_loader()
-    oh, ow = output_size
-    *batch, ih, iw = x.get_size()
-    ih = V.graph.sizevars.guard_static_shape(ih)
-    iw = V.graph.sizevars.guard_static_shape(iw)
-
-    scale_h = ih / oh
-    scale_w = iw / ow
-
-    def scale(x, in_size, scale):
-        x = ops.index_expr(x, torch.float32)
-        h1r = ops.mul(x, ops.constant(scale, torch.float32))
-        h1 = ops.to_dtype(x, torch.int32)
-        h1p = ops.where(
-            ops.lt(h1, ops.constant(in_size - 1, torch.int32)),
-            ops.constant(1, torch.int32),
-            ops.constant(0, torch.int32),
-        )
-        h1lambda = ops.sub(h1r, h1)
-        h0lambda = ops.sub(ops.constant(1, torch.float32), h1lambda)
-        idx_ha = ops.indirect_indexing(h1)
-        idx_hb = ops.indirect_indexing(ops.add(h1, h1p))
-        return idx_ha, idx_hb, h0lambda, h1lambda
-
-    def fn(idx):
-        *b, x, y = idx
-        idx_xa, idx_xb, h0lambda, h1lambda = scale(x, ih, scale_h)
-        idx_ya, idx_yb, w0lambda, w1lambda = scale(y, iw, scale_w)
-
-        data0 = x_loader([*b, idx_xa, idx_ya])
-        data1 = x_loader([*b, idx_xa, idx_yb])
-        data2 = x_loader([*b, idx_xb, idx_ya])
-        data3 = x_loader([*b, idx_xb, idx_yb])
-
-        return ops.add(
-            ops.mul(
-                h0lambda, ops.add(ops.mul(w0lambda, data0), ops.mul(w1lambda, data1))
-            ),
-            ops.mul(
-                h1lambda, ops.add(ops.mul(w0lambda, data2), ops.mul(w1lambda, data3))
-            ),
-        )
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
-    )
-"""
-
-
 @register_lowering(aten.upsample_bilinear2d)
 def upsample_bilinear2d(x, output_size=None, align_corners=False, scale_factors=None):
     return TensorBox.create(
