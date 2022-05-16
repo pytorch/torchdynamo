@@ -180,7 +180,7 @@ class WrapperBackend:
 
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
-        self.gm = normalize_ir(gm, self.original_example_inputs)
+        self.gm = gm
         self.scripted = jit_trace(self.gm, self.example_inputs)
         
 
@@ -191,18 +191,19 @@ class WrapperBackend:
             return self.gm.forward
 
         if not config.verify_correctness:
-            return self.backend(gm, self.original_example_inputs)
+            return self.backend(self.gm, self.original_example_inputs)
 
         # if verify_correctness=True
         try:
             self.restore()
 
             correct = gm.forward(*self.example_inputs)
-            result = self.backend(gm, self.original_example_inputs)(*self.example_inputs)
+            candidate = self.backend(self.gm, self.original_example_inputs)
+            result = candidate(*self.example_inputs)
 
             # TODO: replace `same` function with the one in testing
             if same(correct, result):
-                return self.backend(gm, self.original_example_inputs)
+                return candidate
 
             print(f"incorrect results of backend {self}")
             return self.gm.forward
