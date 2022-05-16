@@ -110,7 +110,7 @@ def gelu(x, approximate="none"):
         return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
-@register_decomposition([aten.special_erf])
+@register_decomposition([aten.special_erf, aten.erf])
 def special_erf(x):
     # TODO(jansel): this might be crazy slow.  Triton doesn't have the
     #               cuda ::erf() builtin.  I've made a feature request for this,
