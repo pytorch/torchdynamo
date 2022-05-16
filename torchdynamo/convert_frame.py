@@ -117,14 +117,36 @@ def wrap_convert_context(fn):
 
 
 def has_tensor_in_frame(frame):
-    # Check if the passed arguments are of type Tensor
-    for value in frame.f_locals.values():
-        if isinstance(value, torch.Tensor):
-            return True
+    """Check if the frame has torch.* related bits"""
 
     # Check if there is global import of torch.*
-    for value in frame.f_globals.values():
-        if is_allowed(value):
+    for co_name in frame.f_code.co_names:
+        if co_name in frame.f_globals:
+            if is_allowed(frame.f_globals[co_name]):
+                return True
+
+    def has_tensor(obj):
+        """Recursively check if the obj has a tensor"""
+        if isinstance(obj, (torch.Tensor, torch.nn.Module)):
+            return True
+        elif isinstance(obj, (list, tuple)):
+            return any([has_tensor(v) for v in obj])
+        elif isinstance(obj, dict):
+            return any([has_tensor(v) for v in obj.values()])
+        elif isinstance(obj, (str, int, float, type(None), bool)):
+            return False
+        elif hasattr(obj, "__dict__"):
+            return any([has_tensor(v) for v in obj.__dict__.values()])
+        else:
+            if config.debug:
+                print(
+                    f"Assuming that object of type {type(obj)} does not have a tensor"
+                )
+            return False
+
+    # Check if the passed arguments are of type Tensor
+    for value in frame.f_locals.values():
+        if has_tensor(value):
             return True
 
     if config.debug:
