@@ -13,6 +13,7 @@ from . import config
 from . import convert_frame
 from . import skipfiles
 from .mutation_guard import install_generation_tagging_new
+from .utils import same
 
 log = logging.getLogger(__name__)
 
@@ -31,12 +32,6 @@ set_guard_error_hook = _eval_frame.set_guard_error_hook
 
 def nothing():
     pass
-
-
-def same(left, right):
-    return len(left) == len(right) and all(
-        torch.allclose(a, b, atol=1e-4, rtol=1e-4) for a, b in zip(left, right)
-    )
 
 
 null_context = contextlib.nullcontext
@@ -215,11 +210,10 @@ def optimize(backend, nopython=False):
     if hasattr(backend, "backend_ctx_ctor"):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
 
-    wrapper_backend = WrapperBackend(backend)
     if nopython:
-        return optimize_assert(wrapper_backend, backend_ctx_ctor)
+        return optimize_assert(backend, backend_ctx_ctor)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(wrapper_backend), backend_ctx_ctor
+        convert_frame.convert_frame(backend), backend_ctx_ctor
     )
 
 
