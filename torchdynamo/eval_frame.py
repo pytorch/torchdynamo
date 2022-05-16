@@ -39,36 +39,6 @@ def same(left, right):
     )
 
 
-def check_requires_grad(gm, example_inputs):
-    if torch.is_grad_enabled():
-        if any(
-            getattr(x, "requires_grad", False)
-            for x in itertools.chain(example_inputs, gm.parameters(True))
-        ):
-            return True
-    return False
-
-
-def jit_trace(gm, example_inputs):
-    """Wrapper around jit.trace to handle hooks"""
-    restore_backward_hooks = []
-
-    def visit(mod):
-        if mod._backward_hooks:
-            restore_backward_hooks.append((mod, mod._backward_hooks))
-            mod._backward_hooks = []
-
-    if not check_requires_grad(gm, example_inputs):
-        # in inference mode it is safe to ignore backwards hooks to allow tracing
-        gm.apply(visit)
-
-    try:
-        return torch.jit.trace(gm.forward, example_inputs)
-    finally:
-        for mod, hooks in restore_backward_hooks:
-            mod._backward_hooks = hooks
-
-
 null_context = contextlib.nullcontext
 
 unset = object()
