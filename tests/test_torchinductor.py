@@ -1253,6 +1253,14 @@ class CommonTemplate:
         ))
 
 
+    def test_triu(self):
+        def fn(a):
+            return aten.triu(a, 1), aten.triu(a, 0), aten.triu(a, 2)
+
+        self.common(fn, (
+            torch.randn([2, 10, 10]),
+        ))
+
 class CpuTests(TestCase):
     common = check_model
     device = "cpu"

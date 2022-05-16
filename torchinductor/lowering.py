@@ -569,6 +569,27 @@ def linspace(start, end, steps, *, dtype=None, device=None):
     )
 
 
+@register_lowering(aten.triu)
+def triu(x, diagonal=0):
+    x_loader = x.make_loader()
+    dtype = x.get_dtype()
+
+    def inner_fn(index):
+        *_, i, j = index
+        return ops.where(
+            ops.ge(ops.index_expr(j - i - diagonal, torch.int32), ops.constant(0, torch.int32)),
+            x_loader(index),
+            ops.constant(0, dtype))
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(x.get_size()),
+    )
+
+
+
 def _unwrap(x):
     if isinstance(x, (list, tuple)) and len(x) > 0:
         return _unwrap(x[0])
