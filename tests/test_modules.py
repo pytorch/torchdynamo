@@ -657,3 +657,35 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             self.assertTrue(torchdynamo.testing.same(out1, out2))
 
         run()
+
+    def test_nn_moduledict_contains(self):
+        class M(torch.nn.Module):
+            def __init__(self, module_dict):
+                super().__init__()
+                self.module_dict = module_dict
+
+            def forward(self, x):
+                if "foo" in self.module_dict:
+                    x = torch.mul(x, 1.0)
+                x = torch.add(x, 1.0)
+                return x
+
+        module_dict = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
+        m = M(module_dict)
+        data = torch.randn(1)
+        out1 = m(data)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt, nopython=True):
+            out2 = m(data)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertTrue(torchdynamo.testing.same(out1, out2))
+
+        module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
+        m = M(module_dict)
+        data = torch.randn(1)
+        out1 = m(data)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt, nopython=True):
+            out2 = m(data)
+        self.assertEqual(cnt.op_count, 1)
+        self.assertTrue(torchdynamo.testing.same(out1, out2))
