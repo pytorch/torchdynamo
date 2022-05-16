@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import functools
 import logging
 import threading
@@ -181,8 +182,6 @@ class WrapperBackend:
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
-        self.scripted = jit_trace(self.gm, self.example_inputs)
-        
 
         if not callable(self.backend):
             print("self.backend is not callable")
@@ -195,10 +194,9 @@ class WrapperBackend:
 
         # if verify_correctness=True
         try:
-            self.restore()
-
-            correct = gm.forward(*self.example_inputs)
-            candidate = self.backend(self.gm, self.original_example_inputs)
+            correct = self.gm.forward(*self.example_inputs)
+            copy_gm = copy.deepcopy(self.gm)
+            candidate = self.backend(copy_gm, self.original_example_inputs)
             result = candidate(*self.example_inputs)
 
             # TODO: replace `same` function with the one in testing
