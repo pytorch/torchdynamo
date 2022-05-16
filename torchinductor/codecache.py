@@ -129,7 +129,7 @@ class PyCodeCache:
 def patch_triton_hackery():
     """
     The following is a copy and paste of triton.code_gen.Kernel.__call__,
-    with a bunch of stuff moved to a closure so it is only called once.
+    with a bunch of stuff moved to a closure, so it is only called once.
 
     This makes tiny kernels run ~1.2x faster.
     """
@@ -197,8 +197,9 @@ class TritonCodeCache:
     @classmethod
     def load(cls, source_code):
         patch_triton_dir()
-        # this breaks cudagraphs, but speeds up small inputs:
-        # patch_triton_hackery()
+        if config.triton.hackery and not config.triton.cudagraphs:
+            # this breaks cudagraphs, but speeds up small inputs:
+            patch_triton_hackery()
         return PyCodeCache.load(source_code)
 
 
