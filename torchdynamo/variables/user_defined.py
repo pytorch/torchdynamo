@@ -58,7 +58,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options["mutable_local"] = MutableLocal()
             subs_as_vars: List[VariableTracker] = list()
             for sub in self.value.__subclasses__():
-                subs_as_vars.append(variables.ConstantVariable(sub))
+                source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
+                subs_as_vars.append(
+                    variables.UserDefinedClassVariable(sub, source=source)
+                )
 
             return variables.ListVariable(subs_as_vars, **options)
 
