@@ -547,7 +547,11 @@ class CommonTemplate:
 
     def test_to_dtype(self):
         def fn(a, b):
-            return aten._to_copy(a, dtype=6), aten._to_copy(b + 1, dtype=6), aten.to(b, torch.float64)
+            return (
+                aten._to_copy(a, dtype=6),
+                aten._to_copy(b + 1, dtype=6),
+                aten.to(b, torch.float64),
+            )
 
         self.common(
             fn,
@@ -796,7 +800,6 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
-
     def test_var_mean(self):
         def fn(x):
             return (
@@ -808,7 +811,6 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]),),
         )
-
 
     @patch.object(config, "pick_loop_orders", True)
     def test_transposed_propagates(self):
@@ -1058,8 +1060,12 @@ class CommonTemplate:
     def test_new_ones(self):
         def fn(a):
             return (
-                aten.new_ones(a, [], device=a.device, dtype=6, layout=0, pin_memory=False),
-                aten.new_zeros(a, [], device=a.device, dtype=6, layout=0, pin_memory=False)
+                aten.new_ones(
+                    a, [], device=a.device, dtype=6, layout=0, pin_memory=False
+                ),
+                aten.new_zeros(
+                    a, [], device=a.device, dtype=6, layout=0, pin_memory=False
+                ),
             )
 
         self.common(fn, (torch.randn(8),))
@@ -1085,7 +1091,10 @@ class CommonTemplate:
 
     def test_index2(self):
         def fn(a, b):
-            return aten.index(a, [b])
+            return (
+                aten.index(a, [b]),
+                aten.index(a, [None, b]),
+            )
 
         self.common(
             fn,
@@ -1244,22 +1253,23 @@ class CommonTemplate:
         )
 
     def test_l1_loss(self):
-        def fn(a,b):
+        def fn(a, b):
             return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
 
-        self.common(fn, (
-            torch.randn([2, 3, 16, 16]),
-            torch.randn([2, 3, 16, 16]),
-        ))
-
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 16, 16]),
+                torch.randn([2, 3, 16, 16]),
+            ),
+        )
 
     def test_triu(self):
         def fn(a):
             return aten.triu(a, 1), aten.triu(a, 0), aten.triu(a, 2)
 
-        self.common(fn, (
-            torch.randn([2, 10, 10]),
-        ))
+        self.common(fn, (torch.randn([2, 10, 10]),))
+
 
 class CpuTests(TestCase):
     common = check_model

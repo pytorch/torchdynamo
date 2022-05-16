@@ -78,6 +78,9 @@ class BaseSchedulerNode:
     def get_device(self):
         return self.node.get_device()
 
+    def is_reduction(self):
+        return False
+
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
 
@@ -95,7 +98,7 @@ class BaseSchedulerNode:
         return True
 
 
-class ExternKernelSchdulerNode(BaseSchedulerNode):
+class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
@@ -107,7 +110,7 @@ class ExternKernelSchdulerNode(BaseSchedulerNode):
         codegen_extern_call(self.node)
 
 
-class NopKernelSchdulerNode(BaseSchedulerNode):
+class NopKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
@@ -398,12 +401,12 @@ class Scheduler:
         self.fusable_deps = set()
         for node in nodes:
             if node.is_no_op():
-                self.nodes.append(NopKernelSchdulerNode(self, node))
+                self.nodes.append(NopKernelSchedulerNode(self, node))
             elif isinstance(node, ir.ComputedBuffer):
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel):
-                self.nodes.append(ExternKernelSchdulerNode(self, node))
+                self.nodes.append(ExternKernelSchedulerNode(self, node))
             else:
                 assert False, node
         self.compute_users()
@@ -467,9 +470,9 @@ class Scheduler:
         if node.unmet_dependencies:
             self.blocked_nodes.add(node)
         else:
-            if isinstance(node, ExternKernelSchdulerNode):
+            if isinstance(node, ExternKernelSchedulerNode):
                 self.runable_extern_kernels.append(node)
-            elif isinstance(node, NopKernelSchdulerNode):
+            elif isinstance(node, NopKernelSchedulerNode):
                 node.run()
             else:
                 self.runable_nodes[node.group].append(node)

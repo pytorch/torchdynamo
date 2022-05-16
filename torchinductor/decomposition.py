@@ -4,25 +4,27 @@ from typing import List
 import functorch._src.decompositions
 import torch
 from torch import Tensor
-
 from torch._decomp import get_decompositions
+
 from torchinductor import config
 
 aten = torch.ops.aten
 
-decompositions = get_decompositions([
-    aten.l1_loss,
-    aten.mse_loss,
-    aten.stack,
-    aten.native_layer_norm,
-    aten.native_batch_norm,
-    aten.cudnn_batch_norm,
-    aten.leaky_relu,
-    aten.hardtanh,
-    aten.hardsigmoid,
-    aten.hardswish,
-    aten.transpose.int,
-])
+decompositions = get_decompositions(
+    [
+        aten.l1_loss,
+        aten.mse_loss,
+        aten.stack,
+        aten.native_layer_norm,
+        aten.native_batch_norm,
+        aten.cudnn_batch_norm,
+        aten.leaky_relu,
+        aten.hardtanh,
+        aten.hardsigmoid,
+        aten.hardswish,
+        aten.transpose.int,
+    ]
+)
 
 
 def register_decomposition(ops):
@@ -78,6 +80,7 @@ def elu(self, alpha=1, scale=1, input_scale=1):
     return torch.where(
         self <= 0, (torch.exp(self * input_scale) - 1) * negcoef, self * scale
     )
+
 
 @register_decomposition([aten.tanh])
 def tanh(x):
@@ -166,5 +169,3 @@ def logsumexp(self, dim, keepdim=False) -> Tensor:
     )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
-
-

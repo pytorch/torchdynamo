@@ -222,7 +222,6 @@ def to(x, device_or_dtype, non_blocking=False, copy=False, memory_format=None):
     assert False, device_or_dtype
 
 
-
 def register_pointwise(
     aten_fn,
     name=None,
@@ -577,9 +576,13 @@ def triu(x, diagonal=0):
     def inner_fn(index):
         *_, i, j = index
         return ops.where(
-            ops.ge(ops.index_expr(j - i - diagonal, torch.int32), ops.constant(0, torch.int32)),
+            ops.ge(
+                ops.index_expr(j - i - diagonal, torch.int32),
+                ops.constant(0, torch.int32),
+            ),
             x_loader(index),
-            ops.constant(0, dtype))
+            ops.constant(0, dtype),
+        )
 
     return Pointwise.create(
         device=x.get_device(),
@@ -587,7 +590,6 @@ def triu(x, diagonal=0):
         inner_fn=inner_fn,
         ranges=list(x.get_size()),
     )
-
 
 
 def _unwrap(x):
@@ -696,7 +698,9 @@ register_lowering(torch.ones)(tensor_constructor(1))
 
 
 def new_constant(fill_value):
-    def _new_constant(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    def _new_constant(
+        x, size, *, dtype=None, layout=None, device=None, pin_memory=None
+    ):
         assert isinstance(size, (list, type))
         assert not pin_memory
         assert not layout
@@ -706,6 +710,7 @@ def new_constant(fill_value):
         return _full(fill_value, device, dtype, size)
 
     return _new_constant
+
 
 register_lowering(aten.new_empty)(new_constant(0))
 register_lowering(aten.new_zeros)(new_constant(0))
@@ -771,25 +776,41 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 def index(x, indices):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices_loaders = [i.make_loader() for i in indices]
-
-    sizes = [i.get_size() for i in indices]
-    output_size = list(sizes[0])
-    num_indirect = len(output_size)
-    for i in range(1, len(sizes)):
-        assert len(sizes[i]) == len(output_size)
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    indices_sizes = [i.get_size() for i in indices if i is not None]
+    output_size = list(indices_sizes[0])
+    for i in range(1, len(indices_sizes)):
+        assert len(indices_sizes[i]) == len(output_size)
         for j in range(len(output_size)):
-            output_size[j] = V.graph.sizevars.guard_equals(output_size[j], sizes[i][j])
+            output_size[j] = V.graph.sizevars.guard_equals(
+                output_size[j], indices_sizes[i][j]
+            )
 
-    output_size.extend(x.get_size()[len(indices) :])
+    start_offset = 0
+    # only support None at start or end for now
+    tmp = list(indices)
+    while tmp and tmp[-1] is None:
+        tmp.pop()
+    while tmp and tmp[0] is None:
+        tmp.pop(0)
+        start_offset += 1
+    assert all((i is not None) for i in tmp)
+    end_offset = len(output_size) + start_offset
+
+    x_size = x.get_size()
+    output_size = [
+        *x_size[:start_offset],
+        *output_size,
+        *x_size[start_offset + len(indices_loaders) :],
+    ]
 
     def fn(idx):
         assert len(idx) == len(output_size)
         new_index = [
-            ops.indirect_indexing(loader(idx[:num_indirect]))
+            ops.indirect_indexing(loader(idx[start_offset:end_offset]))
             for loader in indices_loaders
         ]
-        new_index.extend(idx[num_indirect:])
+        new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
         return x_loader(new_index)
 
     return Pointwise.create(
@@ -1360,11 +1381,6 @@ def fill_(x, fill_value):
 @register_lowering(aten.zero_)
 def zero_(x):
     return mutate_to(x, full_like(x, 0))
-
-
-
-
-
 
 
 sum_ = register_lowering(aten.sum)(make_reduction("sum"))
