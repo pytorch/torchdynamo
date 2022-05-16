@@ -271,6 +271,15 @@ class NNModuleVariable(VariableTracker):
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable(len(module), **options)
+        elif (
+            name == "__contains__"
+            and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
+            and args
+            and args[0].is_python_constant()
+        ):
+            return ConstantVariable(
+                args[0].as_python_constant() in module._modules, **options
+            )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
             assert type(module).__getitem__ in (
