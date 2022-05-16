@@ -1321,3 +1321,21 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts, nopython=True):
             fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_func_jump_on_tensor_condition(self):
+        def f1(input):
+            if input == 0:
+                return input + 1
+            else:
+                return input + 2
+
+        def f2(input):
+            return f1(input)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res1 = f2(torch.tensor([1.0]))
+            res2 = f2(torch.tensor([0.0]))
+
+        self.assertEqual(res1, 3)
+        self.assertEqual(res2, 1)
