@@ -202,6 +202,15 @@ class VariableBuilder:
                 value=value,
                 guards=make_guards(GuardBuilder.CONSTANT_MATCH),
             )
+        elif isinstance(value, frozenset) and (
+            all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
+        ):
+            # For frozenset, we can guard by object ID instead of value
+            # equality, this allows us to handle non-literal values
+            return ConstantVariable(
+                value=value,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         elif isinstance(value, enum.Enum):
             return EnumVariable(
                 value=value,
