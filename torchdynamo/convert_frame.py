@@ -1,6 +1,5 @@
 import dis
 import functools
-import inspect
 import itertools
 import os
 import sys
