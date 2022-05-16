@@ -1226,21 +1226,21 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_builtin_subclasses_as_method_on_class_type(self):
         class Foo:
             def __init__(name):
-                name_ = name
+                self.ame_ = name
 
             def get_name(self):
                 return "Foo " + self.name_
 
         class Bar(Foo):
             def __init__(name):
-                name_ = name
+                self.name_ = name
 
             def get_name(self):
                 return "Bar " + self.name_
 
         class Baz(Foo):
             def __init__(name):
-                name_ = name
+                self.name_ = name
 
             def get_name(self):
                 return "Baz " + self.name_
@@ -1261,21 +1261,21 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_builtin_subclasses_as_method_on_var(self):
         class Foo:
             def __init__(name):
-                name_ = name
+                self.name_ = name
 
             def get_name(self):
                 return "Foo " + self.name_
 
         class Bar(Foo):
             def __init__(name):
-                name_ = name
+                self.name_ = name
 
             def get_name(self):
                 return "Bar " + self.name_
 
         class Baz(Bar):
             def __init__(name):
-                name_ = name
+                self.name_ = name
 
             def get_name(self):
                 return "Baz " + self.name_
