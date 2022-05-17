@@ -43,11 +43,16 @@ from torchdynamo.testing import format_speedup
 from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
+from torchdynamo.test import QuantizationCompiler
+from torch.ao.quantization import default_qconfig
+
+quant_compiler = QuantizationCompiler({"": default_qconfig})
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 torchbench_dir = abspath(
     "../torchbench" if exists("../torchbench") else "../torchbenchmark"
 )
+print(torchbench_dir)
 assert os.path.exists(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
@@ -329,6 +334,59 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
+def quant_experiment(args, model_iter_fn, float_model, quant_model, example_inputs):
+    """
+    Measure speedups over eager using the autotuning inference backend.  To use this:
+        1) First run once to record graphs that need autotuning
+        2) Next run ./autotune.py to select the right backend for each recorded graph
+        3) Finally, run this target again to measure speedups
+
+    Writes to ./speedups.csv
+    """
+    print("running quant_experiment")
+    timings = np.zeros((args.repeat, 2), np.float64)
+    # if we randomize the input, we should also check the result is correct
+    should_check_result = should_randomize_input = args.randomize_input
+    is_correct = True
+
+    for rep in range(args.repeat):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+        # get the converted model
+        quant_compiler.enable_convert()
+        print("setting prepare mode to False in quant_experiment")
+        with torchdynamo.run():
+            timings[rep, 1], actual_output = timed(
+                quant_model, model_iter_fn, inputs, return_result=True
+            )
+
+    # reset the changes to the code
+    # benchmarking floating point model
+    torchdynamo.reset()
+    for rep in range(args.repeat):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+        # with torchdynamo.run():
+        timings[rep, 0], expected_output = timed(
+            float_model, model_iter_fn, inputs, return_result=True
+        )
+        # if should_check_result:
+        #     is_correct = is_correct and same(expected_output, actual_output)
+    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
+    median = np.median(timings, axis=0)
+    speedup = median[0] / median[1]
+    output_csv(
+        output_filename,
+        ("dev", "name", "speedup"),
+        [current_device, current_name, float(speedup)],
+    )
+    return format_speedup(speedup, pvalue, is_correct=is_correct)
 
 def overhead_experiment(*args, model_iter_fn):
     """
@@ -684,6 +742,9 @@ def main():
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
+        "--quant", action="store_true", help="quant perf test"
+    )
+    group.add_argument(
         "--speedup-ts", action="store_true", help=help(speedup_experiment_ts)
     )
     group.add_argument(
@@ -937,6 +998,11 @@ def main():
         optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = f"speedup_{args.backend}.csv"
+    elif args.quant:
+        quant_compiler.enable_prepare()
+        optimize_ctx = torchdynamo.optimize(quant_compiler, nopython=args.nopython)
+        experiment = quant_experiment
+        output_filename = "quant.csv"
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
@@ -993,6 +1059,7 @@ def main():
                 experiment,
                 cos_similarity,
                 args.skip_accuracy_check,
+                args.quant
             )
         stats_file = output_filename.split(".csv")[0] + "_stats.csv"
         if args.generate_aot_autograd_stats:
@@ -1017,8 +1084,11 @@ def main():
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         for device, name, model, example_inputs in iter_models(args):
+            print("benchmarking: ", name)
+            print("example_inputs: ", example_inputs)
             torchdynamo.reset()
             gc.collect()
+            torch.set_default_dtype(torch.float32)
             run_one_model(
                 name,
                 model,
@@ -1029,6 +1099,7 @@ def main():
                 experiment,
                 cos_similarity,
                 args.skip_accuracy_check,
+                args.quant,
             )
 
         Stats.print_summary()
@@ -1068,6 +1139,7 @@ def run_one_model(
     experiment,
     cos_similarity=False,
     skip_accuracy_check=False,
+    quant_exp=False,
 ):
     tolerance = 1e-4
     # Increase the tolerance for torch allclose
@@ -1075,6 +1147,7 @@ def run_one_model(
         tolerance = 1e-3
 
     with pick_grad(name, is_training):
+        original_model = copy.deepcopy(model)
         mode = "train" if is_training else "eval"
         sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
         sys.stdout.flush()
@@ -1095,6 +1168,9 @@ def run_one_model(
         torch.manual_seed(1337)
         torchdynamo.reset()
         try:
+            if quant_exp:
+                # quantize the model
+                quant_compiler.enable_prepare()
             with optimize_ctx:
                 new_result = model_iter_fn(model, example_inputs)
         except Exception:
@@ -1128,7 +1204,10 @@ def run_one_model(
         if output_filename and "coverage" in output_filename:
             results.append(f"{ok:3}/{total:3} +{frames_third_pass} frames")
 
-        results.append(experiment(model, example_inputs))
+        if quant_exp:
+            results.append(experiment(original_model, model, example_inputs))
+        else:
+            results.append(experiment(model, example_inputs))
         print(" ".join(map(str, results)))
 
 
