@@ -146,26 +146,23 @@ class WrapperBackend:
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
 
-        if not callable(self.backend):
-            print("self.backend is not callable")
-
-        if self.backend is None or self.backend is self.gm.forward:
+        if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
 
         if not config.verify_correctness:
-            return self.backend(self.gm, self.original_example_inputs)
+            return self.candidate
 
         # if verify_correctness=True
         try:
             correct = self.gm.forward(*self.example_inputs)
-            copy_gm = copy.deepcopy(self.gm)
-            candidate = self.backend(copy_gm, self.original_example_inputs)
-            result = candidate(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
 
             # TODO: replace `same` function with the one in testing
             if same(correct, result):
-                return candidate
+                return self.candidate
 
             print(f"incorrect results of backend {self}")
             return self.gm.forward
