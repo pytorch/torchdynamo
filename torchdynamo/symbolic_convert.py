@@ -372,24 +372,39 @@ class InstructionTranslatorBase(object):
     def LOAD_CONST(self, inst):
         self.push(ConstantVariable(value=inst.argval))
 
-    def LOAD_GLOBAL(self, inst):
-        try:
-            value = self.f_globals[inst.argval]
-        except KeyError:
-            return self.load_builtin(inst)
+    def get_global_variable(self, name, value):
         if self.output.root_globals is self.f_globals:
-            source = GlobalSource(inst.argval)
+            source = GlobalSource(name)
         else:
             if "__name__" in self.f_globals:
                 source = AttrSource(
-                    self.import_source(self.f_globals["__name__"]), inst.argval
+                    self.import_source(self.f_globals["__name__"]), name
                 )
             else:
-                name = f"___unnamed_scope_{id(self.f_globals)}"
-                if name not in self.output.root_globals:
-                    self.output.install_global(name, self.f_globals)
-                source = GetItemSource(GlobalSource(name), inst.argval)
-        self.push(VariableBuilder(self, source)(value))
+                mangled_name = f"___unnamed_scope_{id(self.f_globals)}"
+                if mangled_name not in self.output.root_globals:
+                    self.output.install_global(mangled_name, self.f_globals)
+                source = GetItemSource(GlobalSource(mangled_name), name)
+        return VariableBuilder(self, source)(value)
+
+    def LOAD_GLOBAL(self, inst):
+        name = inst.argval
+        if name in self.symbolic_globals:
+            self.push(self.output.side_effects.load_global(self.symbolic_globals[name]))
+            return
+
+        try:
+            value = self.f_globals[name]
+        except KeyError:
+            return self.load_builtin(inst)
+        self.push(self.get_global_variable(name, value))
+
+    def STORE_GLOBAL(self, inst):
+        name = inst.argval
+        value = self.pop()
+        variable = self.get_global_variable(name, value)
+        self.symbolic_globals[name] = variable
+        self.output.side_effects.store_global(variable, value)
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
@@ -1101,6 +1116,7 @@ class InstructionTranslatorBase(object):
         # Mutable state checkpointed by copy_graphstate()
         self.output: OutputGraph = output
         self.symbolic_locals: Dict[str, VariableTracker] = symbolic_locals
+        self.symbolic_globals: Dict[str, VariableTracker] = {}
         self.stack: List[VariableTracker] = []
         self.instruction_pointer: int = 0
         self.current_instruction: Instruction = create_instruction("NOP")

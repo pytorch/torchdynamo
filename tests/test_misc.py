@@ -21,6 +21,8 @@ from torchdynamo.testing import unsupported
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
+_gtensor = torch.zeros(10)
+
 
 class MiscTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
@@ -793,6 +795,27 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
+
+    def test_store_global_1(self):
+        class MyObj:
+            def __init__(self, a):
+                self.a = a
+
+        def fn(obj):
+            global _gtensor
+            val = obj.a + _gtensor
+            _gtensor += torch.ones(10)
+            return val
+
+        x1 = torch.randn(10)
+        obj1 = MyObj(x1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res1 = fn(obj1)
+        obj2 = MyObj(x1)
+        with torchdynamo.optimize(cnts):
+            res2 = fn(obj2)
+        self.assertTrue(same(res2 - res1, torch.ones(10)))
 
     def test_user_defined_class_name(self):
         class MyClassFoo:

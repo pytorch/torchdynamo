@@ -9,6 +9,7 @@ from . import utils
 from . import variables
 from .bytecode_transformation import create_instruction
 from .codegen import PyCodegen
+from .source import GlobalSource
 from .source import LocalSource
 from .source import Source
 from .utils import object_new
@@ -117,6 +118,15 @@ class SideEffects(object):
     def load_cell(self, cellvar):
         assert isinstance(cellvar, variables.NewCellVariable)
         return self.load_attr(cellvar, "cell_contents")
+
+    def load_global(self, gvar: VariableTracker):
+        assert isinstance(gvar, variables.VariableTracker)
+        return self.load_attr(gvar, gvar.source.name())
+
+    def store_global(self, gvar: VariableTracker, value: VariableTracker):
+        assert isinstance(gvar, variables.VariableTracker)
+        assert isinstance(value, variables.VariableTracker)
+        self.store_attr(gvar, gvar.source.name(), value)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
@@ -300,7 +310,12 @@ class SideEffects(object):
                     cg.tx.output.update_co_names(name)
                     cg(value)
                     cg(var.mutable_local.source)
-                    suffixes.append([create_instruction("STORE_ATTR", name)])
+                    op = (
+                        "STORE_GLOBAL"
+                        if isinstance(var.mutable_local.source, GlobalSource)
+                        else "STORE_ATTR"
+                    )
+                    suffixes.append([create_instruction(op, name)])
             else:
                 assert False, type(var)
 
