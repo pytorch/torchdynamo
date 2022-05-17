@@ -62,26 +62,32 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 
 def wrap_compiler_fn(compiler_fn):
     """Expand backend strings to functions"""
-    if isinstance(compiler_fn, WrapperBackend):
-        # currently, compiler_fn's backend is not callable
-        # if it use default BACKENDS
-        # set compiler_fn.backend as the callable function
-        wrapper_compiler_fn = compiler_fn
-    else:
-        # convert to WrapperBackend class
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
         wrapper_compiler_fn = WrapperBackend(compiler_fn)
 
-    compiler_fn_backend = wrapper_compiler_fn.backend
-    if compiler_fn_backend == "inductor":
-        from torchinductor.compile_fx import compile_fx
+        if compiler_fn == "inductor":
+            from torchinductor.compile_fx import compile_fx
 
-        wrapper_compiler_fn.backend = compile_fx
-    elif isinstance(compiler_fn_backend, str):
-        from .optimizations import BACKENDS
+            wrapper_compiler_fn.backend = compile_fx
+        elif isinstance(compiler_fn, str):
+            from .optimizations import BACKENDS
 
-        wrapper_compiler_fn.backend = wrap_compiler_fn(BACKENDS[compiler_fn_backend])
+            wrapper_compiler_fn.backend = wrap_compiler_fn(BACKENDS[compiler_fn])
 
-    return wrapper_compiler_fn
+        return wrapper_compiler_fn
+
+    else:
+        if compiler_fn == "inductor":
+            from torchinductor.compile_fx import compile_fx
+
+            return compile_fx
+        elif isinstance(compiler_fn, str):
+            from .optimizations import BACKENDS
+
+            return wrap_compiler_fn(BACKENDS[compiler_fn])
+        else:
+            return compiler_fn
 
 
 def wrap_convert_context(fn):
