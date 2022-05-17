@@ -15,9 +15,15 @@ from torchdynamo.testing import same
 
 try:
     importlib.import_module("functorch")
+
+    from torch._decomp import get_decompositions
+
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx
-except (ImportError, ModuleNotFoundError):
+
+    # This will only pass on pytorch builds newer than roughly 5/15/2022
+    assert get_decompositions([torch.ops.aten.trace])
+except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires functorch")
 
 
