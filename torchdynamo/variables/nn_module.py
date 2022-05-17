@@ -283,6 +283,7 @@ class NNModuleVariable(VariableTracker):
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
             assert type(module).__getitem__ in (
+                torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
             ), typestr(module)

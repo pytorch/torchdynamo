@@ -268,6 +268,21 @@ class ModuleList(torch.nn.Module):
         return x
 
 
+class ModuleDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+
+    def forward(self, x):
+        # TODO(future PR): handle more logic
+        x = self.layers["0"](x)
+        return x
+
+
 class TensorList(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -548,6 +563,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_moduledict = make_test(ModuleDict())
     test_super1 = make_test(SuperModule())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
