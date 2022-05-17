@@ -19,6 +19,7 @@ from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
 from .eval_frame import WrapperBackend
+from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
 from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
@@ -118,6 +119,9 @@ def wrap_convert_context(fn):
 
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
+    # Check if the function was decorated with torchdynamo.optimize
+    if frame.f_code in always_optimize_code_objects:
+        return True
 
     # Check if there is global import of torch.*
     for co_name in frame.f_code.co_names:
