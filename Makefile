@@ -42,8 +42,9 @@ setup:
 	pip install -r requirements.txt
 
 setup_nightly:
-	pip install --pre torch==1.12.0.dev20220501+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	env MAKEFLAGS="-j8" pip install git+https://github.com/pytorch/functorch.git@e492c3cee1e4a22e477daa216c605bc08a447572
+	pip install ninja
+	pip install --pre torch==1.12.0.dev20220515+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
 	pip install -r requirements.txt
 	python setup.py develop
 
@@ -75,7 +76,8 @@ build-deps: clone-deps
 	# conda env remove --name torchdynamo
 	# conda create --name torchdynamo python=3.8
 	# conda activate torchdynamo
-	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake \
+                     cffi typing_extensions future six requests dataclasses protobuf
 	conda install -y -c pytorch magma-cuda113
 	make setup && pip uninstall -y torch
 	(cd ../pytorch     && python setup.py clean && python setup.py develop)
