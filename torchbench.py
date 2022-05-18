@@ -59,8 +59,6 @@ os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
 SKIP = {
-    # non-deterministic output / cant check correctness
-    "pyhpc_turbulent_kinetic_energy",
     # https://github.com/pytorch/torchdynamo/issues/101
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
@@ -75,6 +73,12 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+}
+
+# non-deterministic output / cant check correctness
+NONDETERMINISTIC = {
+    "pyhpc_turbulent_kinetic_energy",
+    "pyhpc_isoneutral_mixing",
 }
 
 # Some models have bad train dataset. We read eval dataset.
@@ -1171,7 +1175,7 @@ def run_one_model(
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
 
         torch.manual_seed(1337)
-        if current_name != "pyhpc_turbulent_kinetic_energy":
+        if current_name not in NONDETERMINISTIC:
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
             if not same(correct_result, correct_rerun_result):
                 print("INCORRECT - Variation in Eager runs itself")
@@ -1187,7 +1191,7 @@ def run_one_model(
             logging.exception("unhandled error")
             print("ERROR")
             return sys.exit(-1)
-        if current_name == "pyhpc_turbulent_kinetic_energy":
+        if current_name in NONDETERMINISTIC:
             # This model has non-deterministic output so we cant
             # check correctness.
             # TODO(jansel): submit upstream fix for this
