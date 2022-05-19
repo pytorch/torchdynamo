@@ -19,17 +19,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         super().__init__(gm)
 
         self.nodes_conv_args = {}
-        self.conv_arg_names = (
-            "input",
-            "weight",
-            "bias",
-            "stride",
-            "padding",
-            "dilation",
-            "transposed",
-            "output_padding",
-            "groups",
-        )
+        self.conv_arg_names = [arg.name for arg in aten.convolution.default._schema.arguments]
 
     def run(self, *args):
         run_result = super().run(*args)

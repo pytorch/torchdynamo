@@ -31,6 +31,14 @@ def has_ipex():
         return False
 
 
+def has_functorch():
+    try:
+        importlib.import_module("functorch")
+        return True
+    except ImportError:
+        return False
+
+
 class Seq(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -89,6 +97,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
+    @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_log_conv_args(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
         model = model.to(memory_format=torch.channels_last)
