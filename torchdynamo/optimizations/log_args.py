@@ -1,4 +1,5 @@
 import json
+import os
 
 import torch
 
@@ -24,7 +25,9 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
 
     def run(self, *args):
         run_result = super().run(*args)
-        with open("tmp/conv_args.json", "w") as fd:
+        filename = "tmp/conv_args.json"
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, "w") as fd:
             json.dump(self.nodes_conv_args, fd)
         return run_result
 
