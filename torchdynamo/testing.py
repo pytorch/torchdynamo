@@ -80,6 +80,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         for k in a.keys():
             if not (same(a[k], b[k], cos_similarity, tol)):
+                print("b[k]=",b[k])
                 print("Accuracy failed for key name", k)
                 return False
         return True
@@ -95,7 +96,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             print(f"Similarity score={res.cpu().numpy()}")
-            return res >= 0.99
+            return res >= 0.98
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol)
     elif isinstance(a, (str, int, float, type(None), bool, torch.device)):

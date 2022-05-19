@@ -142,6 +142,8 @@ INPLACE_KEYWORD_OPS = {
     F.threshold,
 }
 IOPERATOR_REPLACEMENTS = {
+    "masked_fill_": "masked_fill",
+    "scatter_": "scatter",
     torch.relu_: torch.relu,
     torch.sigmoid_: torch.sigmoid,
     operator.iadd: torch.add,
