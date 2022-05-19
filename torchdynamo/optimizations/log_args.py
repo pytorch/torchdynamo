@@ -19,9 +19,17 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         super().__init__(gm)
 
         self.nodes_conv_args = {}
-        # self.convolution_args = inspect.getfullargspec(aten.convolution.op())[0]
-        # print(self.convolution_args)
-        # self.convolution_nargs = len(self.convolution_args)
+        self.conv_arg_names = (
+            "input",
+            "weight",
+            "bias",
+            "stride",
+            "padding",
+            "dilation",
+            "transposed",
+            "output_padding",
+            "groups",
+        )
 
     def run(self, *args):
         run_result = super().run(*args)
@@ -37,17 +45,29 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         if n.op == "call_function":
             if n.target == aten.convolution:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
-                assert len(args) == 9, "aten.convolution should have 9 args"
+                assert len(args) == len(
+                    self.conv_arg_names
+                ), f"aten.convolution should have {len(self.conv_arg_names)} args"
                 conv_args = {}
-                conv_args["input"] = args[0].shape
-                conv_args["weight"] = args[1].shape
-                conv_args["bias"] = args[2].shape if args[2] is not None else None
-                conv_args["stride"] = args[3]
-                conv_args["padding"] = args[4]
-                conv_args["dilation"] = args[5]
-                conv_args["transposed"] = args[6]
-                conv_args["output_padding"] = args[7]
-                conv_args["groups"] = args[8]
+                # collect tensor's shape, stride (channel first or last), dtype
+                for i in range(3):
+                    arg_name = self.conv_arg_names[i]
+                    if args[i] is None:
+                        conv_args[arg_name] = {
+                            "shape": None,
+                            "stride": None,
+                            "dtype": None,
+                        }
+                    else:
+                        conv_args[arg_name] = {
+                            "shape": args[i].shape,
+                            "stride": args[i].stride(),
+                            "dtype": str(args[i].dtype),
+                        }
+                # collect stride/padding/dilation/transposed/output_padding/groups
+                for i in range(3, len(args)):
+                    arg_name = self.conv_arg_names[i]
+                    conv_args[arg_name] = args[i]
 
                 self.nodes_conv_args[n.name] = conv_args
         return result
