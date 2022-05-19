@@ -1362,3 +1362,23 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(res1, 3)
         self.assertEqual(res2, 1)
+
+    def test_frozenset_torch_func_contains(self):
+        funcs = frozenset([torch.add])
+
+        def fn(x, func):
+            if func in funcs:
+                x = torch.add(x, 1.0)
+            x = torch.mul(x, 1.0)
+            return x
+
+        x = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, torch.add)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, torch.mul)
+        self.assertEqual(cnts.op_count, 1)
