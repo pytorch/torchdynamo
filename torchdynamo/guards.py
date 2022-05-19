@@ -171,6 +171,7 @@ class GuardBuilder:
             self.code.append(f"not hasattr({ref}, {attr!r})")
 
     def EQUALS_MATCH(self, guard: Guard):
+        ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(
             val,
@@ -202,11 +203,14 @@ class GuardBuilder:
         ), type(val).__name__
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
-            self.code.append(f"str({self.arg_ref(guard)}) == {str(val)!r}")
+            self.code.append(f"str({ref}) == {str(val)!r}")
             return
         if istype(val, torch.Size):
             val = tuple(val)
-        self.code.append(f"{self.arg_ref(guard)} == {val!r}")
+
+        # Add a type check to prevent boolean check of a tensor and non-tensor.
+        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
+        self.code.append(f"{ref} == {val!r}")
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)

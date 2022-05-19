@@ -298,3 +298,9 @@ class PyCodegen(object):
                 self
             )
         )
+
+    def create_begin_finally(self):
+        if sys.version_info < (3, 8):
+            return self.create_load_const(None)
+        else:
+            return create_instruction("BEGIN_FINALLY")

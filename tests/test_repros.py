@@ -2,10 +2,13 @@
 import collections
 import copy
 import inspect
+import itertools
+from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
 
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -1030,7 +1033,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, ifdyn(28, 14))
 
     def test_recursive_map(self):
-        # https://github.com/facebookresearch/torchdynamo/issues/132
+        # https://github.com/pytorch/torchdynamo/issues/132
         def _recursive_map(struct, batch_dim=0):
             for k, v in struct.items():
                 if v is not None:
@@ -1105,3 +1108,103 @@ class ReproTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize("eager"):
             res = fn3()
         self.assertTrue(same(ref, res))
+
+    def test_with_on_graph_break_inst(self):
+        def reversible(x):
+            print("Hello world")  # Cause graph break so inline fails
+            return torch.sin(torch.cos(x))
+
+        def fn(x):
+            with torch.enable_grad():
+                a = torch.sin(x)
+                b = reversible(a)
+                c = torch.sigmoid(b)
+                c.sum().backward()
+                return x.grad
+
+        x = torch.randn(3, requires_grad=True)
+        x.grad = None
+        with torch.no_grad():
+            ref = fn(x)
+
+        x.grad = None
+        with torchdynamo.optimize("eager"):
+            with torch.no_grad():
+                res = fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_abc_setattr(self):
+        # tests that we correctly bail out of __setattr__ calls
+
+        # TODO: does not ensure ABC classes are correctly inferred as ClassVariables
+        # (doesn't test the fix for 'super()')
+
+        class BaseModule(torch.nn.Module, ABC):
+            def blah(self, x):
+                return x + 1
+
+        class Derived(BaseModule):
+            def __setattr__(self, name, value) -> None:
+                super().__setattr__(name, value)
+
+            def forward(self, x):
+                # expect a graph break on __setattr__
+                self.foo = 0
+                return self.blah(x)
+
+            def blah(self, x):
+                return super().blah(x)
+
+        x = torch.randn(3, requires_grad=True)
+        with torchdynamo.optimize("eager"):
+            mod = Derived()
+            mod(x)
+
+        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
+        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["total"], 3)
+
+    def test_guard_fail(self):
+        @torchdynamo.skip
+        def fn():
+            condition_shape = (5, 5)
+            dtypes = (torch.bool,)
+            shapes = (
+                (),
+                (5,),
+                (1, 5),
+            )
+
+            tensors = list(
+                [
+                    torch.empty(shape, dtype=dtype).fill_(17)
+                    for shape, dtype in itertools.product(shapes, dtypes)
+                ]
+            )
+
+            x_vals = (5.0, *tensors)
+            y_vals = (6.0, *tensors)
+
+            @torchdynamo.disable
+            def get_expected(condition, x, y):
+                x_np = x.cpu().numpy() if isinstance(x, torch.Tensor) else x
+                y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
+                return torch.from_numpy(
+                    np.where(condition.cpu().numpy(), x_np, y_np)
+                ).to(common_dtype)
+
+            for x, y in zip(x_vals, y_vals):
+                condition = torch.empty(*condition_shape, dtype=torch.bool).bernoulli_()
+                common_dtype = torch.result_type(x, y)
+
+                def check_equal(condition, x, y):
+                    # NumPy aggressively promotes to double, hence cast to output to correct dtype
+                    expected = get_expected(condition, x, y)
+                    result = torch.where(condition, x, y)
+                    assert torch.allclose(expected, result)
+
+                check_equal(condition, x, y)
+                check_equal(condition, y, x)
+
+        fn()
+        with torchdynamo.optimize("eager"):
+            fn()

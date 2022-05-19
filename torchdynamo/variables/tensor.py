@@ -13,6 +13,7 @@ from .. import config
 from .. import variables
 from ..exc import TorchRuntimeError
 from ..exc import unimplemented
+from ..source import AttrSource
 from ..utils import clone_tensor
 from ..utils import istype
 from ..utils import product
@@ -329,6 +330,16 @@ class TensorVariable(VariableTracker):
             )
             return ConstantVariable(None, **options)
         else:
+            # Convert x.new(torch.Size) into x.new_empty(torch.Size),
+            # as Tensor.new acts differently with a Size input versus a tuple input.
+            if (
+                name == "new"
+                and len(args) == 1
+                and isinstance(args[0], SizeVariable)
+                and not config.dynamic_shapes
+            ):
+                name = "new_empty"
+
             return TensorVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -366,12 +377,14 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def __init__(
         self,
         tensor_variable,
+        orig_tensor_variable_source,
         subclass_torch_function__func,
         subclass_type,
         **kwargs,
     ):
         super(TensorWithTFOverrideVariable, self).__init__(**kwargs)
         self.tensor_variable = tensor_variable
+        self.orig_tensor_variable_source = orig_tensor_variable_source
         self.subclass_torch_function__func = subclass_torch_function__func
         self.subclass_type = subclass_type
 
@@ -395,6 +408,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
         unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
             tx,
             func_var,
+            self.orig_tensor_variable_source,
             self.subclass_torch_function__func,
             self.subclass_type,
             options,
@@ -409,6 +423,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         return TensorWithTFOverrideVariable(
             unwrapped,
+            self.orig_tensor_variable_source,
             self.subclass_torch_function__func,
             self.subclass_type,
         )
@@ -417,6 +432,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def inline_torch_function_unwrapped(
         tx,
         original_func_var,
+        tensor_with_tf_override_source,
         tf_func,
         subclass_type,
         options,
@@ -431,6 +447,8 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         And `x0` has an override, then:
         * `original_func_var` will be a `VariableTracker` object wrapping `torch.sigmoid`
+        * `tensor_with_tf_override_source` will be the `Source` object from
+          the original tensor override instance in the beginning of the program
         * `tf_func` will be the custom `__torch_function__` function
         * `subclass_type` will be `type(x0)`
 
@@ -440,10 +458,14 @@ class TensorWithTFOverrideVariable(VariableTracker):
         The caller is responsible for wrapping the return value, if needed.
         """
         from torchdynamo.variables import UserDefinedClassVariable
-        from torchdynamo.variables import UserFunctionVariable
         from torchdynamo.variables.builder import TupleVariable
+        from torchdynamo.variables.builder import VariableBuilder
 
-        tf_func_var = UserFunctionVariable(tf_func, **options)
+        source = AttrSource(
+            AttrSource(tensor_with_tf_override_source, "__torch_function__"),
+            "__func__",
+        )
+        tf_func_var = VariableBuilder(tx, source)(tf_func)
         type_var = UserDefinedClassVariable(subclass_type, **options)
 
         # signature:

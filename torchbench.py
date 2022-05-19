@@ -23,6 +23,7 @@ import pandas as pd
 import torch
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
+from torch.utils._pytree import tree_map
 
 import torchdynamo
 import torchdynamo.utils
@@ -45,19 +46,24 @@ from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-torchbench_dir = abspath(
-    "../torchbench" if exists("../torchbench") else "../torchbenchmark"
-)
-assert os.path.exists(torchbench_dir)
+for torchbench_dir in (
+    "../torchbenchmark",
+    "../torchbench",
+    "../benchmark",
+):
+    if exists(torchbench_dir):
+        break
+assert exists(torchbench_dir), "../torchbenchmark does not exist"
+torchbench_dir = abspath(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
 SKIP = {
     # non-deterministic output / cant check correctness
     "pyhpc_turbulent_kinetic_energy",
-    # https://github.com/facebookresearch/torchdynamo/issues/101
+    # https://github.com/pytorch/torchdynamo/issues/101
     "detectron2_maskrcnn",
-    # https://github.com/facebookresearch/torchdynamo/issues/145
+    # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
 }
 
@@ -98,6 +104,32 @@ USE_SMALL_BATCH_SIZE = {
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
 }
+
+# These benchmarks took >600s on an i9-11900K CPU
+VERY_SLOW_BENCHMARKS = {
+    "hf_BigBird",  # 3339s
+    "hf_Longformer",  # 3062s
+    "hf_T5",  # 930s
+}
+
+# These benchmarks took >60s on an i9-11900K CPU
+SLOW_BENCHMARKS = {
+    *{
+        "BERT_pytorch",  # 137s
+        "demucs",  # 116s
+        "fastNLP_Bert",  # 242s
+        "hf_Albert",  # 221s
+        "hf_Bart",  # 400s
+        "hf_Bert",  # 334s
+        "hf_DistilBert",  # 187s
+        "hf_GPT2",  # 470s
+        "hf_Reformer",  # 141s
+        "speech_transformer",  # 317s
+        "vision_maskrcnn",  # 99s
+    },
+    *VERY_SLOW_BENCHMARKS,
+}
+
 
 current_name = ""
 current_device = ""
@@ -560,7 +592,6 @@ def forward_and_backward_pass(mod, inputs, collect_outputs=True):
 def cast_to_fp16(model, inputs):
     # cast model and inputs to fp16
     model = model.half()
-    from torch.utils._pytree import tree_map
 
     inputs = tuple(
         tree_map(
@@ -581,6 +612,22 @@ def cast_to_fp16(model, inputs):
                 inputs,
             )
         )
+    return model, inputs
+
+
+def cast_to_fp32(model, inputs):
+    # cast model and inputs to fp16
+    model = model.to(torch.float32)
+
+    inputs = tuple(
+        tree_map(
+            lambda x: x.to(torch.float32)
+            if getattr(x, "dtype", None) == torch.float16
+            or getattr(x, "dtype", None) == torch.float64
+            else x,
+            inputs,
+        )
+    )
     return model, inputs
 
 
@@ -620,6 +667,13 @@ def main():
     )
     parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
+    )
+
+    parser.add_argument("--float16", action="store_true", help="cast model to fp16")
+    parser.add_argument("--float32", action="store_true", help="cast model to fp32")
+    parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
+    parser.add_argument(
+        "--fast", "-f", action="store_true", help="skip slow benchmarks"
     )
     parser.add_argument("--only", help="used by --isolate to run just one model")
     parser.add_argument(
@@ -735,6 +789,11 @@ def main():
         help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
     )
     group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -778,9 +837,6 @@ def main():
             }
         )
 
-    if args.no_skip:
-        SKIP.clear()
-
     if args.nvfuser:
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
@@ -805,6 +861,12 @@ def main():
     else:
         model_iter_fn = forward_pass
 
+    if args.fast:
+        SKIP.update(SLOW_BENCHMARKS)
+
+    if args.devices == ["cpu"]:
+        SKIP.update(VERY_SLOW_BENCHMARKS)
+
     if args.no_skip:
         SKIP.clear()
 
@@ -816,6 +878,18 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
+    elif args.inductor:
+        if args.threads:
+            import torchinductor.config
+
+            torchinductor.config.cpp.threads = args.threads
+
+        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "inductor.csv"
+        args.isolate = True
+        args.float32 = True
+        args.cosine = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
@@ -886,12 +960,27 @@ def main():
         )
         experiment = speedup_experiment_fx2trt
         output_filename = "speedups_fx2trt.csv"
+        SKIP.update(
+            {
+                "alexnet",
+                "resnet18",
+                "resnet50",
+                "mobilenet_v2",
+                "mnasnet1_0",
+                "squeezenet1_1",
+                "shufflenetv2_x1_0",
+                "vgg16",
+                "resnext50_32x4d",
+            }
+        )
     elif args.speedup_fx2trt_fp16:
         optimize_ctx = torchdynamo.optimize(
             backends.fx2trt_compiler_fp16, nopython=args.nopython
         )
         experiment = speedup_experiment_fx2trt
         output_filename = "speedups_fx2trt_fp16.csv"
+        args.float16 = True
+        args.cosine = True
     elif args.accuracy_aot_nop:
         optimize_ctx = torchdynamo.optimize(
             aot_autograd_debug_strategy1, nopython=args.nopython
@@ -937,6 +1026,7 @@ def main():
         optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = f"speedup_{args.backend}.csv"
+        args.isolate = True
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
@@ -944,10 +1034,7 @@ def main():
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 
-    if args.speedup_fx2trt_fp16:
-        cos_similarity = True
-    else:
-        cos_similarity = False
+    cos_similarity = args.cosine
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
@@ -963,26 +1050,14 @@ def main():
                 device, name, model, example_inputs = load_model(
                     device, args.only, args.training, args.use_eval_mode
                 )
-                # torchbench changed the default precison=fp16 on torchvision net
-                if args.speedup_fx2trt:
-                    if name in (
-                        "alexnet",
-                        "resnet18",
-                        "resnet50",
-                        "mobilenet_v2",
-                        "mnasnet1_0",
-                        "squeezenet1_1",
-                        "shufflenetv2_x1_0",
-                        "vgg16",
-                        "resnext50_32x4d",
-                    ):
-                        print("Do not test vision models in fp32 mode")
-                        continue  # We need to cast model and inputs back to fp32 before we can enable it
-                if args.speedup_fx2trt_fp16:
-                    model, example_inputs = cast_to_fp16(model, example_inputs)
-
             except NotImplementedError:
                 continue  # bad benchmark implementation
+
+            if args.float32:
+                model, example_inputs = cast_to_fp32(model, example_inputs)
+            elif args.float16:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
+
             run_one_model(
                 name,
                 model,
@@ -1019,6 +1094,11 @@ def main():
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
+
+            if args.float32:
+                model, example_inputs = cast_to_fp32(model, example_inputs)
+            elif args.float16:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
             run_one_model(
                 name,
                 model,
@@ -1069,6 +1149,8 @@ def run_one_model(
     cos_similarity=False,
     skip_accuracy_check=False,
 ):
+    t0 = time.perf_counter()
+
     tolerance = 1e-4
     # Increase the tolerance for torch allclose
     if is_training and current_device == "cuda" and name in REQUIRE_HIGHER_TOLERANCE:
@@ -1126,7 +1208,9 @@ def run_one_model(
             frames_third_pass = 0
 
         if output_filename and "coverage" in output_filename:
-            results.append(f"{ok:3}/{total:3} +{frames_third_pass} frames")
+            results.append(
+                f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:3.0f}s"
+            )
 
         results.append(experiment(model, example_inputs))
         print(" ".join(map(str, results)))

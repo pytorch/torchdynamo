@@ -54,11 +54,6 @@ class AOTAutogradStrategy(object):
             if submod.__class__.__name__ == "LSTM":
                 self.use_fallback = True
 
-        has_param_as_input = False
-        for ex in example_inputs:
-            if isinstance(ex, torch.nn.parameter.Parameter):
-                has_param_as_input = True
-
         # 3) set_grad_enabled
         has_set_grad_enabled = False
         for node in self.gm.graph.nodes:
@@ -68,7 +63,6 @@ class AOTAutogradStrategy(object):
         if (
             has_mutation(self.gm, self.example_inputs)
             or len(gm_inputs) == 0
-            or has_param_as_input
             or has_set_grad_enabled
         ):
             self.use_fallback = True
@@ -143,4 +137,14 @@ class AOTAutogradMemoryEfficientFusion(AOTAutogradStrategy):
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs)
 
 
-aot_autograd_speedup_strategy = AOTAutogradMemoryEfficientFusion.compile_fn
+class AOTAutogradMemoryEfficientFusionWithContext:
+    """Pass nvfuser context to TorchDynamo"""
+
+    def __init__(self):
+        self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        return AOTAutogradMemoryEfficientFusion.compile_fn(gm, example_inputs)
+
+
+aot_autograd_speedup_strategy = AOTAutogradMemoryEfficientFusionWithContext()

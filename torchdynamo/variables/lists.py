@@ -6,6 +6,7 @@ import torch
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
+from ..source import GetItemSource
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
@@ -40,9 +41,16 @@ class BaseListVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
         if isinstance(index, slice):
-            return self.clone(items=self.items[index], mutable_local=None).add_options(
-                arg, self
-            )
+            if self.source is not None:
+                return self.clone(
+                    items=self.items[index],
+                    source=GetItemSource(self.source, index),
+                    mutable_local=None,
+                ).add_options(arg, self)
+            else:
+                return self.clone(
+                    items=self.items[index], mutable_local=None
+                ).add_options(arg, self)
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
@@ -236,15 +244,11 @@ class SizeVariable(TupleVariable):
         return torch.Size
 
     def reconstruct(self, codegen):
-        load_torch_size = [
-            create_instruction("LOAD_GLOBAL", "torch"),
-            create_instruction("LOAD_METHOD", "Size"),
-        ]
-        codegen.extend_output(load_torch_size)
+        codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_METHOD", 1),
+            create_instruction("CALL_FUNCTION", 1),
         ]
         return build_torch_size
 

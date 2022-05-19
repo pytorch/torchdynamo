@@ -1,0 +1,23 @@
+name: Test Inductor
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-inductor:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+        cache: 'pip'
+    - run: make setup_nightly
+    - run: pytest ./tests/test_torchinductor.py
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true

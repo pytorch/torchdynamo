@@ -73,7 +73,7 @@ class ConstantVariable(VariableTracker):
         if istype(self.value, tuple):
             # empty tuple constant etc
             return variables.TupleVariable(
-                self.unpack_var_sequence(tx), **options
+                items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
         try:
@@ -95,3 +95,21 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable(result, **options)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
+
+
+class EnumVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(EnumVariable, self).__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self):
+        return self.value
+
+    def __str__(self):
+        return f"EnumVariable({type(self.value)})"
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
