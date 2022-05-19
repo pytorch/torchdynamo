@@ -1322,6 +1322,29 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_id_of_nn_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                x = torch.add(x, 1.0)
+                return x
+
+        m = M().eval()
+        data = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        correct_ref_id = id(m)
+        with torchdynamo.optimize(cnts, nopython=True):
+            m(data, correct_ref_id)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        incorrect_ref_id = id(m) + 1
+        with torchdynamo.optimize(cnts, nopython=True):
+            m(data, incorrect_ref_id)
+        self.assertEqual(cnts.op_count, 1)
+
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
             if input == 0:
