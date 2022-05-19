@@ -104,11 +104,13 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
+        # check tmp/conv_args.json exists and has keys as arg names
+        filename = "tmp/conv_args.json"
+        if os.path.exists(filename):
+            os.remove(filename)
         with torchdynamo.optimize(conv_args_analysis), torch.no_grad():
             r2 = model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
-        # check tmp/conv_args.json exists and has keys as arg names
-        filename = "tmp/conv_args.json"
         self.assertTrue(os.path.exists(filename))
         with open(filename) as f:
             args_dict = json.load(f)

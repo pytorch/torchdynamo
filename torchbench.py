@@ -1034,10 +1034,7 @@ def main():
         output_filename = f"speedup_{args.backend}.csv"
         args.isolate = True
     elif args.log_conv_args:
-        optimize_ctx = torchdynamo.optimize(
-            conv_args_analysis,
-            nopython=args.nopython
-        )
+        optimize_ctx = torchdynamo.optimize(conv_args_analysis, nopython=args.nopython)
         output_filename = "log_conv_args.csv"
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
