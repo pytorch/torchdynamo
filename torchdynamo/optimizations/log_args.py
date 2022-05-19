@@ -19,7 +19,9 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         super().__init__(gm)
 
         self.nodes_conv_args = {}
-        self.conv_arg_names = [arg.name for arg in aten.convolution.default._schema.arguments]
+        self.conv_arg_names = [
+            arg.name for arg in aten.convolution.default._schema.arguments
+        ]
 
     def run(self, *args):
         run_result = super().run(*args)
