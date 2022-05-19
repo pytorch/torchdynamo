@@ -101,6 +101,11 @@ class OpOverrides:
     def bitwise_xor(x, y):
         return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
 
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+
 
 class IndentedBuffer:
     tabwidth = 4

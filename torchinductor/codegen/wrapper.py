@@ -63,7 +63,6 @@ class WrapperCodeGen(CodeGen):
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache, grid
                 try:
                     import triton
-                    from triton import cdiv
                     import triton.language as tl
                 except ImportError:
                     pass

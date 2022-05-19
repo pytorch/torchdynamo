@@ -11,6 +11,7 @@ from unittest.mock import patch
 import numpy
 import sympy
 import torch
+import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
 
@@ -1176,8 +1177,9 @@ class BatchMatrixMultiply(ExternKernelOut):
 
 
 class DeviceCopy(ExternKernelOut):
-    @staticmethod
-    def create(x, device):
+    @classmethod
+    def create(cls, x, device):
+        x = cls.realize_input(x)
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -1229,6 +1231,7 @@ class FallbackKernel(ExternKernelAlloc):
         kernel,
         tensor_args,
         nontensor_args,
+        unflatten_args,
     ):
         super(FallbackKernel, self).__init__(
             layout,
@@ -1237,15 +1240,44 @@ class FallbackKernel(ExternKernelAlloc):
         )
         assert getattr(torch.ops.aten, kernel.__name__) is kernel
         self.kernel = f"aten.{kernel.__name__}"
+        self.unflatten_args = unflatten_args
+
+    def codegen_args(self):
+        @dataclasses.dataclass
+        class Shim:
+            ref: Any
+
+            def __repr__(self):
+                return self.ref
+
+        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
+        constant_args = [Shim(repr(x)) for x in self.constant_args]
+        return list(map(repr, self.unflatten_args(tensor_args, constant_args)))
 
     @classmethod
     def create(cls, kernel, *args):
-        args = list(reversed(args))
+        args_flat, args_spec = pytree.tree_flatten(args)
+
+        is_arg_tensor = []
         tensor_args = []
-        while args and isinstance(args[-1], IRNode):
-            tensor_args.append(args.pop())
-        nontensor_args = list(reversed(args))
-        assert all(not isinstance(x, IRNode) for x in nontensor_args)
+        non_tensor_args = []
+        for arg in args_flat:
+            is_arg_tensor.append(isinstance(arg, IRNode))
+            if is_arg_tensor[-1]:
+                tensor_args.append(arg)
+            else:
+                non_tensor_args.append(arg)
+
+        def unflatten_args(new_tensor_args, new_non_tensor_args):
+            new_args = []
+            it_tensors = iter(new_tensor_args)
+            it_non_tensors = iter(new_non_tensor_args)
+            for is_tensor in is_arg_tensor:
+                if is_tensor:
+                    new_args.append(next(it_tensors))
+                else:
+                    new_args.append(next(it_non_tensors))
+            return pytree.tree_unflatten(new_args, args_spec)
 
         tensor_args = [
             cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
@@ -1262,14 +1294,15 @@ class FallbackKernel(ExternKernelAlloc):
             )
             for x in tensor_args
         ]
-        example_output = kernel(*example_args, *nontensor_args)
+        example_output = kernel(*unflatten_args(example_args, non_tensor_args))
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
                 MultiOutputLayout(),
                 kernel,
                 tensor_args,
-                nontensor_args,
+                non_tensor_args,
+                unflatten_args,
             )
             return [
                 MultiOutput(
@@ -1294,7 +1327,8 @@ class FallbackKernel(ExternKernelAlloc):
                 ),
                 kernel,
                 tensor_args,
-                nontensor_args,
+                non_tensor_args,
+                unflatten_args,
             )
 
 

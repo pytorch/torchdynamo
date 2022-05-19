@@ -98,7 +98,11 @@ class CppCodeCache:
                 cmd = cpp_compile_command(input=input_path, output=output_path).split(
                     " "
                 )
-                subprocess.check_call(cmd)
+                try:
+                    subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError as e:
+                    raise exc.CppCompileError(cmd, e.output)
+
             cls.cache[key] = cdll.LoadLibrary(output_path)
             cls.cache[key].key = key
         return cls.cache[key]
@@ -125,7 +129,7 @@ class PyCodeCache:
 def patch_triton_hackery():
     """
     The following is a copy and paste of triton.code_gen.Kernel.__call__,
-    with a bunch of stuff moved to a closure so it is only called once.
+    with a bunch of stuff moved to a closure, so it is only called once.
 
     This makes tiny kernels run ~1.2x faster.
     """
@@ -193,8 +197,9 @@ class TritonCodeCache:
     @classmethod
     def load(cls, source_code):
         patch_triton_dir()
-        # this breaks cudagraphs, but speeds up small inputs:
-        # patch_triton_hackery()
+        if config.triton.hackery and not config.triton.cudagraphs:
+            # this breaks cudagraphs, but speeds up small inputs:
+            patch_triton_hackery()
         return PyCodeCache.load(source_code)
 
 
@@ -202,17 +207,11 @@ def pointwise_heuristics():
     """args to @triton.heuristics()"""
     from triton import next_power_of_2
 
-    def need_mask(args):
-        return True
-        return (args["numel"] % args["BLOCK_SIZE"]) > 0
-
     def block_size(args):
         return min(1024, next_power_of_2(args["numel"]))
-        # return 1024
 
     return {
         "BLOCK_SIZE": block_size,
-        "NEED_MASK": need_mask,
     }
 
 
@@ -220,29 +219,15 @@ def reduction_heuristics():
     """args to @triton.heuristics()"""
     from triton import next_power_of_2
 
-    def need_mask(args):
-        return True
-        return (args["numel"] % args["BLOCK_SIZE"]) > 0 or (
-            args["reduction_numel"] % args["REDUCTION_SIZE"]
-        ) > 0
-
     def reduction_size(args):
         return next_power_of_2(args["reduction_numel"])
 
     def block_size(args):
         return max(next_power_of_2(1024 // args["REDUCTION_SIZE"]), 1)
 
-    # def num_warps(args):
-    #     n = args["numel"] * args["reduction_numel"]
-    #     if n <= 65536:
-    #         return 2
-    #     return 8
-
     return {
-        # "num_warps": num_warps,
         "REDUCTION_SIZE": reduction_size,
         "BLOCK_SIZE": block_size,
-        "NEED_MASK": need_mask,
     }
 
 
