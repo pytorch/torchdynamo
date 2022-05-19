@@ -49,6 +49,8 @@ DTYPE_ID_LOOKUP = {
 
 
 def decode_dtype(dtype: int):
+    if not isinstance(dtype, int):
+        return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
@@ -200,7 +202,7 @@ def _to_copy(
     non_blocking=False,
     memory_format=None,
 ):
-    assert not layout, "TODO"
+    assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
     assert not memory_format, "TODO"
     if dtype is not None:
@@ -623,7 +625,7 @@ def _full(fill_value, device, dtype, size):
 def constant_like(fill_value):
     def _constant_like(x, *, dtype, device, layout, pin_memory=False):
         assert not pin_memory
-        assert layout == 0
+        assert layout in (0, torch.strided)
         dtype = decode_dtype(dtype)
         return _full(fill_value, device, dtype, x.get_size())
 

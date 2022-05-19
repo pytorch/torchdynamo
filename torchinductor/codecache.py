@@ -65,11 +65,11 @@ def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "omp5"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
     else:
         ipaths = []
         lpaths = []
-        libs = ["omp5"]
+        libs = ["gomp"]
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
