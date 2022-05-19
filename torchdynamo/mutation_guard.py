@@ -73,7 +73,10 @@ class GenerationTracker:
 
 
 def generation_tagging_new(cls, *args, **kwargs):
-    obj = object.__new__(cls)
+    try:
+        obj = object.__new__(cls)
+    except TypeError:
+        obj = object.__new__(type(cls))
     GenerationTracker.tag(obj)
     return obj
 
