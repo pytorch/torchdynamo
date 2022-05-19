@@ -110,6 +110,10 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return constant3(a, b=1.0) + b
 
     @make_test
+    def test_device_constant(a):
+        return a + torch.ones(1, device=torch.device("cpu"))
+
+    @make_test
     def test_tuple1(a, b):
         args = (a, b)
         return sub(*args)
@@ -527,6 +531,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         tmp = f"{x.__class__.__name__} foo"
         if tmp.startswith("Tensor"):
             return x + 1
+
+    @requires_static_shapes
+    @make_test
+    def test_tensor_new_with_size(x):
+        y = torch.rand(5, 8)
+        z = x.new(y.size())
+        assert z.size() == y.size()
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.

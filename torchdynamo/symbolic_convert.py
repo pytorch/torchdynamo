@@ -25,6 +25,7 @@ from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
 from . import config
+from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin
@@ -35,8 +36,6 @@ from .bytecode_transformation import create_instruction
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
-from .exc import RestartAnalysis
-from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .output_graph import OutputGraph
@@ -61,6 +60,7 @@ from .variables.lists import TupleVariable
 from .variables.misc import ClosureVariable
 from .variables.misc import ContextManagerVariable
 from .variables.misc import GetAttrVariable
+from .variables.misc import GradModeVariable
 from .variables.misc import PythonModuleVariable
 from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable
@@ -123,7 +123,9 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
-        elif value.has_unpack_var_sequence(self):
+        elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
+            self
+        ):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
@@ -148,11 +150,33 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
             self.output.compile_subgraph(self)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
-            self.output.add_output_instructions([inst])
+
             for _ in range(push):
                 self.push(UnknownVariable())
+
+            resume_call_insts = self.create_call_resume_at(self.next_instruction)
+            # Check if there is a block stack entry with GradModeVariable. And
+            # wrap the instruction causing the graph break inside a try..finally
+            # block. See more details at
+            # https://github.com/pytorch/torchdynamo/issues/207
+            cleanup = []
+            if len(self.block_stack) == 1 and isinstance(
+                self.block_stack[0].with_context, GradModeVariable
+            ):
+                ctx_variable = self.block_stack[0].with_context
+
+                cg = PyCodegen(self)
+                setup_finally, cleanup = ctx_variable.reconstruct(
+                    cg, resume_call_insts[0]
+                )
+                self.output.add_output_instructions(setup_finally)
+
+            self.output.add_output_instructions([inst])
+
+            # Add the cleanup instructions from try..finally block
+            self.output.add_output_instructions(cleanup)
             self.output.add_output_instructions(
-                self.create_call_resume_at(self.next_instruction)
+                resume_call_insts,
             )
 
         return wrapper
@@ -278,7 +302,12 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (Unsupported, RestartAnalysis, TorchRuntimeError):
+        except (
+            exc.Unsupported,
+            exc.RestartAnalysis,
+            exc.TorchRuntimeError,
+            exc.SkipFrame,
+        ):
             raise
         except Exception as e:
             sys.stderr.write(
@@ -287,6 +316,14 @@ class InstructionTranslatorBase(object):
                 f"{self.lineno} {typestr(e)}\n"
             )
             raise
+        finally:
+            # Cleanup the outputGraph to delete the held tensors. We perform the
+            # cleanup only for InstructionTranslator and not
+            # InliningInstructionTranslator. The InliningInstructionTranslator
+            # mutates the output object and is restored to original state if
+            # there was an exception.
+            if isinstance(self, InstructionTranslator):
+                self.output.cleanup()
 
     def push(self, val):
         assert val is None or isinstance(
@@ -558,7 +595,7 @@ class InstructionTranslatorBase(object):
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
-            kwargsvars = ConstDictVariable({})
+            kwargsvars = ConstDictVariable({}, dict)
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -689,12 +726,14 @@ class InstructionTranslatorBase(object):
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         options = VariableTracker.propagate(items)
-        result = collections.OrderedDict()
+        result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable)
             result[k.value] = v
         assert len(result) == len(items) / 2
-        self.push(ConstDictVariable(result, mutable_local=MutableLocal(), **options))
+        self.push(
+            ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
+        )
 
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
@@ -706,7 +745,8 @@ class InstructionTranslatorBase(object):
         assert len(keys) == len(values)
         self.push(
             ConstDictVariable(
-                collections.OrderedDict(zip(keys, values)),
+                dict(zip(keys, values)),
+                dict,
                 mutable_local=MutableLocal(),
                 **options,
             )
@@ -722,12 +762,13 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
-        items = collections.OrderedDict(obj.items)
+        items = dict(obj.items)
         items[k.as_python_constant()] = v
         self.replace_all(
             obj,
             ConstDictVariable(
                 items,
+                obj.user_cls,
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )
@@ -1189,7 +1230,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def RETURN_VALUE(self, inst):
         if self.output.count_calls() == 0:
-            unimplemented("no graph found")
+            raise exc.SkipFrame()
         self.instruction_pointer = None
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
@@ -1293,7 +1334,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            unimplemented("write to __closure__ while inlining")
+            if isinstance(
+                self.symbolic_locals.get(inst.argval),
+                torchdynamo.variables.NewCellVariable,
+            ):
+                self.output.side_effects.store_cell(
+                    self.symbolic_locals[inst.argval], self.pop()
+                )
+            else:
+                unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:
@@ -1303,7 +1352,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.push(self.output.side_effects.load_cell(cell))
         else:
-            super().LOAD_DEREF(inst)
+            maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
+            if isinstance(maybe_sym_local, torchdynamo.variables.NewCellVariable):
+                self.push(self.output.side_effects.load_cell(maybe_sym_local))
+            else:
+                super().LOAD_DEREF(inst)
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()

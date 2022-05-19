@@ -1,6 +1,7 @@
 .PHONY: default develop test torchbench format lint setup clean autotune
 
-PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) $(wildcard tests/*.py)
+PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
+            $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -14,7 +15,7 @@ test: develop
 	pytest tests
 
 torchbench: develop
-	python torchbench.py
+	python torchbench.py --fast
 
 overhead: develop
 	python torchbench.py --overhead
@@ -35,8 +36,16 @@ lint:
 lint-deps:
 	grep -E '(black|flake8|isort|click)' requirements.txt | xargs pip install
 
+setup_lint: lint-deps
+
 setup:
 	pip install -r requirements.txt
+
+setup_nightly:
+	pip install --pre torch==1.12.0.dev20220501+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	env MAKEFLAGS="-j8" pip install git+https://github.com/pytorch/functorch.git@e492c3cee1e4a22e477daa216c605bc08a447572
+	pip install -r requirements.txt
+	python setup.py develop
 
 clean:
 	python setup.py clean
@@ -76,6 +85,7 @@ build-deps: clone-deps
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../functorch   && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py)
+	make setup_lint
 
 offline-autotune-cpu: develop
 	rm -rf subgraphs
@@ -117,3 +127,15 @@ baseline-gpu: develop
 	 python torchbench.py -dcuda --isolate -n100 --speedup-trt
 	 python torchbench.py -dcuda --isolate -n100 --speedup-onnx
 	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
+
+baseline-gpu-inductor: develop
+	 rm -f baseline_*.csv
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --inductor
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs && mv speedup_cudagraphs.csv baseline_cudagraphs.csv
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts --nvfuser && mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
+	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts && mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
+	 paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > baseline_all.csv
+
+
+
+

@@ -31,9 +31,15 @@ import _collections_abc
 import _weakrefset
 import torch
 
+from . import config
+
+
+def _strip_init_py(s):
+    return re.sub(r"__init__.py$", "", s)
+
 
 def _module_dir(m: types.ModuleType):
-    return re.sub(r"__init__.py$", "", m.__file__)
+    return _strip_init_py(m.__file__)
 
 
 SKIP_DIRS = [
@@ -79,20 +85,30 @@ SKIP_DIRS = [
         _weakrefset,
     )
 ]
-SKIP_DIRS_RE = None  # set in add() below
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
 }
+SKIP_DIRS_RE = None
 
 
-def add(module: types.ModuleType):
-    assert isinstance(module, types.ModuleType)
+def _recompile_re():
     global SKIP_DIRS_RE
-    name = module.__file__
-    if name is None:
-        return
-    SKIP_DIRS.append(_module_dir(module))
     SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+
+
+def add(import_name: str):
+    if isinstance(import_name, types.ModuleType):
+        return add(import_name.__name__)
+    assert isinstance(import_name, str)
+    module_spec = importlib.util.find_spec(import_name)
+    if not module_spec:
+        return
+    origin = module_spec.origin
+    if origin is None:
+        return
+    global SKIP_DIRS_RE
+    SKIP_DIRS.append(_strip_init_py(origin))
+    _recompile_re()
 
 
 def check(filename, allow_torch=False):
@@ -126,16 +142,17 @@ for _name in (
     "tree",
     "tvm",
     "fx2trt_oss",
+    "xarray",
 ):
-    try:
-        add(importlib.import_module(_name))
-    except (ImportError, TypeError):
-        pass
+    add(_name)
+
+_recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    return filename.startswith(_module_dir(torch.nn)) or filename.startswith(
-        _module_dir(torch.distributions)
+    return any(
+        filename.startswith(_module_dir(mod))
+        for mod in config.skipfiles_inline_module_allowlist
     )
 
 

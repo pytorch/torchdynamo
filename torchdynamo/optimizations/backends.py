@@ -326,12 +326,14 @@ def fx2trt(subgraph, **kwargs):
     try:
         model = copy.deepcopy(subgraph.model)
         inputs = copy.deepcopy(subgraph.example_inputs)
-        # import pdb;pdb.set_trace()
+
         model = normalize_ir(model, inputs)
         # pass rewrite
         print("before acc trace=", model.graph)
         # model = transform_setitem(model, inputs)
         # import pdb;pdb.set_trace()
+        # pass rewrite
+        model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)
         print("acc trace=", acc_model.graph)
         # Split out unsupported ops

@@ -1,14 +1,17 @@
+import contextlib
 import dis
 import functools
 import os.path
 import types
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch import fx
 
 import torchdynamo
 
+from . import config
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import is_generator
@@ -66,12 +69,12 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce")
 
 
-def same(a, b, cos_similarity=False, tol=1e-4):
+def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return len(a) == len(b) and all(
-            same(ai, bi, cos_similarity, tol) for ai, bi in zip(a, b)
+            same(ai, bi, cos_similarity, tol, equal_nan) for ai, bi in zip(a, b)
         )
     elif isinstance(a, dict):
         assert isinstance(b, dict)
@@ -79,8 +82,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
             b.keys()
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         for k in a.keys():
-            if not (same(a[k], b[k], cos_similarity, tol)):
-                print("b[k]=",b[k])
+            if not (same(a[k], b[k], cos_similarity, tol, equal_nan=equal_nan)):
                 print("Accuracy failed for key name", k)
                 return False
         return True
@@ -95,10 +97,11 @@ def same(a, b, cos_similarity=False, tol=1e-4):
             a = a.flatten().to(torch.float32)
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
-            print(f"Similarity score={res.cpu().numpy()}")
+            if res < 0.99:
+                print(f"Similarity score={res.cpu().numpy()}")
             return res >= 0.99
         else:
-            return torch.allclose(a, b, atol=tol, rtol=tol)
+            return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
     elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
         return a == b
     elif type(a).__name__ in (
@@ -116,7 +119,7 @@ def same(a, b, cos_similarity=False, tol=1e-4):
     ):
         assert type(a) is type(b)
         return all(
-            same(getattr(a, key), getattr(b, key), cos_similarity, tol)
+            same(getattr(a, key), getattr(b, key), cos_similarity, tol, equal_nan)
             for key in a.__dict__.keys()
         )
     else:
@@ -204,13 +207,16 @@ class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         torchdynamo.reset()
-        torchdynamo.config.debug = cls.prior_debug
+        cls._exit_stack.close()
 
     @classmethod
     def setUpClass(cls):
         torchdynamo.reset()
-        cls.prior_debug = torchdynamo.config.debug
-        torchdynamo.config.debug = True
+        cls._exit_stack = contextlib.ExitStack()
+        cls._exit_stack.enter_context(patch.object(config, "debug", True))
+        cls._exit_stack.enter_context(
+            patch.object(config, "raise_on_backend_error", True)
+        )
 
     def setUp(self):
         torchdynamo.utils.counters.clear()
@@ -241,3 +247,12 @@ def requires_static_shapes(fn):
         return fn(*args, **kwargs)
 
     return _fn
+
+
+def rand_strided(size, stride, dtype, device="cpu"):
+    needed_size = sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
+    if dtype.is_floating_point:
+        buffer = torch.randn(needed_size, dtype=dtype, device=device)
+    else:
+        buffer = torch.randint(0, 2, needed_size, dtype=dtype, device=device)
+    return torch.as_strided(buffer, size, stride)

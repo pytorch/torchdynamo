@@ -187,6 +187,14 @@ class SideEffects(object):
         self.keepalive.append(obj)
         return variable
 
+    def track_cell_existing(self, source: Source, item: Any):
+        variable = variables.NewCellVariable(
+            mutable_local=AttributeMutationExisting(source),
+        )
+        self.id_to_variable[id(item)] = variable
+        self.keepalive.append(item)
+        return variable
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
@@ -232,13 +240,14 @@ class SideEffects(object):
         ]
 
         for var in modified_vars:
-            if isinstance(var.mutable_local, AttributeMutationNew) and isinstance(
-                var, variables.NewCellVariable
-            ):
+            if isinstance(
+                var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
+            ) and isinstance(var, variables.NewCellVariable):
                 cg.load_import_from(utils.__name__, "make_cell")
                 cg.extend_output([create_instruction("CALL_FUNCTION", 0)])
                 cg.add_cache(var)
-                var.mutable_local.source = LocalSource(cg.tempvars[var])
+                if isinstance(var.mutable_local, AttributeMutationNew):
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
