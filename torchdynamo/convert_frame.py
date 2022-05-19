@@ -17,6 +17,7 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .eval_frame import WrapperBackend
 from .eval_frame import skip_code
 from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
@@ -59,7 +60,7 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_compiler_fn(compiler_fn):
+def _wrap_compiler_fn(compiler_fn):
     """Expand backend strings to functions"""
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
@@ -71,6 +72,19 @@ def wrap_compiler_fn(compiler_fn):
         return wrap_compiler_fn(BACKENDS[compiler_fn])
     else:
         return compiler_fn
+
+
+def wrap_compiler_fn(compiler_fn):
+    """WrapperBackend if config.verify_correctness is True"""
+    wrapped_compiler_fn = _wrap_compiler_fn(compiler_fn)
+
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(wrapped_compiler_fn)
+
+        return wrapper_backend_compiler_fn
+
+    return wrapped_compiler_fn
 
 
 def wrap_convert_context(fn):

@@ -1103,6 +1103,11 @@ def main():
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
+
+            if args.float32:
+                model, example_inputs = cast_to_fp32(model, example_inputs)
+            elif args.float16:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
             run_one_model(
                 name,
                 model,

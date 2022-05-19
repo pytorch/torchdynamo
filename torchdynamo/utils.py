@@ -353,3 +353,60 @@ def rename_implicit(v):
         # to support .1 etc see guards.py and _eval_frame.c
         return f"___implicit{m.group(1)}"
     return v
+
+
+def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
+    """Check correctness to see if a and b match"""
+    if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
+        assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
+        return len(a) == len(b) and all(
+            same(ai, bi, cos_similarity, tol, equal_nan) for ai, bi in zip(a, b)
+        )
+    elif isinstance(a, dict):
+        assert isinstance(b, dict)
+        assert set(a.keys()) == set(
+            b.keys()
+        ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
+        for k in a.keys():
+            if not (same(a[k], b[k], cos_similarity, tol, equal_nan=equal_nan)):
+                print("Accuracy failed for key name", k)
+                return False
+        return True
+    elif isinstance(a, torch.Tensor):
+        if a.is_sparse:
+            assert b.is_sparse
+            a = a.to_dense()
+            b = b.to_dense()
+        assert isinstance(b, torch.Tensor)
+        if cos_similarity:
+            # TRT will bring error loss larger than current threshold. Use cosine similarity as replacement
+            a = a.flatten().to(torch.float32)
+            b = b.flatten().to(torch.float32)
+            res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
+            if res < 0.99:
+                print(f"Similarity score={res.cpu().numpy()}")
+            return res >= 0.99
+        else:
+            return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
+    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
+        return a == b
+    elif type(a).__name__ in (
+        "MaskedLMOutput",
+        "Seq2SeqLMOutput",
+        "CausalLMOutputWithCrossAttentions",
+        "LongformerMaskedLMOutput",
+        "Instances",
+        "SquashedNormal",
+        "Boxes",
+        "Normal",
+        "TanhTransform",
+        "Foo",
+        "Variable",
+    ):
+        assert type(a) is type(b)
+        return all(
+            same(getattr(a, key), getattr(b, key), cos_similarity, tol, equal_nan)
+            for key in a.__dict__.keys()
+        )
+    else:
+        raise RuntimeError(f"unsupported type: {type(a).__name__}")

@@ -10,8 +10,6 @@
 #undef Py_BUILD_CORE
 #endif
 
-//#define TORCHDYNAMO_MULTI_THREAD
-//#define TORCHDYNAMO_DEBUG
 #define bool char
 #define false 0
 #define true 1
@@ -60,8 +58,6 @@ static PyObject *guard_error_hook = NULL;
 
 size_t extra_index = -1;
 
-#ifdef TORCHDYNAMO_MULTI_THREAD
-
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
 inline static PyObject *eval_frame_callback_get(void) {
@@ -77,45 +73,23 @@ inline static void eval_frame_callback_set(PyObject *obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-#else
-
-static PyObject *eval_frame_callback_ = NULL;
-
-inline static PyObject *eval_frame_callback_get(void) {
-  return eval_frame_callback_;
-}
-
-inline static void eval_frame_callback_set(PyObject *obj) {
-  eval_frame_callback_ = obj;
-}
-
-#endif
-
 static void ignored(void *obj) {}
+static PyObject *_custom_eval_frame_shim(PyThreadState *tstate,
+                                         PyFrameObject *frame, int throw_flag);
 static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
-                                    int throw_flag);
+                                    int throw_flag, PyObject *callback);
 static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
                                              PyFrameObject *frame,
                                              int throw_flag);
 #if PY_VERSION_HEX >= 0x03090000
-static PyObject *custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
-                                   int throw_flag) {
-  return _custom_eval_frame(tstate, frame, throw_flag);
-}
-static PyObject *custom_eval_frame_run_only(PyThreadState *tstate,
-                                            PyFrameObject *frame,
-                                            int throw_flag) {
-  return _custom_eval_frame_run_only(tstate, frame, throw_flag);
+static PyObject *custom_eval_frame_shim(PyThreadState *tstate,
+                                        PyFrameObject *frame, int throw_flag) {
+  return _custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 #else
-static PyObject *custom_eval_frame(PyFrameObject *frame, int throw_flag) {
+static PyObject *custom_eval_frame_shim(PyFrameObject *frame, int throw_flag) {
   PyThreadState *tstate = PyThreadState_GET();
-  return _custom_eval_frame(tstate, frame, throw_flag);
-}
-static PyObject *custom_eval_frame_run_only(PyFrameObject *frame,
-                                            int throw_flag) {
-  PyThreadState *tstate = PyThreadState_GET();
-  return _custom_eval_frame_run_only(tstate, frame, throw_flag);
+  return _custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 #endif
 
@@ -132,29 +106,33 @@ inline static PyObject *eval_frame_default(PyThreadState *tstate,
 #endif
 }
 
-inline static void enable_eval_frame(PyThreadState *tstate) {
+inline static void enable_eval_frame_shim(PyThreadState *tstate) {
 #if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp, &custom_eval_frame);
+  if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
+      &custom_eval_frame_shim) {
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         &custom_eval_frame_shim);
+  }
 #else
-  tstate->interp->eval_frame = &custom_eval_frame;
+  if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
+    // First call
+    tstate->interp->eval_frame = &custom_eval_frame_shim;
+  }
 #endif
 }
 
-inline static void disable_eval_frame(PyThreadState *tstate) {
+inline static void enable_eval_frame_default(PyThreadState *tstate) {
 #if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
-                                       &_PyEval_EvalFrameDefault);
+  if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
+      &_PyEval_EvalFrameDefault) {
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         &_PyEval_EvalFrameDefault);
+  }
 #else
-  tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
-#endif
-}
-
-inline static void enable_run_only_eval_frame(PyThreadState *tstate) {
-#if PY_VERSION_HEX >= 0x03090000
-  _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
-                                       &custom_eval_frame_run_only);
-#else
-  tstate->interp->eval_frame = &custom_eval_frame_run_only;
+  if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
+    // First call
+    tstate->interp->eval_frame = &_PyEval_EvalFrameDefault;
+  }
 #endif
 }
 
@@ -310,8 +288,26 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
   return result;
 }
 
+static PyObject *_custom_eval_frame_shim(PyThreadState *tstate,
+                                         PyFrameObject *frame, int throw_flag) {
+  // Shims logic into one of three states. Can probably be refactored into a
+  // single func, later:
+  //  - None: disables TorchDynamo
+  //  - False: run-only mode (reuse existing compiles)
+  //  - Python callable(): enables TorchDynamo
+  PyObject *callback = eval_frame_callback_get();
+
+  if (callback == Py_None) {
+    return eval_frame_default(tstate, frame, throw_flag);
+  } else if (callback == Py_False) {
+    return _custom_eval_frame_run_only(tstate, frame, throw_flag);
+  } else {
+    return _custom_eval_frame(tstate, frame, throw_flag, callback);
+  }
+}
+
 static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
-                                    int throw_flag) {
+                                    int throw_flag, PyObject *callback) {
   DEBUG_TRACE("begin %s %s %i %i %i %i", name(frame),
               PyUnicode_AsUTF8(frame->f_code->co_filename), frame->f_lineno,
               frame->f_lasti, frame->f_iblock, frame->f_executing);
@@ -328,15 +324,17 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  // don't run custom_eval_frame() for guard function
-  PyObject *callback = eval_frame_callback_get();
-  disable_eval_frame(tstate);
+  // We don't run the current custom_eval_frame behavior for guards.
+  // So we temporarily set the callback to Py_None to drive the correct behavior
+  // in the shim.
+  eval_frame_callback_set(Py_None);
 
   PyCodeObject *cached_code = lookup(extra, frame->f_locals);
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    enable_eval_frame(tstate);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
@@ -353,13 +351,15 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
     set_extra(frame->f_code, extra);
-    enable_eval_frame(tstate);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     set_extra(frame->f_code, SKIP_CODE);
-    enable_eval_frame(tstate);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
     return eval_frame_default(tstate, frame, throw_flag);
   }
 }
@@ -390,52 +390,50 @@ static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
   }
 }
 
+static int active_dynamo_threads = 0;
+
+static PyObject *increment_working_threads(PyThreadState *tstate) {
+  active_dynamo_threads = active_dynamo_threads + 1;
+  if (active_dynamo_threads > 0) {
+    enable_eval_frame_shim(tstate);
+  }
+  Py_RETURN_NONE;
+}
+
+static PyObject *decrement_working_threads(PyThreadState *tstate) {
+  if (active_dynamo_threads > 0) {
+    active_dynamo_threads = active_dynamo_threads - 1;
+    if (active_dynamo_threads == 0) {
+      enable_eval_frame_default(tstate);
+    }
+  }
+  Py_RETURN_NONE;
+}
+
 static PyObject *set_eval_frame(PyObject *new_callback, PyThreadState *tstate) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
   //  - Python callable(): enables TorchDynamo
-
-  PyObject *old_callback;
-#if PY_VERSION_HEX >= 0x03090000
-  void *old_eval_frame = _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
-#else
-  void *old_eval_frame = tstate->interp->eval_frame;
-#endif
-  if (old_eval_frame == &custom_eval_frame) {
-    old_callback = eval_frame_callback_get();
-  } else if (old_eval_frame == &custom_eval_frame_run_only) {
-    old_callback = Py_False;
-  } else if (old_eval_frame == &_PyEval_EvalFrameDefault) {
-    old_callback = Py_None;
-  } else {
-    CHECK(false);
-  }
+  PyObject *old_callback = eval_frame_callback_get();
 
   // owned by caller
   Py_INCREF(old_callback);
 
-  if (new_callback == Py_None) {
-    disable_eval_frame(tstate);
-  } else if (new_callback == Py_False) {
-    enable_run_only_eval_frame(tstate);
-  } else {
-    enable_eval_frame(tstate);
-#ifdef TORCHDYNAMO_MULTI_THREAD
-  } // callback is private, so always clear it
-#endif
+  if (old_callback != Py_None && new_callback == Py_None) {
+    decrement_working_threads(tstate);
+  } else if (old_callback == Py_None && new_callback != Py_None) {
+    increment_working_threads(tstate);
+  }
 
   Py_INCREF(new_callback);
-  Py_DECREF(eval_frame_callback_get());
+  Py_DECREF(old_callback);
+
+  // Set thread local callback. This will drive behavior of our shim, if/when it
+  // is installed.
   eval_frame_callback_set(new_callback);
 
-#ifndef TORCHDYNAMO_MULTI_THREAD
-  // only actually set the global variable if we are enabled, otherwise don't
-  // mess with other threads
-}
-#endif
-
-return old_callback;
+  return old_callback;
 }
 
 static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
@@ -543,10 +541,8 @@ PyMODINIT_FUNC PyInit__eval_frame(void) {
   CHECK(sizeof(unsigned long) == sizeof(void *));
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
-#ifdef TORCHDYNAMO_MULTI_THREAD
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);
-#endif
 
   Py_INCREF(Py_None);
   eval_frame_callback_set(Py_None);

@@ -3,6 +3,7 @@ import collections
 import copy
 import dataclasses
 import dis
+import enum
 import functools
 import math
 import sys
@@ -1221,3 +1222,120 @@ class MiscTests(torchdynamo.testing.TestCase):
             ConstDictVariable(d2, collections.OrderedDict).python_type(),
             collections.OrderedDict,
         )
+
+    def test_builtin_subclasses_as_method_on_class_type(self):
+        class Foo:
+            def __init__(name):
+                self.ame_ = name
+
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+
+        counter = CompileCounter()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn():
+            return Foo.__subclasses__()
+
+        subs_of_foo_optim = fn()
+
+        self.assertEqual(len(subs_of_foo_reg), 2)
+        self.assertEqual(subs_of_foo_reg, subs_of_foo_optim)
+
+    def test_builtin_subclasses_as_method_on_var(self):
+        class Foo:
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Bar):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+        sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
+
+        sub_of_foo_subclass_var_optim = list()
+        counter = CompileCounter()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn():
+            return Foo.__subclasses__()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn_single(subs_of_foo_optim):
+            return subs_of_foo_optim[0].__subclasses__()
+
+        subs_of_foo_optim = fn()
+        sub_of_foo_subclass_var_optim = fn_single(subs_of_foo_optim)
+
+        self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
+        self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
+
+    def test_enum_no_graphbreaks(self):
+        class Foo(enum.Enum):
+            FOO = 0
+            BAR = 1
+
+        def fn(x, foo):
+            if foo is Foo.FOO:
+                x = torch.add(x, 1.0)
+            x = torch.mul(x, 1.0)
+            return x
+
+        x = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, Foo.FOO)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, Foo.BAR)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_func_jump_on_tensor_condition(self):
+        def f1(input):
+            if input == 0:
+                return input + 1
+            else:
+                return input + 2
+
+        def f2(input):
+            return f1(input)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res1 = f2(torch.tensor([1.0]))
+            res2 = f2(torch.tensor([0.0]))
+
+        self.assertEqual(res1, 3)
+        self.assertEqual(res2, 1)

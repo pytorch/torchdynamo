@@ -268,6 +268,21 @@ class ModuleList(torch.nn.Module):
         return x
 
 
+class ModuleDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+
+    def forward(self, x):
+        # TODO(future PR): handle more logic
+        x = self.layers["0"](x)
+        return x
+
+
 class TensorList(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -548,6 +563,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_moduledict = make_test(ModuleDict())
     test_super1 = make_test(SuperModule())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
@@ -657,3 +673,35 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             self.assertTrue(torchdynamo.testing.same(out1, out2))
 
         run()
+
+    def test_nn_moduledict_contains(self):
+        class M(torch.nn.Module):
+            def __init__(self, module_dict):
+                super().__init__()
+                self.module_dict = module_dict
+
+            def forward(self, x):
+                if "foo" in self.module_dict:
+                    x = torch.mul(x, 1.0)
+                x = torch.add(x, 1.0)
+                return x
+
+        module_dict = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
+        m = M(module_dict)
+        data = torch.randn(1)
+        out1 = m(data)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt, nopython=True):
+            out2 = m(data)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertTrue(torchdynamo.testing.same(out1, out2))
+
+        module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
+        m = M(module_dict)
+        data = torch.randn(1)
+        out1 = m(data)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt, nopython=True):
+            out2 = m(data)
+        self.assertEqual(cnt.op_count, 1)
+        self.assertTrue(torchdynamo.testing.same(out1, out2))

@@ -123,7 +123,9 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
-        elif value.has_unpack_var_sequence(self):
+        elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
+            self
+        ):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
