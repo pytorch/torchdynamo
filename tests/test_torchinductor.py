@@ -253,7 +253,7 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min())
+            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -365,6 +365,21 @@ class CommonTemplate:
             return (torch.nn.functional.silu(a),)
 
         self.common(fn, (torch.randn(8, 8),))
+
+    def test_nan_to_num(self):
+        def fn(a):
+            return (
+                torch.nan_to_num(a),
+                torch.nan_to_num(a, nan=3.0),
+                torch.nan_to_num(a, nan=None),
+                torch.nan_to_num(a, posinf=4.0),
+                torch.nan_to_num(a, neginf=5.0),
+                torch.nan_to_num(a, nan=3.0, posinf=4.0, neginf=5.0),
+            )
+
+        self.common(
+            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),)
+        )
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -1292,6 +1307,12 @@ class CommonTemplate:
             return aten.triu(a, 1), aten.triu(a, 0), aten.triu(a, 2)
 
         self.common(fn, (torch.randn([2, 10, 10]),))
+
+    def test_no_op_reduction(self):
+        def fn(a):
+            return a.sum(-1), torch.amax(a + 1, 1, keepdim=True)
+
+        self.common(fn, (torch.randn([8, 1, 1]),))
 
 
 class CpuTests(TestCase):
