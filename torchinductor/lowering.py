@@ -482,6 +482,16 @@ def _cudnn_rnn(*args):
     )
 
 
+@register_lowering(aten.sort, type_promote=False)
+def sort(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.sort, *args),
+        )
+    )
+
+
 @register_lowering(aten.grid_sampler_2d, type_promote=False)
 def grid_sampler_2d(*args):
     return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
@@ -658,6 +668,27 @@ def tensor(data, *, dtype=None, device=None):
         inner_fn=inner_fn,
         ranges=ranges,
     )
+
+
+@register_lowering(torch.as_tensor)
+def as_tensor(data, dtype=None, device=None):
+    if isinstance(data, TensorBox):
+        if dtype is not None:
+            data = to(data, dtype)
+        if device is not None:
+            data = to(data, device)
+        return data
+    return tensor(data, dtype=dtype, device=device)
+
+
+@register_lowering(torch.LongTensor)
+def long_tensor(data):
+    return tensor(data, dtype=torch.int64)
+
+
+@register_lowering(aten._local_scalar_dense)
+def _local_scalar_dense(data):
+    return ir.DynamicScalar()
 
 
 def _full(fill_value, device, dtype, size):

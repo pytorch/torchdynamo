@@ -1247,6 +1247,23 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_sort(self):
+        def fn(a):
+            return torch.sort(a)
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_long_tensor(self):
+        def fn(a):
+            return (
+                torch.LongTensor([294]).to(a.device) - a,
+                torch.as_tensor([295]).to(a.device) + a,
+            )
+
+        self.common(fn, (torch.randint(0, 999, size=[8, 8]),))
+
     def test_constant_pad_2d(self):
         def fn(a):
             return (
