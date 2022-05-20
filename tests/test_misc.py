@@ -1382,3 +1382,35 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts, nopython=True):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_list_mutation(self):
+        def f1(l):
+            l.append(torch.ones(8))
+            return l
+
+        def f2():
+            l = [torch.ones(6)]
+            f1(l)
+            return l
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_inline_dict_mutation(self):
+        def f1(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        def f2():
+            d = {"a": torch.ones(5), "b": torch.ones(5)}
+            f1(d)
+            return d
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
