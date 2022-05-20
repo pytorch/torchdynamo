@@ -78,9 +78,6 @@ static PyObject *_custom_eval_frame_shim(PyThreadState *tstate,
                                          PyFrameObject *frame, int throw_flag);
 static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
                                     int throw_flag, PyObject *callback);
-static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
-                                             PyFrameObject *frame,
-                                             int throw_flag);
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject *custom_eval_frame_shim(PyThreadState *tstate,
                                         PyFrameObject *frame, int throw_flag) {
@@ -299,11 +296,9 @@ static PyObject *_custom_eval_frame_shim(PyThreadState *tstate,
 
   if (callback == Py_None) {
     return eval_frame_default(tstate, frame, throw_flag);
-  } else if (callback == Py_False) {
-    return _custom_eval_frame_run_only(tstate, frame, throw_flag);
-  } else {
-    return _custom_eval_frame(tstate, frame, throw_flag, callback);
   }
+
+  return _custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
 static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
@@ -312,13 +307,30 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
               PyUnicode_AsUTF8(frame->f_code->co_filename), frame->f_lineno,
               frame->f_lasti, frame->f_iblock, frame->f_executing);
   CacheEntry *extra = get_extra(frame->f_code);
-  if (extra == SKIP_CODE) {
+  if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
+
+  // TODO(jansel): investigate directly using the "fast" representation
   if (PyFrame_FastToLocalsWithError(frame) < 0) {
     DEBUG_TRACE("error %s", name(frame));
     return NULL;
+  }
+
+  // A callback of Py_False indicates "run only" mode, the cache is checked, but
+  // we never compile.
+  if (callback == Py_False) {
+    DEBUG_TRACE("In run only mode %s", name(frame));
+    PyCodeObject *cached_code = lookup(extra, frame->f_locals);
+    if (cached_code != NULL) {
+      // used cached version
+      DEBUG_TRACE("cache hit %s", name(frame));
+      return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    } else {
+      DEBUG_TRACE("cache miss %s", name(frame));
+      return eval_frame_default(tstate, frame, throw_flag);
+    }
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -360,32 +372,6 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
     set_extra(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_frame_default(tstate, frame, throw_flag);
-  }
-}
-
-static PyObject *_custom_eval_frame_run_only(PyThreadState *tstate,
-                                             PyFrameObject *frame,
-                                             int throw_flag) {
-  // do not dynamically compile anything, just reuse prior compiles
-  DEBUG_TRACE("begin %s", name(frame));
-  CacheEntry *extra = get_extra(frame->f_code);
-  if (extra == SKIP_CODE || extra == NULL) {
-    DEBUG_TRACE("skip %s", name(frame));
-    return eval_frame_default(tstate, frame, throw_flag);
-  }
-  // TODO(jansel): investigate directly using the "fast" representation
-  if (PyFrame_FastToLocalsWithError(frame) < 0) {
-    DEBUG_TRACE("error %s", name(frame));
-    return NULL;
-  }
-  PyCodeObject *cached_code = lookup(extra, frame->f_locals);
-  if (cached_code != NULL) {
-    // used cached version
-    DEBUG_TRACE("cache hit %s", name(frame));
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
-  } else {
-    DEBUG_TRACE("cache miss %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
 }
