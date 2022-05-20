@@ -253,7 +253,7 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min())
+            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -1275,6 +1275,12 @@ class CommonTemplate:
             return aten.triu(a, 1), aten.triu(a, 0), aten.triu(a, 2)
 
         self.common(fn, (torch.randn([2, 10, 10]),))
+
+    def test_no_op_reduction(self):
+        def fn(a):
+            return a.sum(-1), torch.amax(a + 1, 1, keepdim=True)
+
+        self.common(fn, (torch.randn([8, 1, 1]),))
 
 
 class CpuTests(TestCase):
