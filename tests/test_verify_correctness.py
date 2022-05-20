@@ -2,6 +2,7 @@
 import importlib
 import operator
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -78,10 +79,8 @@ def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return gm
 
 
-config.verify_correctness = True
-
-
 class TestVerifyCorrectness(torchdynamo.testing.TestCase):
+    @patch.object(config, "verify_correctness", True)
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
@@ -105,6 +104,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
+    @patch.object(config, "verify_correctness", True)
     def test_fixed_strategy1(self):
         s = Seq()
         i = torch.randn(10)
@@ -113,6 +113,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
             r2 = s(i)
         self.assertTrue(same(r1, r2))
 
+    @patch.object(config, "verify_correctness", True)
     def test_nnc(self):
         s = Seq()
         i = torch.randn(10)
@@ -121,6 +122,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
             r2 = s(i)
         self.assertTrue(same(r1, r2))
 
+    @patch.object(config, "verify_correctness", True)
     def test_incorrect_verify_true(self):
         """
         Even the bad optimization return a graph that
@@ -140,8 +142,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
             r2 = toy_example(i1, i2)
         self.assertTrue(same(r1, r2))
 
+    @patch.object(config, "verify_correctness", False)
     def test_incorrect_verify_false(self):
-        config.verify_correctness = False
         """
         The bad optimization return a graph that
         is not functionally equal to the original graph;
@@ -158,9 +160,9 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(incorrect_compile_fn):
             r2 = toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
-        config.verify_correctness = True
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
+    @patch.object(config, "verify_correctness", True)
     def test_export(self):
         s = Seq()
         i = torch.randn(10)
@@ -170,6 +172,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
+    @patch.object(config, "verify_correctness", True)
     def test_ipex_fp32(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
         model = model.to(memory_format=torch.channels_last)
@@ -182,6 +185,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         self.assertEqual(r2.dtype, torch.float32)
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
+    @patch.object(config, "verify_correctness", True)
     def test_ipex_bf16(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
         model = model.to(memory_format=torch.channels_last)
