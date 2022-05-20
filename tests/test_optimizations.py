@@ -1,5 +1,7 @@
 #!/usr/bin/env pytest
 import importlib
+import json
+import os
 import unittest
 
 import torch
@@ -7,6 +9,7 @@ import torch
 import torchdynamo
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.inference import offline_autotuner
+from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
 from torchdynamo.testing import same
@@ -23,6 +26,14 @@ def has_onnxruntime():
 def has_ipex():
     try:
         importlib.import_module("intel_extension_for_pytorch")
+        return True
+    except ImportError:
+        return False
+
+
+def has_functorch():
+    try:
+        importlib.import_module("functorch")
         return True
     except ImportError:
         return False
@@ -85,6 +96,36 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertIsNotNone(r1)
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
+
+    @unittest.skipIf(not has_functorch(), "requires functorch")
+    def test_log_conv_args(self):
+        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
+        model = model.to(memory_format=torch.channels_last)
+        model = model.eval()
+        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
+        r1 = model(input)
+        # check tmp/conv_args.json exists and has keys as arg names
+        filename = "tmp/conv_args.json"
+        if os.path.exists(filename):
+            os.remove(filename)
+        with torchdynamo.optimize(conv_args_analysis), torch.no_grad():
+            r2 = model(input)
+        self.assertTrue(same(r1, r2.float(), tol=0.1))
+        self.assertTrue(os.path.exists(filename))
+        with open(filename) as f:
+            args_dict = json.load(f)
+            self.assertIn("convolution", args_dict.keys())
+            conv_args_dict = args_dict["convolution"]
+            self.assertIn("input", conv_args_dict.keys())
+            self.assertIn("weight", conv_args_dict.keys())
+            self.assertIn("bias", conv_args_dict.keys())
+            self.assertIn("stride", conv_args_dict.keys())
+            self.assertIn("padding", conv_args_dict.keys())
+            self.assertIn("dilation", conv_args_dict.keys())
+            self.assertIn("transposed", conv_args_dict.keys())
+            self.assertIn("output_padding", conv_args_dict.keys())
+            self.assertIn("groups", conv_args_dict.keys())
+        os.remove(filename)
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_export(self):
