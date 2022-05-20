@@ -149,6 +149,24 @@ def masked_fill(value, mask, other):
     return torch.where(mask, other, value)
 
 
+@register_decomposition([aten.nan_to_num])
+def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    if nan is None:
+        nan = 0.0
+    if posinf is None:
+        posinf = torch.finfo(x.dtype).max
+    if neginf is None:
+        neginf = torch.finfo(x.dtype).min
+    nan, posinf, neginf = (
+        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
+    )
+    nan = torch.tensor(nan, dtype=x.dtype, device=x.device)
+    x = torch.where(x != x, nan, x)
+    x = torch.where(x == float("inf"), posinf, x)
+    x = torch.where(x == float("-inf"), neginf, x)
+    return x
+
+
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     for idx in range(ndim - 1, -1, -1):
