@@ -366,6 +366,21 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_nan_to_num(self):
+        def fn(a):
+            return (
+                torch.nan_to_num(a),
+                torch.nan_to_num(a, nan=3.0),
+                torch.nan_to_num(a, nan=None),
+                torch.nan_to_num(a, posinf=4.0),
+                torch.nan_to_num(a, neginf=5.0),
+                torch.nan_to_num(a, nan=3.0, posinf=4.0, neginf=5.0),
+            )
+
+        self.common(
+            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),)
+        )
+
     def test_sum_keepdims(self):
         def fn(a, b):
             return (torch.sum(a + b, -1, keepdim=True),)
