@@ -201,7 +201,7 @@ class Reduction(Loops):
         reduction_type: str,
     ):
         reduction_numel = product(reduction_ranges)
-        if reduction_numel == 1 or reduction_numel == 0:
+        if reduction_numel == 1:
             # this reduction is actually a pointwise op
             def fn(index):
                 reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
