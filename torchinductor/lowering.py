@@ -1157,7 +1157,7 @@ def _validate_reduction_axis(x, axis):
     size = x.get_size()
     if isinstance(axis, int):
         axis = [axis]
-    elif axis is None:
+    elif not axis:
         axis = range(len(size))
     axis = list(axis)
     for i in range(len(axis)):
