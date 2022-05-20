@@ -1384,14 +1384,14 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     def test_inline_list_mutation(self):
-        def f1(l):
-            l.append(torch.ones(8))
-            return l
+        def f1(x):
+            x.append(torch.ones(8))
+            return x
 
         def f2():
-            l = [torch.ones(6)]
-            f1(l)
-            return l
+            x = [torch.ones(6)]
+            f1(x)
+            return x
 
         res1 = f2()
         cnts = torchdynamo.testing.CompileCounter()
