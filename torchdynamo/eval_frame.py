@@ -1,12 +1,21 @@
 import contextlib
+import copy
 import functools
 import logging
 import threading
+
+import torch
+
+from torchdynamo.utils import checkpoint_params
+from torchdynamo.utils import clone_inputs
 
 from . import config
 from . import convert_frame
 from . import skipfiles
 from .mutation_guard import install_generation_tagging_new
+from .utils import same
+
+log = logging.getLogger(__name__)
 
 try:
     from . import _eval_frame
@@ -122,6 +131,47 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn), backend_ctx_ctor=backend_ctx_ctor
     )
+
+
+class WrapperBackend:
+    def __init__(self, backend=None):
+        self.backend = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+
+        if self.candidate is None or self.candidate is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.candidate
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return self.candidate
+
+            print(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            return self.gm.forward
+        finally:
+            self.restore()
 
 
 def optimize(backend, nopython=False):
