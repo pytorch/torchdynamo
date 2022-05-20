@@ -218,16 +218,13 @@ class InstructionTranslatorBase(object):
         )
         self.push(fn.call_function(self, args, kwargs))
 
-    def update_locals_and_stack(
-        self, oldvar: VariableTracker, newvar: VariableTracker, apply_side_effects=False
-    ):
+    def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
         def repl(v: VariableTracker):
             if v.mutable_local is oldvar.mutable_local:
                 return newvar
             return v
 
-        if apply_side_effects:
-            self.output.side_effects.apply(repl)
+        self.output.side_effects.apply(repl)
         self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(repl, x)
@@ -244,7 +241,7 @@ class InstructionTranslatorBase(object):
             newvar = newvar.clone(
                 mutable_local=torchdynamo.variables.base.MutableLocal()
             )
-        self.update_locals_and_stack(oldvar, newvar, True)
+        self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
     def inline_user_function_return(self, fn, args, kwargs):
@@ -1368,22 +1365,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         assert inst.argval in self.cell_and_freevars()
         self.push(self.closure_cells[inst.argval])
 
-    def is_from_parent(self, var: VariableTracker):
-        for k, v in self.parent.symbolic_locals.items():
-            if var.mutable_local is v.mutable_local:
-                return True
-        return False
-
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        if isinstance(
-            oldvar, (ListVariable, ConstDictVariable)
-        ) and self.is_from_parent(oldvar):
-            newvar = self.parent.replace_all(oldvar, newvar)
-            # update this sub inline translator's symbolic_locals and stack
-            super().update_locals_and_stack(oldvar, newvar)
-            return newvar
-        else:
-            return super().replace_all(oldvar, newvar)
+        newvar = super().replace_all(oldvar, newvar)
+        # check and update parent's locals and stack in case oldvar is from parent
+        self.parent.update_locals_and_stack(oldvar, newvar)
+        return newvar
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
