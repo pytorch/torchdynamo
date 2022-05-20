@@ -160,7 +160,6 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     nan, posinf, neginf = (
         torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
     )
-    nan = torch.tensor(nan, dtype=x.dtype, device=x.device)
     x = torch.where(x != x, nan, x)
     x = torch.where(x == float("inf"), posinf, x)
     x = torch.where(x == float("-inf"), neginf, x)
