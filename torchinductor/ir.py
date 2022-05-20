@@ -1230,6 +1230,18 @@ class DeviceCopy(ExternKernelOut):
             wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
 
 
+class DynamicScalar(IRNode):
+    """
+    The result of a call to aten._local_scalar_dense.
+
+    This is not yet implemented.  The one model (so far) that calls this
+    (fastNLP_Bert) does not actually use the result.  So we expect this
+    node to get dead code eliminated.
+    """
+
+    pass
+
+
 class AdaptiveAvgPool2d(ExternKernelAlloc):
     kernel = "aten._adaptive_avg_pool2d"
 

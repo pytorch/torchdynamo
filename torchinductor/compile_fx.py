@@ -118,15 +118,18 @@ def compile_fx(
     if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
         wrap(CheckEachNode(gm).run)(*example_inputs)
 
-    if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
-        wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
+    try:
+        graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+        with V.set_graph_handler(graph):
+            wrap(graph.run)(*example_inputs)
+            compiled_fn = wrap(graph.compile_to_fn())
 
-    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
-    with V.set_graph_handler(graph):
-        wrap(graph.run)(*example_inputs)
-        compiled_fn = wrap(graph.compile_to_fn())
+        if "cuda" in graph.device_types and cudagraphs:
+            return cudagraphs_inner(compiled_fn, example_inputs)
+        else:
+            return compiled_fn
+    except Exception:
+        if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
+            wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
-    if "cuda" in graph.device_types and cudagraphs:
-        return cudagraphs_inner(compiled_fn, example_inputs)
-    else:
-        return compiled_fn
+        raise
