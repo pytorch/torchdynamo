@@ -415,7 +415,7 @@ class Scheduler:
 
     def compute_users(self):
         name_to_users = collections.defaultdict(list)
-        for node in V.graph.graph_outputs:
+        for node in chain(V.graph.graph_outputs, V.graph.mutated_inputs.values()):
             name_to_users[node.get_name()].append(
                 NodeUser(OutputNode(StarDep(node.get_name())))
             )

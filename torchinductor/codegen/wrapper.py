@@ -163,6 +163,9 @@ class WrapperCodeGen(CodeGen):
                     line.codegen(result)
                 else:
                     result.writeline(line)
+            for name, value in V.graph.mutated_inputs.items():
+                # TODO(jansel): we should put these as nodes in the graph so we can fuse into them
+                result.writeline(f"{name}.copy_({value.codegen_reference()})")
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
             result.writeline("return (" + ", ".join(output_refs) + ", )")
         return result.getvalue()

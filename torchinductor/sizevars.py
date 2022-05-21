@@ -71,6 +71,12 @@ class SizeVarAllocator(object):
         else:
             return left
 
+    def maybe_guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+        if self.size_hint(left - right) == 0:
+            self.guard_equals(left, right)
+            return True
+        return False
+
     def guard_lt(self, left: sympy.Symbol, right: sympy.Symbol):
         expr = sympy.expand(right - left).subs(self.replacements)
         assert self.size_hint(expr) > 0

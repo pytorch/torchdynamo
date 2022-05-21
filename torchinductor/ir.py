@@ -148,6 +148,12 @@ class Pointwise(Loops):
     def store_output(self, output_name, indexer, vars):
         return ops.store(output_name, indexer(vars), self.inner_fn(vars))
 
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Pointwise(device, self.dtype, loader, self.ranges)
+
 
 @dataclasses.dataclass
 class Reduction(Loops):
@@ -189,6 +195,19 @@ class Reduction(Loops):
                 )
         except Exception as e:
             return f"inner_fn(): {e}"
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Reduction(
+            device,
+            self.dtype,
+            loader,
+            self.ranges,
+            self.reduction_ranges,
+            self.reduction_type,
+        )
 
     @classmethod
     def create(
@@ -853,15 +872,32 @@ class Buffer(IRNode):
             return [self.layout.view.get_name()]
         return ()
 
+    def get_read_writes(self):
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            return extract_read_writes(
+                self.make_loader(),
+                self.get_size(),
+            )
 
-@dataclasses.dataclass
+
 class InputBuffer(Buffer):
     pass
 
 
-@dataclasses.dataclass
 class ConstantBuffer(InputBuffer):
-    pass
+    override_device = None
+
+    def make_loader(self):
+        def loader(index):
+            indexer = self.layout.make_indexer()
+            return ops.load(
+                V.graph.constant_name(self.name, self.override_device), indexer(index)
+            )
+
+        return loader
+
+    def constant_to_device(self, device):
+        return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
 @dataclasses.dataclass
@@ -933,6 +969,10 @@ class ComputedBuffer(Buffer):
 
     def should_allocate(self):
         return True
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        return self.data.constant_to_device(device)
 
 
 @dataclasses.dataclass
@@ -1210,6 +1250,13 @@ class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
         x = cls.realize_input(x)
+        read_writes = x.get_read_writes()
+        if all(
+            (r.name in V.graph.constants and hasattr(r, "index"))
+            for r in read_writes.reads
+        ):
+            return x.constant_to_device(device)
+
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -1546,8 +1593,10 @@ class TensorBox(MutableBox):
 
 class StorageBox(MutableBox):
     def realize(self):
-        if isinstance(self.data, (ComputedBuffer, InputsKernel, InputBuffer)):
-            return self.data.name
+        if isinstance(
+            self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
+        ):
+            return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
         self.data = ComputedBuffer(
             name=None,
