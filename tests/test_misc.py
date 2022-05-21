@@ -1442,4 +1442,3 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res2 = f4()
         self.assertTrue(same(res1, res2))
-        print(res1)
