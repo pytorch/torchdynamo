@@ -63,6 +63,7 @@ class GraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
         self.sizevars = SizeVarAllocator("s")
         self.graph_inputs = collections.OrderedDict()
+        self.graph_inputs_original = collections.OrderedDict()
         self.graph_outputs = None
         self.device_types = set()
         self.buffers = []
@@ -99,6 +100,14 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
 
+    def constant_name(self, name: str, device_override: torch.device):
+        if self.constants[name].device == device_override or device_override is None:
+            return name
+        alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
+        if alt_name not in self.constants:
+            self.constants[alt_name] = self.constants[name].to(device_override)
+        return alt_name
+
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
         if config.static_weight_shapes and (
@@ -116,6 +125,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
         self.graph_inputs[target] = tensor
+        self.graph_inputs_original[target] = tensor.data.data
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -125,7 +135,9 @@ class GraphLowering(torch.fx.Interpreter):
         if target not in lowerings:
             raise MissingOperator(target, args, kwargs)
         try:
-            return lowerings[target](*args, **kwargs)
+            result = lowerings[target](*args, **kwargs)
+            assert not isinstance(result, ir.IRNode) or isinstance(result, ir.TensorBox)
+            return result
         except Exception as e:
             raise LoweringException(e, target, args, kwargs) from e
 
@@ -153,6 +165,17 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, tuple)
         assert all(isinstance(x, TensorBox) for x in result), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+
+        self.mutated_inputs = {}
+        for name, value in self.graph_inputs.items():
+            value.realize()
+            assert isinstance(value, TensorBox)
+            value = value.data
+            assert isinstance(value, ir.StorageBox)
+            value = value.data
+            if not (isinstance(value, InputBuffer) and value.get_name() == name):
+                self.mutated_inputs[name] = value
+
         self.finalize()
 
     def finalize(self):

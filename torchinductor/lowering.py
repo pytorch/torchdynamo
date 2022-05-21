@@ -22,8 +22,7 @@ from .virtualized import ops
 lowerings = {}
 aten = torch.ops.aten
 
-# TODO(jansel): figure out a way generate this automatically
-#               these come as dtype args to kernels
+# TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
 DTYPE_ID_LOOKUP = {
     0: torch.uint8,
@@ -54,6 +53,14 @@ def decode_dtype(dtype: int):
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
+
+
+def decode_device(device):
+    if device is None:
+        return torch.tensor(0.0).device  # default dtype
+    if isinstance(device, str):
+        return torch.device(device)
+    return device
 
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
@@ -569,7 +576,7 @@ def arange(start, end=None, step=1, *, dtype=None, device=None):
     step = sympy.Integer(step)
 
     return Pointwise.create(
-        device=device or torch.tensor(0.0).device,
+        device=decode_device(device),
         dtype=dtype,
         inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
         ranges=[sympy.Integer(length)],
@@ -589,7 +596,7 @@ def linspace(start, end, steps, *, dtype=None, device=None):
         )
 
     return Pointwise.create(
-        device=device or torch.tensor(0.0).device,
+        device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=[sympy.Integer(steps)],
@@ -668,7 +675,7 @@ def tensor(data, *, dtype=None, device=None):
         )
 
     return Pointwise.create(
-        device=device or torch.tensor(0.0).device,
+        device=decode_device(device),
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=ranges,
@@ -731,7 +738,7 @@ def full_like(x, fill_value, **kwargs):
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(*size, dtype=None, device=None):
-        device = device or torch.tensor(1.0).device
+        device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
@@ -1355,10 +1362,33 @@ def mutate_to(changed, val):
         changed_data = changed
     if isinstance(val, TensorBox):
         val = val.data
-    assert isinstance(changed_data, ir.StorageBox)
-    assert isinstance(val, ir.StorageBox)
-    changed_data.data = val.data
-    return changed
+
+    if not isinstance(val, ir.StorageBox):
+        val = Pointwise.create(
+            device=changed.get_device(),
+            dtype=changed.get_dtype(),
+            inner_fn=val.make_loader(),
+            ranges=changed.get_size(),
+        ).data
+        assert isinstance(val, ir.StorageBox)
+
+    if isinstance(changed_data, ir.StorageBox):
+        changed_data.data = val.data
+        return changed
+
+    if isinstance(changed_data, ir.ReinterpretView):
+        numel1 = product(changed.get_size())
+        numel2 = product(val.get_size())
+        if V.graph.sizevars.maybe_guard_equals(numel1, numel2):
+            assert isinstance(changed_data.data, ir.StorageBox)
+            val.realize()
+            changed_data.data.data = ir.ReinterpretView(
+                val.data,
+                changed_data.data.get_layout(),
+            )
+            return changed
+
+    assert isinstance(changed_data, ir.StorageBox), changed_data
 
 
 @register_lowering(aten.fill_)
@@ -1369,6 +1399,14 @@ def fill_(x, fill_value):
 @register_lowering(aten.zero_)
 def zero_(x):
     return mutate_to(x, full_like(x, 0))
+
+
+@register_lowering(aten.copy_, type_promote=False)
+def copy_(dst, src, non_blocking=False):
+    src = to_device(src, dst.get_device())
+    src = to_dtype(src, dst.get_dtype())
+    src = expand(src, dst.get_size())
+    return mutate_to(dst, src)
 
 
 sum_ = register_lowering(aten.sum)(make_reduction("sum"))
