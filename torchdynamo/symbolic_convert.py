@@ -218,6 +218,17 @@ class InstructionTranslatorBase(object):
         )
         self.push(fn.call_function(self, args, kwargs))
 
+    def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
+        def repl(v: VariableTracker):
+            if v.mutable_local is oldvar.mutable_local:
+                return newvar
+            return v
+
+        self.output.side_effects.apply(repl)
+        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
+        for k, x in self.symbolic_locals.items():
+            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(
             oldvar.mutable_local, torchdynamo.side_effects.MutableSideEffects
@@ -230,16 +241,7 @@ class InstructionTranslatorBase(object):
             newvar = newvar.clone(
                 mutable_local=torchdynamo.variables.base.MutableLocal()
             )
-
-        def repl(v: VariableTracker):
-            if v.mutable_local is oldvar.mutable_local:
-                return newvar
-            return v
-
-        self.output.side_effects.apply(repl)
-        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
-        for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+        self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
     def inline_user_function_return(self, fn, args, kwargs):
@@ -1322,6 +1324,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
         )
+        self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
 
@@ -1361,6 +1364,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
         self.push(self.closure_cells[inst.argval])
+
+    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
+        newvar = super().replace_all(oldvar, newvar)
+        # recursively check and update parent's locals and stack in case oldvar is from parent
+        translator = self
+        while hasattr(translator, "parent"):
+            translator = translator.parent
+            translator.update_locals_and_stack(oldvar, newvar)
+        return newvar
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
