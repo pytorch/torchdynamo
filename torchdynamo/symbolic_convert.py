@@ -1367,8 +1367,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)
-        # check and update parent's locals and stack in case oldvar is from parent
-        self.parent.update_locals_and_stack(oldvar, newvar)
+        # recursively check and update parent's locals and stack in case oldvar is from parent
+        translator = self
+        while hasattr(translator, "parent"):
+            translator = translator.parent
+            translator.update_locals_and_stack(oldvar, newvar)
         return newvar
 
     def should_compile_partial_graph(self):
