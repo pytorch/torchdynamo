@@ -241,8 +241,8 @@ class TritonKernel(Kernel):
         super(TritonKernel, self).__init__()
         if reduction_numel is None:
             reduction_numel = sympy.Integer(1)
-        self.numel = numel
-        self.reduction_numel = reduction_numel
+        self.numel = V.graph.sizevars.simplify(numel)
+        self.reduction_numel = V.graph.sizevars.simplify(reduction_numel)
         self.iter_range_tree = RangeTreeRoot("indices", numel, "i")
         self.reduction_range_tree = RangeTreeRoot("reduction", reduction_numel, "r")
         self.range_tree_nodes = dict()

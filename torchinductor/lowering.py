@@ -1371,19 +1371,8 @@ def mutate_to(changed, val):
         changed_data.data = val.data
         return changed
 
-    if isinstance(changed_data, ir.ReinterpretView):
-        numel1 = product(changed.get_size())
-        numel2 = product(val.get_size())
-        if V.graph.sizevars.maybe_guard_equals(numel1, numel2):
-            assert isinstance(changed_data.data, ir.StorageBox)
-            val.realize()
-            changed_data.data.data = ir.ReinterpretView(
-                val.data,
-                changed_data.data.get_layout(),
-            )
-            return changed
-
-    assert isinstance(changed_data, ir.StorageBox), changed_data
+    ir.MutationLayout.realize_into(val, changed_data)
+    return changed
 
 
 @register_lowering(aten.fill_)
