@@ -1364,6 +1364,7 @@ def mutate_to(changed, val):
         val = val.data
 
     if not isinstance(val, ir.StorageBox):
+        # introduce a copy to handle views
         val = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
@@ -1373,6 +1374,8 @@ def mutate_to(changed, val):
         assert isinstance(val, ir.StorageBox)
 
     if isinstance(changed_data, ir.StorageBox):
+        # Fast path, just swing the data pointer
+        val.realize()
         changed_data.data = val.data
         return changed
 
@@ -1404,6 +1407,7 @@ register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
 
+add = register_pointwise(aten.add)
 div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)
 mul = register_pointwise(aten.mul)
@@ -1414,7 +1418,6 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub)
 
 register_pointwise(aten.abs)
-register_pointwise(aten.add)
 register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not)
 register_pointwise(aten.bitwise_or)
@@ -1435,3 +1438,18 @@ register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
+
+
+def register_inplace(aten_op, outplace_op):
+    @register_lowering(aten_op, type_promote=False)
+    def fn(*args):
+        result = outplace_op(*args)
+        return mutate_to(args[0], result)
+
+    return fn
+
+
+register_inplace(aten.add_, add)
+register_inplace(aten.mul_, mul)
+register_inplace(aten.div_, div)
+register_inplace(aten.sub_, sub)

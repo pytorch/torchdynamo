@@ -902,6 +902,8 @@ def main():
         if args.inductor_dynamic:
             torchinductor.config.triton.cudagraphs = False
             torchinductor.config.dynamic_shapes = True
+        else:
+            torchinductor.config.dynamic_shapes = False
 
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
