@@ -183,7 +183,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.autograd.profiler.record_function:
-            assert(len(args) == 1)
+            assert len(args) == 1
             return ProfileRunModeVariable(str(args[0].as_proxy()), **options)
         elif self.value is torch.autograd.profiler.profile:
             # Passthrough

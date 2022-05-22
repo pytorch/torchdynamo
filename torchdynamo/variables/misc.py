@@ -122,7 +122,6 @@ class ContextWrappingVariable(ContextManagerVariable):
         self._call_func(tx, self.initial_value)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-
     def reconstruct(self, codegen, target_inst=None):
         """
         Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
@@ -239,10 +238,12 @@ class ContextWrappingVariable(ContextManagerVariable):
     def _initial_value(self):
         raise NotImplementedError("_initial_value called on base")
 
+
 class GradModeVariable(ContextWrappingVariable):
     def __init__(self, target_value, initial_value=None, **kwargs):
-        super(GradModeVariable, self).__init__(target_value=target_value, initial_value=
-        initial_value, **kwargs)
+        super(GradModeVariable, self).__init__(
+            target_value=target_value, initial_value=initial_value, **kwargs
+        )
 
     def enter(self, tx):
         assert self.initial_value == torch.is_grad_enabled()
@@ -272,8 +273,9 @@ class GradModeVariable(ContextWrappingVariable):
 class ProfileRunModeVariable(ContextWrappingVariable):
     def __init__(self, target_value, initial_value=None, **kwargs):
         kwargs_edited = kwargs
-        super(ProfileRunModeVariable, self).__init__(target_value=target_value, initial_value=
-        initial_value, **kwargs_edited)
+        super(ProfileRunModeVariable, self).__init__(
+            target_value=target_value, initial_value=initial_value, **kwargs_edited
+        )
 
     def enter(self, tx):
         self.enter = True
@@ -283,7 +285,6 @@ class ProfileRunModeVariable(ContextWrappingVariable):
         self.enter = False
         super(ProfileRunModeVariable, self).exit(tx)
 
-
     def _call_func(self, tx, value):
         if self.enter:
             self.proxy_value = tx.output.create_proxy(
@@ -291,7 +292,10 @@ class ProfileRunModeVariable(ContextWrappingVariable):
             )
         else:
             tx.output.create_proxy(
-                "call_function", torch.ops.profiler._record_function_exit, (self.proxy_value,), {}
+                "call_function",
+                torch.ops.profiler._record_function_exit,
+                (self.proxy_value,),
+                {},
             )
 
     def _func_name(self):
@@ -299,9 +303,10 @@ class ProfileRunModeVariable(ContextWrappingVariable):
             return "torch.ops.profiler._record_function_enter"
         else:
             return "torch.ops.profiler._record_function_exit"
-    
+
     def _initial_value(self):
         return self.target_value
+
 
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
