@@ -185,9 +185,6 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
             return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
-        elif self.value is torch.autograd.profiler.profile:
-            # Passthrough
-            return None
         else:
             return TensorVariable.create(
                 tx=tx,
