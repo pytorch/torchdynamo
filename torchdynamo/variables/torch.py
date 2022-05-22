@@ -6,6 +6,8 @@ from typing import List
 import torch._C
 import torch.nn
 
+from torchdynamo.variables.misc import ProfileRunModeVariable
+
 from .. import config
 from .. import variables
 from ..allowed_functions import _allowed_function_ids
@@ -180,6 +182,12 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
+        elif self.value is torch.autograd.profiler.record_function:
+            assert(len(args) == 1)
+            return ProfileRunModeVariable(str(args[0].as_proxy()), **options)
+        elif self.value is torch.autograd.profiler.profile:
+            # Passthrough
+            return ConstantVariable(torch.autograd.profiler.profile, **options)
         else:
             return TensorVariable.create(
                 tx=tx,

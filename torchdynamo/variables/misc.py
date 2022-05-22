@@ -6,6 +6,8 @@ from typing import List
 
 import torch._C
 
+from torchdynamo.variables.tensor import TensorVariable
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -99,46 +101,31 @@ class ContextManagerVariable(VariableTracker):
     pass
 
 
-class GradModeVariable(ContextManagerVariable):
+class ContextWrappingVariable(ContextManagerVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
     _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
 
-    def __init__(self, target_mode, original_mode=None, **kwargs):
-        super(GradModeVariable, self).__init__(**kwargs)
+    def __init__(self, target_value, initial_value=None, **kwargs):
+        super(ContextWrappingVariable, self).__init__(**kwargs)
         self.guards = self.guards | self._guards_singleton
-        self.target_mode = target_mode
-        if original_mode is None:
-            original_mode = torch.is_grad_enabled()
-        self.original_mode = original_mode
+        self.target_value = target_value
+        if initial_value is None:
+            initial_value = self._initial_value()
+        self.initial_value = initial_value
 
     def enter(self, tx):
-        assert self.original_mode == torch.is_grad_enabled()
-        if self.target_mode != self.original_mode:
-            self._change_mode(tx, self.target_mode)
+        self._call_func(tx, self.target_value)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        if self.target_mode != self.original_mode:
-            self._change_mode(tx, self.original_mode)
+        self._call_func(tx, self.initial_value)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def fn_name(self):
-        if self.target_mode:
-            return "enable_grad"
-        else:
-            return "no_grad"
-
-    @staticmethod
-    def _change_mode(tx, value):
-        tx.output.graph.create_node(
-            "call_function", torch._C._set_grad_enabled, (value,), {}
-        ),
-        torch._C._set_grad_enabled(value)
 
     def reconstruct(self, codegen, target_inst=None):
         """
-        Generate following Python Bytecode
+        Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
         Python 3.8
              0 LOAD_GLOBAL              0 (torch)
              2 LOAD_ATTR                1 (_C)
@@ -203,12 +190,12 @@ class GradModeVariable(ContextManagerVariable):
             52 RETURN_VALUE
 
         """
-        if self.target_mode == self.original_mode:
+        if self.target_value == self.initial_value:
             return ([], [])
 
         def set_grad_insts(mode):
             global_torch_source = codegen.tx.import_source("torch")
-            attr_source = AttrSource(global_torch_source, "_C._set_grad_enabled")
+            attr_source = AttrSource(global_torch_source, self._func_name())
             load_set_grad_enabled_insts = attr_source.reconstruct(codegen)
             return [
                 *load_set_grad_enabled_insts,
@@ -217,8 +204,8 @@ class GradModeVariable(ContextManagerVariable):
                 create_instruction("POP_TOP"),
             ]
 
-        init_block = set_grad_insts(self.target_mode)
-        finally_block = set_grad_insts(self.original_mode)
+        init_block = set_grad_insts(self.target_value)
+        finally_block = set_grad_insts(self.initial_value)
         setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
         prologue = init_block + [setup_final_inst]
 
@@ -232,7 +219,7 @@ class GradModeVariable(ContextManagerVariable):
                 create_instruction("END_FINALLY"),
             ]
         else:
-            except_block = set_grad_insts(self.original_mode)
+            except_block = set_grad_insts(self.initial_value)
             epilogue = [
                 create_instruction("POP_BLOCK"),
                 *except_block,
@@ -243,6 +230,78 @@ class GradModeVariable(ContextManagerVariable):
 
         return (prologue, epilogue)
 
+    def _call_func(self, tx, initial_value):
+        raise NotImplementedError("call_func called on base")
+
+    def _func_name(self):
+        raise NotImplementedError("_func_name called on base")
+
+    def _initial_value(self):
+        raise NotImplementedError("_initial_value called on base")
+
+class GradModeVariable(ContextWrappingVariable):
+    def __init__(self, target_value, initial_value=None, **kwargs):
+        super(GradModeVariable, self).__init__(target_value=target_value, initial_value=
+        initial_value, **kwargs)
+
+    def enter(self, tx):
+        assert self.initial_value == torch.is_grad_enabled()
+        return super(GradModeVariable, self).enter(tx)
+
+    def _call_func(self, tx, value):
+        if self.target_value == self.initial_value:
+            return
+        tx.output.graph.create_node(
+            "call_function", torch._C._set_grad_enabled, (value,), {}
+        ),
+        torch._C._set_grad_enabled(value)
+
+    def _func_name(self):
+        return "_C._set_grad_enabled"
+
+    def _initial_value(self):
+        return torch.is_grad_enabled()
+
+    def fn_name(self):
+        if self.target_value:
+            return "enable_grad"
+        else:
+            return "no_grad"
+
+
+class ProfileRunModeVariable(ContextWrappingVariable):
+    def __init__(self, target_value, initial_value=None, **kwargs):
+        kwargs_edited = kwargs
+        super(ProfileRunModeVariable, self).__init__(target_value=target_value, initial_value=
+        initial_value, **kwargs_edited)
+
+    def enter(self, tx):
+        self.enter = True
+        super(ProfileRunModeVariable, self).enter(tx)
+
+    def exit(self, tx, *args):
+        self.enter = False
+        super(ProfileRunModeVariable, self).exit(tx)
+
+
+    def _call_func(self, tx, value):
+        if self.enter:
+            self.proxy_value = tx.output.create_proxy(
+                "call_function", torch.ops.profiler._record_function_enter, (value,), {}
+            )
+        else:
+            tx.output.create_proxy(
+                "call_function", torch.ops.profiler._record_function_exit, (self.proxy_value,), {}
+            )
+
+    def _func_name(self):
+        if self.enter:
+            return "torch.ops.profiler._record_function_enter"
+        else:
+            return "torch.ops.profiler._record_function_exit"
+    
+    def _initial_value(self):
+        return self.target_value
 
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
@@ -272,7 +331,6 @@ class WithExitFunctionVariable(VariableTracker):
                     create_instruction("POP_TOP"),
                 ]
             )
-
         return output
 
 
