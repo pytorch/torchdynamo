@@ -190,6 +190,36 @@ class Reduction(Loops):
         except Exception as e:
             return f"inner_fn(): {e}"
 
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable,
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+    ):
+        reduction_numel = product(reduction_ranges)
+        if reduction_numel == 1:
+            # this reduction is actually a pointwise op
+            def fn(index):
+                reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                return inner_fn(index, reduction_index)
+
+            return Pointwise.create(device, dtype, fn, ranges)
+
+        return TensorBox.create(
+            Reduction(
+                device,
+                dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+            )
+        )
+
 
 def is_storage_and_layout(x):
     try:
@@ -1198,6 +1228,18 @@ class DeviceCopy(ExternKernelOut):
             )
         else:
             wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
+
+
+class DynamicScalar(IRNode):
+    """
+    The result of a call to aten._local_scalar_dense.
+
+    This is not yet implemented.  The one model (so far) that calls this
+    (fastNLP_Bert) does not actually use the result.  So we expect this
+    node to get dead code eliminated.
+    """
+
+    pass
 
 
 class AdaptiveAvgPool2d(ExternKernelAlloc):

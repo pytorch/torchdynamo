@@ -108,6 +108,8 @@ def check_model_cuda(self: TestCase, model, example_inputs):
 
     def copy_fn(x):
         # preserve strides of the input on the device
+        if not isinstance(x, torch.Tensor):
+            return x
         return torch.empty_strided(
             x.size(), x.stride(), device="cuda", dtype=x.dtype
         ).copy_(x)
@@ -253,7 +255,7 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min())
+            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -365,6 +367,21 @@ class CommonTemplate:
             return (torch.nn.functional.silu(a),)
 
         self.common(fn, (torch.randn(8, 8),))
+
+    def test_nan_to_num(self):
+        def fn(a):
+            return (
+                torch.nan_to_num(a),
+                torch.nan_to_num(a, nan=3.0),
+                torch.nan_to_num(a, nan=None),
+                torch.nan_to_num(a, posinf=4.0),
+                torch.nan_to_num(a, neginf=5.0),
+                torch.nan_to_num(a, nan=3.0, posinf=4.0, neginf=5.0),
+            )
+
+        self.common(
+            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),)
+        )
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -532,6 +549,14 @@ class CommonTemplate:
             fn,
             (torch.randn([2, 20, 2]),),
         )
+
+    def test_split_with_sizes(self):
+        def fn(a, sizes):
+            return [t + 1.0 for t in torch.split(a * 2.0, sizes, -1)]
+
+        self.common(fn, (torch.randn(2, 2, 10), [3, 3, 4]))
+        self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
+        self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
 
     def test_split(self):
         def fn(a):
@@ -1247,6 +1272,23 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_sort(self):
+        def fn(a):
+            return torch.sort(a)
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_long_tensor(self):
+        def fn(a):
+            return (
+                torch.LongTensor([294]).to(a.device) - a,
+                torch.as_tensor([295]).to(a.device) + a,
+            )
+
+        self.common(fn, (torch.randint(0, 999, size=[8, 8]),))
+
     def test_constant_pad_2d(self):
         def fn(a):
             return (
@@ -1275,6 +1317,12 @@ class CommonTemplate:
             return aten.triu(a, 1), aten.triu(a, 0), aten.triu(a, 2)
 
         self.common(fn, (torch.randn([2, 10, 10]),))
+
+    def test_no_op_reduction(self):
+        def fn(a):
+            return a.sum(-1), torch.amax(a + 1, 1, keepdim=True)
+
+        self.common(fn, (torch.randn([8, 1, 1]),))
 
 
 class CpuTests(TestCase):

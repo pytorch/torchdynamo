@@ -394,6 +394,11 @@ def split(x, sizes, dim):
     return result
 
 
+@register_lowering(aten.split_with_sizes)
+def split_with_sizes(x, sizes, dim):
+    return split(x, sizes, dim)
+
+
 @register_lowering(aten.unbind)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
@@ -478,6 +483,16 @@ def _cudnn_rnn(*args):
         map(
             TensorBox.create,
             ir.FallbackKernel.create(aten._cudnn_rnn, *args),
+        )
+    )
+
+
+@register_lowering(aten.sort, type_promote=False)
+def sort(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.sort, *args),
         )
     )
 
@@ -660,6 +675,27 @@ def tensor(data, *, dtype=None, device=None):
     )
 
 
+@register_lowering(torch.as_tensor)
+def as_tensor(data, dtype=None, device=None):
+    if isinstance(data, TensorBox):
+        if dtype is not None:
+            data = to(data, dtype)
+        if device is not None:
+            data = to(data, device)
+        return data
+    return tensor(data, dtype=dtype, device=device)
+
+
+@register_lowering(torch.LongTensor)
+def long_tensor(data):
+    return tensor(data, dtype=torch.int64)
+
+
+@register_lowering(aten._local_scalar_dense)
+def _local_scalar_dense(data):
+    return ir.DynamicScalar()
+
+
 def _full(fill_value, device, dtype, size):
     return Pointwise.create(
         device=device,
@@ -716,7 +752,7 @@ def new_constant(fill_value):
     ):
         assert isinstance(size, (list, type))
         assert not pin_memory
-        assert not layout
+        assert not layout or layout == torch.strided
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -1157,7 +1193,7 @@ def _validate_reduction_axis(x, axis):
     size = x.get_size()
     if isinstance(axis, int):
         axis = [axis]
-    elif axis is None:
+    elif not axis:
         axis = range(len(size))
     axis = list(axis)
     for i in range(len(axis)):

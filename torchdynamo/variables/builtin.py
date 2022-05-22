@@ -553,3 +553,11 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
+
+    def call_id(self, tx, *args):
+        if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
+            nn_mod_variable = args[0]
+            mod = tx.output.get_submodule(nn_mod_variable.module_key)
+            return variables.ConstantVariable(id(mod))
+        else:
+            unimplemented(f"call_id with args {args}")
