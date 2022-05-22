@@ -437,6 +437,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
 
+    def test_simplify_loops(self):
+        def fn(a, b):
+            return a + b
+
+        self.common(
+            fn,
+            (
+                torch.randn(2, 3, 4, 5, 6),
+                torch.randn(4, 2, 3, 5, 6).permute(1, 2, 0, 3, 4),
+            ),
+        )
+
     def test_unsqueeze(self):
         def fn(a):
             return (
@@ -1374,6 +1386,24 @@ class CommonTemplate:
             a.view(64).copy_(torch.tensor([66.0], device=a.device))
             c = a + 2
             return b, c
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        correct1 = fn(arg1)
+        with torchdynamo.optimize_assert(compile_fx):
+            actual1 = fn(arg2)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(arg1, arg2))
+
+    def test_input_mutation3(self):
+        def fn(a):
+            a += 1
+            a *= 2
+            a = a.view(64)
+            a += 3
+            a *= 4
+            return a
 
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
