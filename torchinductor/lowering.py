@@ -57,7 +57,7 @@ def decode_dtype(dtype: int):
 
 def decode_device(device):
     if device is None:
-        return torch.tensor(0.0).device  # default dtype
+        return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
         return torch.device(device)
     return device
