@@ -401,6 +401,11 @@ def split(x, sizes, dim):
     return result
 
 
+@register_lowering(aten.split_with_sizes)
+def split_with_sizes(x, sizes, dim):
+    return split(x, sizes, dim)
+
+
 @register_lowering(aten.unbind)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)

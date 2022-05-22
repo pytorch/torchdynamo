@@ -108,6 +108,8 @@ def check_model_cuda(self: TestCase, model, example_inputs):
 
     def copy_fn(x):
         # preserve strides of the input on the device
+        if not isinstance(x, torch.Tensor):
+            return x
         return torch.empty_strided(
             x.size(), x.stride(), device="cuda", dtype=x.dtype
         ).copy_(x)
@@ -547,6 +549,14 @@ class CommonTemplate:
             fn,
             (torch.randn([2, 20, 2]),),
         )
+
+    def test_split_with_sizes(self):
+        def fn(a, sizes):
+            return [t + 1.0 for t in torch.split(a * 2.0, sizes, -1)]
+
+        self.common(fn, (torch.randn(2, 2, 10), [3, 3, 4]))
+        self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
+        self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
 
     def test_split(self):
         def fn(a):
