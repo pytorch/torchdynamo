@@ -36,6 +36,8 @@ class OutputNode:
     def get_name(self):
         return "OUTPUT"
 
+    __repr__ = get_name
+
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
@@ -44,6 +46,15 @@ class BaseSchedulerNode:
         self.users = None
         self.inverse_users = []
         self.set_read_writes(node.get_read_writes())
+
+    def __repr__(self):
+        return f"{type(self).__name__}(name={self.get_name()!r})"
+
+    def update_mutated_names(self, renames: Dict[str, str]):
+        self.set_read_writes(self.read_writes.rename(renames))
+
+    def add_mutation_dep(self, name):
+        self.set_read_writes(self.read_writes.with_read(name))
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
@@ -59,6 +70,9 @@ class BaseSchedulerNode:
 
     def get_aliases(self):
         return self.node.get_alias_names()
+
+    def get_mutations(self):
+        return self.node.get_mutation_names()
 
     def set_read_writes(self, rw):
         self.read_writes = rw
@@ -270,7 +284,11 @@ class SchedulerNode(BaseSchedulerNode):
         return bool(self.node.data.get_reduction_type())
 
     def allocate(self):
-        if not self.node.should_allocate() or self.node.get_alias_names():
+        if (
+            not self.node.should_allocate()
+            or self.node.get_alias_names()
+            or self.node.get_mutation_names()
+        ):
             return super().allocate()
 
         if config.inplace_buffers:
@@ -409,18 +427,26 @@ class Scheduler:
                 self.nodes.append(ExternKernelSchedulerNode(self, node))
             else:
                 assert False, node
-        self.compute_users()
         self.name_to_node = {node.get_name(): node for node in self.nodes}
+
+        # we handle mutation by renaming modified versions of the same
+        # buffer in the dependency graph to prevent cycles.
+        # mutation_renames: tracks the current name for a given buffer
+        #                   (changed once per mutation)
+        self.mutation_real_name = {}
+        # mutation_real_name: maps back to the original name for codegen
+        self.mutation_renames = {}
+
+        self.compute_users()
+        self.dead_node_elimination()
         self.enqueue(self.nodes)
 
     def compute_users(self):
         name_to_users = collections.defaultdict(list)
-        for node in chain(V.graph.graph_outputs, V.graph.mutated_inputs.values()):
-            name_to_users[node.get_name()].append(
-                NodeUser(OutputNode(StarDep(node.get_name())))
-            )
 
-        # handle aliasing
+        # handle aliasing by using python aliasing in name_to_users
+        # if foo aliases bar then we will make name_to_users["foo"] point
+        # to the same python list as name_to_users["bar"]
         for node1 in self.nodes:
             node1_name = node1.get_name()
             for node2_name in node1.get_aliases():
@@ -437,16 +463,61 @@ class Scheduler:
                 else:
                     name_to_users[node1_name] = name_to_users[node2_name]
 
-        for node in reversed(self.nodes):
-            node.set_users(name_to_users[node.get_name()])
-            name_to_users[node.get_name()] = None
-            for read in node.read_writes.reads:
-                name_to_users[read.name].append(NodeUser(node, node.can_inplace(read)))
+        def rename(n):
+            if n in self.mutation_renames:
+                return rename(self.mutation_renames[n])
+            return n
 
+        def add_user(used_by_name, user_node, can_inplace=False):
+            name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace))
+
+        for node in self.nodes:
+            # a node will mutate either 0 or 1 buffers
+            for alt_name in node.get_mutations():
+                alt_name = rename(alt_name)
+                # this node must run after the prior writer
+                add_user(alt_name, node)
+                node.add_mutation_dep(alt_name)
+                for other_node in name_to_users[alt_name]:
+                    # this node must run after all prior readers
+                    other_name = rename(other_node.get_name())
+                    if other_name != node.get_name():
+                        node.add_mutation_dep(other_name)
+                        add_user(other_name, node)
+
+            # add normal non-mutation dependencies
+            for read in node.read_writes.reads:
+                add_user(read.name, node, node.can_inplace(read))
+
+            node.update_mutated_names(self.mutation_renames)
+
+            # update our renaming scheme for the next iteration
+            for alt_name in node.get_mutations():
+                self.mutation_renames[rename(alt_name)] = node.get_name()
+                self.mutation_renames[alt_name] = node.get_name()
+                self.mutation_real_name[node.get_name()] = alt_name
+
+        # make sure outputs aren't dead-code-eliminated
+        for node in V.graph.graph_outputs:
+            name = node.get_name()
+            add_user(node.get_name(), OutputNode(StarDep(name)))
+
+        # make sure input mutation isn't dead-code-eliminated
+        for name in self.mutation_renames:
+            if name in V.graph.graph_inputs:
+                add_user(name, OutputNode(StarDep(name)))
+                V.graph.mutated_inputs.add(name)
+
+        # copy users information onto the nodes
+        for node in self.nodes:
+            node.set_users(name_to_users[node.get_name()])
+
+        # populate inverse_users
         for node in self.nodes:
             for user in node.users:
                 user.node.inverse_users.append(node)
 
+    def dead_node_elimination(self):
         updated_nodes = []
         for node in self.nodes:
             if node.users:
@@ -457,8 +528,11 @@ class Scheduler:
         self.nodes = updated_nodes
 
     def maybe_remove_buffer(self, node: SchedulerNode, broadcast_after_reduce=False):
+        name = node.get_name()
+        if name in self.mutation_renames:
+            return
         if node.can_remove_buffer(broadcast_after_reduce=broadcast_after_reduce):
-            V.graph.removed_buffers.add(node.get_name())
+            V.graph.removed_buffers.add(name)
 
     def enqueue(self, node):
         if isinstance(node, (tuple, list)):
@@ -503,8 +577,16 @@ class Scheduler:
         for done_name in self.check_can_free:
             done_node = self.name_to_node[done_name]
             for node in done_node.inverse_users:
-                if node.can_free():
-                    V.graph.wrapper_code.codegen_free(node.node)
+                name = node.get_name()
+                if node.can_free() and name:
+                    if name in self.mutation_renames:
+                        continue
+                    if name in self.mutation_real_name:
+                        name = self.mutation_real_name[name]
+                        if name in self.name_to_node:
+                            V.graph.wrapper_code.codegen_free(self.name_to_node[name])
+                    else:
+                        V.graph.wrapper_code.codegen_free(node.node)
         self.check_can_free.clear()
 
     def kernel(self, kernel):

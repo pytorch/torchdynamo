@@ -94,6 +94,8 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(name)
 
         layout = buffer.get_layout()
+        if isinstance(layout, ir.MutationLayout):
+            return
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
@@ -163,11 +165,11 @@ class WrapperCodeGen(CodeGen):
                     line.codegen(result)
                 else:
                     result.writeline(line)
-            for name, value in V.graph.mutated_inputs.items():
-                # TODO(jansel): we should put these as nodes in the graph so we can fuse into them
-                result.writeline(f"{name}.copy_({value.codegen_reference()})")
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
-            result.writeline("return (" + ", ".join(output_refs) + ", )")
+            if output_refs:
+                result.writeline("return (" + ", ".join(output_refs) + ", )")
+            else:
+                result.writeline("return ()")
         return result.getvalue()
 
     def define_kernel(self, name: str, kernel: str):

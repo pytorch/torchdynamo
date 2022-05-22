@@ -1384,6 +1384,31 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    def test_slice_mutation1(self):
+        def fn(a):
+            x = torch.zeros_like(a)
+            b = x + 1
+            x[:, 3] = 3.0
+            c = torch.clone(x)
+            x[4, :] = 4.0
+            d = x + 1
+            return x, b, c, d
+
+        self.common(fn, (torch.randn([8, 8]),))
+
+    def test_slice_mutation2(self):
+        def fn(a):
+            a[:, 20:40] = a[:, 20:40] + 1
+            a[:, 2:11] = a[:, 1:10] + 2
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        fn(arg1)
+        with torchdynamo.optimize_assert(compile_fx):
+            fn(arg2)
+
+        self.assertTrue(same(arg1, arg2))
+
 
 class CpuTests(TestCase):
     common = check_model

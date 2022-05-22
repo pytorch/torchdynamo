@@ -82,6 +82,9 @@ class IRNode(object):
         lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
+    def is_user_of(self, name):
+        return any(name == dep.name for dep in self.get_reads())
+
 
 @dataclasses.dataclass
 class Loops(IRNode):
@@ -133,6 +136,20 @@ class Loops(IRNode):
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
+
+    def get_reads(self):
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            if self.get_reduction_type():
+                return extract_read_writes(
+                    self.make_loader(),
+                    self.get_size(),
+                    self.get_reduction_size(),
+                ).reads
+            else:
+                return extract_read_writes(
+                    self.make_loader(),
+                    self.get_size(),
+                ).reads
 
 
 class Pointwise(Loops):
@@ -280,8 +297,21 @@ class BaseView(IRNode):
     def get_device(self):
         return self.data.get_device()
 
+    def get_name(self):
+        return self.data.get_name()
+
     def mark_reuse(self, users):
         return self.data.mark_reuse(users)
+
+    def realize(self):
+        return self.data.realize()
+
+    def get_reads(self):
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            return extract_read_writes(
+                self.make_loader(),
+                self.get_size(),
+            ).reads
 
 
 @dataclasses.dataclass
@@ -417,6 +447,14 @@ class SqueezeView(BaseView):
 class View(BaseView):
     size: List[Expr]
     reindex: Callable
+
+    def make_indexer(self):
+        base_indexer = self.data.make_indexer()
+
+        def indexer(idx):
+            return base_indexer(self.reindex(idx))
+
+        return indexer
 
     @staticmethod
     def handle_negative_index(idx, size):
@@ -586,6 +624,9 @@ class ReinterpretView(BaseView):
             return ops.load(self.get_name(), indexer(index))
 
         return loader
+
+    def make_indexer(self):
+        return self.layout.make_indexer()
 
     def get_layout(self):
         return self.layout
@@ -819,10 +860,60 @@ class AliasedLayout(Layout):
         return self.as_fixed().make_indexer()
 
 
+class MutationLayout(Layout):
+    def __init__(self, target: IRNode):
+        super().__init__(
+            target.get_device(),
+            target.get_dtype(),
+            target.get_size(),
+            None,
+        )
+        self.target = target
+
+    @classmethod
+    def realize_into(cls, src, dst):
+        dst.realize()
+        V.graph.realize_users_of(dst.get_name())
+
+        if isinstance(src, TensorBox):
+            src = src.data
+
+        if not isinstance(src, StorageBox) or src.is_user_of(dst.get_name()):
+            need_copy = True
+        else:
+            src.realize()
+            need_copy = not isinstance(src.data.layout, FlexibleLayout)
+
+        if need_copy:
+            src = Pointwise.create(
+                device=src.get_device(),
+                dtype=src.get_dtype(),
+                inner_fn=src.make_loader(),
+                ranges=[
+                    V.graph.sizevars.guard_equals(a, b)
+                    for a, b in zip(src.get_size(), dst.get_size())
+                ],
+            ).data
+            src.realize()
+
+        assert isinstance(src.data.layout, FlexibleLayout)
+        src.data.layout = MutationLayout(dst)
+        return src.data
+
+    def as_fixed(self):
+        return self
+
+    def make_indexer(self):
+        return self.target.make_indexer()
+
+
 @dataclasses.dataclass
 class Buffer(IRNode):
     name: str
     layout: Layout
+
+    def make_indexer(self):
+        return self.layout.make_indexer()
 
     def get_name(self):
         assert self.name
@@ -872,12 +963,23 @@ class Buffer(IRNode):
             return [self.layout.view.get_name()]
         return ()
 
+    def get_mutation_names(self):
+        if isinstance(self.layout, MutationLayout):
+            return [self.layout.target.get_name()]
+        return ()
+
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
                 self.get_size(),
             )
+
+    def get_reads(self):
+        return self.get_read_writes().reads
+
+    def realize(self):
+        pass
 
 
 class InputBuffer(Buffer):
@@ -1249,6 +1351,9 @@ class BatchMatrixMultiply(ExternKernelOut):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
+        V.graph.device_types.add(device.type)
+        V.graph.device_types.add(x.get_device().type)
+
         x = cls.realize_input(x)
         read_writes = x.get_read_writes()
         if all(
@@ -1286,7 +1391,8 @@ class DynamicScalar(IRNode):
     node to get dead code eliminated.
     """
 
-    pass
+    def get_reads(self):
+        return ()
 
 
 class AdaptiveAvgPool2d(ExternKernelAlloc):
