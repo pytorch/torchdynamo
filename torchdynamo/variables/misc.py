@@ -268,20 +268,20 @@ class GradModeVariable(ContextWrappingVariable):
             return "no_grad"
 
 
-class ProfileRunModeVariable(ContextWrappingVariable):
+class ProfileRecordFunctionVariable(ContextWrappingVariable):
     def __init__(self, target_value, initial_value=None, **kwargs):
         kwargs_edited = kwargs
-        super(ProfileRunModeVariable, self).__init__(
+        super(ProfileRecordFunctionVariable, self).__init__(
             target_value=target_value, initial_value=initial_value, **kwargs_edited
         )
 
     def enter(self, tx):
         self.enter = True
-        super(ProfileRunModeVariable, self).enter(tx)
+        super(ProfileRecordFunctionVariable, self).enter(tx)
 
     def exit(self, tx, *args):
         self.enter = False
-        super(ProfileRunModeVariable, self).exit(tx)
+        super(ProfileRecordFunctionVariable, self).exit(tx)
 
     def _call_func(self, tx, value):
         if self.enter:

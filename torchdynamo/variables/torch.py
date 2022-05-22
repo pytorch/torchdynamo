@@ -6,7 +6,7 @@ from typing import List
 import torch._C
 import torch.nn
 
-from torchdynamo.variables.misc import ProfileRunModeVariable
+from torchdynamo.variables.misc import ProfileRecordFunctionVariable
 
 from .. import config
 from .. import variables
@@ -184,10 +184,10 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
-            return ProfileRunModeVariable(str(args[0].as_proxy()), **options)
+            return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
         elif self.value is torch.autograd.profiler.profile:
             # Passthrough
-            return ConstantVariable(torch.autograd.profiler.profile, **options)
+            return None
         else:
             return TensorVariable.create(
                 tx=tx,
