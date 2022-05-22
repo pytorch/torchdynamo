@@ -6,8 +6,6 @@ from typing import List
 
 import torch._C
 
-from torchdynamo.variables.tensor import TensorVariable
-
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
