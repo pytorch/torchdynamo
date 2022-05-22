@@ -228,7 +228,7 @@ class ContextWrappingVariable(ContextManagerVariable):
         return (prologue, epilogue)
 
     def _call_func(self, tx, initial_value):
-        raise NotImplementedError("call_func called on base")
+        raise NotImplementedError("_call_func called on base")
 
     def _func_name(self):
         raise NotImplementedError("_func_name called on base")
