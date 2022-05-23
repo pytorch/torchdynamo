@@ -16,6 +16,8 @@ from typing import Dict
 from typing import List
 from unittest.mock import patch
 
+from sympy import variations
+
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
@@ -61,6 +63,7 @@ from .variables.misc import ClosureVariable
 from .variables.misc import ContextManagerVariable
 from .variables.misc import GetAttrVariable
 from .variables.misc import GradModeVariable
+from .variables.misc import NewGlobalVariable
 from .variables.misc import PythonModuleVariable
 from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable
@@ -123,7 +126,9 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
-        elif value.has_unpack_var_sequence(self):
+        elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
+            self
+        ):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
@@ -216,6 +221,17 @@ class InstructionTranslatorBase(object):
         )
         self.push(fn.call_function(self, args, kwargs))
 
+    def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
+        def repl(v: VariableTracker):
+            if v.mutable_local is oldvar.mutable_local:
+                return newvar
+            return v
+
+        self.output.side_effects.apply(repl)
+        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
+        for k, x in self.symbolic_locals.items():
+            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(
             oldvar.mutable_local, torchdynamo.side_effects.MutableSideEffects
@@ -228,16 +244,7 @@ class InstructionTranslatorBase(object):
             newvar = newvar.clone(
                 mutable_local=torchdynamo.variables.base.MutableLocal()
             )
-
-        def repl(v: VariableTracker):
-            if v.mutable_local is oldvar.mutable_local:
-                return newvar
-            return v
-
-        self.output.side_effects.apply(repl)
-        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
-        for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+        self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
     def inline_user_function_return(self, fn, args, kwargs):
@@ -372,7 +379,7 @@ class InstructionTranslatorBase(object):
     def LOAD_CONST(self, inst):
         self.push(ConstantVariable(value=inst.argval))
 
-    def get_global_variable(self, name, value):
+    def get_global_source(self, name):
         if self.output.root_globals is self.f_globals:
             source = GlobalSource(name)
         else:
@@ -385,26 +392,33 @@ class InstructionTranslatorBase(object):
                 if mangled_name not in self.output.root_globals:
                     self.output.install_global(mangled_name, self.f_globals)
                 source = GetItemSource(GlobalSource(mangled_name), name)
-        return VariableBuilder(self, source)(value)
+        return source
 
     def LOAD_GLOBAL(self, inst):
         name = inst.argval
         if name in self.symbolic_globals:
-            self.push(self.output.side_effects.load_global(self.symbolic_globals[name]))
+            variable = self.output.side_effects[self.symbolic_globals[name]]
+            self.push(self.output.side_effects.load_global(variable, name))
             return
 
         try:
             value = self.f_globals[name]
         except KeyError:
             return self.load_builtin(inst)
-        self.push(self.get_global_variable(name, value))
+
+        source = self.get_global_source(name)
+        self.push(VariableBuilder(self, source)(value))
 
     def STORE_GLOBAL(self, inst):
-        name = inst.argval
         value = self.pop()
-        variable = self.get_global_variable(name, value)
-        self.symbolic_globals[name] = variable
-        self.output.side_effects.store_global(variable, value)
+        name = inst.argval
+        source = self.get_global_source(name)
+        if name not in self.symbolic_globals:
+            self.symbolic_globals[name] = object()  # sentinel object
+        variable = self.output.side_effects.track_global_existing(
+            source, self.symbolic_globals[name]
+        )
+        self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
@@ -1109,6 +1123,7 @@ class InstructionTranslatorBase(object):
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
         symbolic_locals: Dict[str, VariableTracker],
+        symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
     ):
         super(InstructionTranslatorBase, self).__init__()
@@ -1116,7 +1131,7 @@ class InstructionTranslatorBase(object):
         # Mutable state checkpointed by copy_graphstate()
         self.output: OutputGraph = output
         self.symbolic_locals: Dict[str, VariableTracker] = symbolic_locals
-        self.symbolic_globals: Dict[str, VariableTracker] = {}
+        self.symbolic_globals: Dict[str, VariableTracker] = symbolic_globals
         self.stack: List[VariableTracker] = []
         self.instruction_pointer: int = 0
         self.current_instruction: Instruction = create_instruction("NOP")
@@ -1165,6 +1180,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             code_options=code_options,
             symbolic_locals=collections.OrderedDict(),  # set below
+            # A global var is inserted only after a STORE_GLOBAL happens to it
+            symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
         )
         self.one_graph: bool = one_graph
@@ -1291,16 +1308,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, closure_cells, func
+                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, closure_cells, func
+                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
         tracer.run()
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
+        # Merge symbolic_globals to the parent
+        parent.symbolic_globals.update(tracer.symbolic_globals)
 
         if config.trace:
             print("DONE INLINING", code)
@@ -1320,6 +1339,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent: InstructionTranslatorBase,
         code: types.CodeType,
         symbolic_locals: Dict[str, VariableTracker],
+        symbolic_globals: Dict[str, VariableTracker],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ):
@@ -1332,10 +1352,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_globals=f_globals,
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
+            symbolic_globals=symbolic_globals,
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
         )
+        self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
 
@@ -1375,6 +1397,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
         self.push(self.closure_cells[inst.argval])
+
+    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
+        newvar = super().replace_all(oldvar, newvar)
+        # recursively check and update parent's locals and stack in case oldvar is from parent
+        translator = self
+        while hasattr(translator, "parent"):
+            translator = translator.parent
+            translator.update_locals_and_stack(oldvar, newvar)
+        return newvar
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing

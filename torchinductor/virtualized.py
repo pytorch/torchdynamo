@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from itertools import chain
 from threading import local
 
+import sympy
 from torch.fx.graph import inplace_methods
 from torch.fx.graph import magic_methods
 
@@ -55,8 +56,13 @@ class MockHandler:
 
         return inner
 
-    def masked(self, mask, body, other):
+    @staticmethod
+    def masked(mask, body, other):
         return f"masked({mask}, {body()}, {other})"
+
+    @staticmethod
+    def indirect_indexing(index_var):
+        return sympy.Symbol(str(index_var))
 
     @classmethod
     def _init_cls(cls):

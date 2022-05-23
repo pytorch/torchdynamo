@@ -99,7 +99,7 @@ def dump_to_repro(gm, *args):
 
 
 def compile_fx(
-    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=True
+    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
 ):
     """Main entrypoint to a compile given FX graph"""
     assert isinstance(model, torch.fx.GraphModule)
@@ -112,19 +112,24 @@ def compile_fx(
         gm.graph.eliminate_dead_code()
     if config.debug:
         gm.graph.print_tabular()
+    if cudagraphs is None:
+        cudagraphs = config.triton.cudagraphs
 
-    if False:
+    if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
         wrap(CheckEachNode(gm).run)(*example_inputs)
 
-    if False:
-        wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
+    try:
+        graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+        with V.set_graph_handler(graph):
+            wrap(graph.run)(*example_inputs)
+            compiled_fn = wrap(graph.compile_to_fn())
 
-    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
-    with V.set_graph_handler(graph):
-        wrap(graph.run)(*example_inputs)
-        compiled_fn = wrap(graph.compile_to_fn())
+        if "cuda" in graph.device_types and cudagraphs:
+            return cudagraphs_inner(compiled_fn, example_inputs)
+        else:
+            return compiled_fn
+    except Exception:
+        if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
+            wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
-    if example_inputs[0].device.type == "cuda" and cudagraphs:
-        return cudagraphs_inner(compiled_fn, example_inputs)
-    else:
-        return compiled_fn
+        raise

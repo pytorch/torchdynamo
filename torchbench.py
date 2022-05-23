@@ -32,6 +32,7 @@ from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.optimizations.inference import fixed_strategy2
 from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
+from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
 from torchdynamo.optimizations.training import aot_autograd_nnc_strategy
@@ -794,6 +795,11 @@ def main():
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--inductor-dynamic",
+        action="store_true",
+        help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -803,6 +809,11 @@ def main():
         "--nops",
         action="store_true",
         help="Test that bytecode rewriting works properly.",
+    )
+    group.add_argument(
+        "--log-conv-args",
+        action="store_true",
+        help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
 
     args = parser.parse_args()
@@ -878,11 +889,15 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
-    elif args.inductor:
-        if args.threads:
-            import torchinductor.config
+    elif args.inductor or args.inductor_dynamic:
+        import torchinductor.config
 
+        if args.threads:
             torchinductor.config.cpp.threads = args.threads
+
+        if args.inductor_dynamic:
+            torchinductor.config.triton.cudagraphs = False
+            torchinductor.config.dynamic_shapes = True
 
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
@@ -1027,6 +1042,9 @@ def main():
         experiment = speedup_experiment
         output_filename = f"speedup_{args.backend}.csv"
         args.isolate = True
+    elif args.log_conv_args:
+        optimize_ctx = torchdynamo.optimize(conv_args_analysis, nopython=args.nopython)
+        output_filename = "log_conv_args.csv"
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
@@ -1094,6 +1112,11 @@ def main():
         for device, name, model, example_inputs in iter_models(args):
             torchdynamo.reset()
             gc.collect()
+
+            if args.float32:
+                model, example_inputs = cast_to_fp32(model, example_inputs)
+            elif args.float16:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
             run_one_model(
                 name,
                 model,

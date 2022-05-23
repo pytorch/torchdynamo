@@ -95,6 +95,11 @@ class NewCellVariable(VariableTracker):
         super(NewCellVariable, self).__init__(**kwargs)
 
 
+class NewGlobalVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super(NewGlobalVariable, self).__init__(**kwargs)
+
+
 class ContextManagerVariable(VariableTracker):
     pass
 

@@ -5,10 +5,13 @@ import functools
 from itertools import chain
 from typing import Any
 from typing import Dict
+from typing import List
 
 import numpy
 import numpy as np
+import torch
 
+from . import config
 from . import dependencies
 from . import ir
 from .dependencies import StarDep
@@ -22,9 +25,16 @@ def cmp(a, b):
 class OutputNode:
     def __init__(self, dep):
         self.unmet_dependencies = {dep}
+        self.inverse_users = []
 
     def is_reduction(self):
         return False
+
+    def get_alias_names(self):
+        return ()
+
+    def get_name(self):
+        return "OUTPUT"
 
 
 class BaseSchedulerNode:
@@ -32,7 +42,23 @@ class BaseSchedulerNode:
         self.scheduler = scheduler
         self.node = node
         self.users = None
+        self.inverse_users = []
         self.set_read_writes(node.get_read_writes())
+
+    def set_users(self, users: List["NodeUser"]):
+        # deduplicate
+        result = {}
+        for use in users:
+            if id(use.node) in result:
+                result[id(use.node)] = NodeUser(
+                    use.node, result[id(use.node)].can_inplace and use.can_inplace
+                )
+            else:
+                result[id(use.node)] = use
+        self.users = list(result.values())
+
+    def get_aliases(self):
+        return self.node.get_alias_names()
 
     def set_read_writes(self, rw):
         self.read_writes = rw
@@ -49,27 +75,47 @@ class BaseSchedulerNode:
     def get_name(self):
         return self.node.get_name()
 
+    def get_device(self):
+        return self.node.get_device()
 
-class ExternKernelSchdulerNode(BaseSchedulerNode):
+    def is_reduction(self):
+        return False
+
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        return False
+
+    def allocate(self):
+        if self.node.should_allocate():
+            V.graph.wrapper_code.codegen_allocation(self.node)
+
+    def can_free(self):
+        for use in self.users:
+            if isinstance(use.node, OutputNode):
+                return False
+            name = use.get_name()
+            if name not in self.scheduler.available_buffer_names:
+                return False
+        return True
+
+
+class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
     def run(self, codegen_extern_call):
-        if self.node.should_allocate():
-            V.graph.wrapper_code.codegen_allocation(self.node)
+        self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
         self.scheduler.kernels.append(self.node)
         codegen_extern_call(self.node)
 
 
-class NopKernelSchdulerNode(BaseSchedulerNode):
+class NopKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
     def run(self):
-        if self.node.should_allocate():
-            V.graph.wrapper_code.codegen_allocation(self.node)
+        self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
 
@@ -102,7 +148,8 @@ def pick_loop_order(stride_lengths, sizes):
         return cmp(b, a)
 
     order = list(reversed(range(stride_lengths.shape[1])))
-    order.sort(key=index_cmp)
+    if config.pick_loop_orders:
+        order.sort(key=index_cmp)
     return order
 
 
@@ -158,6 +205,7 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         self.group = (
+            node.get_device(),
             group_fn(self._size),
             group_fn(self._reduction_size),
         )
@@ -193,9 +241,9 @@ class SchedulerNode(BaseSchedulerNode):
         if (
             self.is_reduction()
             and len(self.users) == 1
-            and len(self.users[0].unmet_dependencies) == 1
+            and len(self.users[0].node.unmet_dependencies) == 1
         ):
-            user = self.users[0]
+            user = self.users[0].node
             dep = next(iter(user.unmet_dependencies))
             writes = self.read_writes.writes
             if broadcast_after_reduce:
@@ -221,8 +269,38 @@ class SchedulerNode(BaseSchedulerNode):
     def is_reduction(self):
         return bool(self.node.data.get_reduction_type())
 
+    def allocate(self):
+        if not self.node.should_allocate() or self.node.get_alias_names():
+            return super().allocate()
+
+        if config.inplace_buffers:
+            for read in self.read_writes.reads:
+                input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
+                    read.name
+                )
+                if input_node and V.graph.wrapper_code.can_reuse(input_node):
+                    remaining_uses = [
+                        x
+                        for x in input_node.users
+                        if x.node.get_name()
+                        not in self.scheduler.available_buffer_names
+                    ]
+                    if (
+                        len(remaining_uses) == 1
+                        and remaining_uses[0].can_inplace
+                        and remaining_uses[0].node is self
+                    ):
+                        V.graph.wrapper_code.codegen_inplace_reuse(
+                            input_node.node, self.node
+                        )
+                        V.kernel.args.make_inplace(
+                            input_node.get_name(), self.get_name()
+                        )
+                        return
+        super().allocate()
+
     def run(self, vars, reduction_vars):
-        V.graph.wrapper_code.codegen_allocation(self.node)
+        self.allocate()
         self.scheduler.run_count += 1
         name = self.get_name()
         indexer = self.node.layout.make_indexer()
@@ -234,6 +312,14 @@ class SchedulerNode(BaseSchedulerNode):
             vars = self._reindex([*vars, *reduction_vars])
             self.node.data.store_output(name, indexer, vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
+
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        if self.node.get_alias_names():
+            return False
+        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
+            write_dep = next(iter(self.read_writes.writes))
+            return read_dep.index == write_dep.index and read_dep.size == write_dep.size
+        return False
 
 
 @dataclasses.dataclass
@@ -284,10 +370,20 @@ class BlockedNodes:
         return result
 
 
+@dataclasses.dataclass
+class NodeUser:
+    node: BaseSchedulerNode
+    can_inplace: bool = False
+
+    def get_name(self):
+        return self.node.get_name()
+
+
 class Scheduler:
-    def __init__(self, group_fn, nodes):
+    def __init__(self, nodes):
         super(Scheduler, self).__init__()
-        self.group_fn = group_fn
+        self.backends = {}
+        self.current_device = None
         self.runable_reduction_groups = collections.defaultdict(int)
         self.runable_pointwise_groups = collections.defaultdict(int)
         self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
@@ -301,28 +397,55 @@ class Scheduler:
             *V.graph.constants.keys(),
         }
         self.pending_buffer_names = set()
+        self.check_can_free = set()
         self.fusable_deps = set()
         for node in nodes:
             if node.is_no_op():
-                self.nodes.append(NopKernelSchdulerNode(self, node))
+                self.nodes.append(NopKernelSchedulerNode(self, node))
             elif isinstance(node, ir.ComputedBuffer):
-                self.nodes.append(SchedulerNode(self, node, self.group_fn))
+                group_fn = self.get_backend(node.get_device()).group_fn
+                self.nodes.append(SchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel):
-                self.nodes.append(ExternKernelSchdulerNode(self, node))
+                self.nodes.append(ExternKernelSchedulerNode(self, node))
             else:
                 assert False, node
         self.compute_users()
+        self.name_to_node = {node.get_name(): node for node in self.nodes}
         self.enqueue(self.nodes)
 
     def compute_users(self):
         name_to_users = collections.defaultdict(list)
         for node in V.graph.graph_outputs:
-            name_to_users[node.get_name()].append(OutputNode(StarDep(node.get_name())))
+            name_to_users[node.get_name()].append(
+                NodeUser(OutputNode(StarDep(node.get_name())))
+            )
+
+        # handle aliasing
+        for node1 in self.nodes:
+            node1_name = node1.get_name()
+            for node2_name in node1.get_aliases():
+                if node1_name in name_to_users and node2_name in name_to_users:
+                    # merge the two
+                    list1 = name_to_users[node1_name]
+                    list2 = name_to_users[node2_name]
+                    combined = list1 + list2
+                    for key in name_to_users.keys():
+                        if name_to_users[key] is list1 or name_to_users[key] is list2:
+                            name_to_users[key] = combined
+                elif node1_name in name_to_users:
+                    name_to_users[node2_name] = name_to_users[node1_name]
+                else:
+                    name_to_users[node1_name] = name_to_users[node2_name]
+
         for node in reversed(self.nodes):
-            node.users = name_to_users[node.get_name()]
+            node.set_users(name_to_users[node.get_name()])
             name_to_users[node.get_name()] = None
             for read in node.read_writes.reads:
-                name_to_users[read.name].append(node)
+                name_to_users[read.name].append(NodeUser(node, node.can_inplace(read)))
+
+        for node in self.nodes:
+            for user in node.users:
+                user.node.inverse_users.append(node)
 
         updated_nodes = []
         for node in self.nodes:
@@ -347,9 +470,9 @@ class Scheduler:
         if node.unmet_dependencies:
             self.blocked_nodes.add(node)
         else:
-            if isinstance(node, ExternKernelSchdulerNode):
+            if isinstance(node, ExternKernelSchedulerNode):
                 self.runable_extern_kernels.append(node)
-            elif isinstance(node, NopKernelSchdulerNode):
+            elif isinstance(node, NopKernelSchedulerNode):
                 node.run()
             else:
                 self.runable_nodes[node.group].append(node)
@@ -368,11 +491,21 @@ class Scheduler:
             self.available_buffer_names.update(self.pending_buffer_names)
             nodes_to_add = []
             for name in self.pending_buffer_names:
+                self.check_can_free.update(self.pending_buffer_names)
                 for node in self.blocked_nodes.pop_name(name):
                     node.prune_deps()
                     nodes_to_add.append(node)
             self.pending_buffer_names.clear()
             self.enqueue(nodes_to_add)
+
+    def maybe_free_buffers(self):
+        # perhaps there are some unused buffers we can free
+        for done_name in self.check_can_free:
+            done_node = self.name_to_node[done_name]
+            for node in done_node.inverse_users:
+                if node.can_free():
+                    V.graph.wrapper_code.codegen_free(node.node)
+        self.check_can_free.clear()
 
     def kernel(self, kernel):
         self.fusable_deps.clear()
@@ -385,14 +518,14 @@ class Scheduler:
 
         return ctx()
 
-    def iter_runable_groups(self, codegen_extern_call):
+    def iter_runable_groups(self):
         while (
             self.runable_reduction_groups
             or self.runable_pointwise_groups
             or self.runable_extern_kernels
         ):
             if self.runable_extern_kernels:
-                self.runable_extern_kernels.popleft().run(codegen_extern_call)
+                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
             elif self.runable_reduction_groups:
                 yield next(iter(self.runable_reduction_groups.keys()))
             else:
@@ -409,7 +542,8 @@ class Scheduler:
             prior_run_count = self.run_count
             yield
 
-    def pop_group(self, group):
+    def pop_group(self, group_without_device):
+        group = (self.current_device, *group_without_device)
         while group in self.runable_nodes:
             self.runable_reduction_groups.pop(group, None)
             self.runable_pointwise_groups.pop(group, None)
@@ -419,3 +553,38 @@ class Scheduler:
             while fusable:
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
+
+    def flush(self):
+        for backend in self.backends.values():
+            backend.flush()
+
+    def codegen_extern_call(self, node: ir.ExternKernel):
+        assert isinstance(node, ir.ExternKernel)
+        self.flush()
+        node.codegen(V.graph.wrapper_code)
+        self.barrier()
+        self.maybe_free_buffers()
+
+    def create_backend(self, device: torch.device):
+        V.graph.device_types.add(device.type)
+        if device.type == "cpu":
+            from .codegen.cpp import CppScheduling
+
+            return CppScheduling(self)
+        else:
+            from .codegen.triton import TritonScheduling
+
+            return TritonScheduling(self)
+
+    def get_backend(self, device: torch.device):
+        if device not in self.backends:
+            self.backends[device] = self.create_backend(device)
+        return self.backends[device]
+
+    def codegen(self):
+        for device, group, reduction_group in self.iter_runable_groups():
+            if device != self.current_device:
+                self.flush()
+                self.current_device = device
+            self.get_backend(device).codegen(group, reduction_group)
+        self.flush()

@@ -11,8 +11,6 @@ import torch
 
 from .. import codecache
 from .. import config
-from .. import ir
-from ..scheduler import Scheduler
 from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
@@ -48,6 +46,8 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         triton_type_name = str(dtype).split(".")[-1]
+        if triton_type_name == "bool":
+            triton_type_name = "int1"
         return f"{x}.to(tl.{triton_type_name})"
 
     @staticmethod
@@ -96,13 +96,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        if other == float("-inf"):
-            other = 'float("-inf")'
-        else:
-            assert False, other
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, other)
+        return ops.where(
+            new_mask, result, TritonOverrides.constant(other, torch.float32)
+        )
 
     @staticmethod
     def logical_not(a):
@@ -345,10 +343,7 @@ class TritonKernel(Kernel):
             old_mask = "mask"
         self.compute.splice(
             f"""
-                if NEED_MASK:
-                    {var} = {old_mask} & {mask}
-                else:
-                    {var} = {mask}
+                {var} = {old_mask} & {mask}
             """
         )
         prior = self._load_mask
@@ -371,11 +366,12 @@ class TritonKernel(Kernel):
         self.stores.writeline(line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
-        default = {"sum": 0, "max": "float('-inf')", "min": "float('inf')"}
+        default = {"sum": 0, "max": "float('-inf')", "min": "float('inf')"}[
+            reduction_type
+        ]
         res = self.cse.generate(
             self.compute,
-            f"tl.where(mask_reduction, {value}, "
-            f"{default[reduction_type]}) if NEED_MASK else {value}",
+            f"tl.where(mask_reduction, {value}, {default})",
         )
         res = self.cse.generate(self.compute, f"tl.{reduction_type}({res}, 1)")
         assert self.inside_reduction
@@ -398,13 +394,7 @@ class TritonKernel(Kernel):
             """
         )
 
-        argdefs = [
-            *self.args.input_buffers.values(),
-            *self.args.output_buffers.values(),
-        ]
-        for var in self.args.sizevars.values():
-            # argdefs.append(f"{var}: tl.constexpr")
-            argdefs.append(f"{var}")
+        argdefs, _ = self.args.python_argdefs()
 
         if config.dynamic_shapes:
             maybe_const = ""
@@ -417,18 +407,19 @@ class TritonKernel(Kernel):
                 f"reduction_numel{maybe_const}",
                 "BLOCK_SIZE: tl.constexpr",
                 "REDUCTION_SIZE: tl.constexpr",
-                "NEED_MASK: tl.constexpr",
             ]
 
         else:
             argdefs += [
                 f"numel{maybe_const}",
                 "BLOCK_SIZE: tl.constexpr",
-                "NEED_MASK: tl.constexpr",
             ]
 
         code.writeline(f"def kernel({', '.join(argdefs)}):")
         with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"{old} = {new}")
+
             code.splice(
                 """
                     offset = tl.program_id(0) * BLOCK_SIZE
@@ -441,24 +432,17 @@ class TritonKernel(Kernel):
                 code.splice(
                     """
                         reduction = tl.arange(0, REDUCTION_SIZE)
-                        if NEED_MASK:
-                            mask = indices < numel
-                            mask_reduction = (tl.reshape(mask, (BLOCK_SIZE, 1)) &
-                                              tl.reshape(reduction < reduction_numel, (1, REDUCTION_SIZE)))
-                        else:
-                            mask : tl.constexpr = None
-                            mask_reduction : tl.constexpr = None
+                        mask = indices < numel
+                        mask_reduction = (tl.reshape(mask, (BLOCK_SIZE, 1)) &
+                                          tl.reshape(reduction < reduction_numel, (1, REDUCTION_SIZE)))
                     """,
                     strip=True,
                 )
             else:
                 code.splice(
                     """
-                    if NEED_MASK:
                         mask = indices < numel
-                    else:
-                        mask : tl.constexpr = None
-                """,
+                    """,
                     strip=True,
                 )
             code.splice(self.indexing_code)
@@ -472,74 +456,65 @@ class TritonKernel(Kernel):
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
-    def call_kernel(self, schedule, name: str):
-        code = schedule.body
-        call_args = list(
-            chain(
-                self.args.input_buffers.keys(),
-                self.args.output_buffers.keys(),
-                self.args.sizevars.keys(),
-            )
-        )
+    def call_kernel(self, code, name: str):
+        _, call_args = self.args.python_argdefs()
         code.writeline(f"{name}_numel = {texpr(self.numel)}")
         call_args.append(f"{name}_numel")
         if self.inside_reduction:
             code.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
             call_args.append(f"{name}_reduction_numel")
-        code.writeline(f"{name}[grid({name}_numel)](")
-        with code.indent():
-            code.writeline(", ".join(call_args))
-        code.writeline(")")
+        call_args = ", ".join(call_args)
+        code.writeline(f"{name}[grid({name}_numel)]({call_args})")
 
-    @classmethod
-    def codegen(cls, wrapper):
-        def codegen_extern_call(node):
-            assert isinstance(node, ir.ExternKernel)
-            node.codegen(wrapper)
-            scheduler.barrier()
 
-        scheduler = Scheduler(product, V.graph.buffers)
+class TritonScheduling:
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.group_fn = product
 
-        for group, reduction_group in scheduler.iter_runable_groups(
-            codegen_extern_call
-        ):
-            reschedule = []
-            with scheduler.kernel(TritonKernel(group, reduction_group)) as kernel:
-                for _ in scheduler.iter_fixed_point():
+    def codegen(self, group, reduction_group):
+        wrapper = V.graph.wrapper_code
+        scheduler = self.scheduler
+
+        reschedule = []
+        with scheduler.kernel(TritonKernel(group, reduction_group)) as kernel:
+            for _ in scheduler.iter_fixed_point():
+                for node in scheduler.pop_group(
+                    (group, reduction_group),
+                ):
+                    scheduler.maybe_remove_buffer(node, broadcast_after_reduce=True)
+                    node.run(*kernel.set_ranges(*node.get_ranges()))
+                    node.mark_fusable(broadcast_after_reduce=True)
+
+                if kernel.inside_reduction:
+                    # Add pointwise with compatible dimensions
                     for node in scheduler.pop_group(
-                        (group, reduction_group),
+                        (group * reduction_group, sympy.Integer(1)),
                     ):
-                        scheduler.maybe_remove_buffer(node, broadcast_after_reduce=True)
-                        node.run(*kernel.set_ranges(*node.get_ranges()))
-                        node.mark_fusable(broadcast_after_reduce=True)
+                        sizes, _ = node.get_ranges()
+                        split = split_sizes(sizes, group, reduction_group)
+                        if split is None:
+                            reschedule.append(node)
+                        else:
+                            node.run(*kernel.set_ranges(sizes[:split], sizes[split:]))
+                            node.mark_fusable()
 
-                    if kernel.inside_reduction:
-                        # Add pointwise with compatible dimensions
-                        for node in scheduler.pop_group(
-                            (group * reduction_group, sympy.Integer(1)),
-                        ):
-                            sizes, _ = node.get_ranges()
-                            split = split_sizes(sizes, group, reduction_group)
-                            if split is None:
-                                reschedule.append(node)
-                            else:
-                                node.run(
-                                    *kernel.set_ranges(sizes[:split], sizes[split:])
-                                )
-                                node.mark_fusable()
+                    # Add more pointwise with fewer dimensions
+                    with kernel.disable_reduction():
+                        for node in scheduler.pop_group((group, sympy.Integer(1))):
+                            node.run(*kernel.set_ranges(*node.get_ranges()))
+                            node.mark_fusable()
 
-                        # Add more pointwise with fewer dimensions
-                        with kernel.disable_reduction():
-                            for node in scheduler.pop_group((group, sympy.Integer(1))):
-                                node.run(*kernel.set_ranges(*node.get_ranges()))
-                                node.mark_fusable()
+        kernel_name = wrapper.next_kernel_name()
+        wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        kernel.call_kernel(wrapper, kernel_name)
 
-            kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
-            kernel.call_kernel(wrapper, kernel_name)
+        scheduler.enqueue(reschedule)
+        scheduler.barrier()
+        scheduler.maybe_free_buffers()
 
-            scheduler.enqueue(reschedule)
-            scheduler.barrier()
+    def flush(self):
+        pass
 
 
 def split_sizes(sizes, prod1, prod2):

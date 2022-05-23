@@ -119,14 +119,14 @@ class SideEffects(object):
         assert isinstance(cellvar, variables.NewCellVariable)
         return self.load_attr(cellvar, "cell_contents")
 
-    def load_global(self, gvar: VariableTracker):
+    def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
-        return self.load_attr(gvar, gvar.source.name())
+        return self.load_attr(gvar, name)
 
-    def store_global(self, gvar: VariableTracker, value: VariableTracker):
+    def store_global(self, gvar: VariableTracker, name: str, value: VariableTracker):
         assert isinstance(gvar, variables.VariableTracker)
         assert isinstance(value, variables.VariableTracker)
-        self.store_attr(gvar, gvar.source.name(), value)
+        self.store_attr(gvar, name, value)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
@@ -199,6 +199,14 @@ class SideEffects(object):
 
     def track_cell_existing(self, source: Source, item: Any):
         variable = variables.NewCellVariable(
+            mutable_local=AttributeMutationExisting(source),
+        )
+        self.id_to_variable[id(item)] = variable
+        self.keepalive.append(item)
+        return variable
+
+    def track_global_existing(self, source: Source, item: Any):
+        variable = variables.NewGlobalVariable(
             mutable_local=AttributeMutationExisting(source),
         )
         self.id_to_variable[id(item)] = variable
@@ -307,15 +315,15 @@ class SideEffects(object):
                 for name, value in self.store_attr_mutations.get(
                     var.mutable_local, {}
                 ).items():
-                    cg.tx.output.update_co_names(name)
-                    cg(value)
-                    cg(var.mutable_local.source)
-                    op = (
-                        "STORE_GLOBAL"
-                        if isinstance(var.mutable_local.source, GlobalSource)
-                        else "STORE_ATTR"
-                    )
-                    suffixes.append([create_instruction(op, name)])
+                    if isinstance(var, variables.NewGlobalVariable):
+                        cg.tx.output.update_co_names(name)
+                        cg(value)
+                        suffixes.append([create_instruction("STORE_GLOBAL", name)])
+                    else:
+                        cg.tx.output.update_co_names(name)
+                        cg(value)
+                        cg(var.mutable_local.source)
+                        suffixes.append([create_instruction("STORE_ATTR", name)])
             else:
                 assert False, type(var)
 

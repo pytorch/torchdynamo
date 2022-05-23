@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import multiprocessing
 import textwrap
-from itertools import chain
 from typing import Dict
 from typing import List
 
@@ -12,8 +11,6 @@ import torch
 
 from .. import codecache
 from .. import config
-from .. import ir
-from ..scheduler import Scheduler
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
@@ -65,6 +62,13 @@ def cpp_prefix():
             #include <limits>
             #define SLEEF_ENABLE_OMP_SIMD
             //#include <sleef.h>
+
+            template<typename T>
+            inline T mod(T a, T b) { return a % b; }
+            template<>
+            inline float mod(float a, float b) { return std::fmod(a, b); }
+            template<>
+            inline double mod(double a, double b) { return std::fmod(a, b); }
             """
         ),
         "h",
@@ -133,6 +137,10 @@ class CppOverrides(OpOverrides):
         return f"{a} ? {b} : {c}"
 
     @staticmethod
+    def mod(a, b):
+        return f"mod({a}, {b})"
+
+    @staticmethod
     def constant(val, dtype):
         if val == float("inf"):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
@@ -151,8 +159,10 @@ class CppOverrides(OpOverrides):
         assert isinstance(other, float)
         if other == float("-inf"):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
+        elif other == float("inf"):
+            code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
         else:
-            assert False
+            code.writeline(f"float {var} = {other!r};")
         code.writeline(f"if({mask})")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
@@ -330,50 +340,45 @@ class CppKernel(Kernel):
         self.reduction_suffix.splice(self.stores)
         (self.loads, self.compute, self.stores, self.cse) = prior
 
-    @classmethod
-    def codegen(cls, wrapper):
-        def codegen_extern_call(node: ir.ExternKernel):
-            nonlocal kernel_group
-            kernel_group.codegen_define_and_call(wrapper)
-            node.codegen(wrapper)
-            scheduler.barrier()
-            kernel_group = KernelGroup()
 
-        scheduler = Scheduler(tuple, V.graph.buffers)
-        kernel_group = KernelGroup()
+class CppScheduling:
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.kernel_group = KernelGroup()
+        self.group_fn = tuple
 
-        for group, reduction_group in scheduler.iter_runable_groups(
-            codegen_extern_call
-        ):
-            with scheduler.kernel(kernel_group.new_kernel()) as kernel:
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+    def codegen(self, group, reduction_group):
+        kernel_group = self.kernel_group
+        scheduler = self.scheduler
+        with scheduler.kernel(kernel_group.new_kernel()) as kernel:
+            vars, reduction_vars = kernel.set_ranges(group, reduction_group)
 
-                # first any pointwise sharing same loops
-                for node in scheduler.pop_group((group + reduction_group, ())):
+            # first any pointwise sharing same loops
+            for node in scheduler.pop_group((group + reduction_group, ())):
+                node.run(vars, reduction_vars)
+                node.mark_fusable()
+
+            if reduction_group:
+                # reductions
+                reduction_nodes = list(scheduler.pop_group((group, reduction_group)))
+                for node in reduction_nodes:
+                    scheduler.maybe_remove_buffer(node)
                     node.run(vars, reduction_vars)
+                # can't yet fuse reduction into reduction
+                for node in reduction_nodes:
                     node.mark_fusable()
 
-                if reduction_group:
-                    # reductions
-                    reduction_nodes = list(
-                        scheduler.pop_group((group, reduction_group))
-                    )
-                    for node in reduction_nodes:
-                        scheduler.maybe_remove_buffer(node)
-                        node.run(vars, reduction_vars)
-                    # can't yet fuse reduction into reduction
-                    for node in reduction_nodes:
+                # we can fuse in some extra pointwise into the suffix
+                with kernel.write_to_suffix():
+                    for node in scheduler.pop_group((group, ())):
+                        node.run(vars, ())
                         node.mark_fusable()
 
-                    # we can fuse in some extra pointwise into the suffix
-                    with kernel.write_to_suffix():
-                        for node in scheduler.pop_group((group, ())):
-                            node.run(vars, ())
-                            node.mark_fusable()
+        kernel_group.finalize_kernel(kernel, scheduler)
 
-            kernel_group.finalize_kernel(kernel, scheduler)
-
-        kernel_group.codegen_define_and_call(wrapper)
+    def flush(self):
+        self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
+        self.kernel_group = KernelGroup()
 
 
 class KernelGroup:
@@ -405,10 +410,13 @@ class KernelGroup:
         if self.count == 0:
             return
 
-        argdefs = ",\n".ljust(25).join(self.args.cpp_argdefs())
+        arg_defs, call_args = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
         code = BracesBuffer()
-        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({argdefs})'])
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
@@ -420,13 +428,7 @@ class KernelGroup:
         wrapper.define_kernel(kernel_name, codecache_def.getvalue())
 
         # generate the code to call this
-        args = self.args
-        call_args = []
-        for name in chain(args.input_buffers.keys(), args.output_buffers.keys()):
-            call_args.append(f"c_void_p({name}.data_ptr())")
-        for name in args.sizevars.keys():
-            call_args.append(f"c_long({name})")
-        wrapper.body.writeline(
+        wrapper.writeline(
             "{}({})".format(kernel_name, ", ".join(call_args)),
         )
 

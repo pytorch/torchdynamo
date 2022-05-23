@@ -14,6 +14,8 @@ class OperatorIssue(RuntimeError):
 
 class MissingOperator(OperatorIssue):
     def __init__(self, target, args, kwargs):
+        # with open("/tmp/missing_ops.txt", "a") as fd:
+        #    fd.write(str(target) + "\n")
         super().__init__(
             f"missing lowering/decomposition\n{self.operator_str(target, args, kwargs)}"
         )
