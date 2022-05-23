@@ -42,8 +42,9 @@ setup:
 	pip install -r requirements.txt
 
 setup_nightly:
-	pip install --pre torch==1.12.0.dev20220501+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	env MAKEFLAGS="-j8" pip install git+https://github.com/pytorch/functorch.git@e492c3cee1e4a22e477daa216c605bc08a447572
+	pip install ninja
+	pip install --pre torch==1.12.0.dev20220515+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
 	pip install -r requirements.txt
 	python setup.py develop
 
@@ -75,7 +76,8 @@ build-deps: clone-deps
 	# conda env remove --name torchdynamo
 	# conda create --name torchdynamo python=3.8
 	# conda activate torchdynamo
-	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake \
+                     cffi typing_extensions future six requests dataclasses protobuf
 	conda install -y -c pytorch magma-cuda113
 	make setup && pip uninstall -y torch
 	(cd ../pytorch     && python setup.py clean && python setup.py develop)
@@ -128,13 +130,37 @@ baseline-gpu: develop
 	 python torchbench.py -dcuda --isolate -n100 --speedup-onnx
 	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
 
-baseline-gpu-inductor: develop
-	 rm -f baseline_*.csv
-	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --inductor
-	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs && mv speedup_cudagraphs.csv baseline_cudagraphs.csv
-	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts --nvfuser && mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	 python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts && mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
-	 paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > baseline_all.csv
+gpu-inductor-cudagraphs: develop
+	rm -f inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv inductor_gpu_cudagraphs.csv
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --inductor
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs
+	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts --nvfuser
+	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=cudagraphs_ts
+	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
+	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs.csv
+
+gpu-inductor-dynamic: develop
+	rm -f inductor.csv baseline_nvfuser.csv baseline_nnc.csv inductor_gpu_dynamic.csv
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --inductor-dynamic
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=ts --nvfuser
+	mv speedup_ts.csv baseline_nvfuser.csv
+	python torchbench.py --cosine -dcuda --float32 --isolate -n50 --backend=ts
+	mv speedup_ts.csv baseline_nnc.csv
+	paste -d, inductor.csv baseline_nvfuser.csv baseline_nnc.csv > inductor_gpu_dynamic.csv
+
+cpu-inductor: develop
+	rm -f inductor.csv speedup_ts.csv cpu_inductor.csv
+	python torchbench.py --cosine --isolate --fast --inductor --threads=8
+	python torchbench.py --cosine --isolate --fast --backend=ts --threads=8
+	paste -d, inductor.csv speedup_ts.csv > cpu_inductor.csv
+
+cpu-inductor-seq: develop
+	rm -f inductor.csv speedup_ts.csv cpu_inductor.csv
+	taskset 1 python torchbench.py --cosine --isolate --fast --inductor --threads=1
+	taskset 1 python torchbench.py --cosine --isolate --fast --backend=ts --threads=1
+	paste -d, inductor.csv speedup_ts.csv > cpu_inductor.csv
 
 
 

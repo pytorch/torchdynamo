@@ -11,9 +11,11 @@ from unittest.mock import patch
 import numpy
 import sympy
 import torch
+import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
 
+from . import config
 from . import dependencies
 from .codegen.common import product
 from .dependencies import extract_read_writes
@@ -122,7 +124,9 @@ class Loops(IRNode):
 
     def inner_fn_str(self):
         try:
-            with V.set_ops_handler(V.MockHandler()):
+            with V.set_ops_handler(V.MockHandler()), patch.object(
+                FlexibleLayout, "allow_indexing", True
+            ):
                 return self.inner_fn(self._index(self.ranges))
         except Exception as e:
             return f"inner_fn(): {e}"
@@ -177,12 +181,44 @@ class Reduction(Loops):
 
     def inner_fn_str(self):
         try:
-            with V.set_ops_handler(V.MockHandler()):
+            with V.set_ops_handler(V.MockHandler()), patch.object(
+                FlexibleLayout, "allow_indexing", True
+            ):
                 return self.inner_fn(
                     self._index(self.ranges), self._index(self.reduction_ranges, "r")
                 )
         except Exception as e:
             return f"inner_fn(): {e}"
+
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable,
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+    ):
+        reduction_numel = product(reduction_ranges)
+        if reduction_numel == 1:
+            # this reduction is actually a pointwise op
+            def fn(index):
+                reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                return inner_fn(index, reduction_index)
+
+            return Pointwise.create(device, dtype, fn, ranges)
+
+        return TensorBox.create(
+            Reduction(
+                device,
+                dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+            )
+        )
 
 
 def is_storage_and_layout(x):
@@ -812,6 +848,11 @@ class Buffer(IRNode):
     def decide_layout(self):
         pass
 
+    def get_alias_names(self):
+        if isinstance(self.layout, AliasedLayout):
+            return [self.layout.view.get_name()]
+        return ()
+
 
 @dataclasses.dataclass
 class InputBuffer(Buffer):
@@ -1056,10 +1097,11 @@ class ExternKernel(InputsKernel):
         return args
 
     def codegen_size_asserts(self, wrapper):
-        size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
-        stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
-        wrapper.body.writeline(f"assert {self.get_name()}.size() == {size}")
-        wrapper.body.writeline(f"assert {self.get_name()}.stride() == {stride}")
+        if config.size_asserts:
+            size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
+            stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
+            wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
+            wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
 
 
 @dataclasses.dataclass
@@ -1072,7 +1114,7 @@ class ExternKernelOut(ExternKernel):
             args.append(f"out={self.output_view.codegen_reference()}")
         else:
             args.append(f"out={self.codegen_reference()}")
-        wrapper.body.writeline(f"{self.kernel}({', '.join(args)})")
+        wrapper.writeline(f"{self.kernel}({', '.join(args)})")
 
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
         super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
@@ -1085,7 +1127,7 @@ class ExternKernelOut(ExternKernel):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
-        wrapper.body.writeline(
+        wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
         if isinstance(self.layout, Layout):
@@ -1164,6 +1206,42 @@ class BatchMatrixMultiply(ExternKernelOut):
         return data
 
 
+class DeviceCopy(ExternKernelOut):
+    @classmethod
+    def create(cls, x, device):
+        x = cls.realize_input(x)
+        return DeviceCopy(
+            FlexibleLayout(
+                device=device,
+                dtype=x.get_dtype(),
+                size=x.get_size(),
+            ),
+            [x],
+        )
+
+    def codegen(self, wrapper):
+        args = self.codegen_args()
+        assert len(args) == 1
+        if self.output_view:
+            wrapper.writeline(
+                f"{self.output_view.codegen_reference()}.copy_({args[0]})"
+            )
+        else:
+            wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
+
+
+class DynamicScalar(IRNode):
+    """
+    The result of a call to aten._local_scalar_dense.
+
+    This is not yet implemented.  The one model (so far) that calls this
+    (fastNLP_Bert) does not actually use the result.  So we expect this
+    node to get dead code eliminated.
+    """
+
+    pass
+
+
 class AdaptiveAvgPool2d(ExternKernelAlloc):
     kernel = "aten._adaptive_avg_pool2d"
 
@@ -1195,6 +1273,7 @@ class FallbackKernel(ExternKernelAlloc):
         kernel,
         tensor_args,
         nontensor_args,
+        unflatten_args,
     ):
         super(FallbackKernel, self).__init__(
             layout,
@@ -1203,15 +1282,44 @@ class FallbackKernel(ExternKernelAlloc):
         )
         assert getattr(torch.ops.aten, kernel.__name__) is kernel
         self.kernel = f"aten.{kernel.__name__}"
+        self.unflatten_args = unflatten_args
+
+    def codegen_args(self):
+        @dataclasses.dataclass
+        class Shim:
+            ref: Any
+
+            def __repr__(self):
+                return self.ref
+
+        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
+        constant_args = [Shim(repr(x)) for x in self.constant_args]
+        return list(map(repr, self.unflatten_args(tensor_args, constant_args)))
 
     @classmethod
     def create(cls, kernel, *args):
-        args = list(reversed(args))
+        args_flat, args_spec = pytree.tree_flatten(args)
+
+        is_arg_tensor = []
         tensor_args = []
-        while args and isinstance(args[-1], IRNode):
-            tensor_args.append(args.pop())
-        nontensor_args = list(reversed(args))
-        assert all(not isinstance(x, IRNode) for x in nontensor_args)
+        non_tensor_args = []
+        for arg in args_flat:
+            is_arg_tensor.append(isinstance(arg, IRNode))
+            if is_arg_tensor[-1]:
+                tensor_args.append(arg)
+            else:
+                non_tensor_args.append(arg)
+
+        def unflatten_args(new_tensor_args, new_non_tensor_args):
+            new_args = []
+            it_tensors = iter(new_tensor_args)
+            it_non_tensors = iter(new_non_tensor_args)
+            for is_tensor in is_arg_tensor:
+                if is_tensor:
+                    new_args.append(next(it_tensors))
+                else:
+                    new_args.append(next(it_non_tensors))
+            return pytree.tree_unflatten(new_args, args_spec)
 
         tensor_args = [
             cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
@@ -1228,14 +1336,15 @@ class FallbackKernel(ExternKernelAlloc):
             )
             for x in tensor_args
         ]
-        example_output = kernel(*example_args, *nontensor_args)
+        example_output = kernel(*unflatten_args(example_args, non_tensor_args))
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
                 MultiOutputLayout(),
                 kernel,
                 tensor_args,
-                nontensor_args,
+                non_tensor_args,
+                unflatten_args,
             )
             return [
                 MultiOutput(
@@ -1260,7 +1369,8 @@ class FallbackKernel(ExternKernelAlloc):
                 ),
                 kernel,
                 tensor_args,
-                nontensor_args,
+                non_tensor_args,
+                unflatten_args,
             )
 
 
@@ -1270,7 +1380,7 @@ class MultiOutputLayout(IRNode):
 
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
-        wrapper.body.writeline(
+        wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}[{self.index}]"
         )
         self.codegen_size_asserts(wrapper)

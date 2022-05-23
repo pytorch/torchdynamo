@@ -1,15 +1,37 @@
 import math
+from typing import List
 
+import functorch._src.decompositions
 import torch
-from functorch._src.decompositions import register_decomposition
+from torch import Tensor
+from torch._decomp import get_decompositions
 
 from torchinductor import config
 
 aten = torch.ops.aten
-decompositions = {}
+
+decompositions = get_decompositions(
+    [
+        aten.l1_loss,
+        aten.mse_loss,
+        aten.stack,
+        aten.native_layer_norm,
+        aten.native_batch_norm,
+        aten.cudnn_batch_norm,
+        aten.leaky_relu,
+        aten.hardtanh,
+        aten.hardsigmoid,
+        aten.hardswish,
+        aten.transpose.int,
+    ]
+)
 
 
-@register_decomposition([aten.clamp], decompositions)
+def register_decomposition(ops):
+    return functorch._src.decompositions.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.clamp])
 def clamp(x, min=None, max=None):
     if min is not None:
         x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
@@ -18,7 +40,7 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten._softmax], decompositions)
+@register_decomposition([aten._softmax])
 def _softmax(x, dim, half_to_float):
     # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
     if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
@@ -29,7 +51,7 @@ def _softmax(x, dim, half_to_float):
     return x * scale
 
 
-@register_decomposition([aten._log_softmax], decompositions)
+@register_decomposition([aten._log_softmax])
 def _log_softmax(x, dim, half_to_float):
     # TODO(jansel): check numerical stability (see SoftMaxKernel.cpp)
     if half_to_float and x.dtype in (torch.bfloat16, torch.float16):
@@ -38,7 +60,7 @@ def _log_softmax(x, dim, half_to_float):
     return x - x_sum
 
 
-@register_decomposition([aten.t], decompositions)
+@register_decomposition([aten.t])
 def t(x):
     ndim = x.ndimension()
     if x.ndim in (0, 1):
@@ -47,19 +69,12 @@ def t(x):
     return torch.transpose(x, 0, 1)
 
 
-@register_decomposition([aten.transpose.int], decompositions)
-def transpose(x, dim0: int, dim1: int):
-    dims = list(range(x.ndim))
-    dims[dim0], dims[dim1] = dims[dim1], dims[dim0]
-    return torch.permute(x, dims)
-
-
-@register_decomposition([aten.addmm], decompositions)
+@register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2):
     return torch.mm(mat1, mat2) + input
 
 
-@register_decomposition([aten.elu], decompositions)
+@register_decomposition([aten.elu])
 def elu(self, alpha=1, scale=1, input_scale=1):
     negcoef = alpha * scale
     return torch.where(
@@ -67,36 +82,22 @@ def elu(self, alpha=1, scale=1, input_scale=1):
     )
 
 
-@register_decomposition([aten.tanh], decompositions)
+@register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
-@register_decomposition([aten.hardtanh], decompositions)
-def hardtanh(x, min_val=-1.0, max_val=1.0):
-    return torch.clamp(x, min_val, max_val)
+@register_decomposition([aten.rsqrt])
+def rsqrt(x):
+    return torch.reciprocal(torch.sqrt(x))
 
 
-@register_decomposition([aten.hardsigmoid], decompositions)
-def hardsigmoid(x):
-    return torch.clamp(x / 6.0 + 0.5, 0.0, 1.0)
+@register_decomposition([aten.log2])
+def log2(x):
+    return torch.log(x) * (1.0 / math.log(2.0))
 
 
-@register_decomposition([aten.hardswish], decompositions)
-def hardswish(x):
-    return torch.where(
-        torch.gt(x, -3),
-        torch.where(torch.lt(x, 3), x * (x + 3.0) / 6.0, x),
-        torch.tensor(0.0, device=x.device, dtype=x.dtype),
-    )
-
-
-@register_decomposition([aten.leaky_relu], decompositions)
-def leaky_relu(x, negative_slope=0.01):
-    return torch.relu(x) + (-negative_slope) * torch.relu(-x)
-
-
-@register_decomposition([aten.gelu], decompositions)
+@register_decomposition([aten.gelu])
 def gelu(x, approximate="none"):
     if config.approximations or approximate != "none":
         # tanh approximation is much faster
@@ -109,7 +110,7 @@ def gelu(x, approximate="none"):
         return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
-@register_decomposition([aten.special_erf], decompositions)
+@register_decomposition([aten.special_erf, aten.erf])
 def special_erf(x):
     # TODO(jansel): this might be crazy slow.  Triton doesn't have the
     #               cuda ::erf() builtin.  I've made a feature request for this,
@@ -133,46 +134,14 @@ def special_erf(x):
     return sign * y
 
 
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar], decompositions)
+@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
 def rsub(a, b):
     if isinstance(b, (int, float)):
         b = torch.tensor(b, dtype=a.dtype, device=a.device)
     return b - a
 
 
-def pow(a, b):
-    # see https://github.com/openai/triton/issues/506
-    # triton doesn't support pow, so need to rewrite it
-    if isinstance(b, float) and b == int(b):
-        return pow(a, int(b))
-    if isinstance(b, int) and b == 0:
-        return torch.ones_like(a)
-    elif isinstance(b, int) and b == 1:
-        return a
-    elif isinstance(b, int):
-        if b < 0:
-            return pow(torch.reciprocal(a), -b)
-
-        result = pow(a, b // 2)
-        result = result * result
-        if (b % 2) == 1:
-            result = result * a
-        return result
-    else:
-        assert False, "TODO: check correctness here"
-        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
-        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
-        # else: torch.exp(torch.log(a) * b)
-
-
-try:
-    register_decomposition([aten.pow], decompositions)(pow)
-except AttributeError:
-    # older versions of PyTorch
-    register_decomposition([aten.pow.Tensor_Scalar], decompositions)(pow)
-
-
-@register_decomposition([aten.masked_fill.Scalar], decompositions)
+@register_decomposition([aten.masked_fill.Scalar])
 def masked_fill(value, mask, other):
     if isinstance(other, (int, float)):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
@@ -180,65 +149,40 @@ def masked_fill(value, mask, other):
     return torch.where(mask, other, value)
 
 
-def _batch_norm(
-    input,
-    weight,
-    bias,
-    running_mean,
-    running_var,
-    training: bool,
-    momentum: float,
-    eps: float,
-):
-    assert not training, "TODO: support training"
-    assert input.ndimension() == 4
-    view_size = [1, -1, 1, 1]
-
-    # TODO(jansel): try broadcasting earlier to get things into a single kernel
-
-    invstd = torch.reciprocal(torch.sqrt(running_var + eps))
-    if weight is None:
-        weight = 1
-    if bias is None:
-        bias = 0
-    alpha = invstd * weight
-    beta = bias - running_mean * alpha
-    result = input * alpha.view(view_size) + beta.view(view_size)
-    return result
-
-
-@register_decomposition([aten.native_batch_norm], decompositions)
-def native_batch_norm(
-    input,
-    weight,
-    bias,
-    running_mean,
-    running_var,
-    training: bool,
-    momentum: float,
-    eps: float,
-):
-    result = _batch_norm(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
+@register_decomposition([aten.nan_to_num])
+def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    if nan is None:
+        nan = 0.0
+    if posinf is None:
+        posinf = torch.finfo(x.dtype).max
+    if neginf is None:
+        neginf = torch.finfo(x.dtype).min
+    nan, posinf, neginf = (
+        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
     )
-    null = torch.tensor([], device=input.device)
-    return (result, null, null)
+    x = torch.where(x != x, nan, x)
+    x = torch.where(x == float("inf"), posinf, x)
+    x = torch.where(x == float("-inf"), neginf, x)
+    return x
 
 
-@register_decomposition([aten.cudnn_batch_norm], decompositions)
-def cudnn_batch_norm(
-    input,
-    weight,
-    bias,
-    running_mean,
-    running_var,
-    training: bool,
-    momentum: float,
-    eps: float,
-):
-    result = _batch_norm(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
+def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
+    ndim = self.dim()
+    for idx in range(ndim - 1, -1, -1):
+        if idx in dims or idx - ndim in dims:
+            self = self.squeeze(idx)
+    return self
+
+
+# based on https://github.com/pytorch/pytorch/pull/77219
+@register_decomposition([aten.logsumexp.default])
+def logsumexp(self, dim, keepdim=False) -> Tensor:
+    if self.numel() == 0:
+        return torch.sum(torch.exp(self), dim, keepdim).log()
+    maxes = torch.amax(self, dim, keepdim=True)
+    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
+    maxes_squeezed = torch.masked_fill(
+        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
     )
-    null = torch.tensor([], device=input.device)
-    null_uint8 = torch.tensor([], device=input.device, dtype=torch.uint8)
-    return (result, null, null, null_uint8)
+    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
+    return result.log().add(maxes_squeezed)

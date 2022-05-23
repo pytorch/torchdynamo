@@ -294,15 +294,21 @@ class BuiltinVariable(VariableTracker):
             ]
             return variables.TupleVariable(items, **options)
 
-    def call_enumerate(self, tx, arg):
-        options = VariableTracker.propagate(self, arg)
-        if arg.has_unpack_var_sequence(tx):
+    def call_enumerate(self, tx, *args):
+        options = VariableTracker.propagate(self, args)
+        if len(args) == 1:
+            start = 0
+        else:
+            assert len(args) == 2
+            assert isinstance(args[1], variables.ConstantVariable)
+            start = args[1].as_python_constant()
+        if args[0].has_unpack_var_sequence(tx):
             items = [
                 variables.TupleVariable(
                     [variables.ConstantVariable(idx, **options), var],
                     **options,
                 )
-                for idx, var in enumerate(arg.unpack_var_sequence(tx))
+                for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
             ]
             return variables.TupleVariable(items, **options)
 
@@ -547,3 +553,11 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
+
+    def call_id(self, tx, *args):
+        if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
+            nn_mod_variable = args[0]
+            mod = tx.output.get_submodule(nn_mod_variable.module_key)
+            return variables.ConstantVariable(id(mod))
+        else:
+            unimplemented(f"call_id with args {args}")

@@ -3,6 +3,7 @@ import collections
 import copy
 import dataclasses
 import dis
+import enum
 import functools
 import math
 import sys
@@ -1190,18 +1191,26 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
-    @unittest.skip("disabled for now")
     def test_python_slice(self):
-        def fn(input):
+        def f1(input):
             y = 0
             for i, x in enumerate(input[2:], 1):
                 y = y + x
             return y
 
+        def f2(input):
+            y = 0
+            for i, x in enumerate(input.shape[2:], 1):
+                y = y + x
+            return y
+
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
-            z = fn([1, 2, 3, 5])
-        self.assertEqual(z, 8)
+            res1 = f1([1, 2, 3, 5])
+            res2 = f2(torch.rand([2, 3, 4, 5]))
+
+        self.assertEqual(res1, 8)
+        self.assertEqual(res2, 9)
 
     def test_const_dict_variable_python_type(self):
         from torchdynamo.variables import ConstDictVariable
@@ -1213,3 +1222,223 @@ class MiscTests(torchdynamo.testing.TestCase):
             ConstDictVariable(d2, collections.OrderedDict).python_type(),
             collections.OrderedDict,
         )
+
+    def test_builtin_subclasses_as_method_on_class_type(self):
+        class Foo:
+            def __init__(name):
+                self.ame_ = name
+
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+
+        counter = CompileCounter()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn():
+            return Foo.__subclasses__()
+
+        subs_of_foo_optim = fn()
+
+        self.assertEqual(len(subs_of_foo_reg), 2)
+        self.assertEqual(subs_of_foo_reg, subs_of_foo_optim)
+
+    def test_builtin_subclasses_as_method_on_var(self):
+        class Foo:
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Foo " + self.name_
+
+        class Bar(Foo):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Bar " + self.name_
+
+        class Baz(Bar):
+            def __init__(name):
+                self.name_ = name
+
+            def get_name(self):
+                return "Baz " + self.name_
+
+        subs_of_foo_reg = Foo.__subclasses__()
+        sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
+
+        sub_of_foo_subclass_var_optim = list()
+        counter = CompileCounter()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn():
+            return Foo.__subclasses__()
+
+        @torchdynamo.optimize_assert(counter)
+        def fn_single(subs_of_foo_optim):
+            return subs_of_foo_optim[0].__subclasses__()
+
+        subs_of_foo_optim = fn()
+        sub_of_foo_subclass_var_optim = fn_single(subs_of_foo_optim)
+
+        self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
+        self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
+
+    def test_enum_no_graphbreaks(self):
+        class Foo(enum.Enum):
+            FOO = 0
+            BAR = 1
+
+        def fn(x, foo):
+            if foo is Foo.FOO:
+                x = torch.add(x, 1.0)
+            x = torch.mul(x, 1.0)
+            return x
+
+        x = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, Foo.FOO)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, Foo.BAR)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_id_of_nn_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                x = torch.add(x, 1.0)
+                return x
+
+        m = M().eval()
+        data = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        correct_ref_id = id(m)
+        with torchdynamo.optimize(cnts, nopython=True):
+            m(data, correct_ref_id)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        incorrect_ref_id = id(m) + 1
+        with torchdynamo.optimize(cnts, nopython=True):
+            m(data, incorrect_ref_id)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_func_jump_on_tensor_condition(self):
+        def f1(input):
+            if input == 0:
+                return input + 1
+            else:
+                return input + 2
+
+        def f2(input):
+            return f1(input)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res1 = f2(torch.tensor([1.0]))
+            res2 = f2(torch.tensor([0.0]))
+
+        self.assertEqual(res1, 3)
+        self.assertEqual(res2, 1)
+
+    def test_frozenset_torch_func_contains(self):
+        funcs = frozenset([torch.add])
+
+        def fn(x, func):
+            if func in funcs:
+                x = torch.add(x, 1.0)
+            x = torch.mul(x, 1.0)
+            return x
+
+        x = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, torch.add)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, torch.mul)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_list_mutation(self):
+        def f1(x):
+            x.append(torch.ones(8))
+            return x
+
+        def f2():
+            x = [torch.ones(6)]
+            f1(x)
+            return x
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_inline_dict_mutation(self):
+        def f1(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        def f2():
+            d = {"a": torch.ones(5), "b": torch.ones(5)}
+            f1(d)
+            return d
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_recursive_inline_list_mutation(self):
+        def f1(x, y):
+            x.append(torch.tensor([1.1]))
+            y.append(torch.tensor([1.2]))
+            return x, y
+
+        def f2(x, y):
+            x.append(torch.tensor([2.1]))
+            y.append(torch.tensor([2.2]))
+            f1(x, y)
+            return x, y
+
+        def f3(x):
+            x.append(torch.tensor([3.1]))
+            y = [torch.tensor([3.2])]
+            f2(x, y)
+            return x, y
+
+        def f4():
+            x = [torch.tensor([4.1])]
+            return f3(x)
+
+        res1 = f4()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f4()
+        self.assertTrue(same(res1, res2))

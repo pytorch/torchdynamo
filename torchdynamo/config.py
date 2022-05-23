@@ -7,6 +7,9 @@ import torch
 # print out lots of stuff
 debug = False
 
+# verify the correctness of optimized backend
+verify_correctness = False
+
 # an unreasonable amount of debug printouts
 trace = False
 
