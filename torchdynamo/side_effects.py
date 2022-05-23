@@ -9,7 +9,6 @@ from . import utils
 from . import variables
 from .bytecode_transformation import create_instruction
 from .codegen import PyCodegen
-from .source import GlobalSource
 from .source import LocalSource
 from .source import Source
 from .utils import object_new

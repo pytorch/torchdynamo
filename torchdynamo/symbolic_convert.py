@@ -16,8 +16,6 @@ from typing import Dict
 from typing import List
 from unittest.mock import patch
 
-from sympy import variations
-
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
@@ -63,7 +61,6 @@ from .variables.misc import ClosureVariable
 from .variables.misc import ContextManagerVariable
 from .variables.misc import GetAttrVariable
 from .variables.misc import GradModeVariable
-from .variables.misc import NewGlobalVariable
 from .variables.misc import PythonModuleVariable
 from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable

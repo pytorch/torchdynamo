@@ -1,25 +1,10 @@
 #!/usr/bin/env pytest
-import collections
-import copy
-import dataclasses
-import dis
-import functools
-import math
-import sys
-import typing
-import unittest
-
-import numpy as np
 import torch
 
 import torchdynamo.testing
-from torchdynamo import bytecode_transformation
-from torchdynamo.testing import CompileCounter
-from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
-from torchdynamo.testing import unsupported
 
-from .test_global_declaration import g_tensor_export
+from . import test_global_declaration
 
 torchdynamo.config.debug = True
 
@@ -180,25 +165,12 @@ class TestGlobals(torchdynamo.testing.TestCase):
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
-    def test_store_global_object(self):
-        def fn(x):
-            global g_object
-            val = x + g_object.y
-            g_object.y += 1
-            return val
-
-        x = torch.randn(10)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
-        res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
-
     def test_store_global_cross_file(self):
         def fn(x):
-            global g_tensor_export
-            val = x + g_tensor_export
-            g_tensor_export = g_tensor_export + 1
+            val = x + test_global_declaration.g_tensor_export
+            test_global_declaration.g_tensor_export = (
+                test_global_declaration.g_tensor_export + 1
+            )
             return val
 
         x = torch.randn(10)
