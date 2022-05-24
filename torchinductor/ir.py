@@ -369,9 +369,22 @@ class BaseView(IRNode):
 class ExpandView(BaseView):
     size: List[Expr]
 
+    @staticmethod
+    def _normalize_size(x, new_size):
+        """ Replace `-1` with correct sizes """
+        new_size = list(map(sympy.expand, new_size))
+        old_size = x.get_size()
+        old_size = [None]*(len(new_size) - len(old_size)) + list(old_size)
+        assert len(new_size) == len(old_size)
+        for i in range(len(new_size)):
+            if new_size[i] == -1:
+                assert old_size[i] is not None
+                new_size[i] = old_size[i]
+        return new_size
+
     @classmethod
     def create(cls, x, new_size):
-        new_size = list(map(sympy.expand, new_size))
+        new_size = cls._normalize_size(x, new_size)
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -1223,20 +1236,15 @@ class ComputedBuffer(Buffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
-        try:
-            strides = numpy.array(
-                [V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs],
-                dtype=numpy.int64,
-            )
-            assert strides.shape == (len(memory_addrs), len(index_vars))
+        strides = numpy.array(
+            [V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs],
+            dtype=numpy.int64,
+        )
+        assert strides.shape == (len(memory_addrs), len(index_vars))
 
-            from .scheduler import pick_loop_order
+        from .scheduler import pick_loop_order
 
-            order = list(reversed(pick_loop_order(strides, sizes)))
-        except TypeError:
-            # sympy cannot convert symbols to int
-            order = list(range(len(sizes)))
-
+        order = list(reversed(pick_loop_order(strides, sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
 

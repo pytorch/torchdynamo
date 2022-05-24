@@ -437,7 +437,7 @@ class CommonTemplate:
 
     def test_expand(self):
         def fn(a):
-            return ((a + 1).expand(3, 4, 2, 3, 2) + 2, a.expand(2, 1, 2, 3, 2) + 2)
+            return ((a + 1).expand(3, 4, 2, 3, 2) + 2, a.expand(2, 1, 2, 3, 2) + 2), a.expand(2, -1, 5, -1)
 
         self.common(fn, (torch.randn(2, 1, 2),))
 
@@ -488,7 +488,7 @@ class CommonTemplate:
 
     def test_unsqueeze_inplace(self):
         def fn(a):
-            tmp1 = (a+1)
+            tmp1 = a + 1
             aten.unsqueeze_(tmp1, 2)
             tmp2 = aten.unsqueeze_(a + 1, 0) + 2
             return (tmp1, tmp2)
