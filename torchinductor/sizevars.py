@@ -41,10 +41,13 @@ class SizeVarAllocator(object):
         if not zero_one_const:
             self.val_to_var.clear()
 
+    def simplify(self, expr):
+        return sympy.expand(expr).subs(self.replacements)
+
     def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
         if left == right:
             return left
-        expr = sympy.expand(left - right).subs(self.replacements)
+        expr = self.simplify(left - right)
         assert self.size_hint(expr) == 0, (expr, self.size_hint(expr))
         free = list(expr.free_symbols)
         if len(free) == 0:
@@ -71,8 +74,14 @@ class SizeVarAllocator(object):
         else:
             return left
 
+    def maybe_guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+        if self.size_hint(left - right) == 0:
+            self.guard_equals(left, right)
+            return True
+        return False
+
     def guard_lt(self, left: sympy.Symbol, right: sympy.Symbol):
-        expr = sympy.expand(right - left).subs(self.replacements)
+        expr = self.simplify(right - left)
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
             return

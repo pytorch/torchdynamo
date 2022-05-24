@@ -1,4 +1,4 @@
-import collections
+import logging
 import operator
 from itertools import chain
 
@@ -18,6 +18,8 @@ from .ir import InputBuffer
 from .ir import TensorBox
 from .lowering import lowerings
 from .sizevars import SizeVarAllocator
+
+log = logging.getLogger(__name__)
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -62,15 +64,17 @@ class GraphLowering(torch.fx.Interpreter):
     def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs=None):
         super().__init__(gm)
         self.sizevars = SizeVarAllocator("s")
-        self.graph_inputs = collections.OrderedDict()
+        self.graph_inputs = {}
+        self.graph_inputs_original = {}
         self.graph_outputs = None
         self.device_types = set()
         self.buffers = []
-        self.constants = dict()
+        self.constants = {}
         self.removed_buffers = set()
         self.wrapper_code = None
         self.num_dynamic_inputs = num_dynamic_inputs
         self.num_static_inputs = None
+        self.mutated_inputs = set()
 
     def run(self, *args):
         if self.num_dynamic_inputs is None:
@@ -82,6 +86,27 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         return name
+
+    def realize_users_of(self, name: str):
+        """
+        When a buffer is mutated we need to make sure all the reads to
+        the old version are realized before the mutation happens.
+        """
+        assert isinstance(name, str)
+
+        def visit(value):
+            if isinstance(value, (list, tuple)):
+                return [visit(x) for x in value]
+            if isinstance(value, ir.IRNode):
+                if value.is_user_of(name):
+                    value.realize()
+            return value
+
+        for key, value in self.env.items():
+            try:
+                visit(value)
+            except Exception:
+                log.warning("error in realize_users_of", exc_info=True)
 
     def add_tensor_constant(self, data):
         def allocate():
@@ -98,6 +123,19 @@ class GraphLowering(torch.fx.Interpreter):
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
+
+    def constant_name(self, name: str, device_override: torch.device):
+        """
+        We AOT copy constants to the devices they are needed on.
+        If device_override doesn't match the constant's device, then
+        copy it and return a different name.
+        """
+        if self.constants[name].device == device_override or device_override is None:
+            return name
+        alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
+        if alt_name not in self.constants:
+            self.constants[alt_name] = self.constants[name].to(device_override)
+        return alt_name
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
@@ -116,6 +154,8 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
         self.graph_inputs[target] = tensor
+        self.graph_inputs_original[target] = tensor.data.data
+        self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -153,6 +193,16 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, tuple)
         assert all(isinstance(x, TensorBox) for x in result), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+
+        for name, value in self.graph_inputs.items():
+            value.realize()
+            assert isinstance(value, TensorBox)
+            value = value.data
+            assert isinstance(value, ir.StorageBox)
+            value = value.data
+            if not isinstance(value, InputBuffer) or value.get_name() != name:
+                # one of our inputs was mutated, need to turn that into a copy
+                ir.MutationLayout.realize_into(value, self.graph_inputs_original[name])
         self.finalize()
 
     def finalize(self):
@@ -171,7 +221,8 @@ class GraphLowering(torch.fx.Interpreter):
         from .scheduler import Scheduler
 
         self.wrapper_code = WrapperCodeGen()
-        Scheduler(self.buffers).codegen()
+        self.scheduler = Scheduler(self.buffers)
+        self.scheduler.codegen()
         return self.wrapper_code.generate()
 
     def compile_to_fn(self):
