@@ -1,8 +1,4 @@
 import unittest
-from abc import ABC
-from abc import abstractmethod
-from typing import Any
-from typing import List
 
 import torch
 
@@ -31,18 +27,16 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         def loop_torture(input, iters):
             out = input
             # randint itself causes one graph break
-            for i in range(iters):
-                # out += input should be another graph
-                # what about the for loop?
+            for _ in range(iters):
                 out += input
             return out
 
         compile_counter = torchdynamo.testing.CompileCounter()
-        for i in range(10):
+        for _ in range(10):
             x = torch.randn(3)
             iters = torch.randint(low=0, high=1000, size=())
             with torchdynamo.optimize(compile_counter):
-                out = loop_torture(x, iters)
+                loop_torture(x, iters)
 
         # Currently, we recompile each time,
         # We'd probably like to bail out quickly and warn
@@ -60,11 +54,11 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
         compile_counter = torchdynamo.testing.CompileCounter()
 
-        for i in range(10):
+        for _ in range(10):
             bsz = torch.randint(low=0, high=1000, size=())
             x = torch.randn((bsz, 3, 4))
             with torchdynamo.optimize(compile_counter):
-                out = model(x)
+                model(x)
 
         print(counters)
         self.assertEqual(counters["frames"]["ok"], self.cache_limit)
