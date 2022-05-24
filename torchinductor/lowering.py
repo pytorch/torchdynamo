@@ -1165,7 +1165,6 @@ def avg_pool2d(
     count_include_pad=True,
     divisor_override=None,
 ):
-    assert count_include_pad
     assert not divisor_override
     if not stride:
         stride = kernel_size
@@ -1188,26 +1187,39 @@ def avg_pool2d(
 
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
         x_loader = constant_boundary_condition_2d(x, 0.0, padding)
+        had_padding = True
     else:
         x_loader = x.make_loader()
+        had_padding = False
 
     new_size = list(batch) + [h_out, w_out]
-
-    scale = 1.0 / (kernel_size[0] * kernel_size[1])
     dtype = x.get_dtype()
 
-    def fn(idx):
+    def fn_sum(idx, loader):
         *prefix, bh, bw = idx
         total = None
         for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
-            val = x_loader([*prefix, ih, iw])
+            val = loader([*prefix, ih, iw])
             if total is None:
                 total = val
             else:
                 total = ops.add(val, total)
-        return ops.mul(total, ops.constant(scale, dtype))
+        return total
+
+    if count_include_pad or not had_padding:
+        scale = 1.0 / (kernel_size[0] * kernel_size[1])
+
+        def fn(idx):
+            return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
+
+    else:
+        ones_loader = constant_boundary_condition_2d(ones_like(x), 0.0, padding)
+
+        def fn(idx):
+            # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
+            return ops.div(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
 
     rv = Pointwise.create(
         device=x.get_device(),

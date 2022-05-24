@@ -302,7 +302,6 @@ class TritonKernel(Kernel):
             offset,
             base_part,
             reduction_part,
-            {**self.iter_range_tree.var_ranges, **self.reduction_range_tree.var_ranges},
         )
 
         offset = self.rename_indexing(offset)
