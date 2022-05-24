@@ -60,6 +60,15 @@ class ModularIndexing(sympy.Function):
             and isinstance(modulus, sympy.Integer)
         ):
             return (base // divisor) % modulus
+
+        if divisor == 1:
+            w1 = sympy.Wild("w1")
+            w2 = sympy.Wild("w2")
+            m = base.match(w1 + modulus * w2)
+            if m and "/" not in str(m[w1]) and "/" not in str(m[w2]) and m[w2] != 0:
+                # simplify indexing
+                return ModularIndexing(m[w1], divisor, modulus)
+
         # if isinstance(base, IndexingDiv):
         #     return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
@@ -134,6 +143,9 @@ class Loops(IRNode):
 
     def get_size(self):
         return self.ranges
+
+    def is_extern(self):
+        return False
 
     @classmethod
     def create(cls, *args, **kwargs):
@@ -341,6 +353,9 @@ class BaseView(IRNode):
 
     def get_storage_numel(self):
         return self.data.get_storage_numel()
+
+    def is_extern(self):
+        return self.data.is_extern()
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -744,6 +759,9 @@ class BaseConstant(IRNode):
     def get_reads(self):
         return ()
 
+    def is_extern(self):
+        return False
+
 
 @dataclasses.dataclass
 class Constant(BaseConstant):
@@ -975,6 +993,9 @@ class Buffer(IRNode):
 
     def get_storage_numel(self):
         return self.get_numel()
+
+    def is_extern(self):
+        return False
 
     def freeze_layout(self):
         if not isinstance(self.layout, MultiOutputLayout):
@@ -1254,6 +1275,9 @@ class InputsKernel(Buffer):
             inputs_new.append(x)
         return inputs_new
 
+    def is_extern(self):
+        return True
+
 
 class NopKernel(InputsKernel):
     def is_no_op(self):
@@ -1511,7 +1535,7 @@ class DeviceCopy(ExternKernelOut):
 
         x = cls.realize_input(x)
         read_writes = x.get_read_writes()
-        if all(
+        if not x.is_extern() and all(
             (r.name in V.graph.constants and hasattr(r, "index"))
             for r in read_writes.reads
         ):
