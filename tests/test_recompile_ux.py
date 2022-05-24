@@ -1,7 +1,9 @@
+from torchdynamo.utils import counters
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
 from typing import List
+import unittest
 
 import torch
 
@@ -10,36 +12,39 @@ import torchdynamo.config
 import torchdynamo.testing
 
 torchdynamo.config.debug = False
-from torchdynamo.utils import counters
+
 
 class RecompileUxTests(torchdynamo.testing.TestCase):
     # TODO(whc) dynamo actualy recompiles one more time than the cache limit
-    max_recompiles = 2
+    cache_limit = 1
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        torchdynamo.config.cache_size_limit = max(1, RecompileUxTests.max_recompiles - 1)
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(torchdynamo.config, "cache_size_limit",
+                                       cls.cache_limit))
 
     def test_loop_torture(self):
-        def loop_torture(input):
+        def loop_torture(input, iters):
             out = input
-            for i in range(torch.randint(low=0, high=1000, size=())):
+            # randint itself causes one graph break
+            for i in range(iters):
+                # out += input should be another graph
+                # what about the for loop?
                 out += input
             return out
 
         for i in range(10):
             x = torch.randn(3)
+            iters = torch.randint(low=0, high=1000, size=())
             with torchdynamo.optimize("eager"):
-                out = loop_torture(x)
+                out = loop_torture(x, iters)
 
         # Currently, we recompile each time,
         # We'd probably like to bail out quickly and warn
-        self.assertEqual(counters["frames"]["total"], RecompileUxTests.max_recompiles)
-        self.assertEqual(
-            torchdynamo.utils.counters["frames"]["total"],
-            torchdynamo.utils.counters["frames"]["ok"],
-        )
+        self.assertEqual(counters["frames"]["total"], 2 + self.cache_limit)
+        self.assertEqual(counters["frames"]["ok"], 1 + self.cache_limit)
 
     def test_dynamic_input(self):
         def model(input):
@@ -50,14 +55,11 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             x = torch.randn((bsz, 3, 4))
             with torchdynamo.optimize("eager"):
                 out = model(x)
-        
-        print(counters)
-        self.assertEqual(counters["frames"]["total"], TortureTests.max_recompiles)
-        self.assertEqual(
-            torchdynamo.utils.counters["frames"]["total"],
-            torchdynamo.utils.counters["frames"]["ok"],
-        )
 
+        print(counters)
+        self.assertEqual(counters["frames"]["ok"], self.cache_limit)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_nvfuser_guards(self):
         # we may want to model dynamo's guards sufficiently after nvfuser's ProfilingExecutor guards
         # such that we ensure dynamo is in charge of all the recompilations at the top level,
@@ -70,23 +72,25 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         b_v = torch.rand(3, 5, 4, device='cuda').view(3, 4, 5)
         b_p = torch.rand(3, 5, 4, device='cuda').permute(0, 2, 1)
         c = torch.rand(3, 4, 5, device='cuda')
-        
-        torchdynamo.config.cache_size_limit = 5
-        
+
         with torchdynamo.optimize("eager"):
-            func(a, b, c) # warmup
+            func(a, b, c)  # warmup
             self.assertEqual(counters["frames"]["total"], 1)
-            func(a, b, c) # no guard fail
+            self.assertEqual(counters["frames"]["ok"], 1)
+            
+            func(a, b, c)  # no guard fail or recompile
             self.assertEqual(counters["frames"]["total"], 1)
-            func(a, b_v, c) # should NOT fail?
+            self.assertEqual(counters["frames"]["ok"], 1)
+
+            func(a, b_v, c)  # a view should not cause nvfuser recompile
             self.assertEqual(counters["frames"]["total"], 1)
-            func(a, b_p, c) # should fail
+            self.assertEqual(counters["frames"]["ok"], 1)
+
+            func(a, b_p, c)  # a permutation should cause recompile
             self.assertEqual(counters["frames"]["total"], 2)
+            self.assertEqual(counters["frames"]["ok"], 1)
+
             func(torch.rand(5), torch.rand(5), torch.rand(5))
             self.assertEqual(counters["frames"]["total"], 2)
-            self.assertEqual(
-                torchdynamo.utils.counters["frames"]["total"],
-                torchdynamo.utils.counters["frames"]["ok"],
-            )
-        
-        torchdynamo.config.cache_size_limit = RecompileUxTests.max_recompiles - 1
+            self.assertEqual(counters["frames"]["ok"], 1)
+
