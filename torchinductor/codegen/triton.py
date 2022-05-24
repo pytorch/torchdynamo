@@ -9,7 +9,7 @@ from typing import List
 import sympy
 import torch
 
-from .. import codecache, ir
+from .. import codecache
 from .. import config
 from ..virtualized import V
 from ..virtualized import ops
@@ -293,7 +293,12 @@ class TritonKernel(Kernel):
         offset = index.subs({v: 0 for v in chain(iter_vars, reduction_vars)})
         base_part = index.subs({v: 0 for v in reduction_vars}) - offset
         reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
-        assert index == offset + base_part + reduction_part, (index, offset, base_part, reduction_part)
+        assert index == offset + base_part + reduction_part, (
+            index,
+            offset,
+            base_part,
+            reduction_part,
+        )
 
         offset = self.rename_indexing(offset)
         base_part = self.rename_indexing(self.simplify_indexing(base_part))

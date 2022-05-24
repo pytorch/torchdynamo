@@ -1223,20 +1223,15 @@ class ComputedBuffer(Buffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
-        try:
-            strides = numpy.array(
-                [V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs],
-                dtype=numpy.int64,
-            )
-            assert strides.shape == (len(memory_addrs), len(index_vars))
+        strides = numpy.array(
+            [V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs],
+            dtype=numpy.int64,
+        )
+        assert strides.shape == (len(memory_addrs), len(index_vars))
 
-            from .scheduler import pick_loop_order
+        from .scheduler import pick_loop_order
 
-            order = list(reversed(pick_loop_order(strides, sizes)))
-        except TypeError:
-            # sympy cannot convert symbols to int
-            order = list(range(len(sizes)))
-
+        order = list(reversed(pick_loop_order(strides, sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
 
