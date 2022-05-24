@@ -34,7 +34,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
                 # what about the for loop?
                 out += input
             return out
-        
+
         compile_counter = torchdynamo.testing.CompileCounter()
         for i in range(10):
             x = torch.randn(3)
@@ -46,7 +46,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         # We'd probably like to bail out quickly and warn
         self.assertEqual(counters["frames"]["total"], 2 + self.cache_limit)
         self.assertEqual(counters["frames"]["ok"], 1 + self.cache_limit)
-        
+
         # compile_counter only sees frames that were fed to the backend compiler,
         # which is a subset of counters["frames"]["ok"] -- probably becuase
         # counters["frames"]["ok"] includes frames not containing torch ops?
@@ -55,7 +55,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
     def test_dynamic_input(self):
         def model(input):
             return input + input
-        
+
         compile_counter = torchdynamo.testing.CompileCounter()
 
         for i in range(10):
@@ -83,29 +83,16 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         c = torch.rand(3, 4, 5, device='cuda')
         compile_counter = torchdynamo.testing.CompileCounter()
 
-        with torchdynamo.optimize(compile_counter):
-            func(a, b, c)  # warmup
-            self.assertEqual(counters["frames"]["total"], 1)
-            self.assertEqual(counters["frames"]["ok"], 1)
-            self.assertEqual(compile_counter.frame_count, 1)
-            
-            func(a, b, c)  # no guard fail or recompile
-            self.assertEqual(counters["frames"]["total"], 1)
-            self.assertEqual(counters["frames"]["ok"], 1)
-            self.assertEqual(compile_counter.frame_count, 1)
+        with unittest.mock.patch.object(torchdynamo.config, "cache_size_limit", 2):
+            with torchdynamo.optimize(compile_counter):
+                func(a, b, c)  # warmup
+                self.assertEqual(compile_counter.frame_count, 1)
 
-            func(a, b_v, c)  # a view should not cause nvfuser recompile
-            self.assertEqual(counters["frames"]["total"], 1)
-            self.assertEqual(counters["frames"]["ok"], 1)
-            self.assertEqual(compile_counter.frame_count, 1)
+                func(a, b, c)  # no guard fail or recompile
+                self.assertEqual(compile_counter.frame_count, 1)
 
-            func(a, b_p, c)  # a permutation should cause recompile
-            self.assertEqual(counters["frames"]["total"], 2)
-            self.assertEqual(counters["frames"]["ok"], 1)
-            self.assertEqual(compile_counter.frame_count, 1)
+                func(a, b_v, c)  # a view should not cause nvfuser recompile
+                self.assertEqual(compile_counter.frame_count, 1)
 
-            func(torch.rand(5), torch.rand(5), torch.rand(5))
-            self.assertEqual(counters["frames"]["total"], 2)
-            self.assertEqual(counters["frames"]["ok"], 1)
-            self.assertEqual(compile_counter.frame_count, 1)
-
+                func(a, b_p, c)  # a permutation should cause recompile
+                self.assertEqual(compile_counter.frame_count, 2)
