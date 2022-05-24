@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import enum
+import logging
 import os
 import re
 import textwrap
@@ -27,6 +28,14 @@ from .utils import istype
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
+
+log = logging.getLogger(__name__)
+
+# map from transformed code back to original user code
+orig_code_map = {}
+
+# keep a record of code_obj -> list of guard failure reasons for logging
+guard_failures = collections.defaultdict(list)
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -356,8 +365,8 @@ class GuardedCode:
         )
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        if os.environ.get("TORCHDYNAMO_PRINT_GUARD_FAILS", None) == "1":
-            set_guard_fail_hook(guard_fail_hook)
+        # if os.environ.get("TORCHDYNAMO_PRINT_GUARD_FAILS", None) == "1":
+        set_guard_fail_hook(guard_fail_hook)
         out = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
@@ -397,7 +406,7 @@ def guard_fail_hook(
         if not eval(part, guard_fn.global_scope, scope):
             reasons.append(part)
             break
-    print(f"Failed guards {reasons} (code={id(code)}, last={last})")
+    guard_failures[orig_code_map[id(code)]].append(reasons)
 
 
 def guard_error_hook(

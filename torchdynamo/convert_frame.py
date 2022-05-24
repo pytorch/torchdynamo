@@ -1,6 +1,7 @@
 import dis
 import functools
 import itertools
+import logging
 import os
 import sys
 import traceback
@@ -24,9 +25,13 @@ from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardedCode
+from .guards import guard_failures
+from .guards import orig_code_map
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+
+log = logging.getLogger(__name__)
 
 
 class Tracker:
@@ -147,6 +152,19 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:
+
+            def format_func_info(code):
+                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+
+            def format_guard_failures(code):
+                return f"{str(guard_failures[code])}"
+
+            assert code in guard_failures, "TODO(whc) any other recompile reasons?"
+            log.warning(
+                f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
+                f"for function {format_func_info(code)}, "
+                f"due to the following guard failures: {format_guard_failures(code)}"
+            )
             unimplemented("cache_size_limit reached")
         output = None
 
@@ -189,6 +207,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             for attempt in itertools.count():
                 try:
                     code = transform_code_object(frame.f_code, transform)
+                    orig_code_map[id(code)] = frame.f_code
                     break
                 except exc.RestartAnalysis:
                     if attempt > 100:
