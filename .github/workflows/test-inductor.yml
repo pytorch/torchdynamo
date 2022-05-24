@@ -26,7 +26,7 @@ jobs:
         export PATH=$PATH:/home/$USER/.local/bin
         pip --version
         make setup_nightly
-        python3 -m pytest ./tests/test_torchinductor.py
+    - run: pytest ./tests/test_torchinductor.py
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
