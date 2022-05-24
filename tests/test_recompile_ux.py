@@ -1,15 +1,15 @@
-from torchdynamo.utils import counters
+import unittest
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
 from typing import List
-import unittest
 
 import torch
 
 import torchdynamo
 import torchdynamo.config
 import torchdynamo.testing
+from torchdynamo.utils import counters
 
 torchdynamo.config.debug = False
 
@@ -22,8 +22,10 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
-            unittest.mock.patch.object(torchdynamo.config, "cache_size_limit",
-                                       cls.cache_limit))
+            unittest.mock.patch.object(
+                torchdynamo.config, "cache_size_limit", cls.cache_limit
+            )
+        )
 
     def test_loop_torture(self):
         def loop_torture(input, iters):
@@ -76,11 +78,11 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         def func(a, b, c):
             return a + b * c
 
-        a = torch.rand(3, 4, 5, device='cuda')
-        b = torch.rand(3, 4, 5, device='cuda')
-        b_v = torch.rand(3, 5, 4, device='cuda').view(3, 4, 5)
-        b_p = torch.rand(3, 5, 4, device='cuda').permute(0, 2, 1)
-        c = torch.rand(3, 4, 5, device='cuda')
+        a = torch.rand(3, 4, 5, device="cuda")
+        b = torch.rand(3, 4, 5, device="cuda")
+        b_v = torch.rand(3, 5, 4, device="cuda").view(3, 4, 5)
+        b_p = torch.rand(3, 5, 4, device="cuda").permute(0, 2, 1)
+        c = torch.rand(3, 4, 5, device="cuda")
         compile_counter = torchdynamo.testing.CompileCounter()
 
         with unittest.mock.patch.object(torchdynamo.config, "cache_size_limit", 2):
