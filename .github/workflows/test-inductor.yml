@@ -8,7 +8,7 @@ on:
 
 jobs:
   test-inductor:
-    runs-on: ubuntu-latest
+    runs-on: linux.4xlarge.nvidia.gpu
     steps:
     - uses: actions/checkout@v2
     - uses: conda-incubator/setup-miniconda@v2
