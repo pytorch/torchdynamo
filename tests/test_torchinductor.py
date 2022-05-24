@@ -606,6 +606,27 @@ class CommonTemplate:
         )
 
     @requires_cuda()
+    def test_to_device_constant(self):
+        def fn(a):
+            d1 = a.device.type
+            if d1 == "cpu":
+                d2 = "cuda"
+            else:
+                d2 = "cpu"
+
+            const1 = torch.as_tensor(list(range(64)), device=d2)
+            return (
+                torch.arange(10, device=d2).to(d1) + a,
+                const1.to(d1),
+                (const1 + 1).to(d1),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([10]),),
+        )
+
+    @requires_cuda()
     def test_multi_device(self):
         def fn(x):
             x = x + 1
@@ -1323,6 +1344,70 @@ class CommonTemplate:
             return a.sum(-1), torch.amax(a + 1, 1, keepdim=True)
 
         self.common(fn, (torch.randn([8, 1, 1]),))
+
+    @patch.object(config.triton, "cudagraphs", True)
+    def test_input_mutation1(self):
+        def fn(a):
+            b = a + 1
+            a.copy_(b)
+            c = a + 2
+            return a * b / c
+
+        arg1 = torch.randn(64, device=self.device)
+        arg2 = arg1.clone()
+        arg3 = torch.randn(64, device=self.device)
+        arg4 = arg3.clone()
+        correct1 = fn(arg1)
+        correct2 = fn(arg3)
+        with torchdynamo.optimize_assert(compile_fx):
+            actual1 = fn(arg2)
+            actual2 = fn(arg4)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(actual2, correct2))
+        self.assertTrue(same(arg1, arg2))
+        self.assertTrue(same(arg3, arg4))
+
+    def test_input_mutation2(self):
+        def fn(a):
+            b = a + 1
+            a.view(64).copy_(torch.tensor([66.0], device=a.device))
+            c = a + 2
+            return b, c
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        correct1 = fn(arg1)
+        with torchdynamo.optimize_assert(compile_fx):
+            actual1 = fn(arg2)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(arg1, arg2))
+
+    def test_slice_mutation1(self):
+        def fn(a):
+            x = torch.zeros_like(a)
+            b = x + 1
+            x[:, 3] = 3.0
+            c = torch.clone(x)
+            x[4, :] = 4.0
+            d = x + 1
+            return x, b, c, d
+
+        self.common(fn, (torch.randn([8, 8]),))
+
+    def test_slice_mutation2(self):
+        def fn(a):
+            a[:, 20:40] = a[:, 20:40] + 1
+            a[:, 2:11] = a[:, 1:10] + 2
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        fn(arg1)
+        with torchdynamo.optimize_assert(compile_fx):
+            fn(arg2)
+
+        self.assertTrue(same(arg1, arg2))
 
 
 class CpuTests(TestCase):
