@@ -8,7 +8,7 @@ dce = False
 forward_only = True
 
 # assume input tensors are dynamic
-dynamic_shapes = False
+dynamic_shapes = True
 
 # assume weight tensors are fixed size
 static_weight_shapes = True

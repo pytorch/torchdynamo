@@ -18,16 +18,39 @@ class MemoryDep(typing.NamedTuple):
         size = (*self.size, *[x for x in extra_sizes if x != 1])
         return MemoryDep(self.name, self.index, size)
 
+    def rename(self, renames):
+        if self.name in renames:
+            return MemoryDep(renames[self.name], self.index, self.size)
+        return self
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
+
+    def rename(self, renames):
+        if self.name in renames:
+            return StarDep(renames[self.name])
+        return self
 
 
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[MemoryDep]
     writes: Set[MemoryDep]
+
+    def rename(self, renames: typing.Dict[str, str]):
+        return ReadWrites(
+            {dep.rename(renames) for dep in self.reads},
+            {dep.rename(renames) for dep in self.writes},
+        )
+
+    def with_read(self, name: str):
+        assert isinstance(name, str)
+        return ReadWrites(
+            set.union(self.reads, {StarDep(name)}),
+            self.writes,
+        )
 
 
 class RecordLoadStore(V.MockHandler):

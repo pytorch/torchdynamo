@@ -1315,8 +1315,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tracer.run()
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
-        # Merge symbolic_globals to the parent
-        parent.symbolic_globals.update(tracer.symbolic_globals)
+
+        if tracer.f_globals is parent.f_globals:
+            # Merge symbolic_globals back if parent and child are in the same namespace
+            parent.symbolic_globals.update(tracer.symbolic_globals)
 
         if config.trace:
             print("DONE INLINING", code)
