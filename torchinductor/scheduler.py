@@ -279,13 +279,34 @@ class SchedulerNode(BaseSchedulerNode):
         self.scheduler.run_count += 1
         name = self.get_name()
         indexer = self.node.layout.make_indexer()
+
         if self.is_reduction():
-            vars = self._reindex(vars)
-            reduction_vars = self._reduction_reindex(reduction_vars)
-            self.node.data.store_reduction(name, indexer, vars, reduction_vars)
+            size = self._size
+            reduction_size = self._reduction_size
         else:
-            vars = self._reindex([*vars, *reduction_vars])
-            self.node.data.store_output(name, indexer, vars)
+            vars = [*vars, *reduction_vars]
+            size = [*self._size, *self._reduction_size]
+            reduction_vars = []
+            reduction_size = []
+
+        assert len(vars) == len(size)
+        assert len(reduction_vars) == len(reduction_size)
+        var_ranges = dict(
+            zip(
+                [*vars, *reduction_vars],
+                [*size, *reduction_size],
+            )
+        )
+        vars = self._reindex(vars)
+
+        with V.set_ops_handler(
+            dependencies.SimplifyIndexing(V.get_ops_handler(), var_ranges)
+        ):
+            if self.is_reduction():
+                reduction_vars = self._reduction_reindex(reduction_vars)
+                self.node.data.store_reduction(name, indexer, vars, reduction_vars)
+            else:
+                self.node.data.store_output(name, indexer, vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):

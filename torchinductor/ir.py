@@ -54,6 +54,7 @@ class ModularIndexing(sympy.Function):
     def eval(cls, base, divisor, modulus):
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
+
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
@@ -61,16 +62,16 @@ class ModularIndexing(sympy.Function):
         ):
             return (base // divisor) % modulus
 
-        if divisor == 1:
-            w1 = sympy.Wild("w1")
-            w2 = sympy.Wild("w2")
-            m = base.match(w1 + modulus * w2)
-            if m and "/" not in str(m[w1]) and "/" not in str(m[w2]) and m[w2] != 0:
-                # simplify indexing
-                return ModularIndexing(m[w1], divisor, modulus)
+        if divisor != 1 and sympy.gcd(base, divisor) == divisor:
+            return ModularIndexing(base / divisor, sympy.Integer(1), modulus)
 
-        # if isinstance(base, IndexingDiv):
-        #     return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+        if isinstance(base, sympy.Add):
+            new_terms = []
+            for term in base.args:
+                if sympy.gcd(term, modulus * divisor) != modulus * divisor:
+                    new_terms.append(term)
+            if len(new_terms) != len(base.args):
+                return ModularIndexing(sum(new_terms), divisor, modulus)
 
 
 class IndexingDiv(sympy.Function):
@@ -89,8 +90,6 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        # if isinstance(base, IndexingDiv):
-        #     return IndexingDiv(base.args[0], base.args[1] * divisor)
         if sympy.gcd(base, divisor) == divisor:
             return base / divisor
 
@@ -371,10 +370,10 @@ class ExpandView(BaseView):
 
     @staticmethod
     def _normalize_size(x, new_size):
-        """ Replace `-1` with correct sizes """
+        """Replace `-1` with correct sizes"""
         new_size = list(map(sympy.expand, new_size))
         old_size = x.get_size()
-        old_size = [None]*(len(new_size) - len(old_size)) + list(old_size)
+        old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
         assert len(new_size) == len(old_size)
         for i in range(len(new_size)):
             if new_size[i] == -1:
@@ -1112,7 +1111,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars) = dependencies.index_vars(
+            _, (index_vars, reduction_vars), _ = dependencies.index_vars(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -1137,7 +1136,7 @@ class ComputedBuffer(Buffer):
             self.freeze_layout()
 
     def simplify_loops(self):
-        _, (index_vars, reduce_vars) = dependencies.index_vars(
+        _, (index_vars, reduce_vars), _ = dependencies.index_vars(
             self.data.get_size(), self.data.get_reduction_size()
         )
         read_writes = self.get_read_writes()
@@ -1236,15 +1235,22 @@ class ComputedBuffer(Buffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
-        strides = numpy.array(
-            [V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs],
-            dtype=numpy.int64,
-        )
-        assert strides.shape == (len(memory_addrs), len(index_vars))
+        try:
+            strides = numpy.array(
+                [
+                    V.graph.sizevars.stride_hints(expr, index_vars)
+                    for expr in memory_addrs
+                ],
+                dtype=numpy.int64,
+            )
+            assert strides.shape == (len(memory_addrs), len(index_vars))
 
-        from .scheduler import pick_loop_order
+            from .scheduler import pick_loop_order
 
-        order = list(reversed(pick_loop_order(strides, sizes)))
+            order = list(reversed(pick_loop_order(strides, sizes)))
+        except TypeError:  # Cannot convert symbols to int
+            order = list(range(len(sizes)))
+
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
 

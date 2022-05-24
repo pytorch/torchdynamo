@@ -44,6 +44,64 @@ class SizeVarAllocator(object):
     def simplify(self, expr):
         return sympy.expand(expr).subs(self.replacements)
 
+    def simplify_with_ranges(self, expr, var_ranges):
+        """
+        Simplify indexing expression with knowledge of the ranges of
+        iteration variables.
+        """
+        from .ir import IndexingDiv
+        from .ir import ModularIndexing
+
+        expr = self.simplify(expr)
+        original_expr = expr
+
+        def remove_zero_terms(base, divisor):
+            """Symbols smaller than the divisor are zero"""
+            for v in base.free_symbols:
+                if v in var_ranges:
+                    # var smaller than divisor can be removed
+                    rest = sympy.Wild("_rest", exclude=[v])
+                    m = base.match(v + rest)
+                    if m and v not in m[rest].free_symbols:
+                        if self.maybe_guard_leq(var_ranges[v], divisor):
+                            base = m[rest]
+            return base
+
+        def visit_indexing_div(base, divisor):
+            return IndexingDiv(remove_zero_terms(base, divisor), divisor)
+
+        def visit_moduler_indexing(base, divisor, modulus):
+            base = remove_zero_terms(base, divisor)
+            if (
+                isinstance(base, sympy.Symbol)
+                and base in var_ranges
+                and self.maybe_guard_leq(var_ranges[base], modulus * divisor)
+            ):
+                # modulus not needed
+                return IndexingDiv(base, divisor)
+            return ModularIndexing(base, divisor, modulus)
+
+        expr = expr.replace(
+            ModularIndexing(
+                sympy.Wild("base"),
+                sympy.Wild("divisor"),
+                sympy.Wild("modulus"),
+            ),
+            visit_moduler_indexing,
+        )
+        expr = expr.replace(
+            IndexingDiv(
+                sympy.Wild("base"),
+                sympy.Wild("divisor"),
+            ),
+            visit_indexing_div,
+        )
+
+        if expr != original_expr:
+            # run to fixed point
+            return self.simplify_with_ranges(expr, var_ranges)
+        return expr
+
     def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
         if left == right:
             return left
@@ -74,13 +132,25 @@ class SizeVarAllocator(object):
         else:
             return left
 
-    def maybe_guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+    def maybe_guard_equals(self, left: sympy.Expr, right: sympy.Expr):
         if self.size_hint(left - right) == 0:
             self.guard_equals(left, right)
             return True
         return False
 
-    def guard_lt(self, left: sympy.Symbol, right: sympy.Symbol):
+    def maybe_guard_leq(self, left: sympy.Expr, right: sympy.Expr):
+        try:
+            if self.size_hint(left) > self.size_hint(right):
+                return False
+        except TypeError:
+            return False
+        self.guard_leq(left, right)
+        return True
+
+    def guard_leq(self, left: sympy.Expr, right: sympy.Expr):
+        return self.guard_lt(left, right + 1)
+
+    def guard_lt(self, left: sympy.Expr, right: sympy.Expr):
         expr = self.simplify(right - left)
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
@@ -89,7 +159,7 @@ class SizeVarAllocator(object):
             # all vars are positive, so needs a minus sign to get negative values
             self.guards.append(PositiveGuard(expr))
 
-    def guard_min(self, left: sympy.Symbol, right: sympy.Symbol):
+    def guard_min(self, left: sympy.Expr, right: sympy.Expr):
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
@@ -102,7 +172,7 @@ class SizeVarAllocator(object):
             self.guard_lt(right, left)
             return right
 
-    def guard_max(self, left: sympy.Symbol, right: sympy.Symbol):
+    def guard_max(self, left: sympy.Expr, right: sympy.Expr):
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
 
