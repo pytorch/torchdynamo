@@ -9,7 +9,7 @@ from typing import List
 import sympy
 import torch
 
-from .. import codecache
+from .. import codecache, ir
 from .. import config
 from ..virtualized import V
 from ..virtualized import ops
@@ -77,6 +77,19 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def relu(x):
         return ops.maximum("0", x)
+
+    @staticmethod
+    def round(x):
+        return f"tl.where({x}<0, {x}-0.5, {x}+0.5).to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def floor(x):
+        tmp = ops.trunc(x)
+        return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
+
+    @staticmethod
+    def trunc(x):
+        return f"{x}.to(tl.int32).to(tl.float32)"
 
     @staticmethod
     def minimum(a, b):
@@ -276,11 +289,11 @@ class TritonKernel(Kernel):
         iter_vars = self.iter_range_tree.var_list
         reduction_vars = self.reduction_range_tree.var_list
 
+        index = V.graph.sizevars.simplify(index)
         offset = index.subs({v: 0 for v in chain(iter_vars, reduction_vars)})
         base_part = index.subs({v: 0 for v in reduction_vars}) - offset
         reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
-
-        assert index == offset + base_part + reduction_part
+        assert index == offset + base_part + reduction_part, (index, offset, base_part, reduction_part)
 
         offset = self.rename_indexing(offset)
         base_part = self.rename_indexing(self.simplify_indexing(base_part))

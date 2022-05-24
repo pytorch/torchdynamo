@@ -121,6 +121,18 @@ class CppOverrides(OpOverrides):
         return f"std::log({x})"
 
     @staticmethod
+    def round(x):
+        return f"std::nearbyint({x})"
+
+    @staticmethod
+    def floor(x):
+        return f"std::floor({x})"
+
+    @staticmethod
+    def trunc(x):
+        return f"std::trunc({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 

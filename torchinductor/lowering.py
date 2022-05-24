@@ -423,6 +423,14 @@ def unsqueeze(x, dim):
     new_shape.insert(dim, sympy.Integer(1))
     return view(x, new_shape)
 
+@register_lowering(aten.unsqueeze_)
+def unsqueeze_(x, dim):
+    val = unsqueeze(x, dim)
+    assert isinstance(x, TensorBox)
+    assert isinstance(val, TensorBox)
+    x.data = val.data
+    return x
+
 
 def _validate_dim(x, dim, offset):
     assert isinstance(dim, int)
@@ -504,9 +512,29 @@ def sort(*args):
     )
 
 
+@register_lowering(aten.topk, type_promote=False)
+def topk(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.topk, *args),
+        )
+    )
+
+
+@register_lowering(torch.randperm, type_promote=False)
+def randperm(*args):
+    return TensorBox.create(ir.FallbackKernel.create(aten.randperm, *args))
+
+
 @register_lowering(aten.grid_sampler_2d, type_promote=False)
 def grid_sampler_2d(*args):
     return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
+
+
+@register_lowering(aten.norm, type_promote=False)
+def norm(*args):
+    return TensorBox.create(ir.FallbackKernel.create(aten.norm, *args))
 
 
 @register_lowering(aten.native_dropout, type_promote=False)
@@ -726,6 +754,7 @@ def constant_like(fill_value):
     return _constant_like
 
 
+empty_like = register_lowering(aten.empty_like)(constant_like(0))
 zeros_like = register_lowering(aten.zeros_like)(constant_like(0))
 ones_like = register_lowering(aten.ones_like)(constant_like(1))
 
@@ -1425,12 +1454,15 @@ register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)
-register_pointwise(aten.remainder)
 register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
+register_pointwise(aten.remainder)
+register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
+register_pointwise(aten.trunc)
+register_pointwise(aten.floor)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)
@@ -1453,3 +1485,5 @@ register_inplace(aten.add_, add)
 register_inplace(aten.mul_, mul)
 register_inplace(aten.div_, div)
 register_inplace(aten.sub_, sub)
+register_inplace(aten.relu_, relu)
+register_inplace(aten.sigmoid_, sigmoid)

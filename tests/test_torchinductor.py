@@ -362,6 +362,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_round(self):
+        def fn(a, b):
+            return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
+
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
+
     def test_silu(self):
         def fn(a):
             return (torch.nn.functional.silu(a),)
@@ -382,6 +388,16 @@ class CommonTemplate:
         self.common(
             fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),)
         )
+
+    def test_div(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -457,6 +473,25 @@ class CommonTemplate:
                 torch.unsqueeze(a + 1, 0) + 2,
                 torch.unsqueeze(a, -2) + 2,
             )
+
+        self.common(
+            fn,
+            (
+                torch.randn(
+                    2,
+                    2,
+                    2,
+                    2,
+                ),
+            ),
+        )
+
+    def test_unsqueeze_inplace(self):
+        def fn(a):
+            tmp1 = (a+1)
+            aten.unsqueeze_(tmp1, 2)
+            tmp2 = aten.unsqueeze_(a + 1, 0) + 2
+            return (tmp1, tmp2)
 
         self.common(
             fn,
@@ -1313,6 +1348,14 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_topk(self):
+        def fn(a):
+            return torch.topk(a, 2, -1)
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
     def test_long_tensor(self):
         def fn(a):
             return (
@@ -1400,9 +1443,11 @@ class CommonTemplate:
         def fn(a):
             a += 1
             a *= 2
+            aten.sigmoid_(a)
             a = a.view(64)
             a += 3
             a *= 4
+            aten.relu_(a)
             return a
 
         arg1 = torch.randn([1, 64], device=self.device)

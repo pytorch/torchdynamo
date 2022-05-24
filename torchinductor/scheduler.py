@@ -541,7 +541,9 @@ class Scheduler:
                     if name in self.mutation_real_name:
                         name = self.mutation_real_name[name]
                         if name in self.name_to_node:
-                            V.graph.wrapper_code.codegen_free(self.name_to_node[name])
+                            V.graph.wrapper_code.codegen_free(
+                                self.name_to_node[name].node
+                            )
                     else:
                         V.graph.wrapper_code.codegen_free(node.node)
         self.check_can_free.clear()
