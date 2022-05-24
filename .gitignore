@@ -13,3 +13,4 @@ tags
 *.swp
 dist
 .~lock*
+.vscode

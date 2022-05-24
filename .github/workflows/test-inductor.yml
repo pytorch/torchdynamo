@@ -11,12 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: actions/setup-python@v2
-      with:
-        python-version: '3.8'
-        cache: 'pip'
-    - run: make setup_nightly
-    - run: pytest ./tests/test_torchinductor.py
+    - uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: 3.8
+          activate-environment: build
+    - run: conda info
+    - run: conda list
+    - run: conda config --show
+    - name: Activate conda
+      run: |
+        python3 --version
+        python3 -m pip install --upgrade pip
+        export PATH=$PATH:/home/$USER/.local/bin
+        pip --version
+        make setup_nightly
+        python3 -m pytest ./tests/test_torchinductor.py
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}

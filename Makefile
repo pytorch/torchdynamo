@@ -43,7 +43,7 @@ setup:
 
 setup_nightly:
 	pip install ninja
-	pip install --pre torch==1.12.0.dev20220515+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install --pre torch==1.12.0.dev20220517+cu116 --extra-index-url https://download.pytorch.org/whl/nightly/
 	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
 	pip install -r requirements.txt
 	python setup.py develop
