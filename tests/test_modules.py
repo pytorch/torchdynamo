@@ -528,6 +528,20 @@ class SelfMutatingModule(torch.nn.Module):
         return F.relu(result)
 
 
+class ModuleHasDuplicatedAttributeName(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(10, 10)
+        self.head = torch.nn.Linear(10, 10)
+
+    # head method duplicates self.head, should use head method
+    def head(self, x):
+        return x + 1
+
+    def forward(self, x):
+        return F.relu(self.head(x))
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -577,6 +591,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
+    test_duplicated_attribute_name = make_test(ModuleHasDuplicatedAttributeName())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

@@ -105,13 +105,20 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented("GETATTR with no source")
 
-        if name in base_dict:
+        # class attribute has the highest priority
+        try:
+            subobj = inspect.getattr_static(base.__class__, name)
+            class_member = False
+        except AttributeError:
+            pass
+
+        if class_member and name in base_dict:
             subobj = base_dict[name]
-        elif name in base_dict["_modules"]:
+        elif class_member and name in base_dict["_modules"]:
             subobj = base_dict["_modules"][name]
-        elif name in base_dict["_parameters"]:
+        elif class_member and name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
-        elif name in base_dict["_buffers"]:
+        elif class_member and name in base_dict["_buffers"]:
             subobj = base_dict["_buffers"][name]
         else:
             subobj = inspect.getattr_static(base, name)
