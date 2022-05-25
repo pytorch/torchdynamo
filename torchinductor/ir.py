@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import itertools
 import textwrap
 from functools import partial
 from typing import Any
@@ -25,6 +26,23 @@ from .virtualized import ops
 indent = functools.partial(textwrap.indent, prefix="  ")
 
 
+def inverse_reorder(order):
+    inv_order = dict(zip(order, range(len(order))))
+
+    def reindex(index):
+        assert len(index) == len(inv_order)
+        return [index[inv_order[i]] for i in range(len(index))]
+
+    return reindex
+
+
+def fuse_reindexing(reindex1, reindex2):
+    def reindex(index):
+        return reindex1(reindex2(index))
+
+    return reindex
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c
@@ -42,6 +60,15 @@ class ModularIndexing(sympy.Function):
             and isinstance(modulus, sympy.Integer)
         ):
             return (base // divisor) % modulus
+
+        if divisor == 1:
+            w1 = sympy.Wild("w1")
+            w2 = sympy.Wild("w2")
+            m = base.match(w1 + modulus * w2)
+            # remove a term that is a multiple of modulus if it doesn't introduce division
+            if m and "/" not in str(m[w1]) and "/" not in str(m[w2]) and m[w2] != 0:
+                return ModularIndexing(m[w1], divisor, modulus)
+
         # if isinstance(base, IndexingDiv):
         #     return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
@@ -85,6 +112,9 @@ class IRNode(object):
     def is_user_of(self, name):
         return any(name == dep.name for dep in self.get_reads())
 
+    def get_numel(self):
+        return product(self.get_size())
+
 
 @dataclasses.dataclass
 class Loops(IRNode):
@@ -113,6 +143,9 @@ class Loops(IRNode):
 
     def get_size(self):
         return self.ranges
+
+    def is_extern(self):
+        return False
 
     @classmethod
     def create(cls, *args, **kwargs):
@@ -273,18 +306,30 @@ def is_contiguous_storage_and_layout(x):
         return False
 
 
-def as_storage_and_layout(x, freeze=True):
+def as_storage_and_layout(x, freeze=True, want_contiguous=False):
     """Try to simplify x into a StorageBox and a Layout"""
     if isinstance(x, TensorBox):
-        return as_storage_and_layout(x.data)
+        return as_storage_and_layout(
+            x.data, freeze=freeze, want_contiguous=want_contiguous
+        )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
-            x.data.freeze_layout()
+            if want_contiguous:
+                x.data.freeze_layout()
+            else:
+                x.data.decide_layout()
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
-        buffer, _ = as_storage_and_layout(x.data)
+        buffer, _ = as_storage_and_layout(
+            x.data, freeze=freeze, want_contiguous=want_contiguous
+        )
         return buffer, x.layout
     raise NotImplementedError
+
+
+as_contiguous_storage_and_layout = functools.partial(
+    as_storage_and_layout, want_contiguous=True
+)
 
 
 @dataclasses.dataclass
@@ -305,6 +350,12 @@ class BaseView(IRNode):
 
     def realize(self):
         return self.data.realize()
+
+    def get_storage_numel(self):
+        return self.data.get_storage_numel()
+
+    def is_extern(self):
+        return self.data.is_extern()
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -482,7 +533,7 @@ class View(BaseView):
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         if is_contiguous_storage_and_layout(x):
-            storage, old_layout = as_storage_and_layout(x)
+            storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -704,6 +755,12 @@ class BaseConstant(IRNode):
 
     def mark_reuse(self, users):
         pass
+
+    def get_reads(self):
+        return ()
+
+    def is_extern(self):
+        return False
 
 
 @dataclasses.dataclass
@@ -934,6 +991,12 @@ class Buffer(IRNode):
     def get_layout(self):
         return self.layout
 
+    def get_storage_numel(self):
+        return self.get_numel()
+
+    def is_extern(self):
+        return False
+
     def freeze_layout(self):
         if not isinstance(self.layout, MultiOutputLayout):
             self.layout = self.layout.as_fixed()
@@ -1060,6 +1123,118 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
+    def simplify_loops(self):
+        _, (index_vars, reduce_vars) = dependencies.index_vars(
+            self.data.get_size(), self.data.get_reduction_size()
+        )
+        read_writes = self.get_read_writes()
+        index_formulas = list(
+            {
+                dep.index
+                for dep in itertools.chain(
+                    read_writes.reads,
+                    read_writes.writes,
+                    read_writes.index_exprs,
+                )
+            }
+        )
+        memory_addrs = [
+            dep.index for dep in itertools.chain(read_writes.reads, read_writes.writes)
+        ]
+
+        def simplify_and_reorder(vars_, sizes):
+            sizes, reindex1, prune = self._simplify_loops(vars_, sizes, index_formulas)
+            vars_ = prune(vars_)
+            sizes, reindex2 = self._apply_loop_reordering(vars_, sizes, memory_addrs)
+            reindex = fuse_reindexing(reindex1, reindex2)
+            return sizes, reindex
+
+        iter_ranges, iter_reindex = simplify_and_reorder(
+            index_vars, self.data.get_size()
+        )
+        reduce_ranges, reduce_reindex = simplify_and_reorder(
+            reduce_vars, self.data.get_reduction_size()
+        )
+        return iter_ranges, iter_reindex, reduce_ranges, reduce_reindex
+
+    @classmethod
+    def _simplify_loops(cls, index_vars, sizes, index_formulas):
+        """
+        Try to remove as many axis from loop iterations as possible, by:
+            1) removing size==1 dimensions
+            2) fuse contiguous dimensions into a single loop
+        """
+        sizes = list(sizes)
+
+        strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
+        assert len(sizes) == len(strides[0])
+
+        for i in range(len(sizes)):
+            if sizes[i] == 1:
+                # remove dim
+                sizes[i] = None
+
+        def can_merge_dims(a, b):
+            for k in range(len(strides)):
+                if strides[k][a] * sizes[a] == strides[k][b]:
+                    # approximate test passed, try sound version
+                    va = index_vars[a]
+                    vb = index_vars[b]
+                    v = sympy.Symbol("_merge_tester")
+                    expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
+                    expr2 = index_formulas[k].subs({va: 0, vb: v})
+                    if expr1 == expr2:
+                        continue
+                return False
+            return True
+
+        changed = True
+        while changed:
+            changed = False
+            for i, j in itertools.product(
+                reversed(range(len(sizes))), reversed(range(len(sizes)))
+            ):
+                if i == j or sizes[i] is None or sizes[j] is None:
+                    continue
+                if can_merge_dims(i, j):
+                    changed = True
+                    sizes[i] = sizes[i] * sizes[j]
+                    sizes[j] = None
+
+        def reindex(index):
+            it = list(reversed(index))
+            new_index = []
+            for size in sizes:
+                if size is None:
+                    new_index.append(sympy.Integer(0))
+                else:
+                    new_index.append(it.pop())
+            assert not it
+            return new_index
+
+        def prune(index):
+            assert len(index) == len(sizes)
+            return [i for i, s in zip(index, sizes) if s is not None]
+
+        return [x for x in sizes if x is not None], reindex, prune
+
+    @staticmethod
+    def _apply_loop_reordering(index_vars, sizes, memory_addrs):
+        """
+        Shuffle the order of loops around to hopefully improve performance.
+        """
+        strides = numpy.array(
+            [V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs],
+            dtype=numpy.int64,
+        )
+        assert strides.shape == (len(memory_addrs), len(index_vars))
+
+        from .scheduler import pick_loop_order
+
+        order = list(reversed(pick_loop_order(strides, sizes)))
+        sizes = [sizes[i] for i in order]
+        return sizes, inverse_reorder(order)
+
     def get_reduction_size(self):
         return self.data.get_reduction_size()
 
@@ -1085,6 +1260,7 @@ class InputsKernel(Buffer):
         return dependencies.ReadWrites(
             {dependencies.StarDep(x.get_name()) for x in self.inputs},
             {dependencies.StarDep(self.get_name())},
+            set(),
         )
 
     @staticmethod
@@ -1098,6 +1274,9 @@ class InputsKernel(Buffer):
             assert isinstance(x, (Buffer, ReinterpretView)), x
             inputs_new.append(x)
         return inputs_new
+
+    def is_extern(self):
+        return True
 
 
 class NopKernel(InputsKernel):
@@ -1226,11 +1405,11 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_contiguous(cls, x):
         if is_contiguous_storage_and_layout(x):
-            as_storage_and_layout(x, freeze=True)
+            as_contiguous_storage_and_layout(x, freeze=True)
             return x
         x = cls.copy_input(x)
         assert is_contiguous_storage_and_layout(x)
-        as_storage_and_layout(x, freeze=True)
+        as_contiguous_storage_and_layout(x, freeze=True)
         return x
 
     def codegen_args(self):
@@ -1356,7 +1535,7 @@ class DeviceCopy(ExternKernelOut):
 
         x = cls.realize_input(x)
         read_writes = x.get_read_writes()
-        if all(
+        if not x.is_extern() and all(
             (r.name in V.graph.constants and hasattr(r, "index"))
             for r in read_writes.reads
         ):
