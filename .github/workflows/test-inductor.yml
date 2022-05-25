@@ -17,7 +17,6 @@ jobs:
         auto-update-conda: false
         python-version: 3.8
         activate-environment: build
-        environment-file: etc/example-environment-caching.yml
     - run: conda info
     - run: conda list
     - run: conda config --show
