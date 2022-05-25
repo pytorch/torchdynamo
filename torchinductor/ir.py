@@ -65,8 +65,8 @@ class ModularIndexing(sympy.Function):
             w1 = sympy.Wild("w1")
             w2 = sympy.Wild("w2")
             m = base.match(w1 + modulus * w2)
+            # remove a term that is a multiple of modulus if it doesn't introduce division
             if m and "/" not in str(m[w1]) and "/" not in str(m[w2]) and m[w2] != 0:
-                # simplify indexing
                 return ModularIndexing(m[w1], divisor, modulus)
 
         # if isinstance(base, IndexingDiv):
