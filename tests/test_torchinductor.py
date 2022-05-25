@@ -26,6 +26,16 @@ try:
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires functorch")
 
+HAS_CPU = False
+try:
+    from subprocess import CalledProcessError
+
+    from torchinductor.codecache import CppCodeCache
+
+    CppCodeCache.load("")
+    HAS_CPU = True
+except (CalledProcessError, OSError):
+    raise unittest.SkipTest("Did not find a working c++ compiler")
 
 aten = torch.ops.aten
 
@@ -1440,12 +1450,13 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
 
 
-class CpuTests(TestCase):
-    common = check_model
-    device = "cpu"
+if HAS_CPU:
 
+    class CpuTests(TestCase):
+        common = check_model
+        device = "cpu"
 
-CommonTemplate.install(CpuTests, "cpu")
+    CommonTemplate.install(CpuTests, "cpu")
 
 if HAS_CUDA:
 
