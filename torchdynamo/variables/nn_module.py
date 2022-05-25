@@ -100,6 +100,7 @@ class NNModuleVariable(VariableTracker):
 
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
+        base_class_dict = object.__getattribute__(base.__class__, "__dict__")
         class_member = True
 
         if not self.source:
@@ -107,7 +108,7 @@ class NNModuleVariable(VariableTracker):
 
         if name in base_dict:
             subobj = base_dict[name]
-        elif name in base_dict["_modules"]:
+        elif name in base_dict["_modules"] and name not in base_class_dict:
             subobj = base_dict["_modules"][name]
         elif name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
