@@ -101,3 +101,45 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
                 func(a, b_p, c)  # a permutation should cause recompile
                 self.assertEqual(compile_counter.frame_count, 2)
+
+    def test_verbose_tensor_check(self):
+        def assert_single_log_contains(logs, contains_str):
+            self.assertEqual(len(logs.records), 1)
+            self.assertTrue(
+                logs.records[0].getMessage().find(contains_str) > 0,
+                msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
+            )
+
+        def func(a):
+            return torch.sum(a)
+
+        def cache_fail_test(cached_input, missed_input, expected_failure):
+            # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient
+            torchdynamo.reset()
+            torchdynamo.utils.counters.clear()
+            with torchdynamo.optimize("eager"):
+                # warmup
+                func(cached_input)
+
+            with self.assertLogs(level="WARNING") as logs:
+                with torchdynamo.optimize("eager"):
+                    func(missed_input)
+            assert_single_log_contains(logs, expected_failure)
+
+        a = torch.rand(3, 4, 5)
+        cache_fail_test(
+            a, a[0:2, :, :], "tensor size mismatch at index 0. expected 3, actual 2"
+        )
+        cache_fail_test(
+            a,
+            a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
+            "tensor strides mismatch at index 0. expected 20, actual 1",
+        )
+        cache_fail_test(a, a[0, :, :], "tensor rank mismatch. expected 3, actual 2")
+        cache_fail_test(a, a.to("meta"), "tensor dispatch key set mismatch.")
+        cache_fail_test(
+            a, a.to(torch.float16), "tensor dtype mismatch. expected Float, actual Half"
+        )
+        a_grad = a.clone()
+        a_grad.requires_grad = True
+        cache_fail_test(a, a_grad, "requires_grad mismatch. expected requires_grad=0")
