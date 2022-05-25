@@ -23,8 +23,8 @@ jobs:
         python-version: 3.8
         activate-environment: anaconda-client-env
         environment-file: environment.yml
-    - run: conda init bash
-    - run: conda activate anaconda-client-env
+    # - run: conda init bash
+    # - run: conda activate anaconda-client-env
     - run: conda info
     - run: conda list
     - run: conda config --show
