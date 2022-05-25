@@ -20,15 +20,14 @@ jobs:
         python-version: 3.8
         activate-environment: build
         environment-file: environment.yml
-    - run: conda activate build
+    # - run: conda activate build
+    # - run: conda activate build
     - run: conda info
     - run: conda list
     - run: conda config --show
     - name: Activate conda
       run: |
-        python3 --version
-        python3 -m pip install --upgrade pip
-        export PATH=$PATH:/home/$USER/.local/bin
+        python --version
         pip --version
         make setup_nightly
     - run: pytest ./tests/test_torchinductor.py
