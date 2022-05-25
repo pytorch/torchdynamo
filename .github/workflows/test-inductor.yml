@@ -32,6 +32,7 @@ jobs:
       run: |
         python --version
         pip --version
+        conda install -c conda-forge gxx
         make setup_nightly
     - run: pytest ./tests/test_torchinductor.py
 
