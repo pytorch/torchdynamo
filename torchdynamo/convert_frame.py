@@ -29,6 +29,8 @@ from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import is_namedtuple
+from .utils import istype
 
 
 class Tracker:
@@ -129,18 +131,33 @@ def has_tensor_in_frame(frame):
             if is_allowed(frame.f_globals[co_name]):
                 return True
 
+    seen_ids = dict()
+
     def has_tensor(obj):
         """Recursively check if the obj has a tensor"""
+        obj_id = id(obj)
+        if obj_id in seen_ids:
+            return seen_ids[obj_id]
+        seen_ids[obj_id] = False
+
         if isinstance(obj, (torch.Tensor, torch.nn.Module)):
-            return True
-        elif isinstance(obj, (list, tuple)):
-            return any([has_tensor(v) for v in obj])
-        elif isinstance(obj, dict):
-            return any([has_tensor(v) for v in obj.values()])
-        elif isinstance(obj, (str, int, float, type(None), bool)):
-            return False
-        elif hasattr(obj, "__dict__"):
-            return any([has_tensor(v) for v in obj.__dict__.values()])
+            seen_ids[obj_id] = True
+            return seen_ids[obj_id]
+        elif istype(obj, (list, tuple)):
+            seen_ids[obj_id] = any([has_tensor(v) for v in obj])
+            return seen_ids[obj_id]
+        elif istype(obj, dict):
+            seen_ids[obj_id] = any([has_tensor(v) for v in obj.values()])
+            return seen_ids[obj_id]
+        elif istype(obj, (str, int, float, type(None), bool)):
+            seen_ids[obj_id] = False
+            return seen_ids[obj_id]
+        elif is_namedtuple(obj):
+            seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
+            return seen_ids[obj_id]
+        elif hasattr(obj, "__dict__") and len(getattr(obj, "__dict__")):
+            seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
+            return seen_ids[obj_id]
         else:
             if config.debug:
                 print(
