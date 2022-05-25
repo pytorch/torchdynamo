@@ -33,6 +33,7 @@ jobs:
         python --version
         pip --version
         conda install -c anaconda gcc_linux-64
+        conda install -c anaconda gxx_linux-64
         make setup_nightly
     - run: pytest ./tests/test_torchinductor.py
 
