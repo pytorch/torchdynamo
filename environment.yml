@@ -5,5 +5,5 @@ channels:
 dependencies:
   - anaconda-client
   - pip
-  - pip:
-      - -r requirements.txt
+  # - pip:
+  #     - -r requirements.txt

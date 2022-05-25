@@ -37,6 +37,8 @@ if torch.cuda.is_available():
     except (ImportError, ModuleNotFoundError):
         pass
 
+print("HAS_CUDA: ", HAS_CUDA)
+
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 

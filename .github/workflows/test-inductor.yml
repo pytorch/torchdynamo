@@ -23,9 +23,8 @@ jobs:
         python-version: 3.8
         activate-environment: anaconda-client-env-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
         environment-file: environment.yml
-    - run: conda info
-    - run: conda list
-    - run: conda config --show
+    # - run: conda list
+    # - run: conda config --show
     - name: Activate conda
       run: |
         python --version
@@ -33,6 +32,10 @@ jobs:
         conda install -c anaconda gcc_linux-64
         conda install -c anaconda gxx_linux-64
         make setup_nightly
+        conda info
+        conda list
+        conda config --show
+        nvidia-smi
     - run: pytest ./tests/test_torchinductor.py
 
 concurrency:
