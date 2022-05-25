@@ -557,7 +557,16 @@ class View(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        return cls(x, tuple(new_size), cls.dynamic_reshape_indexer(old_size, new_size))
+        try:
+            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+        except AssertionError:
+            # optimistic algorithm failed, lets do a fallback
+            flat = [product(old_size)]
+            reindex1 = cls.dynamic_reshape_indexer(old_size, flat)
+            reindex2 = cls.dynamic_reshape_indexer(flat, new_size)
+            reindex = fuse_reindexing(reindex1, reindex2)
+
+        return cls(x, tuple(new_size), reindex)
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):
@@ -635,7 +644,7 @@ class View(BaseView):
         assert len(view_expr) == len(old_size)
 
         def reindex(index):
-            assert len(index) == len(vars)
+            assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
             return tuple(x.subs(replacements) for x in view_expr)
 

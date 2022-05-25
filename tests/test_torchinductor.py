@@ -219,6 +219,33 @@ class TestIndexingSimplification(unittest.TestCase):
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
         self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
 
+    def test_indexing_join(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0")
+        i1 = sympy.Symbol("i1")
+        i2 = sympy.Symbol("i2")
+
+        expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr1, {}), ModularIndexing(i0, 1, 128)
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(2 * expr1, {}),
+            2 * ModularIndexing(i0, 1, 128),
+        )
+
+        expr2 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr2, {}), expr2)
+
+        expr3 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1, i2)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr3, {}), ModularIndexing(i0, 10, i1 * i2)
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr3 + 10, {}),
+            ModularIndexing(i0, 10, i1 * i2) + 10,
+        )
+
 
 class CommonTemplate:
     @classmethod
