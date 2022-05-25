@@ -90,6 +90,10 @@ class OpOverrides:
         return f"~{ExprPrinter.paren(x)}"
 
     @staticmethod
+    def logical_not(a):
+        return f"{ExprPrinter.paren(a)} == 0"
+
+    @staticmethod
     def bitwise_and(x, y):
         return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
 
