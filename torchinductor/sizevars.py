@@ -52,7 +52,7 @@ class SizeVarAllocator(object):
         from .ir import IndexingDiv
         from .ir import ModularIndexing
 
-        expr = self.simplify(expr)
+        expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
         def remove_zero_terms(base, divisor):
@@ -77,7 +77,6 @@ class SizeVarAllocator(object):
                 and base in var_ranges
                 and self.maybe_guard_leq(var_ranges[base], modulus * divisor)
             ):
-                # modulus not needed
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -97,45 +96,7 @@ class SizeVarAllocator(object):
             visit_indexing_div,
         )
 
-        def join_dimensions(terms):
-            """
-            ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
-            becomes
-            ModularIndexing(i0, 1, 128)
-
-            This type of pattern can come from view operations
-            """
-            scale = sympy.Wild("scale", exclude=[0])
-            base = sympy.Wild("base")
-            divisor = sympy.Wild("divisor")
-            mod1 = sympy.Wild("modulus")
-            mod2 = sympy.Wild("modulus2")
-            for term1 in terms:
-                m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
-                if m1:
-                    for term2 in terms:
-                        m2 = term2.match(
-                            m1[scale]
-                            * m1[mod1]
-                            * ModularIndexing(m1[base], m1[mod1], mod2)
-                        )
-                        if m2 and term1 != term2:
-                            # the offset needed to update the formula
-                            return (
-                                m1[scale]
-                                * ModularIndexing(
-                                    m1[base], m1[divisor], m1[mod1] * m2[mod2]
-                                )
-                                - term1
-                                - term2
-                            )
-            return sympy.Integer(0)
-
-        if isinstance(expr, sympy.Add):
-            expr = expr + join_dimensions(expr.args)
-
         if expr != original_expr:
-            # run to fixed point
             return self.simplify_with_ranges(expr, var_ranges)
         return expr
 
@@ -314,3 +275,40 @@ class SizeVarAllocator(object):
         if len(parts) == 1:
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
+
+
+def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
+    """
+    ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
+    becomes
+    ModularIndexing(i0, 1, 128)
+
+    This type of pattern can come from view operations
+    """
+    from .ir import ModularIndexing
+
+    if not isinstance(expr, sympy.Add):
+        return expr
+
+    scale = sympy.Wild("scale", exclude=[0])
+    base = sympy.Wild("base")
+    divisor = sympy.Wild("divisor")
+    mod1 = sympy.Wild("modulus")
+    mod2 = sympy.Wild("modulus2")
+    for term1 in expr.args:
+        m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
+        if m1:
+            for term2 in expr.args:
+                m2 = term2.match(
+                    m1[scale] * m1[mod1] * ModularIndexing(m1[base], m1[mod1], mod2)
+                )
+                if m2 and term1 != term2:
+                    expr = join_dimensions(
+                        expr
+                        - term1
+                        - term2
+                        + m1[scale]
+                        * ModularIndexing(m1[base], m1[divisor], m1[mod1] * m2[mod2])
+                    )
+                    return expr
+    return expr
