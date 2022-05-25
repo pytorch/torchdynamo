@@ -10,6 +10,8 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
+import torchinductor.sizevars
+
 from . import config
 from . import dependencies
 from . import ir
@@ -171,9 +173,8 @@ class SchedulerNode(BaseSchedulerNode):
         super().__init__(scheduler, node)
         (
             self._size,
-            self._reindex,
             self._reduction_size,
-            self._reduction_reindex,
+            self._body,
         ) = node.simplify_loops()
 
         self.group = (
@@ -182,32 +183,13 @@ class SchedulerNode(BaseSchedulerNode):
             group_fn(self._reduction_size),
         )
 
-        # need to recompute reads/writes with possible loop reordering
-        if node.get_reduction_type():
-
-            def store_fn(vars, reduction_vars):
-                return node.get_store_function()(
-                    self._reindex(vars), self._reduction_reindex(reduction_vars)
-                )
-
-            self.set_read_writes(
-                dependencies.extract_read_writes(
-                    store_fn,
-                    self._size,
-                    self._reduction_size,
-                )
+        self.set_read_writes(
+            dependencies.extract_read_writes(
+                self._body,
+                self._size,
+                self._reduction_size,
             )
-        else:
-
-            def store_fn(vars):
-                return node.get_store_function()(self._reindex(vars))
-
-            self.set_read_writes(
-                dependencies.extract_read_writes(
-                    store_fn,
-                    self._size,
-                )
-            )
+        )
 
     def can_remove_buffer(self, broadcast_after_reduce=False):
         if (
@@ -278,36 +260,19 @@ class SchedulerNode(BaseSchedulerNode):
     def run(self, vars, reduction_vars):
         self.allocate()
         self.scheduler.run_count += 1
-        name = self.get_name()
-        indexer = self.node.layout.make_indexer()
-
-        if self.is_reduction():
-            size = self._size
-            reduction_size = self._reduction_size
-        else:
-            vars = [*vars, *reduction_vars]
-            size = [*self._size, *self._reduction_size]
-            reduction_vars = []
-            reduction_size = []
-
-        assert len(vars) == len(size)
-        assert len(reduction_vars) == len(reduction_size)
+        size = self._size
+        reduction_size = self._reduction_size
+        assert len(vars) + len(reduction_vars) == len(size) + len(reduction_size)
         var_ranges = dict(
             zip(
                 [*vars, *reduction_vars],
                 [*size, *reduction_size],
             )
         )
-        vars = self._reindex(vars)
-
         with V.set_ops_handler(
-            dependencies.SimplifyIndexing(V.get_ops_handler(), var_ranges)
-        ), patch.object(ir.ConstantBuffer, "override_device", self.node.get_device()):
-            if self.is_reduction():
-                reduction_vars = self._reduction_reindex(reduction_vars)
-                self.node.data.store_reduction(name, indexer, vars, reduction_vars)
-            else:
-                self.node.data.store_output(name, indexer, vars)
+            torchinductor.sizevars.SimplifyIndexing(V.get_ops_handler(), var_ranges)
+        ):
+            self._body(vars, reduction_vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):

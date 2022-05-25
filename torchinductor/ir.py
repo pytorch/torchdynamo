@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import inspect
 import itertools
 import textwrap
 from functools import partial
@@ -11,10 +12,12 @@ from unittest.mock import patch
 
 import numpy
 import sympy
-import torch
+import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
+
+import torchinductor.sizevars
 
 from . import config
 from . import dependencies
@@ -1147,38 +1150,51 @@ class ComputedBuffer(Buffer):
             self.freeze_layout()
 
     def simplify_loops(self):
-        _, (index_vars, reduce_vars), _ = dependencies.index_vars(
-            self.data.get_size(), self.data.get_reduction_size()
+        _, args, var_ranges = dependencies.index_vars(
+            self.data.get_size(), self.data.get_reduction_size(), prefix="z"
         )
-        read_writes = self.get_read_writes()
-        index_formulas = list(
-            {
-                dep.index
-                for dep in itertools.chain(
-                    read_writes.reads,
-                    read_writes.writes,
-                    read_writes.index_exprs,
-                )
-            }
+        body = LoopBody(
+            self.get_store_function(),
+            (args if self.get_reduction_type() else args[:1]),
+            var_ranges,
         )
-        memory_addrs = [
-            dep.index for dep in itertools.chain(read_writes.reads, read_writes.writes)
-        ]
+        index_formulas = [*body.indexing_exprs.values()]
+        memory_addrs = [*body.reads, *body.writes]
 
-        def simplify_and_reorder(vars_, sizes):
-            sizes, reindex1, prune = self._simplify_loops(vars_, sizes, index_formulas)
-            vars_ = prune(vars_)
-            sizes, reindex2 = self._apply_loop_reordering(vars_, sizes, memory_addrs)
+        index_vars = []
+        reduce_vars = []
+        index_size = []
+        reduce_size = []
+        for v, s in var_ranges.items():
+            if v in args[0]:
+                assert not reduce_vars
+                index_vars.append(v)
+                index_size.append(s)
+            else:
+                assert v in args[1]
+                reduce_vars.append(v)
+                reduce_size.append(s)
+
+        def simplify_and_reorder(x_vars, sizes):
+            sizes, reindex1, prune = self._simplify_loops(x_vars, sizes, index_formulas)
+            x_vars = prune(x_vars)
+            sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
 
-        iter_ranges, iter_reindex = simplify_and_reorder(
-            index_vars, self.data.get_size()
-        )
-        reduce_ranges, reduce_reindex = simplify_and_reorder(
-            reduce_vars, self.data.get_reduction_size()
-        )
-        return iter_ranges, iter_reindex, reduce_ranges, reduce_reindex
+        iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
+        reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
+
+        def body_wrapper(index, reduce_index=None):
+            if not reduce_ranges and reduce_index:
+                index = [*index, *reduce_index]
+                reduce_index = None
+            index = iter_reindex(index)
+            if reduce_index:
+                index = [*index, *reduce_reindex(reduce_index)]
+            return body(index)
+
+        return iter_ranges, reduce_ranges, body_wrapper
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):
@@ -1190,7 +1206,7 @@ class ComputedBuffer(Buffer):
         sizes = list(sizes)
 
         strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
-        assert len(sizes) == len(strides[0])
+        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
 
         for i in range(len(sizes)):
             if sizes[i] == 1:
@@ -1941,3 +1957,154 @@ class StorageBox(MutableBox):
             # TODO(jansel): this heuristic is a wild guess
             if len(read_writes.reads) > 1 or len(self.inner_fn_str()) > 1000:
                 self.realize()
+
+
+class LoopBody:
+    """
+    Captures the body of a Loops subclass into an FX graph.  Persists any
+    indexing simplifications and makes it easier to analyze loop bodies.
+    """
+
+    def __init__(self, fn, args, var_ranges):
+        super().__init__()
+        self.var_ranges = var_ranges
+        self.indexing_exprs = {}
+        self.indexing_exprs_name = {}
+        self.reads = []
+        self.writes = []
+        self.other = []
+        self.submodules = {}
+        self.subblocks = {}
+        self.indirect_vars = []
+        self.root_block = LoopBodyBlock(self, fn, args)
+        self.indexing = None
+
+    def add_index_expr(self, expr: sympy.Expr, category):
+        getattr(self, category).append(expr)
+        if expr not in self.indexing_exprs_name:
+            name = f"index{len(self.indexing_exprs)}"
+            self.indexing_exprs_name[expr] = name
+            self.indexing_exprs[name] = expr
+        return self.indexing_exprs_name[expr]
+
+    def add_submodule(self, block, prefix):
+        """Not actually for nn.Modules, but subblocks in generated code are mapped to FX call_module opcodes"""
+        if prefix[-1].isnumeric() and prefix not in self.submodules:
+            name = prefix
+        else:
+            name = f"{prefix}{len(self.submodules)}"
+        self.submodules[name] = block
+        return name
+
+    def add_indirect(self):
+        name = f"indirect{len(self.indirect_vars)}"
+        var = sympy.Symbol(name, integer=True)
+        self.indirect_vars.append([var])
+        return var
+
+    def __call__(self, index=()):
+        assert len(index) == len(self.var_ranges)
+        assert all(v not in self.var_ranges for v in index)
+        replacements = dict(zip(self.var_ranges.keys(), index))
+        self.indexing = {
+            name: expr.subs(replacements) for name, expr in self.indexing_exprs.items()
+        }
+        result = self.root_block()
+        self.indexing = None
+        return result
+
+
+class LoopBodyBlock:
+    """
+    Captures the body of a Loops subclass into an FX graph.
+    In normal cases there will be a 1:1 mapping between LoopBody and
+    LoopBodyBlock, hower in the case of ops.masked() the masked out
+    operations will manifest as an extra LoopBodyBlock.
+    """
+
+    def __init__(self, body: LoopBody, fn: Callable, args: List[Any]):
+        self.gm = None
+        self.body = body
+
+        def add_index(expr, category):
+            return tracer.create_proxy(
+                "get_attr", self.body.add_index_expr(expr, category), (), {}
+            )
+
+        class CaptureIndexing(V.WrapperHandler):
+            def load(self, name: str, index: sympy.Expr):
+                index = add_index(index, "reads")
+                return self._inner.load(name, index)
+
+            def store(self, name, index, value):
+                index = add_index(index, "writes")
+                return self._inner.store(name, index, value)
+
+            def reduction(self, name, dtype, reduction_type, index, value):
+                index = add_index(index, "writes")
+                return self._inner.reduction(name, dtype, reduction_type, index, value)
+
+            def index_expr(self, index, dtype):
+                index = add_index(index, "other")
+                return self._inner.index_expr(index, dtype)
+
+            @staticmethod
+            def masked(mask_proxy, masked_body: Callable, other_proxy):
+                """
+                Recursively capture the masked out body in another LoopBodyBlock
+                """
+
+                def shim(mask, other):
+                    return V.ops.masked(mask, subblock, other)
+
+                name = self.body.add_submodule(shim, "masked_subblock")
+                subblock = LoopBodyBlock(self.body, masked_body, ())
+                self.body.subblocks[name] = subblock
+                return tracer.create_proxy(
+                    "call_module", name, (mask_proxy, other_proxy), {}
+                )
+
+            @staticmethod
+            def indirect_indexing(index_proxy):
+                """
+                Flow data from tensors into indexing formulas.
+                Introduce a call_module to update the indexing.
+                """
+
+                def set_indirect(new_var):
+                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
+
+                var = self.body.add_indirect()
+                tracer.create_proxy(
+                    "call_module",
+                    self.body.add_submodule(set_indirect, f"set_{var}"),
+                    (index_proxy,),
+                    {},
+                )
+                return var
+
+        tracer = torch.fx.Tracer()
+        tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
+        proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
+        with V.set_ops_handler(
+            torchinductor.sizevars.SimplifyIndexing(
+                CaptureIndexing(proxy_ops), self.body.var_ranges
+            )
+        ):
+            tracer.create_proxy("output", "output", (fn(*args),), {})
+        self.graph = tracer.graph
+
+    def replace_indirect(self, old, new):
+        """Swap in a variable used in indirect indexing"""
+        for name in self.body.indexing.keys():
+            expr = getattr(self.gm, name)
+            if old in expr.free_symbols:
+                setattr(self.gm, name, expr.subs({old: new}))
+
+    def __call__(self):
+        self.gm = torch.fx.GraphModule(
+            {**self.body.indexing, **self.body.submodules}, self.graph
+        )
+        result = self.gm.forward(V.get_ops_handler())
+        self.gm = None
+        return result

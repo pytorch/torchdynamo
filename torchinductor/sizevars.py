@@ -9,6 +9,8 @@ from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from .virtualized import V
+
 
 @dataclasses.dataclass
 class ZeroGuard:
@@ -312,3 +314,30 @@ def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
                     )
                     return expr
     return expr
+
+
+class SimplifyIndexing(V.WrapperHandler):
+    """
+    A wrapper around .virtualize.ops that uses var range information to
+    simplify ir.ModularIndexing/ir.IndexingDiv.
+    """
+
+    def __init__(self, inner, var_ranges):
+        super().__init__(inner)
+        self._var_ranges = var_ranges
+
+    def load(self, name: str, index: sympy.Expr):
+        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
+        return self._inner.load(name, index)
+
+    def store(self, name, index, value):
+        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
+        return self._inner.store(name, index, value)
+
+    def reduction(self, name, dtype, reduction_type, index, value):
+        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
+        return self._inner.reduction(name, dtype, reduction_type, index, value)
+
+    def index_expr(self, index, dtype):
+        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
+        return self._inner.index_expr(index, dtype)
