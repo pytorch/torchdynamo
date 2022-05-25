@@ -1,0 +1,9 @@
+name: anaconda-client-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - anaconda-client
+  - pip
+  - pip:
+      - -r requirements.txt
