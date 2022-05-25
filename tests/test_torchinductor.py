@@ -399,6 +399,22 @@ class CommonTemplate:
             self.common(fn1, (torch.randn(size1),))
             self.common(fn2, (torch.randn(size1),))
 
+    def test_views3(self):
+        # example taken from hf_BigBird
+        def forward(arg1, arg2):
+            index = torch.ops.aten.index(arg1, [arg2])
+            view_1 = torch.ops.aten.view(index, [1, 2232, 64])
+            view_2 = torch.ops.aten.view(view_1, [1, 12, 62, 192])
+            return view_2
+
+        self.common(
+            forward,
+            (
+                rand_strided((64, 64), (64, 1), torch.float32),
+                rand_strided((2232,), (1,), torch.int64),
+            ),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)

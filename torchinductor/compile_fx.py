@@ -61,9 +61,7 @@ def dump_to_repro(gm, *args):
                 """
                 import torch
                 import torchdynamo
-                from torchdynamo.testing import rand_strided,same
-                from torchinductor.compile_fx import compile_fx
-
+                from torchdynamo.testing import rand_strided, same
                 """
             )
         )
@@ -89,7 +87,7 @@ def dump_to_repro(gm, *args):
             textwrap.dedent(
                 """
                 expected = Repro().forward(*args)
-                with torchdynamo.optimize(compile_fx, nopython=True):
+                with torchdynamo.optimize("inductor", nopython=True):
                     actual = Repro().forward(*args)
                 assert same(actual, expected)
                 """
