@@ -1184,6 +1184,24 @@ class CommonTemplate:
             ),
         )
 
+    def test_bitwise2(self):
+        # again with bool types
+        def fn(x, y):
+            return (
+                torch.bitwise_not(x),
+                torch.bitwise_or(x, y),
+                torch.bitwise_xor(x, y),
+                torch.bitwise_and(x, y),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 2, (2, 20), dtype=torch.bool),
+                torch.randint(0, 2, (2, 20), dtype=torch.bool),
+            ),
+        )
+
     def test_inf(self):
         def fn(a):
             return a + float("inf"), a + float("-inf"), a * -float("inf")

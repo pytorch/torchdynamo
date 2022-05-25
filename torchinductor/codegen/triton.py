@@ -115,10 +115,6 @@ class TritonOverrides(OpOverrides):
             new_mask, result, TritonOverrides.constant(other, torch.float32)
         )
 
-    @staticmethod
-    def logical_not(a):
-        return f"~{a}"
-
 
 @dataclasses.dataclass
 class RangeTree:

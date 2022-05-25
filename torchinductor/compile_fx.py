@@ -91,7 +91,7 @@ def dump_to_repro(gm, *args):
                 expected = Repro().forward(*args)
                 with torchdynamo.optimize(compile_fx, nopython=True):
                     actual = Repro().forward(*args)
-                assert same(actual, expected), (actual[0]-expected[0]).max()
+                assert same(actual, expected)
                 """
             )
         )

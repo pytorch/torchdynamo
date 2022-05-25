@@ -186,10 +186,6 @@ class CppOverrides(OpOverrides):
     def and_(a, b):
         return f"{a} && {b}"
 
-    @staticmethod
-    def logical_not(a):
-        return f"!{a}"
-
 
 class CppKernel(Kernel):
     overrides = CppOverrides

@@ -158,11 +158,13 @@ def promote_constants(inputs):
     ]
 
 
-def make_pointwise(fn, override_dtype=None, override_device=None):
+def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=None):
     def inner(*inputs: List[TensorBox]):
         inputs = promote_constants(inputs)
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
+        dtype = override_dtype or inputs[0].get_dtype()
+
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()
@@ -170,11 +172,14 @@ def make_pointwise(fn, override_dtype=None, override_device=None):
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
-            return fn(*[load(index) for load in loaders])
+            if dtype == torch.bool and override_bool is not None:
+                return override_bool(*[load(index) for load in loaders])
+            else:
+                return fn(*[load(index) for load in loaders])
 
         return Pointwise.create(
             device=override_device or inputs[0].get_device(),
-            dtype=override_dtype or inputs[0].get_dtype(),
+            dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
         )
@@ -229,6 +234,15 @@ def to(x, device_or_dtype, non_blocking=False, copy=False, memory_format=None):
     assert False, device_or_dtype
 
 
+def ops_wrapper(name):
+    assert isinstance(name, str)
+
+    def fn(*args, **kwargs):
+        return getattr(ops, name)(*args, **kwargs)
+
+    return fn
+
+
 def register_pointwise(
     aten_fn,
     name=None,
@@ -236,15 +250,19 @@ def register_pointwise(
     type_promote=True,
     override_dtype=None,
     override_device=None,
+    override_bool=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
+    fn = ops_wrapper(name)
+    if override_bool is not None:
+        override_bool = ops_wrapper(override_bool)
 
     fn = make_pointwise(
-        fn, override_dtype=override_dtype, override_device=override_device
+        fn,
+        override_dtype=override_dtype,
+        override_device=override_device,
+        override_bool=override_bool,
     )
     fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
     return fn
@@ -1461,7 +1479,7 @@ sub = register_pointwise(aten.sub)
 
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
-register_pointwise(aten.bitwise_not)
+register_pointwise(aten.bitwise_not, override_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.log)
