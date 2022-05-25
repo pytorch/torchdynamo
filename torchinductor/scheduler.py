@@ -5,6 +5,7 @@ import functools
 from typing import Any
 from typing import Dict
 from typing import List
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -301,7 +302,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         with V.set_ops_handler(
             dependencies.SimplifyIndexing(V.get_ops_handler(), var_ranges)
-        ):
+        ), patch.object(ir.ConstantBuffer, "override_device", self.node.get_device()):
             if self.is_reduction():
                 reduction_vars = self._reduction_reindex(reduction_vars)
                 self.node.data.store_reduction(name, indexer, vars, reduction_vars)

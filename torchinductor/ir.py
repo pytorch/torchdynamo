@@ -521,6 +521,8 @@ class View(BaseView):
 
     @staticmethod
     def handle_negative_index(idx, size):
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
         sizevars = V.graph.sizevars
         if sizevars.size_hint(idx) < 0:
             sizevars.guard_lt(idx, 0)
