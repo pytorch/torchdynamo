@@ -207,7 +207,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             for attempt in itertools.count():
                 try:
                     code = transform_code_object(frame.f_code, transform)
-                    orig_code_map[id(code)] = frame.f_code
+                    orig_code_map[code] = frame.f_code
                     break
                 except exc.RestartAnalysis:
                     if attempt > 100:

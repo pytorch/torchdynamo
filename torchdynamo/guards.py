@@ -24,6 +24,7 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
+from .utils import ExactWeakKeyDictionary
 from .utils import istype
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
@@ -32,7 +33,7 @@ from .utils import tuple_iterator_len
 log = logging.getLogger(__name__)
 
 # map from transformed code back to original user code
-orig_code_map = {}
+orig_code_map = ExactWeakKeyDictionary()
 
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
@@ -406,7 +407,7 @@ def guard_fail_hook(
         if not eval(part, guard_fn.global_scope, scope):
             reasons.append(part)
             break
-    guard_failures[orig_code_map[id(code)]].append(reasons)
+    guard_failures[orig_code_map[code]].append(reasons)
 
 
 def guard_error_hook(
