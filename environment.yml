@@ -1,4 +1,4 @@
-name: anaconda-client-env-${{ github.run_number }}
+name: anaconda-client-env-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
 channels:
   - conda-forge
   - defaults

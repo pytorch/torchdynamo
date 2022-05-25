@@ -21,10 +21,8 @@ jobs:
         installer-url: https://repo.anaconda.com/miniconda/Miniconda3-py38_4.11.0-Linux-x86_64.sh
         auto-update-conda: false
         python-version: 3.8
-        activate-environment: anaconda-client-env-${{ github.run_number }}
+        activate-environment: anaconda-client-env-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
         environment-file: environment.yml
-    # - run: conda init bash
-    # - run: conda activate anaconda-client-env
     - run: conda info
     - run: conda list
     - run: conda config --show
