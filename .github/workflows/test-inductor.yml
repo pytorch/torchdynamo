@@ -13,11 +13,14 @@ jobs:
     - uses: actions/checkout@v2
     - uses: conda-incubator/setup-miniconda@v2
       with:
+        # It's critical to specify the installer-url, otherwise you may run into issue maintioned here
+        # https://github.com/conda-incubator/setup-miniconda/issues/218
         installer-url: https://repo.anaconda.com/miniconda/Miniconda3-py38_4.11.0-Linux-x86_64.sh
         auto-update-conda: false
         python-version: 3.8
         activate-environment: build
         environment-file: environment.yml
+    - run: conda activate build
     - run: conda info
     - run: conda list
     - run: conda config --show
