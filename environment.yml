@@ -1,4 +1,4 @@
-name: build
+name: anaconda-client-env
 channels:
   - conda-forge
   - defaults
