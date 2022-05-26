@@ -122,6 +122,9 @@ def compile_fx(
             wrap(graph.run)(*example_inputs)
             compiled_fn = wrap(graph.compile_to_fn())
 
+        # make sure it works
+        compiled_fn(*example_inputs)
+
         if (
             cudagraphs
             and set(graph.device_types) == {"cuda"}

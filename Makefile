@@ -151,16 +151,16 @@ gpu-inductor-dynamic: develop
 	paste -d, inductor.csv baseline_nvfuser.csv baseline_nnc.csv > inductor_gpu_dynamic.csv
 
 cpu-inductor: develop
-	rm -f inductor.csv speedup_ts.csv cpu_inductor.csv
+	rm -f inductor.csv speedup_ts.csv cpu_8t_inductor.csv
 	python torchbench.py --cosine --isolate --fast --inductor --threads=8
 	python torchbench.py --cosine --isolate --fast --backend=ts --threads=8
-	paste -d, inductor.csv speedup_ts.csv > cpu_inductor.csv
+	paste -d, inductor.csv speedup_ts.csv > cpu_8t_inductor.csv
 
 cpu-inductor-seq: develop
-	rm -f inductor.csv speedup_ts.csv cpu_inductor.csv
+	rm -f inductor.csv speedup_ts.csv cpu_1t_inductor.csv
 	taskset 1 python torchbench.py --cosine --isolate --fast --inductor --threads=1
 	taskset 1 python torchbench.py --cosine --isolate --fast --backend=ts --threads=1
-	paste -d, inductor.csv speedup_ts.csv > cpu_inductor.csv
+	paste -d, inductor.csv speedup_ts.csv > cpu_1t_inductor.csv
 
 
 

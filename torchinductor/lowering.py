@@ -273,6 +273,11 @@ def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
 
+    if isinstance(a, (float, int)):
+        a = constant_like(a)(b)
+    if isinstance(b, (float, int)):
+        b = constant_like(b)(a)
+
     dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
     return make_pointwise(fn, override_dtype=dtype)(
         cond, to_dtype(a, dtype), to_dtype(b, dtype)
@@ -420,7 +425,7 @@ def split(x, sizes, dim):
 
 
 @register_lowering(aten.split_with_sizes)
-def split_with_sizes(x, sizes, dim):
+def split_with_sizes(x, sizes, dim=0):
     return split(x, sizes, dim)
 
 
