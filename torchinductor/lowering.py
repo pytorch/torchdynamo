@@ -158,11 +158,13 @@ def promote_constants(inputs):
     ]
 
 
-def make_pointwise(fn, override_dtype=None, override_device=None):
+def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=None):
     def inner(*inputs: List[TensorBox]):
         inputs = promote_constants(inputs)
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
+        dtype = override_dtype or inputs[0].get_dtype()
+
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()
@@ -170,11 +172,14 @@ def make_pointwise(fn, override_dtype=None, override_device=None):
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
-            return fn(*[load(index) for load in loaders])
+            if dtype == torch.bool and override_bool is not None:
+                return override_bool(*[load(index) for load in loaders])
+            else:
+                return fn(*[load(index) for load in loaders])
 
         return Pointwise.create(
             device=override_device or inputs[0].get_device(),
-            dtype=override_dtype or inputs[0].get_dtype(),
+            dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
         )
@@ -229,6 +234,15 @@ def to(x, device_or_dtype, non_blocking=False, copy=False, memory_format=None):
     assert False, device_or_dtype
 
 
+def ops_wrapper(name):
+    assert isinstance(name, str)
+
+    def fn(*args, **kwargs):
+        return getattr(ops, name)(*args, **kwargs)
+
+    return fn
+
+
 def register_pointwise(
     aten_fn,
     name=None,
@@ -236,15 +250,19 @@ def register_pointwise(
     type_promote=True,
     override_dtype=None,
     override_device=None,
+    override_bool=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
+    fn = ops_wrapper(name)
+    if override_bool is not None:
+        override_bool = ops_wrapper(override_bool)
 
     fn = make_pointwise(
-        fn, override_dtype=override_dtype, override_device=override_device
+        fn,
+        override_dtype=override_dtype,
+        override_device=override_device,
+        override_bool=override_bool,
     )
     fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
     return fn
@@ -424,6 +442,15 @@ def unsqueeze(x, dim):
     return view(x, new_shape)
 
 
+@register_lowering(aten.unsqueeze_)
+def unsqueeze_(x, dim):
+    val = unsqueeze(x, dim)
+    assert isinstance(x, TensorBox)
+    assert isinstance(val, TensorBox)
+    x.data = val.data
+    return x
+
+
 def _validate_dim(x, dim, offset):
     assert isinstance(dim, int)
     ndim = len(x.get_size())
@@ -504,9 +531,29 @@ def sort(*args):
     )
 
 
+@register_lowering(aten.topk, type_promote=False)
+def topk(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.topk, *args),
+        )
+    )
+
+
+@register_lowering(torch.randperm, type_promote=False)
+def randperm(*args):
+    return TensorBox.create(ir.FallbackKernel.create(aten.randperm, *args))
+
+
 @register_lowering(aten.grid_sampler_2d, type_promote=False)
 def grid_sampler_2d(*args):
     return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
+
+
+@register_lowering(aten.norm, type_promote=False)
+def norm(*args):
+    return TensorBox.create(ir.FallbackKernel.create(aten.norm, *args))
 
 
 @register_lowering(aten.native_dropout, type_promote=False)
@@ -726,6 +773,7 @@ def constant_like(fill_value):
     return _constant_like
 
 
+empty_like = register_lowering(aten.empty_like)(constant_like(0))
 zeros_like = register_lowering(aten.zeros_like)(constant_like(0))
 ones_like = register_lowering(aten.ones_like)(constant_like(1))
 
@@ -1135,7 +1183,6 @@ def avg_pool2d(
     count_include_pad=True,
     divisor_override=None,
 ):
-    assert count_include_pad
     assert not divisor_override
     if not stride:
         stride = kernel_size
@@ -1158,26 +1205,39 @@ def avg_pool2d(
 
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
         x_loader = constant_boundary_condition_2d(x, 0.0, padding)
+        had_padding = True
     else:
         x_loader = x.make_loader()
+        had_padding = False
 
     new_size = list(batch) + [h_out, w_out]
-
-    scale = 1.0 / (kernel_size[0] * kernel_size[1])
     dtype = x.get_dtype()
 
-    def fn(idx):
+    def fn_sum(idx, loader):
         *prefix, bh, bw = idx
         total = None
         for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
-            val = x_loader([*prefix, ih, iw])
+            val = loader([*prefix, ih, iw])
             if total is None:
                 total = val
             else:
                 total = ops.add(val, total)
-        return ops.mul(total, ops.constant(scale, dtype))
+        return total
+
+    if count_include_pad or not had_padding:
+        scale = 1.0 / (kernel_size[0] * kernel_size[1])
+
+        def fn(idx):
+            return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
+
+    else:
+        ones_loader = constant_boundary_condition_2d(ones_like(x), 0.0, padding)
+
+        def fn(idx):
+            # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
+            return ops.div(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -1419,18 +1479,21 @@ sub = register_pointwise(aten.sub)
 
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
-register_pointwise(aten.bitwise_not)
+register_pointwise(aten.bitwise_not, override_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)
-register_pointwise(aten.remainder)
 register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
+register_pointwise(aten.remainder)
+register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
+register_pointwise(aten.trunc)
+register_pointwise(aten.floor)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)
@@ -1453,3 +1516,5 @@ register_inplace(aten.add_, add)
 register_inplace(aten.mul_, mul)
 register_inplace(aten.div_, div)
 register_inplace(aten.sub_, sub)
+register_inplace(aten.relu_, relu)
+register_inplace(aten.sigmoid_, sigmoid)

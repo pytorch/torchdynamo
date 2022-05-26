@@ -79,6 +79,19 @@ class TritonOverrides(OpOverrides):
         return ops.maximum("0", x)
 
     @staticmethod
+    def round(x):
+        return f"tl.where({x}<0, {x}-0.5, {x}+0.5).to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def floor(x):
+        tmp = ops.trunc(x)
+        return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
+
+    @staticmethod
+    def trunc(x):
+        return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
     def minimum(a, b):
         return f"tl.minimum({a}, {b})"
 
@@ -101,10 +114,6 @@ class TritonOverrides(OpOverrides):
         return ops.where(
             new_mask, result, TritonOverrides.constant(other, torch.float32)
         )
-
-    @staticmethod
-    def logical_not(a):
-        return f"~{a}"
 
 
 @dataclasses.dataclass
