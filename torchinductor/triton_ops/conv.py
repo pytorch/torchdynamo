@@ -1,5 +1,6 @@
 import torch
 import triton
+import numpy as np
 
 import triton.language as tl
 
@@ -20,11 +21,15 @@ def _kernel(x, w, bias, y,
             dilation_h, dilation_w,
             output_padding_h, output_padding_w,
             groups,
+            # ptr increment for x
+            delta_x_ptr,
             # Metaparameters
             ACC_TYPE: tl.constexpr,
             # blocks in different dimension
             BLOCK_BATCH: tl.constexpr, BLOCK_H: tl.constexpr,
-            BLOCK_W: tl.constexpr, BLOCK_K: tl.constexpr, BLOCK_C: tl.constexpr,
+            BLOCK_W: tl.constexpr, BLOCK_K: tl.constexpr,
+            # tiling parameter for matmul
+            TK: tl.constexpr,
             # Super-blocking for better L2 peformance
             GROUP_H: tl.constexpr
             ):
@@ -74,66 +79,55 @@ def _kernel(x, w, bias, y,
     rb = tl.arange(0, BLOCK_BATCH)
     # rh = tl.arange(0, BLOCK_H)
     # rw = tl.arange(0, BLOCK_W)
-    rc = tl.arange(0, BLOCK_C)
+    # rc = tl.arange(0, BLOCK_C)
     rk = tl.arange(0, BLOCK_K)
+    rtk = tl.arange(0, TK)
+    WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
 
     # print("loop", BATCH, BLOCK_H, BLOCK_W, IN_C, BLOCK_C)
     for hi in range(BLOCK_H):
         for wi in range(BLOCK_W):
-            for ci in range(0, IN_C, BLOCK_C):
-                # allocate accumulator
-                acc = tl.zeros((BLOCK_BATCH, BLOCK_K), dtype=ACC_TYPE)
+            y_ptrs = y_ptr + rb[:, None] * stride_yn + hi * stride_yh \
+                + wi * stride_yw + rk[None, :] * stride_yc
 
+            mask_y = (batch + rb < BATCH)[:, None] \
+                & (y_h_start + hi < OUT_H) \
+                & (y_w_start + wi < OUT_W) \
+                & (k + rk < KERNEL_N)[None, :]
+
+            # allocate accumulator
+            acc = tl.zeros((BLOCK_BATCH, BLOCK_K), dtype=ACC_TYPE) + 1
+            
+            for tki in range(0, WINDOW_SIZE, TK):
+                acc = acc.to(y.dtype.element_ty)
                 # weight
-                w_ptrs = w_ptr + r_windowh[:, None, None, None] * stride_wh \
-                    + r_windoww[None, :, None, None] * stride_ww + (ci + rc[None, None, :, None]) * stride_wc \
-                    + rk[None, None, None, :] * stride_wn
+                # assume kn is not the last channel, then the TK elements in weights are contigous
+                '''
+                w_ptrs = w_ptr + (tki + rtk)[:, None] + rk[None, :] * stride_wn
 
-                mask_w = (r_windowh < KERNEL_H)[:, None, None, None] \
-                    & (r_windoww < KERNEL_W)[None, :, None, None] \
-                    & (ci + rc < IN_C)[None, None, :, None] \
-                    & (k + rk < KERNEL_N)[None, None, None, :]
-
-                matrix_w = tl.reshape(tl.load(w_ptrs, mask=mask_w), (KERNEL_H * KERNEL_W * BLOCK_C, BLOCK_K))
+                mask_w = (tki + rtk < WINDOW_SIZE)[:, None] \
+                    & (k + rk < KERNEL_N)[None, :]
+                # load (TK, BLOCK_K) of weights
+                matrix_w = tl.load(w_ptrs, mask=mask_w)
 
                 # x window
                 x_window_start_ptr = x_ptr + hi * stride_h * stride_xh \
-                    + wi * stride_w * stride_xw + ci * stride_xc
-                x_window_ptrs = x_window_start_ptr + rb[:, None, None, None] * stride_xn \
-                    + r_windowh[None, :, None, None] * stride_xh \
-                    + r_windoww[None, None, :, None] * stride_xw \
-                    + rc[None, None, None, :] * stride_xc
-                # x_ptrs[:, hi, wi, :] = tl.reshape(x_window_ptrs, ((BLOCK_BATCH, KERNEL_H * KERNEL_W * BLOCK_C)))
-                mask_x_window = (batch + rb < BATCH)[:, None, None, None] \
-                    & (x_h_start + hi + r_windowh < IN_H)[None, :, None, None] \
-                    & (x_w_start + wi + r_windoww < IN_W)[None, None, :, None] \
-                    & (ci + rc < IN_C)[None, None, None, :]
-                # mask_x[:, hi, wi, :] = tl.reshape(mask_x_window, (BLOCK_BATCH, KERNEL_H * KERNEL_W * BLOCK_C))
-                matrix_x_window = tl.reshape(tl.load(x_window_ptrs, mask=mask_x_window),
-                                             (BLOCK_BATCH, KERNEL_H * KERNEL_W * BLOCK_C))
+                    + wi * stride_w * stride_xw
+                delta_x_ptr_window = tl.load(delta_x_ptr + tki + rtk)
+                x_window_ptrs = x_window_start_ptr + rb[:, None] * stride_xn \
+                    + delta_x_ptr_window[None, :]
+                mask_x_window = (batch + rb < BATCH)[:, None] \
+                    & (tki + rtk < WINDOW_SIZE)[None, :]
+                matrix_x_window = tl.load(x_window_ptrs, mask=mask_x_window)
 
                 # dot product
-                # (BLOCK_BATCH, KERNEL_H * KERNEL_W * BLOCK_C) DOT (KERNEL_H * KERNEL_W * BLOCK_C, BLOCK_K)
+                # (BLOCK_BATCH, TK) DOT (TK, BLOCK_K)
                 # output shape (BLOCK_BATCH, BLOCK_K)
                 acc += tl.dot(matrix_x_window, matrix_w)
-                acc = acc.to(y.dtype.element_ty)
-
-                y_ptrs = y_ptr + rb[:, None] * stride_yn + hi * stride_yh \
-                    + wi * stride_yw + rk[None, :] * stride_yc
-
-                mask_y = (batch + rb < BATCH)[:, None] \
-                    & (y_h_start + hi < OUT_H) \
-                    & (y_w_start + wi < OUT_W) \
-                    & (k + rk < KERNEL_N)[None, :]
-
-                tl.store(y_ptrs, acc, mask=mask_y)
-                #y_ptrs = y_ptr + hi * stride_yh + wi * stride_yw + rk * stride_yc
-                #data = tl.arange(0, BLOCK_K)
-                #tl.store(y_ptrs, data)
-                #y_ptrs = y_ptr + hi * stride_yh + wi * stride_yw + rb[:, None] * stride_yn + rk[None, :] * stride_yc
-                #data = tl.zeros((BLOCK_BATCH, BLOCK_K), dtype=y.dtype.element_ty) + 2
-                #tl.store(y_ptrs, data, mask=mask_y)
-                # tl.store(y_ptr + (BLOCK_BATCH - 1) * stride_yn + hi * stride_yh + wi * stride_yw + (BLOCK_K - 1) * stride_yc, 1)
+                '''
+            
+            acc = acc.to(y.dtype.element_ty)
+            tl.store(y_ptrs, acc, mask=mask_y)
 
     return
 
@@ -147,6 +141,42 @@ class _conv(torch.autograd.Function):
         for i in range(rank - 1, 0, -1):
             ret[i - 1] = ret[i] * shape[i]
         return ret
+
+    @staticmethod
+    def _roundup(x, div):
+        return (x + div - 1) // div * div
+
+    @staticmethod
+    def _unpack(idx, order, shape):
+        _12 = idx  // shape[order[0]]
+        _0   = idx   % shape[order[0]]
+        _2  = _12 // shape[order[1]]
+        _1   = _12  % shape[order[1]]
+        return _0, _1, _2
+
+    # for the contigous order of w ptr, what's the corresponding
+    # ptr changes for x
+    @staticmethod
+    def _delta_x_ptr(xc, xh, xw,
+                     wc, wh, ww,
+                     stride_x, shape_w,
+                     TK):
+        # get the order of axes in w, innermost dimension outward
+        order = sorted([wc, wh, ww], reverse=True)
+        c, h, w = [order.index(x) for x in [wc, wh, ww]]
+
+        # PTR_LUT_SIZE
+        PTR_LUT_SIZE = _conv._roundup(shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]], TK)
+        r_lut = np.arange(PTR_LUT_SIZE, dtype=np.int32)
+        # len is kernel_w * kernel_w * in_c
+        current_k = _conv._unpack(r_lut, order, shape_w)
+
+        # compute memory stride
+        delta_x = current_k[c] * stride_x[xc]
+        delta_x += current_k[h] * stride_x[xh]
+        delta_x += current_k[w] * stride_x[xw]
+
+        return delta_x
 
     @staticmethod
     def _call(x, w, bias,
@@ -209,17 +239,30 @@ class _conv(torch.autograd.Function):
         stride_w = _conv._extract_strides(shape_w)
         stride_y = _conv._extract_strides(shape_y)
 
+        assert((stride_x[0] >= stride_x[1]) and (stride_x[1] >= stride_x[2])
+               and (stride_x[2] > stride_x[3])), "stride and layout does not match for x"
+        assert((stride_w[0] >= stride_w[1]) and (stride_w[1] >= stride_w[2])
+               and (stride_w[2] > stride_w[3])), "stride and layout does not match for w"
+        assert((stride_y[0] >= stride_y[1]) and (stride_y[1] >= stride_y[2])
+               and (stride_y[2] > stride_y[3])), "stride and layout does not match for y"
+
         # allocate output
         y = torch.empty(shape_y, device=device, dtype=x.dtype)
         print(y.shape, 'stride_y', stride_y[yn], stride_y[yc], stride_y[yh], stride_y[yw])
         # accumulator types
         ACC_TYPE = tl.float32 if x.dtype in [torch.float16, torch.bfloat16, torch.float32] else tl.int32
         # if input activation is channel-last, it's good to tiling output
-        # into block of [BLOCK_BATCH, BLOCK_K, BLOCK_H, BLOCK_W] because of better 
-        if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
+        # into block of [BLOCK_BATCH, BLOCK_K, BLOCK_H, BLOCK_W] because of better
+        #if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
+        if True:
+            delta_x_ptr = _conv._delta_x_ptr(xc, xh, xw,
+                                             wc, wh, ww,
+                                             stride_x, shape_w,
+                                             TK=2)
+            delta_x_ptr = torch.from_numpy(delta_x_ptr).cuda()
             # launch kernel, 3-dim, batch, kernel num, h*w
             grid = lambda META: (triton.cdiv(BATCH, META['BLOCK_BATCH']), triton.cdiv(KERNEL_N, META['BLOCK_K']),
-                                triton.cdiv(OUT_H, META['BLOCK_H']) * triton.cdiv(OUT_W, META['BLOCK_W']))
+                                 triton.cdiv(OUT_H, META['BLOCK_H']) * triton.cdiv(OUT_W, META['BLOCK_W']))
             _kernel[grid](x, w, bias, y,
                           # stride nchw for x,w,y tensor
                           stride_x[xn], stride_x[xc], stride_x[xh], stride_x[xw],
@@ -235,14 +278,17 @@ class _conv(torch.autograd.Function):
                           dilation[0], dilation[1],
                           output_padding[0], output_padding[1],
                           groups,
+                          # ptr increment for x
+                          delta_x_ptr,
+                          # Metaparameters
                           ACC_TYPE=ACC_TYPE,
-                          BLOCK_BATCH=1, BLOCK_H=4, BLOCK_W=4,
-                          BLOCK_K=4, BLOCK_C=2,
+                          BLOCK_BATCH=32, BLOCK_H=16, BLOCK_W=16, BLOCK_K=8,
+                          TK=8,
                           GROUP_H=1
                           )
         # do matrix multiplication
-        else:
-            _kernel_mm[grid]()
+        #else:
+        #    _kernel_mm[grid]()
         return y
 
     @staticmethod
