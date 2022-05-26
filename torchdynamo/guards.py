@@ -355,9 +355,10 @@ class GuardedCode:
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
             code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
-            verbose_code_parts.append(
-                f"___check_tensors_verbose({', '.join(tensor_check_names)})"
+            verbose_args = ", ".join(
+                tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
+            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         code = " and ".join(unique(code_parts))
 
@@ -366,6 +367,7 @@ class GuardedCode:
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("tensor_check_names", tensor_check_names),
             ]
         )
         closure_vars.update(CLOSURE_VARS)

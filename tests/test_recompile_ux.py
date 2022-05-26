@@ -128,18 +128,22 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
         a = torch.rand(3, 4, 5)
         cache_fail_test(
-            a, a[0:2, :, :], "tensor size mismatch at index 0. expected 3, actual 2"
+            a, a[0:2, :, :], "tensor 'a' size mismatch at index 0. expected 3, actual 2"
         )
         cache_fail_test(
             a,
             a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
-            "tensor strides mismatch at index 0. expected 20, actual 1",
+            "tensor 'a' strides mismatch at index 0. expected 20, actual 1",
         )
-        cache_fail_test(a, a[0, :, :], "tensor rank mismatch. expected 3, actual 2")
-        cache_fail_test(a, a.to("meta"), "tensor dispatch key set mismatch.")
+        cache_fail_test(a, a[0, :, :], "tensor 'a' rank mismatch. expected 3, actual 2")
+        cache_fail_test(a, a.to("meta"), "tensor 'a' dispatch key set mismatch.")
         cache_fail_test(
-            a, a.to(torch.float16), "tensor dtype mismatch. expected Float, actual Half"
+            a,
+            a.to(torch.float16),
+            "tensor 'a' dtype mismatch. expected Float, actual Half",
         )
         a_grad = a.clone()
         a_grad.requires_grad = True
-        cache_fail_test(a, a_grad, "requires_grad mismatch. expected requires_grad=0")
+        cache_fail_test(
+            a, a_grad, "tensor 'a' requires_grad mismatch. expected requires_grad=0"
+        )
