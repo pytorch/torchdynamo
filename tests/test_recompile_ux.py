@@ -5,7 +5,6 @@ import torch
 import torchdynamo
 import torchdynamo.config
 import torchdynamo.testing
-from torchdynamo.utils import counters
 
 torchdynamo.config.debug = False
 
@@ -53,17 +52,26 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         def model(input):
             return input + input
 
+        expected_recompiles = 2
         compile_counter = torchdynamo.testing.CompileCounter()
+        with unittest.mock.patch.object(
+            torchdynamo.config, "cache_size_limit", expected_recompiles
+        ):
+            with self.assertLogs(level="WARNING") as logs:
+                for _ in range(10):
+                    bsz = torch.randint(low=0, high=1000, size=())
+                    x = torch.randn((bsz, 3, 4))
+                    with torchdynamo.optimize(compile_counter):
+                        model(x)
 
-        for _ in range(10):
-            bsz = torch.randint(low=0, high=1000, size=())
-            x = torch.randn((bsz, 3, 4))
-            with torchdynamo.optimize(compile_counter):
-                model(x)
-
-        print(counters)
-        self.assertEqual(counters["frames"]["ok"], self.cache_limit)
-        self.assertEqual(compile_counter.frame_count, self.cache_limit)
+        self.assertEqual(compile_counter.frame_count, expected_recompiles)
+        self.assertEqual(len(logs.records), 1)
+        print(logs.records[0])
+        self.assertTrue(
+            logs.records[0]
+            .getMessage()
+            .startswith("torchdynamo hit recompilation cache limit")
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_nvfuser_guards(self):
