@@ -838,8 +838,7 @@ def gather(x, dim, index):
 
     def fn(idx):
         idx = list(idx)
-        var_index = index_loader(idx)
-        idx[dim] = sympy.Symbol(str(var_index))
+        idx[dim] = ops.indirect_indexing(index_loader(idx))
         return x_loader(idx)
 
     return Pointwise.create(
