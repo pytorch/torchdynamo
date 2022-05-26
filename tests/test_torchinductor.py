@@ -6,12 +6,16 @@ import importlib
 import unittest
 from unittest.mock import patch
 
+import sympy
 import torch
 from torch.nn import functional as F
 
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.ir import IndexingDiv
+from torchinductor.ir import ModularIndexing
+from torchinductor.sizevars import SizeVarAllocator
 
 try:
     importlib.import_module("functorch")
@@ -163,6 +167,84 @@ class SweepInputsCpuTest(SweepInputs2, TestCase):
 
 
 SweepInputsCpuTest.populate()
+
+
+class TestIndexingSimplification(unittest.TestCase):
+    def test_indexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0")
+        i1 = sympy.Symbol("i1")
+        i2 = sympy.Symbol("i2")
+        r3 = sympy.Symbol("r3")
+
+        var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
+        expr = (
+            128 * i2
+            + ModularIndexing(i1, 1, 64)
+            + 64 * ModularIndexing(i1 + 64 * r3, 64, 2)
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
+        )
+        var_ranges[r3] = 2
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
+        )
+
+        self.assertEqual(
+            sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
+            IndexingDiv(i1, 32),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                IndexingDiv(r3 + 2 * i2 + i1, 32), var_ranges
+            ),
+            IndexingDiv(i1 + 2 * i2, 32),
+        )
+
+        self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
+        self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
+
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * 10, 1, 10), ModularIndexing(i0, 1, 10)
+        )
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * 20, 2, 10), ModularIndexing(i0, 2, 10)
+        )
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
+        )
+
+        self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
+        self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
+
+    def test_indexing_join(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0")
+        i1 = sympy.Symbol("i1")
+        i2 = sympy.Symbol("i2")
+
+        expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr1, {}), ModularIndexing(i0, 1, 128)
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(2 * expr1, {}),
+            2 * ModularIndexing(i0, 1, 128),
+        )
+
+        expr2 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr2, {}), expr2)
+
+        expr3 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1, i2)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr3, {}), ModularIndexing(i0, 10, i1 * i2)
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr3 + 10, {}),
+            ModularIndexing(i0, 10, i1 * i2) + 10,
+        )
 
 
 class CommonTemplate:
