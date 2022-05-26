@@ -1,7 +1,7 @@
 import dataclasses
 import functools
-import inspect
 import itertools
+import logging
 import textwrap
 from functools import partial
 from typing import Any
@@ -17,8 +17,6 @@ import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
 
-import torchinductor.sizevars
-
 from . import config
 from . import dependencies
 from .codegen.common import product
@@ -26,6 +24,7 @@ from .dependencies import extract_read_writes
 from .virtualized import V
 from .virtualized import ops
 
+log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 
 
@@ -1262,6 +1261,8 @@ class ComputedBuffer(Buffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
+        from .scheduler import pick_loop_order
+
         try:
             strides = numpy.array(
                 [
@@ -1271,13 +1272,12 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
-
-            from .scheduler import pick_loop_order
-
             order = list(reversed(pick_loop_order(strides, sizes)))
-        except TypeError:  # Cannot convert symbols to int
+        except Exception:
+            log.warning(
+                f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+            )
             order = list(range(len(sizes)))
-
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
 
@@ -2086,10 +2086,10 @@ class LoopBodyBlock:
         tracer = torch.fx.Tracer()
         tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
+        from .sizevars import SimplifyIndexing
+
         with V.set_ops_handler(
-            torchinductor.sizevars.SimplifyIndexing(
-                CaptureIndexing(proxy_ops), self.body.var_ranges
-            )
+            SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
         ):
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph

@@ -11,7 +11,7 @@ forward_only = True
 dynamic_shapes = True
 
 # assume weight tensors are fixed size
-static_weight_shapes = False
+static_weight_shapes = True
 
 # enable some approximation algorithms
 approximations = False

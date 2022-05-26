@@ -224,6 +224,9 @@ class SizeVarAllocator(object):
         return strides
 
     def stride_hints(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+        for v in index.free_symbols:
+            if str(v).startswith("indirect"):
+                index = index.subs({v: 0})
         return [self.size_hint(s) for s in self.stride_vars(index, vars)]
 
     def stride_order(self, index: sympy.Expr, vars: List[sympy.Symbol]):

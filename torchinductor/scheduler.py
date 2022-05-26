@@ -5,17 +5,15 @@ import functools
 from typing import Any
 from typing import Dict
 from typing import List
-from unittest.mock import patch
 
 import numpy as np
 import torch
-
-import torchinductor.sizevars
 
 from . import config
 from . import dependencies
 from . import ir
 from .dependencies import StarDep
+from .sizevars import SimplifyIndexing
 from .virtualized import V
 
 
@@ -269,9 +267,7 @@ class SchedulerNode(BaseSchedulerNode):
                 [*size, *reduction_size],
             )
         )
-        with V.set_ops_handler(
-            torchinductor.sizevars.SimplifyIndexing(V.get_ops_handler(), var_ranges)
-        ):
+        with V.set_ops_handler(SimplifyIndexing(V.get_ops_handler(), var_ranges)):
             self._body(vars, reduction_vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
