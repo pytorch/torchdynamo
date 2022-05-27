@@ -11,8 +11,6 @@ import torch
 
 from .. import codecache
 from .. import config
-from .. import ir
-from ..scheduler import Scheduler
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
@@ -64,6 +62,13 @@ def cpp_prefix():
             #include <limits>
             #define SLEEF_ENABLE_OMP_SIMD
             //#include <sleef.h>
+
+            template<typename T>
+            inline T mod(T a, T b) { return a % b; }
+            template<>
+            inline float mod(float a, float b) { return std::fmod(a, b); }
+            template<>
+            inline double mod(double a, double b) { return std::fmod(a, b); }
             """
         ),
         "h",
@@ -116,6 +121,18 @@ class CppOverrides(OpOverrides):
         return f"std::log({x})"
 
     @staticmethod
+    def round(x):
+        return f"std::nearbyint({x})"
+
+    @staticmethod
+    def floor(x):
+        return f"std::floor({x})"
+
+    @staticmethod
+    def trunc(x):
+        return f"std::trunc({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 
@@ -130,6 +147,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
+
+    @staticmethod
+    def mod(a, b):
+        return f"mod({a}, {b})"
 
     @staticmethod
     def constant(val, dtype):
@@ -164,10 +185,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def and_(a, b):
         return f"{a} && {b}"
-
-    @staticmethod
-    def logical_not(a):
-        return f"!{a}"
 
 
 class CppKernel(Kernel):
@@ -331,51 +348,45 @@ class CppKernel(Kernel):
         self.reduction_suffix.splice(self.stores)
         (self.loads, self.compute, self.stores, self.cse) = prior
 
-    @classmethod
-    def codegen(cls, wrapper):
-        def codegen_extern_call(node: ir.ExternKernel):
-            nonlocal kernel_group
-            kernel_group.codegen_define_and_call(wrapper)
-            node.codegen(wrapper)
-            scheduler.barrier()
-            scheduler.maybe_free_buffers()
-            kernel_group = KernelGroup()
 
-        scheduler = Scheduler(tuple, V.graph.buffers)
-        kernel_group = KernelGroup()
+class CppScheduling:
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.kernel_group = KernelGroup()
+        self.group_fn = tuple
 
-        for group, reduction_group in scheduler.iter_runable_groups(
-            codegen_extern_call
-        ):
-            with scheduler.kernel(kernel_group.new_kernel()) as kernel:
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+    def codegen(self, group, reduction_group):
+        kernel_group = self.kernel_group
+        scheduler = self.scheduler
+        with scheduler.kernel(kernel_group.new_kernel()) as kernel:
+            vars, reduction_vars = kernel.set_ranges(group, reduction_group)
 
-                # first any pointwise sharing same loops
-                for node in scheduler.pop_group((group + reduction_group, ())):
+            # first any pointwise sharing same loops
+            for node in scheduler.pop_group((group + reduction_group, ())):
+                node.run(vars, reduction_vars)
+                node.mark_fusable()
+
+            if reduction_group:
+                # reductions
+                reduction_nodes = list(scheduler.pop_group((group, reduction_group)))
+                for node in reduction_nodes:
+                    scheduler.maybe_remove_buffer(node)
                     node.run(vars, reduction_vars)
+                # can't yet fuse reduction into reduction
+                for node in reduction_nodes:
                     node.mark_fusable()
 
-                if reduction_group:
-                    # reductions
-                    reduction_nodes = list(
-                        scheduler.pop_group((group, reduction_group))
-                    )
-                    for node in reduction_nodes:
-                        scheduler.maybe_remove_buffer(node)
-                        node.run(vars, reduction_vars)
-                    # can't yet fuse reduction into reduction
-                    for node in reduction_nodes:
+                # we can fuse in some extra pointwise into the suffix
+                with kernel.write_to_suffix():
+                    for node in scheduler.pop_group((group, ())):
+                        node.run(vars, ())
                         node.mark_fusable()
 
-                    # we can fuse in some extra pointwise into the suffix
-                    with kernel.write_to_suffix():
-                        for node in scheduler.pop_group((group, ())):
-                            node.run(vars, ())
-                            node.mark_fusable()
+        kernel_group.finalize_kernel(kernel, scheduler)
 
-            kernel_group.finalize_kernel(kernel, scheduler)
-
-        kernel_group.codegen_define_and_call(wrapper)
+    def flush(self):
+        self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
+        self.kernel_group = KernelGroup()
 
 
 class KernelGroup:
