@@ -326,16 +326,11 @@ def fx2trt(subgraph, **kwargs):
     try:
         model = copy.deepcopy(subgraph.model)
         inputs = copy.deepcopy(subgraph.example_inputs)
-
+        # normalize
         model = normalize_ir(model, inputs)
-        # pass rewrite
-        print("before acc trace=", model.graph)
-        # model = transform_setitem(model, inputs)
-        # import pdb;pdb.set_trace()
         # pass rewrite
         model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)
-        print("acc trace=", acc_model.graph)
         # Split out unsupported ops
         splitter_setting = TRTSplitterSetting()
         splitter_setting.use_implicit_batch_dim = False
@@ -365,7 +360,7 @@ def fx2trt(subgraph, **kwargs):
         for name, _ in split_mod.named_children():
             if "_run_on_acc" in name:
                 submod = getattr(split_mod, name)
-                print("acc=",submod.code)
+                # print("acc=",submod.code)
                 # Get submodule inputs for fx2trt
                 acc_inputs = get_submod_inputs(split_mod, submod, inputs)
 
@@ -375,29 +370,20 @@ def fx2trt(subgraph, **kwargs):
                     InputTensorSpec.from_tensors(acc_inputs),
                     explicit_batch_dimension=True,
                 )
-                from fx2trt_oss.fx.tools.timing_cache_utils import TimingCacheManager
-                cache_path = "/var/tmp/cache"
-                timing_cache_manager = TimingCacheManager(cache_path, save_timing_cache=True)
-                timing_cache = timing_cache_manager.get_timing_cache_trt("tmp")
-                import tensorrt as trt
+
                 r = interp.run(
                     max_workspace_size=20 << 30,
                     lower_precision=precision,
-                    timing_cache=timing_cache,
-                    # profiling_verbosity=trt.ProfilingVerbosity.DETAILED,
+                    # profiling_verbosity=trt.ProfilingVerbosity.DETAILED, #check for layer running info
                 )
-                timing_cache_manager.update_timing_cache(
-                    "tmp", r.serialized_cache
-                )
-                trt_mod = TRTModule(*r)
-
                 # from fx2trt_oss.fx.tools.trt_profiler_sorted import profile_trt_module
                 # profile_trt_module("", trt_mod, acc_inputs)
+                trt_mod = TRTModule(*r)
 
                 setattr(split_mod, name, trt_mod)
             else:
                 submod = getattr(split_mod, name)
-                print("gpu=",submod.code)
+                # print("gpu=",submod.code)
         return subgraph.wrap_returns(split_mod)
     except Exception:
         log.exception("FX2TRT conversion error")
@@ -734,23 +720,8 @@ def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_ipex = {"datatype": "bf16"}
     return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
-count = 0
-def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
-    global count
-    print("====count=",count)
-    if count < 4 or count > 4:
-    # if count > 200:
-        count = count+1
-        return gm.forward
-    else:
-        count = count+1
-        # from .normalize import normalize_ir
-        # gm = normalize_ir(gm, example_inputs)
-        # print("=====after normalize=", gm.graph)
-        # from fx2trt_oss.fx.passes.lower_basic_pass import transform_setitem
-        # gm = transform_setitem(gm, example_inputs)
-        # return gm.forward
 
+def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
     kwargs_fx2trt = {"fp16_mode": True}
     trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
