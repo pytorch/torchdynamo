@@ -28,10 +28,9 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
             # Metaparameters
             ACC_TYPE: tl.constexpr,
             # blocks in different dimension
-            BLOCK_BATCH: tl.constexpr, BLOCK_H: tl.constexpr,
-            BLOCK_W: tl.constexpr, BLOCK_K: tl.constexpr,
-            # tiling parameter for matmul
-            TK: tl.constexpr,
+            BLOCK_NHW: tl.constexpr, BLOCK_K: tl.constexpr,
+            # reduction tiling parameter for matmul
+            BLOCK_CRS: tl.constexpr,
             # Super-blocking for better L2 peformance
             GROUP_H: tl.constexpr
             ):
@@ -40,109 +39,68 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
     '''
     # -----------------------------------------------------------
     # Map program ids `pid` to the block of y it should compute.
-    # program-id for current grid
-    pid_batch = tl.program_id(0)
+    pid_nhw = tl.program_id(0)
     pid_k = tl.program_id(1)
-    pid_hw = tl.program_id(2)
-    # number of program ids along different axes
-    grid_h = tl.cdiv(OUT_H, BLOCK_H)
-    grid_w = tl.cdiv(OUT_W, BLOCK_W)
 
-    batch = pid_batch * BLOCK_BATCH
-    k = pid_k * BLOCK_K
+    # offset for output y
+    off_y_k = pid_k * BLOCK_K + tl.arange(0, BLOCK_K)
+    off_y_nhw = pid_nhw * BLOCK_NHW + tl.arange(0, BLOCK_NHW)
+    off_y_n = off_y_nhw // (OUT_H * OUT_W)
+    off_y_hw = off_y_nhw % (OUT_H * OUT_W)
+    off_y_h = off_y_hw // OUT_W
+    off_y_w = off_y_hw % OUT_W
 
-    # re-order program ID for better L2 performance
-    width = GROUP_H * grid_w
-    group_id = pid_hw // width
-    group_size = min(grid_h - group_id * GROUP_H, GROUP_H)
-    # *within groups*, programs are ordered in a column-major order
-    # row-id of the program in the *launch grid*
-    pid_h = group_id * GROUP_H + (pid_hw % group_size)
-    # col-id of the program in the *launch grid*
-    pid_w = (pid_hw % width) // (group_size)
+    # offset for the initial ptr for x
+    off_x_n = off_y_n
+    off_x_h = off_y_h
+    off_x_w = off_y_w
+    off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
+    off_x_crs = tl.arange(0, BLOCK_CRS)
+    # TODO: unpack crs....
+    x_ptrs = x + off_x_nhw[:, None] + off_x_crs[None, :]
 
-    # get starting y_ptr for current batch, h and w
-    y_h_start = pid_h * BLOCK_H
-    y_w_start = pid_w * BLOCK_W
-    y_ptr = y + batch * stride_yn + y_h_start * stride_yh \
-        + y_w_start * stride_yw + k * stride_yc
-    # get starting w_ptr for current k
-    w_ptr = w + k * stride_wn
-    # get starting x_ptr for the window that correspondes to the y_ptr output
-    # TODO: consider dilation and group
-    x_h_start = y_h_start * stride_h
-    x_w_start = y_w_start * stride_w
-    x_ptr = x + batch * stride_xn + x_h_start * stride_xh \
-        + x_w_start * stride_xw
+    # offset for the inital ptr for w
+    off_w_crs = tl.arange(0, BLOCK_CRS)
+    off_w_k = off_y_k
+    w_ptrs = w + off_w_crs[:, None] * stride_wc + off_w_k[None, :] * stride_wn
 
     # -----------------------------------------------------------
-    # do the computation for current block)
-    rbhw = tl.arange(0, BLOCK_BATCH * BLOCK_H * BLOCK_W)
-    rb = rbhw // (BLOCK_H * BLOCK_W)
-    rhw = rbhw % (BLOCK_H * BLOCK_W)
-    rh = rhw // BLOCK_W
-    rw = rhw % BLOCK_W
-    rk = tl.arange(0, BLOCK_K)
-    rtk = tl.arange(0, TK)
-    WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
-
     # allocate accumulator
-    acc = tl.zeros((BLOCK_BATCH * BLOCK_H * BLOCK_W, BLOCK_K), dtype=ACC_TYPE)
+    acc = tl.zeros((BLOCK_NHW, BLOCK_K), dtype=ACC_TYPE)
+    CRS = IN_C * KERNEL_H * KERNEL_W
+    for crs in range(0, CRS, BLOCK_CRS):
 
-    for tki in range(0, WINDOW_SIZE, TK):
-
-        # weight
-        # load contigous weight pointers
-        w_ptrs = w_ptr + (tki + rtk)[:, None] + rk[None, :] * stride_wn
-
-        mask_w = (tki + rtk < WINDOW_SIZE)[:, None] \
-            & (k + rk < KERNEL_N)[None, :]
-        # load (TK, BLOCK_K) of weights
-        matrix_w = tl.load(w_ptrs, mask=mask_w)
-
-        # x window
-        # range of the sliding window
-        rx_k_c = tl.load(delta_x_c_ptr + tki + rtk)
-        rx_k_h = tl.load(delta_x_h_ptr + tki + rtk)
-        rx_k_w = tl.load(delta_x_w_ptr + tki + rtk)
-        rx_k = rx_k_h * stride_xh + rx_k_w * stride_xw + rx_k_c * stride_xc
-
-        x_window_ptrs = x_ptr + rb[:, None] * stride_xn \
-            + rh[:, None] * stride_h * stride_xh \
-            + rw[:, None] * stride_w * stride_xw \
-            + rx_k[None, :]
-        # check if the sliding window x exceeds bounds
-        x_window_in = (x_h_start + rx_k_h < IN_H) & (x_w_start + rx_k_w < IN_W) \
-            & (rx_k_c < IN_C) & (tki + rtk < WINDOW_SIZE)
-        x_window_in = (tki + rtk < WINDOW_SIZE)
-        mask_x_window = (batch + rb < BATCH)[:, None] \
-            & (y_h_start + rh < OUT_H)[:, None] \
-            & (y_w_start + rw < OUT_W)[:, None] \
-            & x_window_in[None, :]
-        matrix_x_window = tl.load(x_window_ptrs, mask=mask_x_window)
-
-        # store tmp tensor
-        tmp_w_ptrs = tmp_w + rtk[:, None] * KERNEL_N + rk[None, :]
-        tmp_x_ptrs = tmp_x + tl.arange(0, BLOCK_BATCH * BLOCK_H * BLOCK_W)[:, None] * WINDOW_SIZE + \
-            rtk[None, :]
-        tl.store(tmp_w_ptrs, matrix_w)
-        tl.store(tmp_x_ptrs, matrix_x_window)
-
-        # dot product
-        # (BLOCK_BATCH * BLOCK_H * BLOCK_W, TK) DOT (TK, BLOCK_K)
-        # output shape (BLOCK_BATCH * BLOCK_H * BLOCK_W, BLOCK_K)
-        acc += tl.dot(matrix_x_window, matrix_w)
+        # ------ load x ------
+        matrix_x = tl.load(x_ptrs)
+        # ------ load w ------
+        matrix_w = tl.load(w_ptrs)
+        # ------ matrix multiplication ------
+        acc += tl.dot(matrix_x, matrix_w)
+        # ------ update ptrs ------
+        w_ptrs += BLOCK_CRS
+        # TODO: update x_ptr
+        x_ptrs += BLOCK_CRS
 
     acc = acc.to(y.dtype.element_ty)
 
-    # y ptrs in the block of [BLOCK_BATCH, BLOCK_H, BLOCK_W, BLOCK_K]
-    y_ptrs = y_ptr + rb[:, None] * stride_yn + rh[:, None] * stride_yh \
-        + rw[:, None] * stride_yw + rk[None, :] * stride_yc
+    # rematerialize -- this saves some registers
+    # offset for output y
+    off_y_k = pid_k * BLOCK_K + tl.arange(0, BLOCK_K)
+    off_y_nhw = pid_nhw * BLOCK_NHW + tl.arange(0, BLOCK_NHW)
+    off_y_n = off_y_nhw // (OUT_H * OUT_W)
+    off_y_hw = off_y_nhw % (OUT_H * OUT_W)
+    off_y_h = off_y_hw // OUT_W
+    off_y_w = off_y_hw % OUT_W
 
-    mask_y = (batch + rb < BATCH)[:, None] \
-        & (y_h_start + rh < OUT_H)[:, None] \
-        & (y_w_start + rw < OUT_W)[:, None] \
-        & (k + rk < KERNEL_N)[None, :]
+    # y ptrs in the block of [BLOCK_NHW, BLOCK_K]
+    y_ptrs = y + off_y_n[:, None] * stride_yn + off_y_h[:, None] * stride_yh \
+        + off_y_w[:, None] * stride_yw + off_y_k[None, :] * stride_yc
+
+    # out-of-bounds check
+    mask_y = (off_y_n < BATCH)[:, None] \
+        & (off_y_h < OUT_H)[:, None] \
+        & (off_y_w < OUT_W)[:, None] \
+        & (off_y_k < KERNEL_N)[None, :]
 
     tl.store(y_ptrs, acc, mask=mask_y)
 
@@ -291,8 +249,7 @@ class _conv(torch.autograd.Function):
             delta_x_h_ptr = torch.from_numpy(delta_x_h).cuda()
             delta_x_w_ptr = torch.from_numpy(delta_x_w).cuda()
             # launch kernel, 3-dim, batch, kernel num, h*w
-            grid = lambda META: (triton.cdiv(BATCH, META['BLOCK_BATCH']), triton.cdiv(KERNEL_N, META['BLOCK_K']),
-                                 triton.cdiv(OUT_H, META['BLOCK_H']) * triton.cdiv(OUT_W, META['BLOCK_W']))
+            grid = lambda META: (triton.cdiv(BATCH * OUT_H * OUT_W, META['BLOCK_NHW']), triton.cdiv(KERNEL_N, META['BLOCK_K']))
             _kernel[grid](x, w, bias, y, tmp_x, tmp_w,
                           # stride nchw for x,w,y tensor
                           stride_x[xn], stride_x[xc], stride_x[xh], stride_x[xw],
@@ -314,8 +271,8 @@ class _conv(torch.autograd.Function):
                           delta_x_w_ptr,
                           # Metaparameters
                           ACC_TYPE=ACC_TYPE,
-                          BLOCK_BATCH=16, BLOCK_H=16, BLOCK_W=16, BLOCK_K=8,
-                          TK=8,
+                          BLOCK_NHW=128, BLOCK_K=32,
+                          BLOCK_CRS=16,
                           GROUP_H=1
                           )
         # do matrix multiplication
