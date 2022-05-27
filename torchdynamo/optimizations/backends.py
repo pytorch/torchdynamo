@@ -370,12 +370,12 @@ def fx2trt(subgraph, **kwargs):
                     InputTensorSpec.from_tensors(acc_inputs),
                     explicit_batch_dimension=True,
                 )
-
                 r = interp.run(
                     max_workspace_size=20 << 30,
                     lower_precision=precision,
-                    # profiling_verbosity=trt.ProfilingVerbosity.DETAILED, #check for layer running info
+                    # profiling_verbosity=trt.ProfilingVerbosity.DETAILED, #For profile
                 )
+                # For profile
                 # from fx2trt_oss.fx.tools.trt_profiler_sorted import profile_trt_module
                 # profile_trt_module("", trt_mod, acc_inputs)
                 trt_mod = TRTModule(*r)
