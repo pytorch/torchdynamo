@@ -12,7 +12,7 @@ from torch.fx.experimental.normalize import NormalizeOperators
 from torch.fx.operator_schemas import get_signature_for_torch_op
 
 from torchdynamo import config
-from torchdynamo.allowed_functions import _allowed_function_ids
+from torchdynamo.allowed_functions import torch_get_name
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import counters
 
@@ -249,10 +249,9 @@ def long_name(gm, node: torch.fx.Node):
     name = short_name(gm, node)
     target = node.target
     if node.op == "call_function":
-        try:
-            return _allowed_function_ids()[id(node.target)]
-        except KeyError:
-            return f"{getattr(target, '__module__', '')}.{name}"
+        return torch_get_name(
+            node.target, f"{getattr(target, '__module__', '')}.{name}"
+        )
     elif node.op == "call_method":
         return name
     elif node.op == "call_module":
