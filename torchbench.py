@@ -603,6 +603,7 @@ def cast_to_fp16(model, inputs):
             inputs,
         )
     )
+    # Disable this part temporarily. Further evaluation needed
     # TRT does not support int64. Some model does need it like Super_SloMo
     # if current_name != "Super_SloMo" and current_name != "fastNLP_Bert":
     #     inputs = tuple(
