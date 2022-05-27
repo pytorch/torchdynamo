@@ -55,12 +55,11 @@ def ensure_patched(cls):
 
 class GenerationTracker:
     generation = 0
-    db = ExactWeakKeyDictionary()
     dynamic_classes = ExactWeakKeyDictionary()
 
     @classmethod
     def tag(cls, obj):
-        cls.db[obj] = cls.generation
+        obj.generation = cls.generation
 
     @staticmethod
     def mark_class_dynamic(cls):
@@ -69,16 +68,7 @@ class GenerationTracker:
 
     @classmethod
     def check(cls, obj):
-        return cls.db.get(obj, -1) == cls.generation
-
-
-def generation_tagging_new(cls, *args, **kwargs):
-    try:
-        obj = object.__new__(cls)
-    except TypeError:
-        obj = object.__new__(type(cls))
-    GenerationTracker.tag(obj)
-    return obj
+        return getattr(obj, "generation", -1) == cls.generation
 
 
 def is_dynamic_nn_module(obj):
@@ -88,15 +78,24 @@ def is_dynamic_nn_module(obj):
     )
 
 
-def install_generation_tagging_new():
+def install_generation_tagging_init():
     """
-    Monkey patch torch.nn.Module.__new__ so we can detect nn.Module
-    instances created dynamically inside forward methods.
+    Monkey patch torch.nn.Module.__init__ and torch.nn.Module.__setstate__
+    so we can detect nn.Module instances created dynamically inside forward methods.
     """
-    assert (
-        Module.__dict__.get("__new__") is generation_tagging_new
-        or Module.__new__ is object.__new__
-    )
-    Module.__new__ = generation_tagging_new
-    GenerationTracker.db.clear()
+    init = Module.__init__
+
+    def patched_init(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        GenerationTracker.tag(self)
+
+    Module.__init__ = patched_init
+
+    setstate = Module.__setstate__
+
+    def patched_setstate(self, state):
+        setstate(self, state)
+        GenerationTracker.tag(self)
+
+    Module.__setstate__ = patched_setstate
     GenerationTracker.generation += 1

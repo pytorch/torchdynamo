@@ -12,7 +12,7 @@ from torchdynamo.utils import clone_inputs
 from . import config
 from . import convert_frame
 from . import skipfiles
-from .mutation_guard import install_generation_tagging_new
+from .mutation_guard import install_generation_tagging_init
 from .utils import same
 
 log = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ class OptimizeContext(_TorchDynamoContext):
     def __init__(self, callback, backend_ctx_ctor):
         super().__init__(
             callback=callback,
-            on_enter=install_generation_tagging_new,
+            on_enter=install_generation_tagging_init,
             backend_ctx_ctor=backend_ctx_ctor,
         )
 

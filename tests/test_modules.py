@@ -5,6 +5,7 @@ from torch.nn import functional as F
 
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
+from copy import deepcopy
 
 from . import test_functions
 
@@ -610,6 +611,28 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out3))
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_generation_tag(self):
+        cnt = torchdynamo.testing.CompileCounter()
+
+        # guarantee that we have installed
+        # the generation tagging function
+        with torchdynamo.optimize_assert(cnt):
+            pass
+
+        m1 = torch.nn.Linear(10, 10)
+        prev_generation = m1.generation
+        cur_generation = prev_generation + 1
+
+        with torchdynamo.optimize_assert(cnt):
+            m2 = torch.nn.Linear(10, 10)
+
+        self.assertEqual(m1.generation, prev_generation)
+        self.assertEqual(m2.generation, cur_generation)
+        # check that newly constructed instances
+        # also have the same generation (even if copied from an old instance)
+        m3 = deepcopy(m1)
+        self.assertEqual(m3.generation, cur_generation)
 
     def test_simple_torch_function(self):
         def foo(x):
