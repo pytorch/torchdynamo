@@ -6,7 +6,7 @@ import triton.language as tl
 
 
 @triton.jit
-def _kernel(x, w, bias, y,
+def _kernel(x, w, bias, y, tmp_x, tmp_w,
             # stride of tensor
             stride_xn, stride_xc, stride_xh, stride_xw,
             stride_wn, stride_wc, stride_wh, stride_ww,
@@ -121,6 +121,13 @@ def _kernel(x, w, bias, y,
             & x_window_in[None, :]
         matrix_x_window = tl.load(x_window_ptrs, mask=mask_x_window)
 
+        # store tmp tensor
+        tmp_w_ptrs = tmp_w + rtk[:, None] * KERNEL_N + rk[None, :]
+        tmp_x_ptrs = tmp_x + tl.arange(0, BLOCK_BATCH * BLOCK_H * BLOCK_W)[:, None] * WINDOW_SIZE + \
+            rtk[None, :]
+        tl.store(tmp_w_ptrs, matrix_w)
+        tl.store(tmp_x_ptrs, matrix_x_window)
+
         # dot product
         # (BLOCK_BATCH * BLOCK_H * BLOCK_W, TK) DOT (TK, BLOCK_K)
         # output shape (BLOCK_BATCH * BLOCK_H * BLOCK_W, BLOCK_K)
@@ -168,14 +175,24 @@ class _conv(torch.autograd.Function):
     # ptr changes for x in a sliding window
     @staticmethod
     def _delta_x_ptr(wc, wh, ww,
-                     shape_w):
+                     shape_w,
+                     dilation_h, dilation_w,
+                     stride_xh, stride_xw, stride_xc):
         # get the order of axes in w, innermost dimension outward
         order = sorted([wc, wh, ww], reverse=True)
         c, h, w = [order.index(x) for x in [wc, wh, ww]]
-        window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
+        # window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
+
+        r_dilation_h = dilation_h * np.arange(shape_w[h])[:, None, None]
+        r_dilation_w = dilation_h * np.arange(shape_w[w])[None, :, None]
+        r_inc = np.arange(shape_w[c])[None, None, :]
+        r_pixel = r_dilation_h * stride_xh + r_dilation_w * stride_xw \
+            + r_inc * stride_xc
+        r_pixel = r_pixel.flatten()
+
         delta_x_c, delta_x_h, delta_x_w = [], [], []
 
-        for i in range(0, window_size):
+        for i in r_pixel:
             current_k = _conv._unpack(i, order, shape_w)
             delta_x_c.append(current_k[c])
             delta_x_h.append(current_k[h])
@@ -256,20 +273,27 @@ class _conv(torch.autograd.Function):
 
         # allocate output
         y = torch.empty(shape_y, device=device, dtype=x.dtype)
+        # allocate tmp
+        WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
+        tmp_x = torch.empty((BATCH * OUT_H * OUT_W, WINDOW_SIZE), device=device, dtype=x.dtype)
+        tmp_w = torch.empty((WINDOW_SIZE, KERNEL_N), device=device, dtype=w.dtype)
         # accumulator types
         ACC_TYPE = tl.float32 if x.dtype in [torch.float16, torch.bfloat16, torch.float32] else tl.int32
         # if input activation is channel-last, it's good to tiling output
         # into block of [BLOCK_BATCH, BLOCK_K, BLOCK_H, BLOCK_W] because of better
-        #if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
+        # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
         if True:
-            delta_x_c, delta_x_h, delta_x_w = _conv._delta_x_ptr(wc, wh, ww, shape_w)
+            delta_x_c, delta_x_h, delta_x_w = \
+                _conv._delta_x_ptr(wc, wh, ww, shape_w,
+                                   dilation[0], dilation[1],
+                                   stride_x[xh], stride_x[xw], stride_x[xc])
             delta_x_c_ptr = torch.from_numpy(delta_x_c).cuda()
             delta_x_h_ptr = torch.from_numpy(delta_x_h).cuda()
             delta_x_w_ptr = torch.from_numpy(delta_x_w).cuda()
             # launch kernel, 3-dim, batch, kernel num, h*w
             grid = lambda META: (triton.cdiv(BATCH, META['BLOCK_BATCH']), triton.cdiv(KERNEL_N, META['BLOCK_K']),
                                  triton.cdiv(OUT_H, META['BLOCK_H']) * triton.cdiv(OUT_W, META['BLOCK_W']))
-            _kernel[grid](x, w, bias, y,
+            _kernel[grid](x, w, bias, y, tmp_x, tmp_w,
                           # stride nchw for x,w,y tensor
                           stride_x[xn], stride_x[xc], stride_x[xh], stride_x[xw],
                           stride_w[wn], stride_w[wc], stride_w[wh], stride_w[ww],
@@ -297,7 +321,7 @@ class _conv(torch.autograd.Function):
         # do matrix multiplication
         # else:
         #    _kernel_mm[grid]()
-        return y
+        return y, tmp_x, tmp_w
 
     @staticmethod
     def forward(ctx, x, w, bias,
