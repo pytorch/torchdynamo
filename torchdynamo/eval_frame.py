@@ -1,12 +1,22 @@
 import contextlib
+import copy
 import functools
 import logging
 import threading
 
+import torch
+
+from torchdynamo.utils import checkpoint_params
+from torchdynamo.utils import clone_inputs
+
 from . import config
 from . import convert_frame
 from . import skipfiles
+from . import utils
 from .mutation_guard import install_generation_tagging_new
+from .utils import same
+
+log = logging.getLogger(__name__)
 
 try:
     from . import _eval_frame
@@ -19,6 +29,8 @@ unsupported = _eval_frame.unsupported
 skip_code = _eval_frame.skip_code
 set_guard_fail_hook = _eval_frame.set_guard_fail_hook
 set_guard_error_hook = _eval_frame.set_guard_error_hook
+
+always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 
 
 def nothing():
@@ -56,21 +68,30 @@ class _TorchDynamoContext:
         assert callable(fn)
         callback = self.callback
         on_enter = self.on_enter
+        backend_ctx_ctor = self.extra_ctx_ctor
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             on_enter()
             prior = set_eval_frame(callback)
+            backend_ctx = backend_ctx_ctor()
+            backend_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
+                backend_ctx.__exit__()
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
             _fn._torchdynamo_disable = True
         else:
             _fn._torchdynamo_inline = fn
+
+        # If the function is called with torchdynamo.optimize decorator, we
+        # should prevent any type of skipping.
+        if callback not in (None, False):
+            always_optimize_code_objects[fn.__code__] = True
 
         return _fn
 
@@ -124,6 +145,47 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
     )
 
 
+class WrapperBackend:
+    def __init__(self, backend=None):
+        self.backend = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+
+        if self.candidate is None or self.candidate is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.candidate
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return self.candidate
+
+            print(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            return self.gm.forward
+        finally:
+            self.restore()
+
+
 def optimize(backend, nopython=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -152,7 +214,6 @@ def optimize(backend, nopython=False):
         with torchdynamo.optimize(my_compiler):
            ...
     """
-
     backend_ctx_ctor = null_context
     if hasattr(backend, "backend_ctx_ctor"):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")

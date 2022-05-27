@@ -1,6 +1,7 @@
 import dis
 import functools
 import itertools
+import logging
 import os
 import sys
 import traceback
@@ -13,19 +14,28 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
 from . import exc
+from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .eval_frame import WrapperBackend
+from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
 from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardedCode
+from .guards import guard_failures
+from .guards import orig_code_map
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import is_namedtuple
+from .utils import istype
+
+log = logging.getLogger(__name__)
 
 
 class Tracker:
@@ -59,7 +69,7 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_compiler_fn(compiler_fn):
+def _wrap_compiler_fn(compiler_fn):
     """Expand backend strings to functions"""
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
@@ -71,6 +81,19 @@ def wrap_compiler_fn(compiler_fn):
         return wrap_compiler_fn(BACKENDS[compiler_fn])
     else:
         return compiler_fn
+
+
+def wrap_compiler_fn(compiler_fn):
+    """WrapperBackend if config.verify_correctness is True"""
+    wrapped_compiler_fn = _wrap_compiler_fn(compiler_fn)
+
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(wrapped_compiler_fn)
+
+        return wrapper_backend_compiler_fn
+
+    return wrapped_compiler_fn
 
 
 def wrap_convert_context(fn):
@@ -99,6 +122,67 @@ def wrap_convert_context(fn):
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
     return _fn
+
+
+def has_tensor_in_frame(frame):
+    """Check if the frame has torch.* related bits"""
+    # Check if the function was decorated with torchdynamo.optimize
+    if frame.f_code in always_optimize_code_objects:
+        return True
+
+    # Check if there is global import of torch.*
+    for co_name in frame.f_code.co_names:
+        if co_name in frame.f_globals:
+            if is_allowed(frame.f_globals[co_name]):
+                return True
+
+    seen_ids = dict()
+
+    def has_tensor(obj):
+        """Recursively check if the obj has a tensor"""
+        obj_id = id(obj)
+        if obj_id in seen_ids:
+            return seen_ids[obj_id]
+        seen_ids[obj_id] = False
+
+        if isinstance(obj, (torch.Tensor, torch.nn.Module)):
+            seen_ids[obj_id] = True
+            return seen_ids[obj_id]
+        elif istype(obj, (list, tuple)):
+            seen_ids[obj_id] = any([has_tensor(v) for v in obj])
+            return seen_ids[obj_id]
+        elif istype(obj, dict):
+            seen_ids[obj_id] = any([has_tensor(v) for v in obj.values()])
+            return seen_ids[obj_id]
+        elif istype(obj, (str, int, float, type(None), bool)):
+            seen_ids[obj_id] = False
+            return seen_ids[obj_id]
+        elif is_namedtuple(obj):
+            seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
+            return seen_ids[obj_id]
+        elif hasattr(obj, "__dict__") and len(getattr(obj, "__dict__")):
+            seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
+            return seen_ids[obj_id]
+        else:
+            if config.debug:
+                print(
+                    f"Assuming that object of type {type(obj)} does not have a tensor"
+                )
+            return False
+
+    # Check if the passed arguments are of type Tensor
+    for value in frame.f_locals.values():
+        if has_tensor(value):
+            return True
+
+    if config.debug:
+        print(
+            "skipping",
+            frame.f_code.co_name,
+            frame.f_code.co_filename,
+            frame.f_code.co_firstlineno,
+        )
+    return False
 
 
 def convert_frame_assert(compiler_fn: Callable, one_graph=True):
@@ -133,8 +217,24 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:
+
+            def format_func_info(code):
+                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+
+            def format_guard_failures(code):
+                return f"{str(guard_failures[code])}"
+
+            assert code in guard_failures, "TODO(whc) any other recompile reasons?"
+            log.warning(
+                f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
+                f"for function {format_func_info(code)}, "
+                f"due to the following guard failures: {format_guard_failures(code)}"
+            )
             unimplemented("cache_size_limit reached")
         output = None
+
+        if not has_tensor_in_frame(frame):
+            return None
 
         # from .utils import print_once;  print_once(code.co_filename)
 
@@ -175,6 +275,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             for attempt in itertools.count():
                 try:
                     code = transform_code_object(frame.f_code, transform)
+                    orig_code_map[code] = frame.f_code
                     break
                 except exc.RestartAnalysis:
                     if attempt > 100:

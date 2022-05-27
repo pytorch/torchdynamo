@@ -90,6 +90,10 @@ class OpOverrides:
         return f"~{ExprPrinter.paren(x)}"
 
     @staticmethod
+    def logical_not(a):
+        return f"{ExprPrinter.paren(a)} == 0"
+
+    @staticmethod
     def bitwise_and(x, y):
         return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
 
@@ -100,6 +104,11 @@ class OpOverrides:
     @staticmethod
     def bitwise_xor(x, y):
         return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
+
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
 
 class IndentedBuffer:
@@ -192,14 +201,15 @@ class KernelArgs:
         self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
+        name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
+        name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
-        assert name not in self.input_buffers, name
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):

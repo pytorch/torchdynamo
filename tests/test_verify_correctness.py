@@ -1,17 +1,16 @@
 #!/usr/bin/env pytest
 import importlib
-import json
-import os
+import operator
 import unittest
+from unittest.mock import patch
 
 import torch
 
 import torchdynamo
+import torchdynamo.config as config
 from torchdynamo.optimizations import backends
+from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.optimizations.inference import offline_autotuner
-from torchdynamo.optimizations.log_args import conv_args_analysis
-from torchdynamo.optimizations.normalize import Inplacifier
-from torchdynamo.optimizations.normalize import normalize
 from torchdynamo.testing import same
 
 
@@ -26,14 +25,6 @@ def has_onnxruntime():
 def has_ipex():
     try:
         importlib.import_module("intel_extension_for_pytorch")
-        return True
-    except ImportError:
-        return False
-
-
-def has_functorch():
-    try:
-        importlib.import_module("functorch")
         return True
     except ImportError:
         return False
@@ -64,16 +55,32 @@ class Conv_Bn_Relu(torch.nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 
-class TestOptimizations(torchdynamo.testing.TestCase):
-    def test_inplacifier(self):
-        gm = torch.fx.symbolic_trace(Seq())
-        normalize(gm)
-        Inplacifier(gm).inplacify()
-        gm.recompile()
-        code = gm.code.replace(" ", "")
-        self.assertIn("inplace=True", code)
-        self.assertIn("out=linear_1", code)
+def toy_example(a, b):
+    x = a / (torch.abs(a) + 1)
+    if b.sum() < 0:
+        b = b * -1
+    return x * b
 
+
+def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in gm.graph.nodes:
+        # Checks if we're calling a function (i.e:
+        # operator.add)
+        if node.op == "call_function":
+            # The target attribute is the function
+            # that call_function calls.
+            if node.target == operator.mul:
+                node.target = operator.add
+
+    gm.graph.lint()  # Does some checks to make sure the
+    # Graph is well-formed.
+
+    gm.recompile()
+    return gm
+
+
+class TestVerifyCorrectness(torchdynamo.testing.TestCase):
+    @patch.object(config, "verify_correctness", True)
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
@@ -97,37 +104,65 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    @unittest.skipIf(not has_functorch(), "requires functorch")
-    def test_log_conv_args(self):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
-        model = model.to(memory_format=torch.channels_last)
-        model = model.eval()
-        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
-        r1 = model(input)
-        # check tmp/conv_args.json exists and has keys as arg names
-        filename = "tmp/conv_args.json"
-        if os.path.exists(filename):
-            os.remove(filename)
-        with torchdynamo.optimize(conv_args_analysis), torch.no_grad():
-            r2 = model(input)
-        self.assertTrue(same(r1, r2.float(), tol=0.1))
-        self.assertTrue(os.path.exists(filename))
-        with open(filename) as f:
-            args_dict = json.load(f)
-            self.assertIn("convolution", args_dict.keys())
-            conv_args_dict = args_dict["convolution"]
-            self.assertIn("input", conv_args_dict.keys())
-            self.assertIn("weight", conv_args_dict.keys())
-            self.assertIn("bias", conv_args_dict.keys())
-            self.assertIn("stride", conv_args_dict.keys())
-            self.assertIn("padding", conv_args_dict.keys())
-            self.assertIn("dilation", conv_args_dict.keys())
-            self.assertIn("transposed", conv_args_dict.keys())
-            self.assertIn("output_padding", conv_args_dict.keys())
-            self.assertIn("groups", conv_args_dict.keys())
-        os.remove(filename)
+    @patch.object(config, "verify_correctness", True)
+    def test_fixed_strategy1(self):
+        s = Seq()
+        i = torch.randn(10)
+        r1 = s(i)
+        with torchdynamo.optimize(fixed_strategy1):
+            r2 = s(i)
+        self.assertTrue(same(r1, r2))
+
+    @patch.object(config, "verify_correctness", True)
+    def test_nnc(self):
+        s = Seq()
+        i = torch.randn(10)
+        r1 = s(i)
+        with torchdynamo.optimize("nnc"):
+            r2 = s(i)
+        self.assertTrue(same(r1, r2))
+
+    @patch.object(config, "verify_correctness", True)
+    def test_incorrect_verify_true(self):
+        """
+        Even the bad optimization return a graph that
+        is not functionally equal to the original graph;
+        When config.verify_correctness=True, it will
+        check the correctness of outputs and fallback using
+        the original graph
+        """
+        i1 = torch.randn(10)
+        i2 = torch.randn(10)
+
+        def incorrect_compile_fn(gm, example_inputs):
+            return transform(gm).forward
+
+        r1 = toy_example(i1, i2)
+        with torchdynamo.optimize(incorrect_compile_fn):
+            r2 = toy_example(i1, i2)
+        self.assertTrue(same(r1, r2))
+
+    @patch.object(config, "verify_correctness", False)
+    def test_incorrect_verify_false(self):
+        """
+        The bad optimization return a graph that
+        is not functionally equal to the original graph;
+        When config.verify_correctness=False, wrong outputs
+        will return
+        """
+        i1 = torch.randn(10)
+        i2 = torch.randn(10)
+
+        def incorrect_compile_fn(gm, example_inputs):
+            return transform(gm).forward
+
+        r1 = toy_example(i1, i2)
+        with torchdynamo.optimize(incorrect_compile_fn):
+            r2 = toy_example(i1, i2)
+        self.assertTrue(not same(r1, r2))
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
+    @patch.object(config, "verify_correctness", True)
     def test_export(self):
         s = Seq()
         i = torch.randn(10)
@@ -137,6 +172,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
+    @patch.object(config, "verify_correctness", True)
     def test_ipex_fp32(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
         model = model.to(memory_format=torch.channels_last)
@@ -149,6 +185,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertEqual(r2.dtype, torch.float32)
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
+    @patch.object(config, "verify_correctness", True)
     def test_ipex_bf16(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
         model = model.to(memory_format=torch.channels_last)

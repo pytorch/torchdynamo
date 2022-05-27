@@ -1322,6 +1322,29 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_id_of_nn_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                x = torch.add(x, 1.0)
+                return x
+
+        m = M().eval()
+        data = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        correct_ref_id = id(m)
+        with torchdynamo.optimize(cnts, nopython=True):
+            m(data, correct_ref_id)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        incorrect_ref_id = id(m) + 1
+        with torchdynamo.optimize(cnts, nopython=True):
+            m(data, incorrect_ref_id)
+        self.assertEqual(cnts.op_count, 1)
+
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
             if input == 0:
@@ -1339,3 +1362,83 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(res1, 3)
         self.assertEqual(res2, 1)
+
+    def test_frozenset_torch_func_contains(self):
+        funcs = frozenset([torch.add])
+
+        def fn(x, func):
+            if func in funcs:
+                x = torch.add(x, 1.0)
+            x = torch.mul(x, 1.0)
+            return x
+
+        x = torch.randn(1)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, torch.add)
+        self.assertEqual(cnts.op_count, 2)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts, nopython=True):
+            fn(x, torch.mul)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_list_mutation(self):
+        def f1(x):
+            x.append(torch.ones(8))
+            return x
+
+        def f2():
+            x = [torch.ones(6)]
+            f1(x)
+            return x
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_inline_dict_mutation(self):
+        def f1(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        def f2():
+            d = {"a": torch.ones(5), "b": torch.ones(5)}
+            f1(d)
+            return d
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_recursive_inline_list_mutation(self):
+        def f1(x, y):
+            x.append(torch.tensor([1.1]))
+            y.append(torch.tensor([1.2]))
+            return x, y
+
+        def f2(x, y):
+            x.append(torch.tensor([2.1]))
+            y.append(torch.tensor([2.2]))
+            f1(x, y)
+            return x, y
+
+        def f3(x):
+            x.append(torch.tensor([3.1]))
+            y = [torch.tensor([3.2])]
+            f2(x, y)
+            return x, y
+
+        def f4():
+            x = [torch.tensor([4.1])]
+            return f3(x)
+
+        res1 = f4()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f4()
+        self.assertTrue(same(res1, res2))

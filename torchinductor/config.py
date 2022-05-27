@@ -38,3 +38,4 @@ class cpp:
 # config specific to codegen/triton.py
 class triton:
     cudagraphs = True
+    hackery = False
