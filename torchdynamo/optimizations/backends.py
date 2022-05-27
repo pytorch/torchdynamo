@@ -321,6 +321,7 @@ def fx2trt(subgraph, **kwargs):
     from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
     from fx2trt_oss.fx.trt_module import TRTModule
     from fx2trt_oss.fx.utils import LowerPrecision
+
     from .normalize import normalize_ir
 
     try:
