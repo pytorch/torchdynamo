@@ -35,6 +35,7 @@ public:
       sizes_.emplace_back(sizes[i]);
       strides_.emplace_back(strides[i]);
     }
+    v_ = v;
   }
 
   bool check(const LocalState &state, const at::Tensor &v) {
@@ -56,7 +57,7 @@ public:
         }
       }
     }
-    return true;
+    return torch::allclose(v, v_);
   }
 
   PyTypeObject *pytype;
@@ -68,6 +69,7 @@ private:
   bool dynamic_shapes_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
+  at::Tensor v_;
 };
 
 typedef std::vector<TensorCheck> ChecksList;
