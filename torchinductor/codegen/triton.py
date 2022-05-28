@@ -293,12 +293,9 @@ class TritonKernel(Kernel):
         offset = index.subs({v: 0 for v in chain(iter_vars, reduction_vars)})
         base_part = index.subs({v: 0 for v in reduction_vars}) - offset
         reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
-        assert index == offset + base_part + reduction_part, (
-            index,
-            offset,
-            base_part,
-            reduction_part,
-        )
+        assert (
+            index == offset + base_part + reduction_part
+        ), f"failed to split indexing into base+reduction {index}"
 
         offset = self.rename_indexing(offset)
         base_part = self.rename_indexing(self.simplify_indexing(base_part))

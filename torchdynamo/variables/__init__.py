@@ -22,6 +22,7 @@ from .misc import GradModeVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
 from .misc import NewCellVariable
+from .misc import NewGlobalVariable
 from .misc import NumpyVariable
 from .misc import PythonModuleVariable
 from .misc import SuperVariable
@@ -53,6 +54,7 @@ __all__ = [
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
+    "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyVariable",
     "PythonModuleVariable",

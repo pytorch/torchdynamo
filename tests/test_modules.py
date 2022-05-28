@@ -528,10 +528,19 @@ class SelfMutatingModule(torch.nn.Module):
         return F.relu(result)
 
 
-class ModuleAttributePrecedence(torch.nn.Module):
+class ModuleAttributePrecedenceBase(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def linear(self, x):
+        return x * 2.0
+
+
+class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
     def __init__(self):
         super().__init__()
         self.activation = torch.nn.ReLU()
+        self.linear = torch.nn.Linear(10, 10)
         self.initializer = torch.ones([10, 10])
         self.scale = 0.5
 
@@ -546,7 +555,7 @@ class ModuleAttributePrecedence(torch.nn.Module):
 
     def forward(self, x):
         # object attribute takes precedence unless it's a nn.Module
-        return self.activation(self.initializer + x) * self.scale
+        return self.activation(self.linear(self.initializer + x)) * self.scale
 
 
 def make_test(fn, expected_ops=None):

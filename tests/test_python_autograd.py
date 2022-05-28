@@ -18,24 +18,16 @@ This is an example of a pure-python version of autograd implemented by
 to push the limits of what it can do.
 """
 
-if False:
-    # TODO(jansel): requires STORE_GLOBAL (#40) and f-strings (#41)
-    _name: int = 0
 
-    def fresh_name() -> str:
-        """create a new unique name for a variable: v0, v1, v2"""
-        global _name
-        r = f"v{_name}"
-        _name += 1
-        return r
+_name: int = 0
 
-else:
-    # this is the only remaining workaround
-    _names = []
 
-    def fresh_name():
-        _names.append("v" + str(len(_names)))
-        return _names[-1]
+def fresh_name() -> str:
+    """create a new unique name for a variable: v0, v1, v2"""
+    global _name
+    r = f"v{_name}"
+    _name += 1
+    return r
 
 
 class Variable:
@@ -81,7 +73,8 @@ gradient_tape: List[TapeEntry] = []
 
 def reset_tape():
     gradient_tape.clear()
-    _names.clear()
+    global _name
+    _name = 0
 
 
 def grad(L, desired_results: List[Variable]) -> List[Variable]:

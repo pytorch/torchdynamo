@@ -607,16 +607,17 @@ def cast_to_fp16(model, inputs):
             inputs,
         )
     )
+    # Disable this part temporarily. Further evaluation needed
     # TRT does not support int64. Some model does need it like Super_SloMo
-    if current_name != "Super_SloMo" and current_name != "fastNLP_Bert":
-        inputs = tuple(
-            tree_map(
-                lambda x: x.to(torch.int32)
-                if getattr(x, "dtype", None) == torch.int64
-                else x,
-                inputs,
-            )
-        )
+    # if current_name != "Super_SloMo" and current_name != "fastNLP_Bert":
+    #     inputs = tuple(
+    #         tree_map(
+    #             lambda x: x.to(torch.int32)
+    #             if getattr(x, "dtype", None) == torch.int64
+    #             else x,
+    #             inputs,
+    #         )
+    #     )
     return model, inputs
 
 
