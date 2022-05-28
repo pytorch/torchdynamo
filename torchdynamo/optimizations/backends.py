@@ -338,8 +338,19 @@ def fx2trt(subgraph, **kwargs):
         splitter = TRTSplitter(acc_model, inputs, settings=splitter_setting)
         splitter.node_support_preview()
         split_mod = splitter()
+        num_piece = 0
         for name, _ in split_mod.named_children():
             print(f"graph is split into {name}")
+            num_piece += 1
+
+        # if the graph module is split into pieces larger than 8, we consider its perf
+        # is not good and fall back to non-TRT
+        if num_piece > 8:
+            print(
+                f"The graph module is split into {num_piece} which is large than the \
+                threshold=8. Fall back to non-TRT module."
+            )
+            return None
 
         if kwargs["fp16_mode"]:
             precision = LowerPrecision.FP16
