@@ -271,6 +271,7 @@ class SizeVarAllocator(object):
     def codegen_sizevar(self, x):
         from .codegen.wrapper import pexpr
 
+        x = sympy.expand(x)
         return pexpr(x.subs(self.replacements))
 
     def codegen_shape_tuple(self, shape):

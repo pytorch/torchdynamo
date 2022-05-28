@@ -122,6 +122,8 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 cls.cache[key] = mod
                 cls.cache[key].key = key
+        if config.debug:
+            print("PyCodeCache", path)
         return cls.cache[key]
 
 

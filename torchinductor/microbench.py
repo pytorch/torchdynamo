@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import argparse
-import gc
 import inspect
 import sys
 import time
@@ -22,7 +21,6 @@ except ImportError:
 
 def timed(model, example_inputs, times=1):
     synchronize()
-    gc.collect()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
@@ -32,6 +30,13 @@ def timed(model, example_inputs, times=1):
     # GC the result after timing
     assert result is not None
     return t1 - t0
+
+
+def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
+    timings = [timed(fn, args, times) for _ in range(repeat)]
+    took = np.median(timings)
+    print(f"{took/baseline:.6f}")
+    return took
 
 
 def compute_speedups(args, models, example_inputs):
