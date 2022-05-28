@@ -491,7 +491,9 @@ class TritonKernel(Kernel):
 class TritonScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.group_fn = product
+
+    def group_fn(self, sizes):
+        return tuple(product(s) for s in sizes)
 
     def codegen(self, group, reduction_group):
         wrapper = V.graph.wrapper_code

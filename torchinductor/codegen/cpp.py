@@ -353,7 +353,9 @@ class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.kernel_group = KernelGroup()
-        self.group_fn = tuple
+
+    def group_fn(self, sizes):
+        return tuple(tuple(s) for s in sizes)
 
     def codegen(self, group, reduction_group):
         kernel_group = self.kernel_group

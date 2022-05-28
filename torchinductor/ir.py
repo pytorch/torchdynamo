@@ -1193,7 +1193,7 @@ class ComputedBuffer(Buffer):
                 index = [*index, *reduce_reindex(reduce_index)]
             return body(index)
 
-        return iter_ranges, reduce_ranges, body_wrapper
+        return (iter_ranges, reduce_ranges), body_wrapper
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):

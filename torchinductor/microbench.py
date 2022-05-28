@@ -122,6 +122,7 @@ def main():
     parser.add_argument(
         "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
+    parser.add_argument("--transpose", action="store_true", help="transpose one input")
     args = parser.parse_args()
 
     # defaults
@@ -157,12 +158,10 @@ def main():
                 n = int(n)
                 sys.stdout.write(f"{model.__name__:10} {device:4} {n:5} ")
                 sys.stdout.flush()
-                result = microbenchmark(
-                    args,
-                    model,
-                    [torch.rand((n, n), device=device), torch.rand((n, n), device=device).transpose(0, 1)],
-                    # [torch.rand((n, n), device=device) for _ in range(nargs)],
-                )
+                inputs = [torch.rand((n, n), device=device) for _ in range(nargs)]
+                if args.transpose:
+                    inputs[-1] = inputs[-1].transpose(0, 1)
+                result = microbenchmark(args, model, inputs)
                 rows.append([model.__name__, device, str(n)] + result)
                 print(" ".join(f"{v:.2f}x" for v in result))
 
