@@ -110,6 +110,11 @@ class BaseSchedulerNode:
                 return False
         return True
 
+    def get_priority(self):
+        """ Controls the order this node will be executed in, higher runs first"""
+        raise NotImplementedError()
+
+
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
@@ -122,6 +127,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self.scheduler.kernels.append(self.node)
         codegen_extern_call(self.node)
 
+    def get_priority(self):
+        return 100
+
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
@@ -131,6 +139,9 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
+
+    def get_priority(self):
+        return 200
 
 
 def pick_loop_order(stride_lengths, sizes):
@@ -279,6 +290,12 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
+    def get_priority(self):
+        if self.is_reduction():
+            return 2
+        else:
+            return 1
+
 
 @dataclasses.dataclass
 class SchedulerNodeBox:
@@ -342,8 +359,10 @@ class Scheduler:
         super(Scheduler, self).__init__()
         self.backends = {}
         self.current_device = None
-        self.runable_reduction_groups = collections.defaultdict(int)
-        self.runable_pointwise_groups = collections.defaultdict(int)
+        # runable_groups maps node group to priority
+        # we use self.runable_groups.most_common() to implement a priority queue
+        self.runable_groups = collections.Counter()
+        # runable_nodes  maps node group to nodes
         self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
         self.runable_extern_kernels = collections.deque()
         self.blocked_nodes = BlockedNodes()
@@ -487,14 +506,11 @@ class Scheduler:
             if isinstance(node, ExternKernelSchedulerNode):
                 self.runable_extern_kernels.append(node)
             elif isinstance(node, NopKernelSchedulerNode):
-                node.run()
+                node.run()  # just schedule nop kernels eagerly
             else:
                 self.runable_nodes[node.group].append(node)
-                if node.is_reduction():
-                    # Do reductions first as they yield more possible fusions
-                    self.runable_reduction_groups[node.group] += 1
-                else:
-                    self.runable_pointwise_groups[node.group] += 1
+                old_priority, old_count = self.runable_groups.get(node.group, (0, 0))
+                self.runable_groups[node.group] = (max(old_priority, node.get_priority()), old_count + 1)
 
     def barrier(self):
         """
@@ -543,17 +559,13 @@ class Scheduler:
         return ctx()
 
     def iter_runable_groups(self):
-        while (
-            self.runable_reduction_groups
-            or self.runable_pointwise_groups
-            or self.runable_extern_kernels
-        ):
+        while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
                 self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
-            elif self.runable_reduction_groups:
-                yield next(iter(self.runable_reduction_groups.keys()))
             else:
-                yield next(iter(self.runable_pointwise_groups.keys()))
+                group, priority = self.runable_groups.most_common(1)[0]
+                del self.runable_groups[group]
+                yield group
         assert not self.runable_nodes
         assert len(self.nodes) == self.run_count
 
@@ -569,8 +581,8 @@ class Scheduler:
     def pop_group(self, group_without_device):
         group = (self.current_device, *group_without_device)
         while group in self.runable_nodes:
-            self.runable_reduction_groups.pop(group, None)
-            self.runable_pointwise_groups.pop(group, None)
+            if group in self.runable_groups:
+                del self.runable_groups[group]
             yield from self.runable_nodes.pop(group)
         if self.fusable_deps:
             fusable = True

@@ -128,7 +128,7 @@ def main():
     args.devices = args.devices or ["cpu", "cuda"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
-    args.size = args.size or [64, 256, 1024, 4096]
+    args.size = args.size or [64, 256, 1024, 4096, 8192]
 
     if args.nvfuser:
         torch._C._jit_override_can_fuse_on_cpu(False)
@@ -150,7 +150,7 @@ def main():
         torchinductor.config.debug = True
 
     rows = []
-    for model in (MicroBenchmarks.add_relu_softmax,):
+    for model in (MicroBenchmarks.add,):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:
@@ -160,7 +160,8 @@ def main():
                 result = microbenchmark(
                     args,
                     model,
-                    [torch.rand((n, n * 2), device=device) for _ in range(nargs)],
+                    [torch.rand((n, n), device=device), torch.rand((n, n), device=device).transpose(0, 1)],
+                    # [torch.rand((n, n), device=device) for _ in range(nargs)],
                 )
                 rows.append([model.__name__, device, str(n)] + result)
                 print(" ".join(f"{v:.2f}x" for v in result))
