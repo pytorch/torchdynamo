@@ -46,6 +46,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
+        ("inf", float("inf")),
     ]
 )
 
