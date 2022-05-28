@@ -56,8 +56,9 @@ public:
           return false;
         }
       }
+      return torch::allclose(v, v_);
     }
-    return torch::allclose(v, v_);
+    return true;
   }
 
   PyTypeObject *pytype;
