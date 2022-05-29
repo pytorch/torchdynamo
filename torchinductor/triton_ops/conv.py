@@ -63,7 +63,8 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
     off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
 
     x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
-    mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H) & (off_x_w >= 0) & (off_x_w < IN_W))[:, None] \
+    mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H + padding_h)
+              & (off_x_w >= 0) & (off_x_w < IN_W + padding_w))[:, None] \
         & (off_x_crs < CRS)[None, :]
 
     # offset for the inital ptr for w
@@ -98,8 +99,9 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
     off_y_nhw = pid_nhw * BLOCK_NHW + tl.arange(0, BLOCK_NHW)
     off_y_n = off_y_nhw // (OUT_H * OUT_W)
     off_y_hw = off_y_nhw % (OUT_H * OUT_W)
-    off_y_h = off_y_hw // OUT_W
-    off_y_w = off_y_hw % OUT_W
+    # consider output padding
+    off_y_h = off_y_hw // OUT_W + output_padding_h
+    off_y_w = off_y_hw % OUT_W + output_padding_w
 
     # y ptrs in the block of [BLOCK_NHW, BLOCK_K]
     y_ptrs = y + off_y_n[:, None] * stride_yn + off_y_h[:, None] * stride_yh \
@@ -107,8 +109,8 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
 
     # out-of-bounds check
     mask_y = (off_y_n < BATCH)[:, None] \
-        & (off_y_h < OUT_H)[:, None] \
-        & (off_y_w < OUT_W)[:, None] \
+        & (off_y_h < OUT_H + output_padding_h)[:, None] \
+        & (off_y_w < OUT_W + output_padding_w)[:, None] \
         & (off_y_k < KERNEL_N)[None, :]
 
     tl.store(y_ptrs, acc, mask=mask_y)
