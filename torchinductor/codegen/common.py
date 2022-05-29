@@ -321,6 +321,7 @@ class CSE:
         )
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
+        assert isinstance(expr, str), expr
         if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
             return expr
         if expr not in self.cache:

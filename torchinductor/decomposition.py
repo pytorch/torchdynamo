@@ -5,6 +5,7 @@ import functorch._src.decompositions
 import torch
 from torch import Tensor
 from torch._decomp import get_decompositions
+from torch._decomp.decompositions import pw_cast_for_opmath
 
 from torchinductor import config
 
@@ -209,3 +210,9 @@ def logsumexp(self, dim, keepdim=False) -> Tensor:
     )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
+
+
+@register_decomposition(aten.leaky_relu)
+@pw_cast_for_opmath
+def leaky_relu(self: Tensor, negative_slope: float = 0.01) -> Tensor:
+    return torch.where(self > 0, self, self * negative_slope)

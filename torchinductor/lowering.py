@@ -756,6 +756,9 @@ def _local_scalar_dense(data):
 
 
 def _full(fill_value, device, dtype, size):
+    if isinstance(fill_value, ir.Constant):
+        fill_value = fill_value.value
+    assert isinstance(fill_value, (int, float)), fill_value
     return Pointwise.create(
         device=device,
         dtype=dtype,

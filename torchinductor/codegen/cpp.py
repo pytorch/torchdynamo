@@ -355,7 +355,7 @@ class CppScheduling:
         self.kernel_group = KernelGroup()
 
     def group_fn(self, sizes):
-        return tuple(tuple(s) for s in sizes)
+        return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def codegen(self, group, reduction_group):
         kernel_group = self.kernel_group

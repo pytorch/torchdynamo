@@ -210,10 +210,10 @@ def pointwise_heuristics():
     from triton import next_power_of_2
 
     def block_size(args):
-        return min(1024, next_power_of_2(args["numel"]))
+        return min(1024, next_power_of_2(args["xnumel"]))
 
     return {
-        "BLOCK_SIZE": block_size,
+        "XBLOCK": block_size,
     }
 
 
@@ -222,23 +222,30 @@ def reduction_heuristics():
     from triton import next_power_of_2
 
     def reduction_size(args):
-        return next_power_of_2(args["reduction_numel"])
+        return next_power_of_2(args["rnumel"])
 
     def block_size(args):
-        return max(next_power_of_2(1024 // args["REDUCTION_SIZE"]), 1)
+        return max(next_power_of_2(1024 // args["rnumel"]), 1)
 
     return {
-        "REDUCTION_SIZE": reduction_size,
-        "BLOCK_SIZE": block_size,
+        "RBLOCK": reduction_size,
+        "XBLOCK": block_size,
     }
 
 
-def grid(numel):
-    """Helper function to compute triton grids for pointwise ops"""
+def cdiv(numel, bs):
+    return (numel + bs - 1) // bs
+
+
+def grid(xnumel, ynumel=None, znumel=None):
+    """Helper function to compute triton grids"""
 
     def grid_fn(meta):
-        bs = meta["BLOCK_SIZE"]
-        # inlined triton.cdiv
-        return ((numel + bs - 1) // bs,)
+        result = [cdiv(xnumel, meta["XBLOCK"])]
+        if ynumel:
+            result.append(cdiv(ynumel, meta["YBLOCK"]))
+            if znumel:
+                result.append(cdiv(znumel, meta["ZBLOCK"]))
+        return result
 
     return grid_fn
