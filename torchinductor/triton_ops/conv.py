@@ -1,3 +1,4 @@
+from curses import window
 import torch
 import triton
 import numpy as np
@@ -11,6 +12,10 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
             stride_xn, stride_xc, stride_xh, stride_xw,
             stride_wn, stride_wc, stride_wh, stride_ww,
             stride_yn, stride_yc, stride_yh, stride_yw,
+            # order of dim of w
+            # shape_w_o0, shape_w_o1, # shape_w_o2,
+            # oc, oh, ow,
+            delta_x_ptr,
             # Tensor dimensions
             BATCH, IN_C, IN_H, IN_W,
             KERNEL_N, KERNEL_H, KERNEL_W,
@@ -21,10 +26,6 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
             dilation_h, dilation_w,
             output_padding_h, output_padding_w,
             groups,
-            # ptr increment for x
-            delta_x_c_ptr,
-            delta_x_h_ptr,
-            delta_x_w_ptr,
             # Metaparameters
             ACC_TYPE: tl.constexpr,
             # blocks in different dimension
@@ -52,34 +53,42 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
 
     # offset for the initial ptr for x
     off_x_n = off_y_n
-    off_x_h = off_y_h
-    off_x_w = off_y_w
+    off_x_h = off_y_h * stride_h - padding_h
+    off_x_w = off_y_w * stride_w - padding_w
     off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
     off_x_crs = tl.arange(0, BLOCK_CRS)
-    # TODO: unpack crs....
-    x_ptrs = x + off_x_nhw[:, None] + off_x_crs[None, :]
+
+    CRS = IN_C * KERNEL_H * KERNEL_W
+    # load inc ptr of x, upade x_ptrs
+    off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
+
+    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
+    mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H) & (off_x_w >= 0) & (off_x_w < IN_W))[:, None] \
+        & (off_x_crs < CRS)[None, :]
 
     # offset for the inital ptr for w
     off_w_crs = tl.arange(0, BLOCK_CRS)
     off_w_k = off_y_k
     w_ptrs = w + off_w_crs[:, None] * stride_wc + off_w_k[None, :] * stride_wn
+    mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
 
     # -----------------------------------------------------------
     # allocate accumulator
     acc = tl.zeros((BLOCK_NHW, BLOCK_K), dtype=ACC_TYPE)
-    CRS = IN_C * KERNEL_H * KERNEL_W
     for crs in range(0, CRS, BLOCK_CRS):
-
         # ------ load x ------
-        matrix_x = tl.load(x_ptrs)
+        matrix_x = tl.load(x_ptrs, mask=mask_x)
         # ------ load w ------
-        matrix_w = tl.load(w_ptrs)
+        matrix_w = tl.load(w_ptrs, mask=mask_w)
         # ------ matrix multiplication ------
         acc += tl.dot(matrix_x, matrix_w)
         # ------ update ptrs ------
         w_ptrs += BLOCK_CRS
-        # TODO: update x_ptr
-        x_ptrs += BLOCK_CRS
+        # load inc ptr of x, upade x_ptrs
+        off_x_crs = crs + tl.arange(0, BLOCK_CRS)
+        off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
+        x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
+        # x_ptrs += BLOCK_CRS
 
     acc = acc.to(y.dtype.element_ty)
 
@@ -139,27 +148,19 @@ class _conv(torch.autograd.Function):
         # get the order of axes in w, innermost dimension outward
         order = sorted([wc, wh, ww], reverse=True)
         c, h, w = [order.index(x) for x in [wc, wh, ww]]
-        # window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
+        window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
 
-        r_dilation_h = dilation_h * np.arange(shape_w[h])[:, None, None]
-        r_dilation_w = dilation_h * np.arange(shape_w[w])[None, :, None]
-        r_inc = np.arange(shape_w[c])[None, None, :]
-        r_pixel = r_dilation_h * stride_xh + r_dilation_w * stride_xw \
+        r_window = np.arange(0, window_size)
+        window_unpack = _conv._unpack(r_window, order, shape_w)
+        window_unpack_h = window_unpack[h]
+        window_unpack_w = window_unpack[w]
+        window_unpack_c = window_unpack[c]
+        r_dilation_h = dilation_h * window_unpack_h[:, None, None]
+        r_dilation_w = dilation_w * window_unpack_w[None, :, None]
+        r_inc = window_unpack_c[None, None, :]
+        delta_x = r_dilation_h * stride_xh + r_dilation_w * stride_xw \
             + r_inc * stride_xc
-        r_pixel = r_pixel.flatten()
-
-        delta_x_c, delta_x_h, delta_x_w = [], [], []
-
-        for i in r_pixel:
-            current_k = _conv._unpack(i, order, shape_w)
-            delta_x_c.append(current_k[c])
-            delta_x_h.append(current_k[h])
-            delta_x_w.append(current_k[w])
-
-        delta_x_c = np.asarray(delta_x_c)
-        delta_x_h = np.asarray(delta_x_h)
-        delta_x_w = np.asarray(delta_x_w)
-        return delta_x_c, delta_x_h, delta_x_w
+        return delta_x
 
     @staticmethod
     def _call(x, w, bias,
@@ -241,20 +242,21 @@ class _conv(torch.autograd.Function):
         # into block of [BLOCK_BATCH, BLOCK_K, BLOCK_H, BLOCK_W] because of better
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
         if True:
-            delta_x_c, delta_x_h, delta_x_w = \
+            delta_x = \
                 _conv._delta_x_ptr(wc, wh, ww, shape_w,
                                    dilation[0], dilation[1],
                                    stride_x[xh], stride_x[xw], stride_x[xc])
-            delta_x_c_ptr = torch.from_numpy(delta_x_c).cuda()
-            delta_x_h_ptr = torch.from_numpy(delta_x_h).cuda()
-            delta_x_w_ptr = torch.from_numpy(delta_x_w).cuda()
-            # launch kernel, 3-dim, batch, kernel num, h*w
-            grid = lambda META: (triton.cdiv(BATCH * OUT_H * OUT_W, META['BLOCK_NHW']), triton.cdiv(KERNEL_N, META['BLOCK_K']))
+            delta_x = torch.from_numpy(delta_x).cuda()
+            # launch kernel, 2-dim, batch*h*w, kernel
+            grid = lambda META: (triton.cdiv(BATCH * OUT_H * OUT_W, META['BLOCK_NHW']),
+                                 triton.cdiv(KERNEL_N, META['BLOCK_K']))
             _kernel[grid](x, w, bias, y, tmp_x, tmp_w,
                           # stride nchw for x,w,y tensor
                           stride_x[xn], stride_x[xc], stride_x[xh], stride_x[xw],
                           stride_w[wn], stride_w[wc], stride_w[wh], stride_w[ww],
                           stride_y[yn], stride_y[yc], stride_y[yh], stride_y[yw],
+                          # pointer inc for x
+                          delta_x,
                           # Tensor dimensions
                           BATCH, IN_C, IN_H, IN_W,
                           KERNEL_N, KERNEL_H, KERNEL_W,
@@ -265,10 +267,6 @@ class _conv(torch.autograd.Function):
                           dilation[0], dilation[1],
                           output_padding[0], output_padding[1],
                           groups,
-                          # ptr increment for x
-                          delta_x_c_ptr,
-                          delta_x_h_ptr,
-                          delta_x_w_ptr,
                           # Metaparameters
                           ACC_TYPE=ACC_TYPE,
                           BLOCK_NHW=128, BLOCK_K=32,
