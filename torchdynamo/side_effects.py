@@ -84,12 +84,13 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
-    def apply(self, fn):
+    def apply(self, fn, cache=None):
         self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
+            (k, VariableTracker.apply(fn, v, cache))
+            for k, v in self.id_to_variable.items()
         )
         self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v))
+            (k, VariableTracker.apply(fn, v, cache))
             for k, v in self.store_attr_mutations.items()
         )
 
