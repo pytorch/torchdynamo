@@ -164,10 +164,10 @@ def has_tensor_in_frame(frame):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
-            if config.debug:
-                print(
-                    f"Assuming that object of type {type(obj)} does not have a tensor"
-                )
+            # if config.debug:
+            #     print(
+            #         f"Assuming that object of type {type(obj)} does not have a tensor"
+            #     )
             return False
 
     # Check if the passed arguments are of type Tensor
@@ -177,7 +177,7 @@ def has_tensor_in_frame(frame):
 
     if config.debug:
         print(
-            "skipping",
+            "skipping because no torch.*",
             frame.f_code.co_name,
             frame.f_code.co_filename,
             frame.f_code.co_firstlineno,

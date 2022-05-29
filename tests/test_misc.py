@@ -1442,3 +1442,19 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res2 = f4()
         self.assertTrue(same(res1, res2))
+
+    def test_sample_input(self):
+        from torch.testing._internal.common_methods_invocations import SampleInput
+
+        def fn(sample):
+            if isinstance(sample.input, torch.Tensor):
+                return sample.input * 2
+            return torch.zeros(())
+
+        sample = SampleInput(torch.ones(2))
+        ref = fn(sample)
+
+        with torchdynamo.optimize("eager"):
+            res = fn(sample)
+
+        self.assertTrue(same(ref, res))
