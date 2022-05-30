@@ -1,11 +1,8 @@
 import math
-from typing import List
 
 import functorch._src.decompositions
 import torch
-from torch import Tensor
 from torch._decomp import get_decompositions
-from torch._decomp.decompositions import pw_cast_for_opmath
 
 from torchinductor import config
 
@@ -13,20 +10,21 @@ aten = torch.ops.aten
 
 decompositions = get_decompositions(
     [
-        aten.l1_loss,
-        aten.mse_loss,
-        aten.stack,
-        aten.native_layer_norm,
-        aten.native_batch_norm,
+        aten.clamp_max,
+        aten.clamp_min,
         aten.cudnn_batch_norm,
-        aten.native_group_norm,
-        aten.leaky_relu,
-        aten.hardtanh,
         aten.hardsigmoid,
         aten.hardswish,
+        aten.hardtanh,
+        aten.l1_loss,
+        aten.leaky_relu,
+        aten.logsumexp.default,
+        aten.mse_loss,
+        aten.native_batch_norm,
+        aten.native_group_norm,
+        aten.native_layer_norm,
+        aten.stack,
         aten.transpose.int,
-        aten.clamp_min,
-        aten.clamp_max,
         # don't exist (yet), but wish they did:
         aten._embedding_bag,
         aten.grid_sampler_2d,
@@ -188,31 +186,3 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     x = torch.where(x == float("inf"), posinf, x)
     x = torch.where(x == float("-inf"), neginf, x)
     return x
-
-
-def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
-    ndim = self.dim()
-    for idx in range(ndim - 1, -1, -1):
-        if idx in dims or idx - ndim in dims:
-            self = self.squeeze(idx)
-    return self
-
-
-# based on https://github.com/pytorch/pytorch/pull/77219
-@register_decomposition([aten.logsumexp.default])
-def logsumexp(self, dim, keepdim=False) -> Tensor:
-    if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
-    return result.log().add(maxes_squeezed)
-
-
-@register_decomposition(aten.leaky_relu)
-@pw_cast_for_opmath
-def leaky_relu(self: Tensor, negative_slope: float = 0.01) -> Tensor:
-    return torch.where(self > 0, self, self * negative_slope)

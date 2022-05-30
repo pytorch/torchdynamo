@@ -129,7 +129,7 @@ class RangeTree:
     ):
         super(RangeTree, self).__init__()
         self.name = name
-        self.children: Dict[sympy.Expr, RangeTreeEntry] = dict()
+        self.children: Dict[sympy.Expr, RangeTreeEntry] = {}
         self.var_list = var_list
         self.var_ranges = var_ranges
         self.numel = numel
@@ -156,7 +156,7 @@ class RangeTreeRoot(RangeTree):
         super(RangeTreeRoot, self).__init__(
             name=name,
             var_list=[],
-            var_ranges=dict(),
+            var_ranges={},
             numel=numel,
             prefix=prefix,
         )
@@ -265,11 +265,11 @@ class TritonKernel(Kernel):
             self.range_trees.append(
                 RangeTreeRoot(names[i], self.numels[i], names[i][0])
             )
-        self.range_tree_nodes = dict()
+        self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.indexing_code = IndentedBuffer()
         self.inside_reduction = self.numels[-1] != 1
-        self.disabled_reduction_stores = dict()
+        self.disabled_reduction_stores = {}
         self._load_mask = None
 
     def disable_reduction(self):
@@ -411,7 +411,7 @@ class TritonKernel(Kernel):
         sizes[-1] = "1"
         res = self.cse.generate(
             self.compute,
-            f"tl.reshape(tl.{reduction_type}({res}, {len(self.range_trees) - 1}), [{', '.join(sizes)}])"
+            f"tl.reshape(tl.{reduction_type}({res}, {len(self.range_trees) - 1}), [{', '.join(sizes)}])",
         )
         assert self.inside_reduction
         with self.disable_reduction():
