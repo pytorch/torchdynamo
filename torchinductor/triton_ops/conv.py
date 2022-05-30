@@ -1,4 +1,3 @@
-from curses import window
 import torch
 import triton
 import numpy as np
@@ -7,11 +6,12 @@ import triton.language as tl
 
 
 @triton.jit
-def _kernel(x, w, bias, y, tmp_x, tmp_w,
+def _kernel(x, w, bias, y,
             # stride of tensor
             stride_xn, stride_xc, stride_xh, stride_xw,
             stride_wn, stride_wc, stride_wh, stride_ww,
             stride_yn, stride_yc, stride_yh, stride_yw,
+            stride_biasn,
             # order of dim of w
             # shape_w_o0, shape_w_o1, # shape_w_o2,
             # oc, oh, ow,
@@ -90,6 +90,14 @@ def _kernel(x, w, bias, y, tmp_x, tmp_w,
         off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         # x_ptrs += BLOCK_CRS
+
+    # add bias if is not None
+    if bias is not None:
+        off_bias_k = pid_k * BLOCK_K + tl.arange(0, BLOCK_K)
+        bias_ptrs = bias + off_bias_k * stride_biasn
+        mask_bias = off_bias_k < KERNEL_N
+        _bias = tl.load(bias_ptrs, mask=mask_bias)
+        acc += _bias[None, :]
 
     acc = acc.to(y.dtype.element_ty)
 
@@ -175,7 +183,7 @@ class _conv(torch.autograd.Function):
         # input shapes
         shape_x = x.shape
         shape_w = w.shape
-        shape_bias = bias.shape if bias else None
+        shape_bias = bias.shape if bias is not None else None
 
         # indicies for the layeout
         xn, xc, xh, xw = [layout_x.find(x) for x in 'nchw']
@@ -185,7 +193,7 @@ class _conv(torch.autograd.Function):
         # out_channel, in_channel, kernel_height, kernel_width
         kernel_size = [shape_w[yh], shape_w[yw]]
         input_size = [shape_x[xh], shape_x[xw]]
-        assert not shape_bias or shape_bias == shape_w[wn], \
+        assert not shape_bias or shape_bias[0] == shape_w[wn], \
             f"bias shape did not match{shape_bias} != {shape_w[wn]}"
         in_channel = shape_w[wc] * groups
 
@@ -224,6 +232,8 @@ class _conv(torch.autograd.Function):
         stride_x = _conv._extract_strides(shape_x)
         stride_w = _conv._extract_strides(shape_w)
         stride_y = _conv._extract_strides(shape_y)
+        stride_bias = _conv._extract_strides(shape_bias) if shape_bias else None
+        stride_biasn = stride_bias[0] if stride_bias else None
 
         assert((stride_x[0] >= stride_x[1]) and (stride_x[1] >= stride_x[2])
                and (stride_x[2] > stride_x[3])), "stride and layout does not match for x"
@@ -235,9 +245,9 @@ class _conv(torch.autograd.Function):
         # allocate output
         y = torch.empty(shape_y, device=device, dtype=x.dtype)
         # allocate tmp
-        WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
-        tmp_x = torch.empty((BATCH * OUT_H * OUT_W, WINDOW_SIZE), device=device, dtype=x.dtype)
-        tmp_w = torch.empty((WINDOW_SIZE, KERNEL_N), device=device, dtype=w.dtype)
+        # WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
+        # tmp_x = torch.empty((BATCH * OUT_H * OUT_W, WINDOW_SIZE), device=device, dtype=x.dtype)
+        # tmp_w = torch.empty((WINDOW_SIZE, KERNEL_N), device=device, dtype=w.dtype)
         # accumulator types
         ACC_TYPE = tl.float32 if x.dtype in [torch.float16, torch.bfloat16, torch.float32] else tl.int32
         # if input activation is channel-last, it's good to tiling output
@@ -252,11 +262,12 @@ class _conv(torch.autograd.Function):
             # launch kernel, 2-dim, batch*h*w, kernel
             grid = lambda META: (triton.cdiv(BATCH * OUT_H * OUT_W, META['BLOCK_NHW']),
                                  triton.cdiv(KERNEL_N, META['BLOCK_K']))
-            _kernel[grid](x, w, bias, y, tmp_x, tmp_w,
+            _kernel[grid](x, w, bias, y,
                           # stride nchw for x,w,y tensor
                           stride_x[xn], stride_x[xc], stride_x[xh], stride_x[xw],
                           stride_w[wn], stride_w[wc], stride_w[wh], stride_w[ww],
                           stride_y[yn], stride_y[yc], stride_y[yh], stride_y[yw],
+                          stride_biasn,
                           # pointer inc for x
                           delta_x,
                           # Tensor dimensions
@@ -278,7 +289,7 @@ class _conv(torch.autograd.Function):
         # do matrix multiplication
         # else:
         #    _kernel_mm[grid]()
-        return y, tmp_x, tmp_w
+        return y
 
     @staticmethod
     def forward(ctx, x, w, bias,
