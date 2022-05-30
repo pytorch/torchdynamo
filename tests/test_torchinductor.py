@@ -107,6 +107,7 @@ class InputGen:
 def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
     has_lowp_args = False
+
     def upcast_fn(x):
         nonlocal has_lowp_args
         if isinstance(x, torch.Tensor) and (x.dtype == torch.float16 or x.dtype == torch.bfloat16):
@@ -123,6 +124,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     if has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.half)
+
     @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
     def run(*ex):
         return model(*ex)
@@ -531,7 +533,7 @@ class CommonTemplate:
 
         self.common(
             fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),),
-            check_lowp=False # a much more elaborate test is required to match finfo max's for float and half
+            check_lowp=False  # a much more elaborate test is required to match finfo max's for float and half
         )
 
     def test_div(self):
@@ -843,7 +845,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 2, 10]),),
-            check_lowp=False # cpu doesn't understand fp16, and there are explicit .cpu() calls
+            check_lowp=False  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
     def test_unbind(self):
@@ -1122,7 +1124,7 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([3, 10, 16, 16]),),
-            check_lowp=False, #too painful to match types of bn model
+            check_lowp=False,  # too painful to match types of bn model
         )
 
     def test_leaky_relu(self):
@@ -1484,7 +1486,7 @@ class CommonTemplate:
                 torch.randn([4, 8, 2048]),
                 torch.randn([4, 8, 2048]),
             ),
-            check_lowp=False, #difference in rnn is too large between half and float inputs
+            check_lowp=False,  # difference in rnn is too large between half and float inputs
         )
 
     def test_upsample_nearest2d(self):
