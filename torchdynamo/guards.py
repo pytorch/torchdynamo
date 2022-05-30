@@ -221,6 +221,12 @@ class GuardBuilder:
 
         # Add a type check to prevent boolean check of a tensor and non-tensor.
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
+        if istype(val, (list, slice, tuple)):
+            for idx, elem in enumerate(val):
+                self.code.append(
+                    f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
+                )
+
         self.code.append(f"{ref} == {val!r}")
 
     def CONSTANT_MATCH(self, guard: Guard):
