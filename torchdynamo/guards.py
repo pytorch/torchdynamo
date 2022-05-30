@@ -263,6 +263,18 @@ class GuardBuilder:
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
 
+        def add_guard_recursively(prefix_index_str, lst):
+            for idx, elem in enumerate(lst):
+                if istype(elem, (list, tuple)):
+                    r = f"{ref}{prefix_index_str}[{idx}]"
+                    self.code.append(
+                        f"___check_type_id({r}, {self.id_ref(type(elem))})"
+                    )
+                    self.code.append(f"len({r}) == {len(elem)}")
+                    add_guard_recursively(f"{prefix_index_str}[{idx}]", elem)
+
+        add_guard_recursively("", value)
+
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
