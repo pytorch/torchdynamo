@@ -366,32 +366,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 9, 3, 21), torch.randn(8, 9, 3, 21)))
 
-    def test_fn_sum(self):
-        def fn(a,b):
-            return a+b
-
-        size=(4,32,16,112,112)
-        size1=(32,1,112,1)
-        a=torch.randn(size, dtype=torch.half).transpose(-1,-2)
-        b=torch.randn(size1, dtype=torch.half).transpose(-1,-2)
-        self.common(fn, (a,b))
-
-    # def test_fn_sum1(self):
-    #     def fn(x0, x1, x2):
-    #         x4=x2+x0
-    #         x5=x2+x1
-    #         x6=x5.sum(-1)
-    #         x7=x1.sum(-1)
-    #         return x4, x6, x7
-
-
-    #     size=(2048, 1024)
-    #     x0=torch.randn(size, dtype=torch.half)
-    #     x1=torch.randn(size, dtype=torch.half)
-    #     x2=torch.randn(size[-1], dtype=torch.half)
-    #     self.common(fn, (x0,x1,x2))
-
-
     def test_sum3(self):
         def fn(a, b):
             r1 = a + b
