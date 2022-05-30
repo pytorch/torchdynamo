@@ -4,7 +4,7 @@ import itertools
 import logging
 import textwrap
 from functools import partial
-from typing import Any, Dict
+from typing import Any
 from typing import Callable
 from typing import List
 from typing import Optional
@@ -1188,20 +1188,26 @@ class ComputedBuffer(Buffer):
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
         )
-        body = LoopBody(body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges)
+        body = LoopBody(
+            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+        )
 
         # TODO(jansel): should we include store strides here or just loads?
-        strides = [V.graph.sizevars.stride_hints(expr, iter_vars)
-                   for expr in body.reads
-                   if "indirect" not in str(expr)]
+        strides = [
+            V.graph.sizevars.stride_hints(expr, iter_vars)
+            for expr in body.reads
+            if "indirect" not in str(expr)
+        ]
 
-        if self.get_device().type == "cuda" and not self.get_reduction_type() and iter_ranges:
+        if (
+            self.get_device().type == "cuda"
+            and not self.get_reduction_type()
+            and iter_ranges
+        ):
             iter_ranges = self._tile_loops(iter_ranges, strides)
             return (*iter_ranges, reduce_ranges), body
         else:
             return (iter_ranges, reduce_ranges), body
-
-
 
     @classmethod
     def _tile_loops(cls, iter_ranges: List[sympy.Expr], strides, max_tiles=2):
@@ -1230,7 +1236,6 @@ class ComputedBuffer(Buffer):
             tiles.append(current_tile)
 
         return tiles
-
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):

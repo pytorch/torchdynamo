@@ -417,8 +417,11 @@ class TritonKernel(Kernel):
 
     def codegen_kernel(self):
         from triton import next_power_of_2
+
         code = IndentedBuffer()
-        size_hints = [next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels]
+        size_hints = [
+            next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
+        ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
         else:
@@ -517,11 +520,19 @@ class TritonScheduling:
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
+        def is_group_matching(other_groups):
+            if groups == other_groups:
+                return True
+            if len(groups) == 2 and groups[-1] != 1:
+                if other_groups == (product(groups), sympy.Integer(1)):
+                    return True
+            return False
+
         reschedule = []
         with scheduler.kernel(TritonKernel(*groups)) as kernel:
             for _ in scheduler.iter_fixed_point():
                 for node in scheduler.pop_group(groups):
-                    scheduler.maybe_remove_buffer(node, broadcast_after_reduce=True)
+                    scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
                     node.run(*kernel.set_ranges(*node.get_ranges()))
                     node.mark_fusable(broadcast_after_reduce=True)
 
@@ -529,6 +540,7 @@ class TritonScheduling:
                     # TODO(jansel): rewrite this to support tiled reductions
                     group, reduction_group = groups
 
+                    """
                     # Add pointwise with compatible dimensions
                     for node in scheduler.pop_group(
                         (group * reduction_group, sympy.Integer(1)),
@@ -540,10 +552,14 @@ class TritonScheduling:
                         else:
                             node.run(*kernel.set_ranges(sizes[:split], sizes[split:]))
                             node.mark_fusable()
+                    """
 
                     # Add more pointwise with fewer dimensions
                     with kernel.disable_reduction():
                         for node in scheduler.pop_group((group, sympy.Integer(1))):
+                            scheduler.maybe_remove_buffer(
+                                node, check_group=is_group_matching
+                            )
                             node.run(*kernel.set_ranges(*node.get_ranges()))
                             node.mark_fusable()
 

@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import itertools
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import List
 
@@ -189,16 +190,19 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.set_read_writes(dependencies.extract_read_writes(self._body, *self._sizes))
 
-    def can_remove_buffer(self, broadcast_after_reduce=False):
+    def can_remove_buffer(self, check_group):
         if (
             self.is_reduction()
             and len(self.users) == 1
+            and isinstance(self.users[0].node, SchedulerNode)
             and len(self.users[0].node.unmet_dependencies) == 1
         ):
             user = self.users[0].node
+            if not check_group(user.group):
+                return False
             dep = next(iter(user.unmet_dependencies))
             writes = self.read_writes.writes
-            if broadcast_after_reduce:
+            if self._sizes[-1] != 1:
                 writes = set(writes)
                 writes.update(
                     [w.broadcast_extend_sizes(self._sizes[-1]) for w in writes]
@@ -280,9 +284,9 @@ class SchedulerNode(BaseSchedulerNode):
 
     def get_priority(self):
         if self.is_reduction():
-            return 2
+            return len(self.group)
         else:
-            return 1
+            return len(self.group) - 1
 
 
 @dataclasses.dataclass
@@ -474,11 +478,11 @@ class Scheduler:
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
-    def maybe_remove_buffer(self, node: SchedulerNode, broadcast_after_reduce=False):
+    def maybe_remove_buffer(self, node: SchedulerNode, check_group: Callable):
         name = node.get_name()
         if name in self.mutation_renames:
             return
-        if node.can_remove_buffer(broadcast_after_reduce=broadcast_after_reduce):
+        if node.can_remove_buffer(check_group=check_group):
             V.graph.removed_buffers.add(name)
 
     def enqueue(self, node):

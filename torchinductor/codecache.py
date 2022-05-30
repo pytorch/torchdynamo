@@ -207,6 +207,7 @@ class TritonCodeCache:
 
 def block_size_fn(maximum, hint, key):
     from triton import next_power_of_2
+
     if next_power_of_2(hint) >= maximum:
         return lambda args: maximum
 
@@ -224,36 +225,48 @@ def pointwise_heuristics(size_hints):
 
     # TODO(jansel): try tuning these, current just a guess
     if len(size_hints) == 1:
-        return heuristics({
-            "XBLOCK": block_size_fn(1024, size_hints[0], "xnumel"),
-        })
+        return heuristics(
+            {
+                "XBLOCK": block_size_fn(1024, size_hints[0], "xnumel"),
+            }
+        )
     if len(size_hints) == 2:
-        return heuristics({
-            "XBLOCK": block_size_fn(32, size_hints[0], "xnumel"),
-            "YBLOCK": block_size_fn(32, size_hints[1], "ynumel"),
-        })
+        return heuristics(
+            {
+                "XBLOCK": block_size_fn(32, size_hints[0], "xnumel"),
+                "YBLOCK": block_size_fn(32, size_hints[1], "ynumel"),
+            }
+        )
     if len(size_hints) == 3:
-        return heuristics({
-            "XBLOCK": block_size_fn(16, size_hints[0], "xnumel"),
-            "YBLOCK": block_size_fn(16, size_hints[1], "ynumel"),
-            "ZBLOCK": block_size_fn(16, size_hints[2], "znumel"),
-        })
+        return heuristics(
+            {
+                "XBLOCK": block_size_fn(16, size_hints[0], "xnumel"),
+                "YBLOCK": block_size_fn(16, size_hints[1], "ynumel"),
+                "ZBLOCK": block_size_fn(16, size_hints[2], "znumel"),
+            }
+        )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
 def reduction_heuristics(size_hints):
     """args to @triton.heuristics()"""
-    from triton import next_power_of_2
     from triton import heuristics
+    from triton import next_power_of_2
 
     def reduction_size(args):
         return next_power_of_2(args["rnumel"])
 
     if len(size_hints) == 2:
-        return heuristics({
-            "RBLOCK": reduction_size,
-            "XBLOCK": block_size_fn(next_power_of_2(1024 // size_hints[-1]), size_hints[0], "xnumel"),
-        })
+        return heuristics(
+            {
+                "RBLOCK": reduction_size,
+                "XBLOCK": block_size_fn(
+                    next_power_of_2(1024 // size_hints[-1] or 1),
+                    size_hints[0],
+                    "xnumel",
+                ),
+            }
+        )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
