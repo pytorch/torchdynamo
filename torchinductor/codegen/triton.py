@@ -258,9 +258,7 @@ class TritonKernel(Kernel):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
-        names = ["xindex", "yindex", "zindex",][
-            : len(self.numels) - 1
-        ] + ["rindex"]
+        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
             self.range_trees.append(
                 RangeTreeRoot(names[i], self.numels[i], names[i][0])
