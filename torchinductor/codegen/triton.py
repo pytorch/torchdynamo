@@ -416,17 +416,22 @@ class TritonKernel(Kernel):
             ops.store(name, index, res)
 
     def codegen_kernel(self):
+        from triton import next_power_of_2
         code = IndentedBuffer()
-        heuristics = (
-            "reduction_heuristics" if self.inside_reduction else "pointwise_heuristics"
-        )
+        size_hints = [next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels]
+        if self.inside_reduction:
+            heuristics = "reduction_heuristics"
+        else:
+            heuristics = "pointwise_heuristics"
+            size_hints = size_hints[:-1]
+
         code.splice(
             f"""
                 import triton
                 import triton.language as tl
-                from {codecache.__name__} import reduction_heuristics, pointwise_heuristics
+                from {codecache.__name__} import {heuristics}
 
-                @triton.heuristics({heuristics}())
+                @{heuristics}(size_hints={size_hints!r})
                 @triton.jit
             """
         )
@@ -508,21 +513,22 @@ class TritonScheduling:
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(product(s)) for s in sizes)
 
-    def codegen(self, group, reduction_group):
+    def codegen(self, *groups):
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
         reschedule = []
-        with scheduler.kernel(TritonKernel(group, reduction_group)) as kernel:
+        with scheduler.kernel(TritonKernel(*groups)) as kernel:
             for _ in scheduler.iter_fixed_point():
-                for node in scheduler.pop_group(
-                    (group, reduction_group),
-                ):
+                for node in scheduler.pop_group(groups):
                     scheduler.maybe_remove_buffer(node, broadcast_after_reduce=True)
                     node.run(*kernel.set_ranges(*node.get_ranges()))
                     node.mark_fusable(broadcast_after_reduce=True)
 
                 if kernel.inside_reduction:
+                    # TODO(jansel): rewrite this to support tiled reductions
+                    group, reduction_group = groups
+
                     # Add pointwise with compatible dimensions
                     for node in scheduler.pop_group(
                         (group * reduction_group, sympy.Integer(1)),

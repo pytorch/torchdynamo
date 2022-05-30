@@ -205,32 +205,56 @@ class TritonCodeCache:
         return PyCodeCache.load(source_code)
 
 
-def pointwise_heuristics():
-    """args to @triton.heuristics()"""
+def block_size_fn(maximum, hint, key):
     from triton import next_power_of_2
+    if next_power_of_2(hint) >= maximum:
+        return lambda args: maximum
 
     def block_size(args):
-        return min(1024, next_power_of_2(args["xnumel"]))
+        return min(maximum, next_power_of_2(args[key]))
 
-    return {
-        "XBLOCK": block_size,
-    }
+    return block_size
 
 
-def reduction_heuristics():
+def pointwise_heuristics(size_hints):
+    """
+    Construct @triton.heuristics() based on size_hints.
+    """
+    from triton import heuristics
+
+    # TODO(jansel): try tuning these, current just a guess
+    if len(size_hints) == 1:
+        return heuristics({
+            "XBLOCK": block_size_fn(1024, size_hints[0], "xnumel"),
+        })
+    if len(size_hints) == 2:
+        return heuristics({
+            "XBLOCK": block_size_fn(32, size_hints[0], "xnumel"),
+            "YBLOCK": block_size_fn(32, size_hints[1], "ynumel"),
+        })
+    if len(size_hints) == 3:
+        return heuristics({
+            "XBLOCK": block_size_fn(16, size_hints[0], "xnumel"),
+            "YBLOCK": block_size_fn(16, size_hints[1], "ynumel"),
+            "ZBLOCK": block_size_fn(16, size_hints[2], "znumel"),
+        })
+    raise NotImplementedError(f"size_hints: {size_hints}")
+
+
+def reduction_heuristics(size_hints):
     """args to @triton.heuristics()"""
     from triton import next_power_of_2
+    from triton import heuristics
 
     def reduction_size(args):
         return next_power_of_2(args["rnumel"])
 
-    def block_size(args):
-        return max(next_power_of_2(1024 // args["rnumel"]), 1)
-
-    return {
-        "RBLOCK": reduction_size,
-        "XBLOCK": block_size,
-    }
+    if len(size_hints) == 2:
+        return heuristics({
+            "RBLOCK": reduction_size,
+            "XBLOCK": block_size_fn(next_power_of_2(1024 // size_hints[-1]), size_hints[0], "xnumel"),
+        })
+    raise NotImplementedError(f"size_hints: {size_hints}")
 
 
 def cdiv(numel, bs):

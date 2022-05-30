@@ -4,7 +4,7 @@ import itertools
 import logging
 import textwrap
 from functools import partial
-from typing import Any
+from typing import Any, Dict
 from typing import Callable
 from typing import List
 from typing import Optional
@@ -1150,7 +1150,7 @@ class ComputedBuffer(Buffer):
 
     def simplify_loops(self):
         _, args, var_ranges = dependencies.index_vars_squeeze(
-            self.data.get_size(), self.data.get_reduction_size(), prefix="s"
+            self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         body = LoopBody(
             self.get_store_function(),
@@ -1188,10 +1188,49 @@ class ComputedBuffer(Buffer):
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
         )
-        iter_vars = iter_reindex(iter_vars)
-        reduce_vars = reduce_reindex(reduce_vars)
-        body = LoopBody(body, [iter_vars, reduce_vars], var_ranges)
-        return (iter_ranges, reduce_ranges), body
+        body = LoopBody(body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges)
+
+        # TODO(jansel): should we include store strides here or just loads?
+        strides = [V.graph.sizevars.stride_hints(expr, iter_vars)
+                   for expr in body.reads
+                   if "indirect" not in str(expr)]
+
+        if self.get_device().type == "cuda" and not self.get_reduction_type() and iter_ranges:
+            iter_ranges = self._tile_loops(iter_ranges, strides)
+            return (*iter_ranges, reduce_ranges), body
+        else:
+            return (iter_ranges, reduce_ranges), body
+
+
+
+    @classmethod
+    def _tile_loops(cls, iter_ranges: List[sympy.Expr], strides, max_tiles=2):
+        """
+        Break iter_vars up into at most max_tiles tiles.
+
+        Transformation on iter_vars like:
+            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
+
+        Where each group will be tiled in a different dimension in the
+        output kernel.
+        """
+        tiles = []
+        current_tile = []
+
+        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
+        for i in range(len(iter_ranges)):
+            current_tile.append(iter_ranges[i])
+            # break tiles on stride 1
+            if any(stride[i] == 1 for stride in strides) and len(tiles) < max_tiles:
+                # split rest into a new tile
+                tiles.append(current_tile)
+                current_tile = []
+
+        if current_tile:
+            tiles.append(current_tile)
+
+        return tiles
+
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):
