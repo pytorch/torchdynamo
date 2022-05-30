@@ -110,11 +110,14 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     def upcast_fn(x):
         nonlocal has_lowp_args
-        if isinstance(x, torch.Tensor) and (x.dtype == torch.float16 or x.dtype == torch.bfloat16):
+        if isinstance(x, torch.Tensor) and (
+            x.dtype == torch.float16 or x.dtype == torch.bfloat16
+        ):
             has_lowp_args = True
             return x.float()
         else:
             return x
+
     upcasted_inputs = list(map(upcast_fn, example_inputs))
     if has_lowp_args:
         if hasattr(model, "to"):
@@ -136,7 +139,10 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
-    correct_flat = tuple(y.to(x.dtype) if isinstance(y, torch.Tensor) else y for x, y in zip(actual_flat, correct_flat))
+    correct_flat = tuple(
+        y.to(x.dtype) if isinstance(y, torch.Tensor) else y
+        for x, y in zip(actual_flat, correct_flat)
+    )
     correct = tree_unflatten(correct_flat, correct_spec)
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
@@ -157,10 +163,14 @@ def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
     check_model(self, model, example_inputs)
 
     if check_lowp:
+
         def downcast_fn(x):
             if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
-            return torch.empty_strided(x.size(), x.stride(), device="cuda", dtype=torch.half).copy_(x)
+            return torch.empty_strided(
+                x.size(), x.stride(), device="cuda", dtype=torch.half
+            ).copy_(x)
+
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
@@ -511,8 +521,11 @@ class CommonTemplate:
     def test_round(self):
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
+
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
-        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False)
+        self.common(
+            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False
+        )
 
     def test_silu(self):
         def fn(a):
@@ -532,8 +545,9 @@ class CommonTemplate:
             )
 
         self.common(
-            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),),
-            check_lowp=False  # a much more elaborate test is required to match finfo max's for float and half
+            fn,
+            (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),),
+            check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
     def test_div(self):
@@ -845,7 +859,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 2, 10]),),
-            check_lowp=False  # cpu doesn't understand fp16, and there are explicit .cpu() calls
+            check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
     def test_unbind(self):
@@ -1116,11 +1130,7 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(
-            m,
-            (torch.randn([2, 10, 8, 8]),),
-            check_lowp=False
-        )
+        self.common(m, (torch.randn([2, 10, 8, 8]),), check_lowp=False)
         self.common(
             m,
             (torch.randn([3, 10, 16, 16]),),
