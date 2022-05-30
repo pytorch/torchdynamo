@@ -9,7 +9,8 @@ from unittest.mock import patch
 import sympy
 import torch
 from torch.nn import functional as F
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
 from torchdynamo.testing import rand_strided
