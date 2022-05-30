@@ -49,7 +49,6 @@ CLOSURE_VARS = collections.OrderedDict(
     ]
 )
 
-
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -231,6 +230,7 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
+        self.NN_MODULE_PARAM_NAMES(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(val.training, bool)
@@ -268,12 +268,19 @@ class GuardBuilder:
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
+
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         keys = {k for k, v in value.named_parameters()}
+        values = {v for k, v in value.named_parameters()}
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
-        self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
+        self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")     
+        # TODO after draft diff, before push - make a config value for this?   
+        values_collapsed = f"{values}".replace(' ', '').replace('\n', '')
+        self.code.append(f"{{v for k, v in {ref}.named_parameters()}} == {values_collapsed!r}")
+        
+
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
@@ -320,6 +327,7 @@ class GuardedCode:
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
+
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
@@ -366,9 +374,9 @@ class GuardedCode:
         )
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        # if os.environ.get("TORCHDYNAMO_PRINT_GUARD_FAILS", None) == "1":
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
+
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
