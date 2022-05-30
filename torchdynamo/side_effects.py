@@ -85,6 +85,9 @@ class SideEffects(object):
         )
 
     def apply(self, fn, cache=None):
+        if cache is None:
+            cache = dict()
+
         self.id_to_variable = collections.OrderedDict(
             (k, VariableTracker.apply(fn, v, cache))
             for k, v in self.id_to_variable.items()
