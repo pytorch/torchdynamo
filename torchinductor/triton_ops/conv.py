@@ -55,6 +55,9 @@ def _kernel(x, w, bias, y,
     off_x_n = off_y_n
     off_x_h = off_y_h * stride_h - padding_h
     off_x_w = off_y_w * stride_w - padding_w
+    # solve misaligned address issue for stride > 1
+    off_x_h = tl.multiple_of(off_x_h, 1)
+    off_x_w = tl.multiple_of(off_x_w, 1)
     off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
     off_x_crs = tl.arange(0, BLOCK_CRS)
 
@@ -63,8 +66,8 @@ def _kernel(x, w, bias, y,
     off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
 
     x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
-    mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H + padding_h)
-              & (off_x_w >= 0) & (off_x_w < IN_W + padding_w))[:, None] \
+    mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H)
+              & (off_x_w >= 0) & (off_x_w < IN_W))[:, None] \
         & (off_x_crs < CRS)[None, :]
 
     # offset for the inital ptr for w
