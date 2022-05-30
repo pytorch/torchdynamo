@@ -1124,7 +1124,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars(
+            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -1149,8 +1149,8 @@ class ComputedBuffer(Buffer):
             self.freeze_layout()
 
     def simplify_loops(self):
-        _, args, var_ranges = dependencies.index_vars(
-            self.data.get_size(), self.data.get_reduction_size(), prefix="z"
+        _, args, var_ranges = dependencies.index_vars_squeeze(
+            self.data.get_size(), self.data.get_reduction_size(), prefix="s"
         )
         body = LoopBody(
             self.get_store_function(),
@@ -1184,16 +1184,14 @@ class ComputedBuffer(Buffer):
         iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
         reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
 
-        def body_wrapper(index, reduce_index=None):
-            if not reduce_ranges and reduce_index:
-                index = [*index, *reduce_index]
-                reduce_index = None
-            index = iter_reindex(index)
-            if reduce_index:
-                index = [*index, *reduce_reindex(reduce_index)]
-            return body(index)
-
-        return (iter_ranges, reduce_ranges), body_wrapper
+        # retrace the loop body with simplification and reordering applied
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_ranges, reduce_ranges, prefix="z"
+        )
+        iter_vars = iter_reindex(iter_vars)
+        reduce_vars = reduce_reindex(reduce_vars)
+        body = LoopBody(body, [iter_vars, reduce_vars], var_ranges)
+        return (iter_ranges, reduce_ranges), body
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):
@@ -2002,7 +2000,8 @@ class LoopBody:
         self.indirect_vars.append([var])
         return var
 
-    def __call__(self, index=()):
+    def __call__(self, *indices):
+        index = list(itertools.chain(*indices))
         assert len(index) == len(self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
