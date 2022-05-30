@@ -1486,3 +1486,19 @@ class MiscTests(torchdynamo.testing.TestCase):
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
+
+    def test_sample_input(self):
+        from torch.testing._internal.common_methods_invocations import SampleInput
+
+        def fn(sample):
+            if isinstance(sample.input, torch.Tensor):
+                return sample.input * 2
+            return torch.zeros(())
+
+        sample = SampleInput(torch.ones(2))
+        ref = fn(sample)
+
+        with torchdynamo.optimize("eager"):
+            res = fn(sample)
+
+        self.assertTrue(same(ref, res))
