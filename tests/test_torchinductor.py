@@ -9,6 +9,7 @@ from unittest.mock import patch
 import sympy
 import torch
 from torch.nn import functional as F
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 import torchdynamo
 from torchdynamo.testing import rand_strided
@@ -103,9 +104,25 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
-def check_model(self: TestCase, model, example_inputs):
-    correct = model(*example_inputs)
-
+def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+    # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+    has_lowp_args = False
+    def upcast_fn(x):
+        nonlocal has_lowp_args
+        if isinstance(x, torch.Tensor) and (x.dtype == torch.float16 or x.dtype == torch.bfloat16):
+            has_lowp_args = True
+            return x.float()
+        else:
+            return x
+    upcasted_inputs = list(map(upcast_fn, example_inputs))
+    if has_lowp_args:
+        if hasattr(model, "to"):
+            model = model.to(torch.float)
+    correct = model(*upcasted_inputs)
+    # downcast the model back if needed
+    if has_lowp_args:
+        if hasattr(model, "to"):
+            model = model.to(torch.half)
     @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
     def run(*ex):
         return model(*ex)
@@ -113,10 +130,16 @@ def check_model(self: TestCase, model, example_inputs):
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
         actual = run(*example_inputs)
-    self.assertTrue(same(actual, correct, equal_nan=True))
+
+    assert type(actual) == type(correct)
+    correct_flat, correct_spec = tree_flatten(correct)
+    actual_flat, _ = tree_flatten(actual)
+    correct_flat = tuple(y.to(x.dtype) if isinstance(y, torch.Tensor) else y for x, y in zip(actual_flat, correct_flat))
+    correct = tree_unflatten(correct_flat, correct_spec)
+    self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
-def check_model_cuda(self: TestCase, model, example_inputs):
+def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
     if hasattr(model, "to"):
         model = model.to("cuda")
 
@@ -130,6 +153,16 @@ def check_model_cuda(self: TestCase, model, example_inputs):
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
     check_model(self, model, example_inputs)
+
+    if check_lowp:
+        def downcast_fn(x):
+            if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
+                return x
+            return torch.empty_strided(x.size(), x.stride(), device="cuda", dtype=torch.half).copy_(x)
+        example_inputs = list(map(downcast_fn, example_inputs))
+        if hasattr(model, "to"):
+            model = model.to(torch.half)
+        check_model(self, model, example_inputs, 2e-3)
 
 
 class SweepInputs2:
@@ -333,6 +366,32 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 9, 3, 21), torch.randn(8, 9, 3, 21)))
 
+    def test_fn_sum(self):
+        def fn(a,b):
+            return a+b
+
+        size=(4,32,16,112,112)
+        size1=(32,1,112,1)
+        a=torch.randn(size, dtype=torch.half).transpose(-1,-2)
+        b=torch.randn(size1, dtype=torch.half).transpose(-1,-2)
+        self.common(fn, (a,b))
+
+    # def test_fn_sum1(self):
+    #     def fn(x0, x1, x2):
+    #         x4=x2+x0
+    #         x5=x2+x1
+    #         x6=x5.sum(-1)
+    #         x7=x1.sum(-1)
+    #         return x4, x6, x7
+
+
+    #     size=(2048, 1024)
+    #     x0=torch.randn(size, dtype=torch.half)
+    #     x1=torch.randn(size, dtype=torch.half)
+    #     x2=torch.randn(size[-1], dtype=torch.half)
+    #     self.common(fn, (x0,x1,x2))
+
+
     def test_sum3(self):
         def fn(a, b):
             r1 = a + b
@@ -476,8 +535,8 @@ class CommonTemplate:
     def test_round(self):
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
-
-        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
+        # with *100 we are always getting a number exactly at .5 which we don't do right in half
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False)
 
     def test_silu(self):
         def fn(a):
@@ -497,7 +556,8 @@ class CommonTemplate:
             )
 
         self.common(
-            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),)
+            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),),
+            check_lowp=False # a much more elaborate test is required to match finfo max's for float and half
         )
 
     def test_div(self):
@@ -809,6 +869,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 2, 10]),),
+            check_lowp=False # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
     def test_unbind(self):
@@ -1082,10 +1143,12 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([2, 10, 8, 8]),),
+            check_lowp=False
         )
         self.common(
             m,
             (torch.randn([3, 10, 16, 16]),),
+            check_lowp=False, #too painful to match types of bn model
         )
 
     def test_leaky_relu(self):
@@ -1117,7 +1180,7 @@ class CommonTemplate:
 
     def test_masked_fill(self):
         def fn(mask, value):
-            return aten.masked_fill(value, mask, -1000000000.0) + 2, aten.masked_fill(
+            return aten.masked_fill(value, mask, -10000.0) + 2, aten.masked_fill(
                 value / 2.0, torch.logical_not(mask), 667
             )
 
@@ -1323,7 +1386,7 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randn(8, 8, 8),
+                torch.randn(8, 8, 12),
                 torch.tensor([0, 0, 2, 2], dtype=torch.int64),
                 torch.tensor([3, 4, 4, 3], dtype=torch.int64),
             ),
@@ -1447,6 +1510,7 @@ class CommonTemplate:
                 torch.randn([4, 8, 2048]),
                 torch.randn([4, 8, 2048]),
             ),
+            check_lowp=False, #difference in rnn is too large between half and float inputs
         )
 
     def test_upsample_nearest2d(self):
