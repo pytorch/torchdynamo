@@ -216,17 +216,19 @@ class GuardBuilder:
             # TODO(jansel): is this slow? perhaps optimize it
             self.code.append(f"str({ref}) == {str(val)!r}")
             return
-        if istype(val, torch.Size):
-            val = tuple(val)
 
-        # Add a type check to prevent boolean check of a tensor and non-tensor.
-        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
-        if istype(val, (list, slice, tuple)):
+        # Add type check to prevent equality check between tensor and non-tensor.
+        if istype(val, (list, tuple)):
+            self.LIST_LENGTH(guard)
             for idx, elem in enumerate(val):
                 self.code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
+        elif not istype(val, torch.Size):
+            self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
 
+        if istype(val, torch.Size):
+            val = tuple(val)
         self.code.append(f"{ref} == {val!r}")
 
     def CONSTANT_MATCH(self, guard: Guard):
@@ -262,18 +264,6 @@ class GuardBuilder:
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
-
-        def add_guard_recursively(prefix_index_str, lst):
-            for idx, elem in enumerate(lst):
-                if istype(elem, (list, tuple)):
-                    r = f"{ref}{prefix_index_str}[{idx}]"
-                    self.code.append(
-                        f"___check_type_id({r}, {self.id_ref(type(elem))})"
-                    )
-                    self.code.append(f"len({r}) == {len(elem)}")
-                    add_guard_recursively(f"{prefix_index_str}[{idx}]", elem)
-
-        add_guard_recursively("", value)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
