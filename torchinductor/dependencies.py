@@ -70,9 +70,9 @@ class RecordLoadStore(V.MockHandler):
         self._index_exprs = set()
         self._size = tuple([x for x in size if x != 1])
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         self._reads.add(MemoryDep(name, index, self._size))
-        return f"load({name}, {index})"
+        return f"load({name}, {index}, {upcast})"
 
     def store(self, name, index, value):
         self._writes.add(MemoryDep(name, index, self._size))

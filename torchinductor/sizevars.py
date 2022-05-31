@@ -330,9 +330,9 @@ class SimplifyIndexing(V.WrapperHandler):
         super().__init__(inner)
         self._var_ranges = var_ranges
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.load(name, index)
+        return self._inner.load(name, index, upcast)
 
     def store(self, name, index, value):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)

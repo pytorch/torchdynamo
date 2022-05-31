@@ -203,7 +203,8 @@ class CppKernel(Kernel):
         self.reduction_suffix = IndentedBuffer()
         self.reduction_vars = {}
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+        # upcast argument is ignored on cpu
         var = self.args.input(name)
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
