@@ -1,5 +1,7 @@
 import dataclasses
 import functools
+import itertools
+import logging
 import textwrap
 from functools import partial
 from typing import Any
@@ -10,7 +12,7 @@ from unittest.mock import patch
 
 import numpy
 import sympy
-import torch
+import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
@@ -22,7 +24,25 @@ from .dependencies import extract_read_writes
 from .virtualized import V
 from .virtualized import ops
 
+log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
+
+
+def inverse_reorder(order):
+    inv_order = dict(zip(order, range(len(order))))
+
+    def reindex(index):
+        assert len(index) == len(inv_order)
+        return [index[inv_order[i]] for i in range(len(index))]
+
+    return reindex
+
+
+def fuse_reindexing(reindex1, reindex2):
+    def reindex(index):
+        return reindex1(reindex2(index))
+
+    return reindex
 
 
 class ModularIndexing(sympy.Function):
@@ -36,14 +56,24 @@ class ModularIndexing(sympy.Function):
     def eval(cls, base, divisor, modulus):
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
+
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
             and isinstance(modulus, sympy.Integer)
         ):
             return (base // divisor) % modulus
-        # if isinstance(base, IndexingDiv):
-        #     return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
+        if divisor != 1 and sympy.gcd(base, divisor) == divisor:
+            return ModularIndexing(base / divisor, sympy.Integer(1), modulus)
+
+        if isinstance(base, sympy.Add):
+            new_terms = []
+            for term in base.args:
+                if sympy.gcd(term, modulus * divisor) != modulus * divisor:
+                    new_terms.append(term)
+            if len(new_terms) != len(base.args):
+                return ModularIndexing(sum(new_terms), divisor, modulus)
 
 
 class IndexingDiv(sympy.Function):
@@ -62,8 +92,6 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        # if isinstance(base, IndexingDiv):
-        #     return IndexingDiv(base.args[0], base.args[1] * divisor)
         if sympy.gcd(base, divisor) == divisor:
             return base / divisor
 
@@ -84,6 +112,9 @@ class IRNode(object):
 
     def is_user_of(self, name):
         return any(name == dep.name for dep in self.get_reads())
+
+    def get_numel(self):
+        return product(self.get_size())
 
 
 @dataclasses.dataclass
@@ -113,6 +144,9 @@ class Loops(IRNode):
 
     def get_size(self):
         return self.ranges
+
+    def is_extern(self):
+        return False
 
     @classmethod
     def create(cls, *args, **kwargs):
@@ -273,18 +307,30 @@ def is_contiguous_storage_and_layout(x):
         return False
 
 
-def as_storage_and_layout(x, freeze=True):
+def as_storage_and_layout(x, freeze=True, want_contiguous=False):
     """Try to simplify x into a StorageBox and a Layout"""
     if isinstance(x, TensorBox):
-        return as_storage_and_layout(x.data)
+        return as_storage_and_layout(
+            x.data, freeze=freeze, want_contiguous=want_contiguous
+        )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
-            x.data.freeze_layout()
+            if want_contiguous:
+                x.data.freeze_layout()
+            else:
+                x.data.decide_layout()
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
-        buffer, _ = as_storage_and_layout(x.data)
+        buffer, _ = as_storage_and_layout(
+            x.data, freeze=freeze, want_contiguous=want_contiguous
+        )
         return buffer, x.layout
     raise NotImplementedError
+
+
+as_contiguous_storage_and_layout = functools.partial(
+    as_storage_and_layout, want_contiguous=True
+)
 
 
 @dataclasses.dataclass
@@ -306,6 +352,12 @@ class BaseView(IRNode):
     def realize(self):
         return self.data.realize()
 
+    def get_storage_numel(self):
+        return self.data.get_storage_numel()
+
+    def is_extern(self):
+        return self.data.is_extern()
+
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -318,9 +370,22 @@ class BaseView(IRNode):
 class ExpandView(BaseView):
     size: List[Expr]
 
+    @staticmethod
+    def _normalize_size(x, new_size):
+        """Replace `-1` with correct sizes"""
+        new_size = list(map(sympy.expand, new_size))
+        old_size = x.get_size()
+        old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
+        assert len(new_size) == len(old_size)
+        for i in range(len(new_size)):
+            if new_size[i] == -1:
+                assert old_size[i] is not None
+                new_size[i] = old_size[i]
+        return new_size
+
     @classmethod
     def create(cls, x, new_size):
-        new_size = list(map(sympy.expand, new_size))
+        new_size = cls._normalize_size(x, new_size)
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -458,6 +523,8 @@ class View(BaseView):
 
     @staticmethod
     def handle_negative_index(idx, size):
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
         sizevars = V.graph.sizevars
         if sizevars.size_hint(idx) < 0:
             sizevars.guard_lt(idx, 0)
@@ -482,7 +549,7 @@ class View(BaseView):
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         if is_contiguous_storage_and_layout(x):
-            storage, old_layout = as_storage_and_layout(x)
+            storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -492,7 +559,16 @@ class View(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        return cls(x, tuple(new_size), cls.dynamic_reshape_indexer(old_size, new_size))
+        try:
+            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+        except AssertionError:
+            # optimistic algorithm failed, lets do a fallback
+            flat = [product(old_size)]
+            reindex1 = cls.dynamic_reshape_indexer(old_size, flat)
+            reindex2 = cls.dynamic_reshape_indexer(flat, new_size)
+            reindex = fuse_reindexing(reindex1, reindex2)
+
+        return cls(x, tuple(new_size), reindex)
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):
@@ -570,7 +646,7 @@ class View(BaseView):
         assert len(view_expr) == len(old_size)
 
         def reindex(index):
-            assert len(index) == len(vars)
+            assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
             return tuple(x.subs(replacements) for x in view_expr)
 
@@ -621,7 +697,10 @@ class ReinterpretView(BaseView):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            return ops.load(self.get_name(), indexer(index))
+            upcast = (
+                self.get_dtype() == torch.float16 or self.get_dtype == torch.bfloat16
+            )
+            return ops.load(self.get_name(), indexer(index), upcast)
 
         return loader
 
@@ -704,6 +783,12 @@ class BaseConstant(IRNode):
 
     def mark_reuse(self, users):
         pass
+
+    def get_reads(self):
+        return ()
+
+    def is_extern(self):
+        return False
 
 
 @dataclasses.dataclass
@@ -934,6 +1019,12 @@ class Buffer(IRNode):
     def get_layout(self):
         return self.layout
 
+    def get_storage_numel(self):
+        return self.get_numel()
+
+    def is_extern(self):
+        return False
+
     def freeze_layout(self):
         if not isinstance(self.layout, MultiOutputLayout):
             self.layout = self.layout.as_fixed()
@@ -945,7 +1036,10 @@ class Buffer(IRNode):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            return ops.load(self.name, indexer(index))
+            upcast = (
+                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
+            )
+            return ops.load(self.name, indexer(index), upcast)
 
         return loader
 
@@ -1036,7 +1130,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars) = dependencies.index_vars(
+            _, (index_vars, reduction_vars), _ = dependencies.index_vars(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -1059,6 +1153,139 @@ class ComputedBuffer(Buffer):
 
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
+
+    def simplify_loops(self):
+        _, args, var_ranges = dependencies.index_vars(
+            self.data.get_size(), self.data.get_reduction_size(), prefix="z"
+        )
+        body = LoopBody(
+            self.get_store_function(),
+            (args if self.get_reduction_type() else args[:1]),
+            var_ranges,
+        )
+        index_formulas = [*body.indexing_exprs.values()]
+        memory_addrs = [*body.reads, *body.writes]
+
+        index_vars = []
+        reduce_vars = []
+        index_size = []
+        reduce_size = []
+        for v, s in var_ranges.items():
+            if v in args[0]:
+                assert not reduce_vars
+                index_vars.append(v)
+                index_size.append(s)
+            else:
+                assert v in args[1]
+                reduce_vars.append(v)
+                reduce_size.append(s)
+
+        def simplify_and_reorder(x_vars, sizes):
+            sizes, reindex1, prune = self._simplify_loops(x_vars, sizes, index_formulas)
+            x_vars = prune(x_vars)
+            sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
+            reindex = fuse_reindexing(reindex1, reindex2)
+            return sizes, reindex
+
+        iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
+        reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
+
+        def body_wrapper(index, reduce_index=None):
+            if not reduce_ranges and reduce_index:
+                index = [*index, *reduce_index]
+                reduce_index = None
+            index = iter_reindex(index)
+            if reduce_index:
+                index = [*index, *reduce_reindex(reduce_index)]
+            return body(index)
+
+        return iter_ranges, reduce_ranges, body_wrapper
+
+    @classmethod
+    def _simplify_loops(cls, index_vars, sizes, index_formulas):
+        """
+        Try to remove as many axis from loop iterations as possible, by:
+            1) removing size==1 dimensions
+            2) fuse contiguous dimensions into a single loop
+        """
+        sizes = list(sizes)
+
+        strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
+        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+
+        for i in range(len(sizes)):
+            if sizes[i] == 1:
+                # remove dim
+                sizes[i] = None
+
+        def can_merge_dims(a, b):
+            for k in range(len(strides)):
+                if strides[k][a] * sizes[a] == strides[k][b]:
+                    # approximate test passed, try sound version
+                    va = index_vars[a]
+                    vb = index_vars[b]
+                    v = sympy.Symbol("_merge_tester")
+                    expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
+                    expr2 = index_formulas[k].subs({va: 0, vb: v})
+                    if expr1 == expr2:
+                        continue
+                return False
+            return True
+
+        changed = True
+        while changed:
+            changed = False
+            for i, j in itertools.product(
+                reversed(range(len(sizes))), reversed(range(len(sizes)))
+            ):
+                if i == j or sizes[i] is None or sizes[j] is None:
+                    continue
+                if can_merge_dims(i, j):
+                    changed = True
+                    sizes[i] = sizes[i] * sizes[j]
+                    sizes[j] = None
+
+        def reindex(index):
+            it = list(reversed(index))
+            new_index = []
+            for size in sizes:
+                if size is None:
+                    new_index.append(sympy.Integer(0))
+                else:
+                    new_index.append(it.pop())
+            assert not it
+            return new_index
+
+        def prune(index):
+            assert len(index) == len(sizes)
+            return [i for i, s in zip(index, sizes) if s is not None]
+
+        return [x for x in sizes if x is not None], reindex, prune
+
+    @staticmethod
+    def _apply_loop_reordering(index_vars, sizes, memory_addrs):
+        """
+        Shuffle the order of loops around to hopefully improve performance.
+        """
+        from .scheduler import pick_loop_order
+
+        try:
+            strides = numpy.array(
+                [
+                    V.graph.sizevars.stride_hints(expr, index_vars)
+                    for expr in memory_addrs
+                ],
+                dtype=numpy.int64,
+            )
+            assert strides.shape == (len(memory_addrs), len(index_vars))
+            order = list(reversed(pick_loop_order(strides, sizes)))
+        except Exception:
+            log.warning(
+                f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+            )
+            order = list(range(len(sizes)))
+        sizes = [sizes[i] for i in order]
+        return sizes, inverse_reorder(order)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()
@@ -1085,6 +1312,7 @@ class InputsKernel(Buffer):
         return dependencies.ReadWrites(
             {dependencies.StarDep(x.get_name()) for x in self.inputs},
             {dependencies.StarDep(self.get_name())},
+            set(),
         )
 
     @staticmethod
@@ -1098,6 +1326,9 @@ class InputsKernel(Buffer):
             assert isinstance(x, (Buffer, ReinterpretView)), x
             inputs_new.append(x)
         return inputs_new
+
+    def is_extern(self):
+        return True
 
 
 class NopKernel(InputsKernel):
@@ -1226,11 +1457,11 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_contiguous(cls, x):
         if is_contiguous_storage_and_layout(x):
-            as_storage_and_layout(x, freeze=True)
+            as_contiguous_storage_and_layout(x, freeze=True)
             return x
         x = cls.copy_input(x)
         assert is_contiguous_storage_and_layout(x)
-        as_storage_and_layout(x, freeze=True)
+        as_contiguous_storage_and_layout(x, freeze=True)
         return x
 
     def codegen_args(self):
@@ -1356,7 +1587,7 @@ class DeviceCopy(ExternKernelOut):
 
         x = cls.realize_input(x)
         read_writes = x.get_read_writes()
-        if all(
+        if not x.is_extern() and all(
             (r.name in V.graph.constants and hasattr(r, "index"))
             for r in read_writes.reads
         ):
@@ -1732,3 +1963,154 @@ class StorageBox(MutableBox):
             # TODO(jansel): this heuristic is a wild guess
             if len(read_writes.reads) > 1 or len(self.inner_fn_str()) > 1000:
                 self.realize()
+
+
+class LoopBody:
+    """
+    Captures the body of a Loops subclass into an FX graph.  Persists any
+    indexing simplifications and makes it easier to analyze loop bodies.
+    """
+
+    def __init__(self, fn, args, var_ranges):
+        super().__init__()
+        self.var_ranges = var_ranges
+        self.indexing_exprs = {}
+        self.indexing_exprs_name = {}
+        self.reads = []
+        self.writes = []
+        self.other = []
+        self.submodules = {}
+        self.subblocks = {}
+        self.indirect_vars = []
+        self.root_block = LoopBodyBlock(self, fn, args)
+        self.indexing = None
+
+    def add_index_expr(self, expr: sympy.Expr, category):
+        getattr(self, category).append(expr)
+        if expr not in self.indexing_exprs_name:
+            name = f"index{len(self.indexing_exprs)}"
+            self.indexing_exprs_name[expr] = name
+            self.indexing_exprs[name] = expr
+        return self.indexing_exprs_name[expr]
+
+    def add_submodule(self, block, prefix):
+        """Not actually for nn.Modules, but subblocks in generated code are mapped to FX call_module opcodes"""
+        if prefix[-1].isnumeric() and prefix not in self.submodules:
+            name = prefix
+        else:
+            name = f"{prefix}{len(self.submodules)}"
+        self.submodules[name] = block
+        return name
+
+    def add_indirect(self):
+        name = f"indirect{len(self.indirect_vars)}"
+        var = sympy.Symbol(name, integer=True)
+        self.indirect_vars.append([var])
+        return var
+
+    def __call__(self, index=()):
+        assert len(index) == len(self.var_ranges)
+        assert all(v not in self.var_ranges for v in index)
+        replacements = dict(zip(self.var_ranges.keys(), index))
+        self.indexing = {
+            name: expr.subs(replacements) for name, expr in self.indexing_exprs.items()
+        }
+        result = self.root_block()
+        self.indexing = None
+        return result
+
+
+class LoopBodyBlock:
+    """
+    Captures the body of a Loops subclass into an FX graph.
+    In normal cases there will be a 1:1 mapping between LoopBody and
+    LoopBodyBlock, hower in the case of ops.masked() the masked out
+    operations will manifest as an extra LoopBodyBlock.
+    """
+
+    def __init__(self, body: LoopBody, fn: Callable, args: List[Any]):
+        self.gm = None
+        self.body = body
+
+        def add_index(expr, category):
+            return tracer.create_proxy(
+                "get_attr", self.body.add_index_expr(expr, category), (), {}
+            )
+
+        class CaptureIndexing(V.WrapperHandler):
+            def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+                index = add_index(index, "reads")
+                return self._inner.load(name, index, upcast)
+
+            def store(self, name, index, value):
+                index = add_index(index, "writes")
+                return self._inner.store(name, index, value)
+
+            def reduction(self, name, dtype, reduction_type, index, value):
+                index = add_index(index, "writes")
+                return self._inner.reduction(name, dtype, reduction_type, index, value)
+
+            def index_expr(self, index, dtype):
+                index = add_index(index, "other")
+                return self._inner.index_expr(index, dtype)
+
+            @staticmethod
+            def masked(mask_proxy, masked_body: Callable, other_proxy):
+                """
+                Recursively capture the masked out body in another LoopBodyBlock
+                """
+
+                def shim(mask, other):
+                    return V.ops.masked(mask, subblock, other)
+
+                name = self.body.add_submodule(shim, "masked_subblock")
+                subblock = LoopBodyBlock(self.body, masked_body, ())
+                self.body.subblocks[name] = subblock
+                return tracer.create_proxy(
+                    "call_module", name, (mask_proxy, other_proxy), {}
+                )
+
+            @staticmethod
+            def indirect_indexing(index_proxy):
+                """
+                Flow data from tensors into indexing formulas.
+                Introduce a call_module to update the indexing.
+                """
+
+                def set_indirect(new_var):
+                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
+
+                var = self.body.add_indirect()
+                tracer.create_proxy(
+                    "call_module",
+                    self.body.add_submodule(set_indirect, f"set_{var}"),
+                    (index_proxy,),
+                    {},
+                )
+                return var
+
+        tracer = torch.fx.Tracer()
+        tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
+        proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
+        from .sizevars import SimplifyIndexing
+
+        with V.set_ops_handler(
+            SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
+        ):
+            tracer.create_proxy("output", "output", (fn(*args),), {})
+        self.graph = tracer.graph
+
+    def replace_indirect(self, old, new):
+        """Swap in a variable used in indirect indexing"""
+        for name in self.body.indexing.keys():
+            expr = getattr(self.gm, name)
+            if old in expr.free_symbols:
+                setattr(self.gm, name, expr.subs({old: new}))
+
+    def __call__(self):
+        self.gm = torch.fx.GraphModule(
+            {**self.body.indexing, **self.body.submodules}, self.graph
+        )
+        result = self.gm.forward(V.get_ops_handler())
+        self.gm = None
+        return result

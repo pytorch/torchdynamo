@@ -121,6 +121,18 @@ class CppOverrides(OpOverrides):
         return f"std::log({x})"
 
     @staticmethod
+    def round(x):
+        return f"std::nearbyint({x})"
+
+    @staticmethod
+    def floor(x):
+        return f"std::floor({x})"
+
+    @staticmethod
+    def trunc(x):
+        return f"std::trunc({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 
@@ -174,10 +186,6 @@ class CppOverrides(OpOverrides):
     def and_(a, b):
         return f"{a} && {b}"
 
-    @staticmethod
-    def logical_not(a):
-        return f"!{a}"
-
 
 class CppKernel(Kernel):
     overrides = CppOverrides
@@ -195,7 +203,8 @@ class CppKernel(Kernel):
         self.reduction_suffix = IndentedBuffer()
         self.reduction_vars = {}
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+        # upcast argument is ignored on cpu
         var = self.args.input(name)
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")

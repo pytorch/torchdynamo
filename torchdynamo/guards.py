@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import enum
+import logging
 import os
 import re
 import textwrap
@@ -23,10 +24,19 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
+from .utils import ExactWeakKeyDictionary
 from .utils import istype
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
+
+log = logging.getLogger(__name__)
+
+# map from transformed code back to original user code
+orig_code_map = ExactWeakKeyDictionary()
+
+# keep a record of code_obj -> list of guard failure reasons for logging
+guard_failures = collections.defaultdict(list)
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -36,6 +46,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
+        ("inf", float("inf")),
     ]
 )
 
@@ -324,20 +335,31 @@ class GuardedCode:
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
+        # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
+        verbose_code_parts = (
+            ["___guarded_code.valid"] + local_builder.code + global_builder.code
+        )
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
         check_tensors_fn = None
+        check_tensors_verbose_fn = None
         if tensor_check_names:
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
-            check_tensors_fn = TensorGuards(
+            tensor_guards = TensorGuards(
                 *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
-            ).check
+            )
+            check_tensors_fn = tensor_guards.check
+            check_tensors_verbose_fn = tensor_guards.check_verbose
             code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
+            verbose_args = ", ".join(
+                tensor_check_names + ["tensor_check_names=tensor_check_names"]
+            )
+            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         code = " and ".join(unique(code_parts))
 
@@ -345,6 +367,8 @@ class GuardedCode:
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
+                ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("tensor_check_names", tensor_check_names),
             ]
         )
         closure_vars.update(CLOSURE_VARS)
@@ -356,13 +380,14 @@ class GuardedCode:
         )
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        if os.environ.get("TORCHDYNAMO_PRINT_GUARD_FAILS", None) == "1":
-            set_guard_fail_hook(guard_fail_hook)
+        set_guard_fail_hook(guard_fail_hook)
         out = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
+        # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.code_parts = code_parts
+        guard_fn.verbose_code_parts = verbose_code_parts
         guard_fn.global_scope = global_builder.scope
         return guard_fn
 
@@ -385,19 +410,24 @@ def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
 ):
     """
-    set TORCHDYNAMO_PRINT_GUARD_FAILS=1 to cause this to be called
-    whenever a guard fails.
+    called whenever a guard fails.
     """
     if not last:
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reasons = []
-    for part in guard_fn.code_parts:
-        if not eval(part, guard_fn.global_scope, scope):
+    for part in guard_fn.verbose_code_parts:
+        fail_reason = eval(part, guard_fn.global_scope, scope)
+        # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
+        # is updated to return a string explaining the failure.
+        if isinstance(fail_reason, str):
+            reasons.append(fail_reason)
+            break
+        elif isinstance(fail_reason, bool) and not fail_reason:
             reasons.append(part)
             break
-    print(f"Failed guards {reasons} (code={id(code)}, last={last})")
+    guard_failures[orig_code_map[code]].append(reasons)
 
 
 def guard_error_hook(

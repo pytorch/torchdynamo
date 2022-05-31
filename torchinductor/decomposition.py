@@ -18,11 +18,18 @@ decompositions = get_decompositions(
         aten.native_layer_norm,
         aten.native_batch_norm,
         aten.cudnn_batch_norm,
+        aten.native_group_norm,
         aten.leaky_relu,
         aten.hardtanh,
         aten.hardsigmoid,
         aten.hardswish,
         aten.transpose.int,
+        aten.clamp_min,
+        aten.clamp_max,
+        # don't exist (yet), but wish they did:
+        aten._embedding_bag,
+        aten.grid_sampler_2d,
+        aten.norm,
     ]
 )
 
@@ -95,6 +102,22 @@ def rsqrt(x):
 @register_decomposition([aten.log2])
 def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))
+
+
+@register_decomposition([aten.round.decimals])
+def round_dec(x, decimals=0):
+    ten_pow_decimals = 10.0**decimals
+    return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
+
+
+@register_decomposition([aten.div.Tensor_mode])
+def div_mode(a, b, rounding_mode=None):
+    result = aten.div(a, b)
+    if rounding_mode == "floor":
+        return torch.floor(result)
+    if rounding_mode == "trunc":
+        return torch.trunc(result)
+    return result
 
 
 @register_decomposition([aten.gelu])

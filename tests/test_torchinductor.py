@@ -6,12 +6,18 @@ import importlib
 import unittest
 from unittest.mock import patch
 
+import sympy
 import torch
 from torch.nn import functional as F
+from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.ir import IndexingDiv
+from torchinductor.ir import ModularIndexing
+from torchinductor.sizevars import SizeVarAllocator
 
 try:
     importlib.import_module("functorch")
@@ -26,9 +32,20 @@ try:
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires functorch")
 
-aten = torch.ops.aten
-
 print("torch.cuda.is_available(): ", torch.cuda.is_available())
+
+HAS_CPU = False
+try:
+    from subprocess import CalledProcessError
+
+    from torchinductor.codecache import CppCodeCache
+
+    CppCodeCache.load("")
+    HAS_CPU = True
+except (CalledProcessError, OSError):
+    raise unittest.SkipTest("Did not find a working c++ compiler")
+
+aten = torch.ops.aten
 
 HAS_CUDA = False
 if torch.cuda.is_available():
@@ -92,8 +109,29 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
-def check_model(self: TestCase, model, example_inputs):
-    correct = model(*example_inputs)
+def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+    # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+    has_lowp_args = False
+
+    def upcast_fn(x):
+        nonlocal has_lowp_args
+        if isinstance(x, torch.Tensor) and (
+            x.dtype == torch.float16 or x.dtype == torch.bfloat16
+        ):
+            has_lowp_args = True
+            return x.float()
+        else:
+            return x
+
+    upcasted_inputs = list(map(upcast_fn, example_inputs))
+    if has_lowp_args:
+        if hasattr(model, "to"):
+            model = model.to(torch.float)
+    correct = model(*upcasted_inputs)
+    # downcast the model back if needed
+    if has_lowp_args:
+        if hasattr(model, "to"):
+            model = model.to(torch.half)
 
     @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
     def run(*ex):
@@ -102,10 +140,19 @@ def check_model(self: TestCase, model, example_inputs):
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
         actual = run(*example_inputs)
-    self.assertTrue(same(actual, correct, equal_nan=True))
+
+    assert type(actual) == type(correct)
+    correct_flat, correct_spec = tree_flatten(correct)
+    actual_flat, _ = tree_flatten(actual)
+    correct_flat = tuple(
+        y.to(x.dtype) if isinstance(y, torch.Tensor) else y
+        for x, y in zip(actual_flat, correct_flat)
+    )
+    correct = tree_unflatten(correct_flat, correct_spec)
+    self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
-def check_model_cuda(self: TestCase, model, example_inputs):
+def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
     if hasattr(model, "to"):
         model = model.to("cuda")
 
@@ -119,6 +166,20 @@ def check_model_cuda(self: TestCase, model, example_inputs):
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
     check_model(self, model, example_inputs)
+
+    if check_lowp:
+
+        def downcast_fn(x):
+            if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
+                return x
+            return torch.empty_strided(
+                x.size(), x.stride(), device="cuda", dtype=torch.half
+            ).copy_(x)
+
+        example_inputs = list(map(downcast_fn, example_inputs))
+        if hasattr(model, "to"):
+            model = model.to(torch.half)
+        check_model(self, model, example_inputs, 2e-3)
 
 
 class SweepInputs2:
@@ -166,6 +227,103 @@ class SweepInputsCpuTest(SweepInputs2, TestCase):
 
 
 SweepInputsCpuTest.populate()
+
+
+class TestIndexingSimplification(unittest.TestCase):
+    def test_indexing_simplification(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0")
+        i1 = sympy.Symbol("i1")
+        i2 = sympy.Symbol("i2")
+        r3 = sympy.Symbol("r3")
+
+        var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
+
+        expr = (
+            128 * i2
+            + ModularIndexing(i1, 1, 64)
+            + 64 * ModularIndexing(i1 + 64 * r3, 64, 2)
+        )
+        # check that `i1//64` is removed when i1 is always less than 64,
+        # and the next simplificaton doesn't happen
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
+        )
+        # all the modular indexing should be removed when the body cant be larger than the modulus
+        var_ranges[r3] = 2
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
+        )
+
+        # always-zero terms should be removed from IndexingDiv too
+        self.assertEqual(
+            sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
+            IndexingDiv(i1, 32),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                IndexingDiv(r3 + 2 * i2 + i1, 32), var_ranges
+            ),
+            IndexingDiv(i1 + 2 * i2, 32),
+        )
+
+        # check the same thing but with symbolic divisor
+        self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
+        self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
+
+        # (10*i) % 10 is always zero and should get optimized away
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * 10, 1, 10), ModularIndexing(i0, 1, 10)
+        )
+
+        # ((20*i)//2) % 10 is always zero and should get optimized away
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * 20, 2, 10), ModularIndexing(i0, 2, 10)
+        )
+
+        # the same things happens with symbolic divisor
+        self.assertEqual(
+            ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
+        )
+
+        # Constant fold from divisor into base
+        self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
+        self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
+
+    def test_indexing_join(self):
+        sizevars = SizeVarAllocator()
+        i0 = sympy.Symbol("i0")
+        i1 = sympy.Symbol("i1")
+        i2 = sympy.Symbol("i2")
+
+        # join two ModularIndexing calls into one larger one when possible
+        expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr1, {}), ModularIndexing(i0, 1, 128)
+        )
+
+        # it should also work with a scale
+        self.assertEqual(
+            sizevars.simplify_with_ranges(2 * expr1, {}),
+            2 * ModularIndexing(i0, 1, 128),
+        )
+
+        # it should not happen in this case as the modulus is wrong
+        expr2 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr2, {}), expr2)
+
+        # check that it also works with a modulus>1
+        expr3 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1, i2)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr3, {}), ModularIndexing(i0, 10, i1 * i2)
+        )
+
+        # and also works with an offset
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr3 + 10, {}),
+            ModularIndexing(i0, 10, i1 * i2) + 10,
+        )
 
 
 class CommonTemplate:
@@ -365,6 +523,15 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_round(self):
+        def fn(a, b):
+            return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
+
+        # with *100 we are always getting a number exactly at .5 which we don't do right in half
+        self.common(
+            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False
+        )
+
     def test_silu(self):
         def fn(a):
             return (torch.nn.functional.silu(a),)
@@ -383,8 +550,20 @@ class CommonTemplate:
             )
 
         self.common(
-            fn, (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),)
+            fn,
+            (torch.tensor((float("nan"), float("inf"), float("-inf"), 1.0)),),
+            check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
+
+    def test_div(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -424,7 +603,10 @@ class CommonTemplate:
 
     def test_expand(self):
         def fn(a):
-            return ((a + 1).expand(3, 4, 2, 3, 2) + 2, a.expand(2, 1, 2, 3, 2) + 2)
+            return (
+                (a + 1).expand(3, 4, 2, 3, 2) + 2,
+                a.expand(2, 1, 2, 3, 2) + 2,
+            ), a.expand(2, -1, 5, -1)
 
         self.common(fn, (torch.randn(2, 1, 2),))
 
@@ -440,6 +622,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
 
+    def test_simplify_loops(self):
+        def fn(a, b):
+            return a + b
+
+        self.common(
+            fn,
+            (
+                torch.randn(2, 3, 4, 5, 6),
+                torch.randn(4, 2, 3, 5, 6).permute(1, 2, 0, 3, 4),
+            ),
+        )
+
     def test_unsqueeze(self):
         def fn(a):
             return (
@@ -448,6 +642,25 @@ class CommonTemplate:
                 torch.unsqueeze(a + 1, 0) + 2,
                 torch.unsqueeze(a, -2) + 2,
             )
+
+        self.common(
+            fn,
+            (
+                torch.randn(
+                    2,
+                    2,
+                    2,
+                    2,
+                ),
+            ),
+        )
+
+    def test_unsqueeze_inplace(self):
+        def fn(a):
+            tmp1 = a + 1
+            aten.unsqueeze_(tmp1, 2)
+            tmp2 = aten.unsqueeze_(a + 1, 0) + 2
+            return (tmp1, tmp2)
 
         self.common(
             fn,
@@ -651,6 +864,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 2, 10]),),
+            check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
     def test_unbind(self):
@@ -771,6 +985,15 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 8, 111, 111]),),
+        )
+
+    def test_avg_pool2d5(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1], count_include_pad=False)
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
     def test_alexnet_prefix(self):
@@ -912,13 +1135,11 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(
-            m,
-            (torch.randn([2, 10, 8, 8]),),
-        )
+        self.common(m, (torch.randn([2, 10, 8, 8]),), check_lowp=False)
         self.common(
             m,
             (torch.randn([3, 10, 16, 16]),),
+            check_lowp=False,  # too painful to match types of bn model
         )
 
     def test_leaky_relu(self):
@@ -950,7 +1171,7 @@ class CommonTemplate:
 
     def test_masked_fill(self):
         def fn(mask, value):
-            return aten.masked_fill(value, mask, -1000000000.0) + 2, aten.masked_fill(
+            return aten.masked_fill(value, mask, -10000.0) + 2, aten.masked_fill(
                 value / 2.0, torch.logical_not(mask), 667
             )
 
@@ -1073,6 +1294,24 @@ class CommonTemplate:
             ),
         )
 
+    def test_bitwise2(self):
+        # again with bool types
+        def fn(x, y):
+            return (
+                torch.bitwise_not(x),
+                torch.bitwise_or(x, y),
+                torch.bitwise_xor(x, y),
+                torch.bitwise_and(x, y),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(0, 2, (2, 20), dtype=torch.bool),
+                torch.randint(0, 2, (2, 20), dtype=torch.bool),
+            ),
+        )
+
     def test_inf(self):
         def fn(a):
             return a + float("inf"), a + float("-inf"), a * -float("inf")
@@ -1138,7 +1377,7 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randn(8, 8, 8),
+                torch.randn(8, 8, 12),
                 torch.tensor([0, 0, 2, 2], dtype=torch.int64),
                 torch.tensor([3, 4, 4, 3], dtype=torch.int64),
             ),
@@ -1262,6 +1501,7 @@ class CommonTemplate:
                 torch.randn([4, 8, 2048]),
                 torch.randn([4, 8, 2048]),
             ),
+            check_lowp=False,  # difference in rnn is too large between half and float inputs
         )
 
     def test_upsample_nearest2d(self):
@@ -1299,6 +1539,14 @@ class CommonTemplate:
     def test_sort(self):
         def fn(a):
             return torch.sort(a)
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_topk(self):
+        def fn(a):
+            return torch.topk(a, 2, -1)
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
@@ -1387,6 +1635,26 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    def test_input_mutation3(self):
+        def fn(a):
+            a += 1
+            a *= 2
+            aten.sigmoid_(a)
+            a = a.view(64)
+            a += 3
+            a *= 4
+            aten.relu_(a)
+            return a
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        correct1 = fn(arg1)
+        with torchdynamo.optimize_assert(compile_fx):
+            actual1 = fn(arg2)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(arg1, arg2))
+
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -1413,12 +1681,13 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
 
 
-class CpuTests(TestCase):
-    common = check_model
-    device = "cpu"
+if HAS_CPU:
 
+    class CpuTests(TestCase):
+        common = check_model
+        device = "cpu"
 
-CommonTemplate.install(CpuTests, "cpu")
+    CommonTemplate.install(CpuTests, "cpu")
 
 if HAS_CUDA:
 
