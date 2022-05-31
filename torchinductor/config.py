@@ -42,3 +42,5 @@ class cpp:
 class triton:
     cudagraphs = True
     hackery = False
+    # Always load full blocks (rather than broadcasting inside the block)
+    dense_indexing = False

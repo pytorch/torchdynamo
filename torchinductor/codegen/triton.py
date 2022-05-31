@@ -100,6 +100,17 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
+        # wonkyness to work around https://github.com/openai/triton/issues/532
+        # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
+        a = ops.identity(a)
+        b = ops.identity(b)
+        c = ops.identity(c)
+        a = ops.identity(
+            f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
+        )
+        a = ops.identity(
+            f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
+        )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
@@ -321,10 +332,25 @@ class TritonKernel(Kernel):
         mask = []
         addr = []
 
+        have_dense = True
+        need_dense = config.triton.dense_indexing or "tmp" in str(index)
+
         for part, tree in zip(parts, self.range_trees):
             if part != 0:
                 addr.append(texpr(part))
                 mask.append(f"{tree.prefix}mask")
+            elif tree.prefix == "r" and not self.inside_reduction:
+                pass
+            else:
+                have_dense = False
+
+        if need_dense and not have_dense:
+            mask = [
+                f"{tree.prefix}mask"
+                for tree in self.range_trees
+                if tree.prefix != "r" or self.inside_reduction
+            ]
+            addr.append(f"tl.zeros({self.dense_size_str()}, tl.int32)")
 
         if offset != 0:
             addr.append(texpr(offset))
@@ -489,6 +515,13 @@ class TritonKernel(Kernel):
         sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
         if i is not None:
             sizes[i] = f"{x.upper()}BLOCK"
+        return f"[{', '.join(sizes)}]"
+
+    def dense_size_str(self):
+        sizes = []
+        for tree in self.range_trees:
+            if tree.prefix != "r" or self.inside_reduction:
+                sizes.append(f"{tree.prefix.upper()}BLOCK")
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, code, name: str):

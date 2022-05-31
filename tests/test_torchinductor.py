@@ -1640,6 +1640,24 @@ class CommonTemplate:
 
         self.assertTrue(same(arg1, arg2))
 
+    def test_indirect_load_broadcast(self):
+        def fn(in_ptr0, in_ptr1, in_ptr2):
+            return torch.gather(in_ptr1, 0, in_ptr2) + in_ptr0
+
+        arg190 = rand_strided((32, 21), (1, 32), device=self.device, dtype=torch.int64)
+        arg190.fill_(0)
+        arg111 = rand_strided(
+            (9521, 512), (512, 1), device=self.device, dtype=torch.float32
+        )
+        self.common(
+            fn,
+            (
+                torch.randn(32, 1),
+                arg111,
+                arg190,
+            ),
+        )
+
 
 if HAS_CPU:
 

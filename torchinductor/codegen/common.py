@@ -61,6 +61,11 @@ class OpOverrides:
         return getattr(self._parent, item)
 
     @staticmethod
+    def identity(value):
+        # used to trigger cse
+        return value
+
+    @staticmethod
     def constant(value, dtype):
         return repr(value)
 

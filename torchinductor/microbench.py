@@ -99,6 +99,10 @@ class MicroBenchmarks:
     def add_relu_softmax(x, a):
         return (torch.softmax(torch.relu(x + a), -1),)
 
+    @staticmethod
+    def sum(a, b):
+        return (a + b).sum()
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -152,7 +156,7 @@ def main():
         torchinductor.config.debug = True
 
     rows = []
-    for model in (MicroBenchmarks.add,):
+    for model in (MicroBenchmarks.sum,):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:

@@ -123,7 +123,7 @@ def compile_fx(
             compiled_fn = wrap(graph.compile_to_fn())
 
         # make sure it works, causes issues for mutation
-        # compiled_fn(*example_inputs)
+        compiled_fn(*example_inputs)
 
         if (
             cudagraphs
