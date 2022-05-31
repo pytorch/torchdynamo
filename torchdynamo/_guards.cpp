@@ -257,7 +257,15 @@ PyObject *TensorGuards_check_verbose(TensorGuards *self, PyObject *args,
   for (ssize_t i = 0; i < len; ++i) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
-      return Py_BuildValue("s", "Py_Type check fail");
+      std::stringstream fail_reason;
+      PyObject* type_str = PyObject_Str(PyObject_Type(item));
+      fail_reason << "expected type of '" << tensor_check_names[i] << "' to be a tensor type, ";
+      if(!type_str) {
+        fail_reason << "but found a different type";
+      } else {
+        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+      }
+      return Py_BuildValue("s", fail_reason.str().c_str());
     }
     std::string fail_reason = checks[i].check_verbose(
         state, THPVariable_Unpack(item), tensor_check_names[i]);
