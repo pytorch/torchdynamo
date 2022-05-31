@@ -1,3 +1,4 @@
+import collections
 import dataclasses
 import itertools
 import typing
@@ -34,15 +35,22 @@ class StarDep(typing.NamedTuple):
         return self
 
 
+class IndexExprDep(typing.NamedTuple):
+    index: sympy.Expr
+    size: List[sympy.Expr]
+
+
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[MemoryDep]
     writes: Set[MemoryDep]
+    index_exprs: Set[IndexExprDep]
 
     def rename(self, renames: typing.Dict[str, str]):
         return ReadWrites(
             {dep.rename(renames) for dep in self.reads},
             {dep.rename(renames) for dep in self.writes},
+            self.index_exprs,
         )
 
     def with_read(self, name: str):
@@ -50,6 +58,7 @@ class ReadWrites:
         return ReadWrites(
             set.union(self.reads, {StarDep(name)}),
             self.writes,
+            self.index_exprs,
         )
 
 
@@ -58,6 +67,7 @@ class RecordLoadStore(V.MockHandler):
         super(RecordLoadStore, self).__init__()
         self._reads = set()
         self._writes = set()
+        self._index_exprs = set()
         self._size = tuple([x for x in size if x != 1])
 
     def load(self, name: str, index: sympy.Expr):
@@ -71,23 +81,33 @@ class RecordLoadStore(V.MockHandler):
     def reduction(self, name, dtype, reduction_type, index, value):
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 
+    def index_expr(self, index, dtype):
+        self._index_exprs.add(IndexExprDep(index, self._size))
+        return f"index_expr({index}, {dtype})"
 
-def index_vars(*argsizes):
+
+def index_vars(*argsizes, prefix="d"):
     from .ir import SqueezeView
 
+    def add_var(length):
+        v = sympy.Symbol(f"{prefix}{next(cnt)}")
+        var_ranges[v] = length
+        return v
+
+    var_ranges = collections.OrderedDict()
     args = []
     new_sizes = []
     cnt = itertools.count()
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
-        args.append(reindex([sympy.Symbol(f"d{next(cnt)}") for _ in new_size]))
-    return new_sizes, args
+        args.append(reindex(list(map(add_var, new_size))))
+    return new_sizes, args, var_ranges
 
 
 def extract_read_writes(fn, *argsizes):
-    new_sizes, args = index_vars(*argsizes)
+    new_sizes, args, var_ranges = index_vars(*argsizes)
     rw = RecordLoadStore(new_sizes[0])
     with V.set_ops_handler(rw):
         fn(*args)
-    return ReadWrites(rw._reads, rw._writes)
+    return ReadWrites(rw._reads, rw._writes, rw._index_exprs)

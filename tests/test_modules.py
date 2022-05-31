@@ -529,6 +529,36 @@ class SelfMutatingModule(torch.nn.Module):
         return F.relu(result)
 
 
+class ModuleAttributePrecedenceBase(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def linear(self, x):
+        return x * 2.0
+
+
+class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
+    def __init__(self):
+        super().__init__()
+        self.activation = torch.nn.ReLU()
+        self.linear = torch.nn.Linear(10, 10)
+        self.initializer = torch.ones([10, 10])
+        self.scale = 0.5
+
+    def activation(self, x):
+        return x * 1.2
+
+    def initializer(self):
+        return torch.zeros([10, 10])
+
+    def scale(self):
+        return 2.0
+
+    def forward(self, x):
+        # object attribute takes precedence unless it's a nn.Module
+        return self.activation(self.linear(self.initializer + x)) * self.scale
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -578,6 +608,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
+    test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()

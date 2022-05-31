@@ -3,6 +3,7 @@ import inspect
 import itertools
 import math
 import operator
+import types
 from typing import Dict
 from typing import List
 
@@ -352,6 +353,15 @@ class BuiltinVariable(VariableTracker):
     def call_isinstance(self, tx, arg, isinstance_type):
         arg_type = arg.python_type()
         isinstance_type = isinstance_type.as_python_constant()
+
+        # UserDefinedObject with C extensions can have torch.Tensor attributes,
+        # so break graph.
+        if isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
+            arg.value, types.MemberDescriptorType
+        ):
+            unimplemented(
+                f"isinstance called on UserDefinedClass {arg} {isinstance_type}"
+            )
         try:
             val = issubclass(arg_type, isinstance_type)
         except TypeError:
