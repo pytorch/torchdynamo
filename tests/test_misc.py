@@ -1458,3 +1458,17 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(sample)
 
         self.assertTrue(same(ref, res))
+
+    def test_update_locals_and_stack_uses_shared_cache(self):
+        def fn(x):
+            perm = [0, 3, 5]
+            perm = [i for i in range(min(perm))] + perm
+            perm.extend(i for i in range(x.dim()) if i not in perm)
+            return perm
+
+        x = torch.rand([2, 2, 2, 2, 2, 2])
+        res1 = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x)
+        self.assertTrue(same(res1, res2))
