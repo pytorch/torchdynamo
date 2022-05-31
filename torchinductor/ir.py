@@ -1213,6 +1213,7 @@ class ComputedBuffer(Buffer):
             and not self.get_reduction_type()
             and iter_ranges
             and not has_modular_indexing
+            and config.triton.max_tiles > 1
         ):
             # TODO(jansel): should we include store strides here or just loads?
             strides = [
@@ -1233,7 +1234,7 @@ class ComputedBuffer(Buffer):
         return (iter_ranges, reduce_ranges), body
 
     @classmethod
-    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides, max_tiles=2):
+    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides):
         """
         Break iter_ranges up into at most max_tiles tiles based on stride==1
         dimensions.
@@ -1246,20 +1247,24 @@ class ComputedBuffer(Buffer):
         """
         tiles = []
         current_tile = []
+        max_tiles = config.triton.max_tiles
 
         # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
         for i in range(len(iter_ranges)):
             current_tile.append(iter_ranges[i])
             # break tiles on stride 1
-            if any(stride[i] == 1 for stride in strides) and len(tiles) < max_tiles - 1:
-                # split rest into a new tile
+            if any(stride[i] == 1 for stride in strides):
                 tiles.append(current_tile)
                 current_tile = []
 
         if current_tile:
             tiles.append(current_tile)
 
-        assert len(tiles) <= max_tiles
+        if len(tiles) > max_tiles:
+            split = len(tiles)-max_tiles+1
+            tiles = [*itertools.chain(*tiles[:split])] + tiles[split:]
+            assert len(tiles) == max_tiles
+
         return tiles
 
     @classmethod
