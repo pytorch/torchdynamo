@@ -1,1 +1,1 @@
-from .conv import conv
+from .conv import _conv, conv
