@@ -1148,7 +1148,17 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_loops(self):
+    def simplify_reorder_and_tile(self):
+        """
+        This is the main place where we do loop transformations in a
+        backend-agnostic way.
+
+        Here we:
+            1) Remove any 1 dimensions
+            2) Fuse contiguous dimensions together
+            3) Reorder dimensions based on stride orders
+            4) Split dimensions into tiles
+        """
         _, args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
@@ -1194,8 +1204,7 @@ class ComputedBuffer(Buffer):
 
         # TODO(jansel): support tiling with modular indexing
         has_modular_indexing = any(
-            ("ModularIndexing" in str(expr)
-            or "IndexingDiv" in str(expr))
+            ("ModularIndexing" in str(expr) or "IndexingDiv" in str(expr))
             for expr in body.indexing_exprs.values()
         )
 
@@ -1209,6 +1218,7 @@ class ComputedBuffer(Buffer):
             strides = [
                 V.graph.sizevars.stride_hints(expr, iter_vars)
                 for expr in body.reads
+                # TODO(jansel): how should we tile indirect loads?
                 if "indirect" not in str(expr)
             ]
             tiled_ranges = self._tile_contiguous(iter_ranges, strides)
