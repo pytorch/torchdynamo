@@ -122,6 +122,7 @@ class RangeTree:
         self,
         name: str,
         var_list: List[sympy.Symbol],
+        var_ranges: Dict[sympy.Symbol, sympy.Expr],
         numel: sympy.Expr,
         prefix: str,
         depth=0,
@@ -131,6 +132,7 @@ class RangeTree:
         self.name = name
         self.children: Dict[sympy.Expr, RangeTreeEntry] = dict()
         self.var_list = var_list
+        self.var_ranges = var_ranges
         self.numel = numel
         self.prefix = prefix
         self.depth = depth
@@ -144,6 +146,7 @@ class RangeTree:
             self.children[length] = node
             V.kernel.range_tree_nodes[node.symbol()] = node
             self.var_list.append(node.symbol())
+            self.var_ranges[node.symbol()] = length
         else:
             node = self.children[length]
         return node
@@ -154,6 +157,7 @@ class RangeTreeRoot(RangeTree):
         super(RangeTreeRoot, self).__init__(
             name=name,
             var_list=[],
+            var_ranges=dict(),
             numel=numel,
             prefix=prefix,
         )
@@ -179,6 +183,7 @@ class RangeTreeEntry(RangeTree):
             name=name,
             numel=parent.numel / length,
             var_list=parent.var_list,
+            var_ranges=parent.var_ranges,
             prefix=parent.prefix,
             length=length,
             depth=parent.depth + 1,
@@ -288,8 +293,9 @@ class TritonKernel(Kernel):
         offset = index.subs({v: 0 for v in chain(iter_vars, reduction_vars)})
         base_part = index.subs({v: 0 for v in reduction_vars}) - offset
         reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
-
-        assert index == offset + base_part + reduction_part
+        assert (
+            index == offset + base_part + reduction_part
+        ), f"failed to split indexing into base+reduction {index}"
 
         offset = self.rename_indexing(offset)
         base_part = self.rename_indexing(self.simplify_indexing(base_part))
@@ -319,6 +325,11 @@ class TritonKernel(Kernel):
         return " + ".join(addr)
 
     def simplify_indexing(self, expr: sympy.Expr):
+        expr = V.graph.sizevars.simplify_with_ranges(
+            expr,
+            {**self.iter_range_tree.var_ranges, **self.reduction_range_tree.var_ranges},
+        )
+
         nodes = [
             self.range_tree_nodes[sym]
             for sym in expr.free_symbols
@@ -331,6 +342,7 @@ class TritonKernel(Kernel):
         for sym in expr.free_symbols:
             if sym in self.range_tree_nodes:
                 self.range_tree_nodes[sym].codegen()
+
         return expr
 
     def mask(self, reductions=True):
@@ -361,12 +373,14 @@ class TritonKernel(Kernel):
             yield var
         self._load_mask = prior
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         if (name, index) in self.disabled_reduction_stores:
             tmpvar = self.disabled_reduction_stores[(name, index)]
             return f"tl.reshape({tmpvar}, (BLOCK_SIZE, 1))"
         var = self.args.input(name)
         line = f"tl.load({var} + {self.indexing(index)}, {self.mask()})"
+        if upcast:
+            line += ".to(tl.float32)"
         return self.cse.generate(self.loads, line)
 
     def store(self, name, index, value):

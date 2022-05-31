@@ -100,15 +100,17 @@ class NNModuleVariable(VariableTracker):
 
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
-        base_class_dict = object.__getattribute__(base.__class__, "__dict__")
-        class_member = True
+        object_member = True
+        all_class_attribute_names = set()
+        for x in inspect.getmro(base.__class__):
+            all_class_attribute_names.update(x.__dict__.keys())
 
         if not self.source:
             unimplemented("GETATTR with no source")
 
         if name in base_dict:
             subobj = base_dict[name]
-        elif name in base_dict["_modules"] and name not in base_class_dict:
+        elif name in base_dict["_modules"] and name not in all_class_attribute_names:
             subobj = base_dict["_modules"][name]
         elif name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
@@ -116,12 +118,12 @@ class NNModuleVariable(VariableTracker):
             subobj = base_dict["_buffers"][name]
         else:
             subobj = inspect.getattr_static(base, name)
-            class_member = False
+            object_member = False
 
-        if name == "__class__" and not class_member:
+        if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, **options)
 
-        if class_member:
+        if object_member:
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
         else:
             if istype(subobj, property):

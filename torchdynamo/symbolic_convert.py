@@ -224,10 +224,11 @@ class InstructionTranslatorBase(object):
                 return newvar
             return v
 
-        self.output.side_effects.apply(repl)
-        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
+        cache = dict()
+        self.output.side_effects.apply(repl, cache)
+        self.stack = [VariableTracker.apply(repl, x, cache) for x in self.stack]
         for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+            self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(
