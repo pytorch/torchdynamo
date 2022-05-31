@@ -35,7 +35,6 @@ jobs:
         conda info
         conda list
         conda config --show
-        nvidia-smi
     - run: pytest ./tests/test_torchinductor.py
 
 concurrency:
