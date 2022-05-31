@@ -66,12 +66,3 @@ allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
 }
-
-# Enable this check if you expect your eval model to change on forward passes - this ensures guards do a deeper check on parameter names and any named parameters you expect to change (see: eval_model_named_parameter_checks).
-# Note: guard_nn_modules must be True for this to run.
-eval_model_named_parameter_checks_enabled = True
-
-# A list names, from the models named parameters, to check within guards.
-# Note: eval_model_named_parameter_checks_enabled must be True for this to run.
-# Note: eval_model_named_parameter_checks_enabled still functions when this list is empty, but the deeper check against the parameter name is skipped.
-eval_model_named_parameter_checks = ["weight"]

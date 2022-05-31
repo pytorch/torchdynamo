@@ -231,8 +231,7 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        if config.eval_model_named_parameter_checks_enabled:
-            self.NN_MODULE_PARAM_NAMES(guard)
+        self.NN_MODULE_PARAM_NAMES(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(val.training, bool)
@@ -273,14 +272,13 @@ class GuardBuilder:
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        keys = {k for k, v in value.named_parameters()}
-        if config.eval_model_named_parameter_checks_enabled and not value.training:
-            for name, param in value.named_parameters():
-                if name in config.eval_model_named_parameter_checks:
-                    full = guard.name + "." + name
-                    self.code.append(
-                        f"___check_obj_id({self.arg_ref(full)}, {self.id_ref(full)})"
-                    )
+        keys = list()
+        for name, param in value.named_parameters(recurse=False):
+            keys.append(name)
+            full = f"{ref}._parameters['{name}']"
+            self.code.append(
+                f"___check_obj_id({full}, {self.id_ref(full)})"
+            )
 
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
