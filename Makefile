@@ -77,7 +77,7 @@ build-deps: clone-deps
 	# conda create --name torchdynamo python=3.8
 	# conda activate torchdynamo
 	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake \
-						 cffi typing_extensions future six requests dataclasses protobuf numba
+        cffi typing_extensions future six requests dataclasses protobuf numba
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 
