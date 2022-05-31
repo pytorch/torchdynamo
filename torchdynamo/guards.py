@@ -276,9 +276,7 @@ class GuardBuilder:
         for name, param in value.named_parameters(recurse=False):
             keys.append(name)
             full = f"{ref}._parameters['{name}']"
-            self.code.append(
-                f"___check_obj_id({full}, {self.id_ref(full)})"
-            )
+            self.code.append(f"___check_obj_id({full}, {self.id_ref(full)})")
 
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
