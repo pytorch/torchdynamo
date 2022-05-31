@@ -274,15 +274,17 @@ class GuardBuilder:
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         keys = set()
-        for name, param in value.named_parameters(recurse=False):
-            keys.add(name)
-            full = f"{ref}._parameters['{name}']"
-            self.code.append(f"___check_obj_id({full}, {self.id_ref(full)})")
-
+        for key in value._parameters.keys():
+            keys.add(key)
+        
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(
-            f"{{k for k, v in {ref}.named_parameters(recurse=False)}} == {keys!r}"
+            f"{ref}._parameters.keys() == {keys!r}"
         )
+
+        for key in keys:
+            full = f"{ref}._parameters['{key}']"
+            self.code.append(f"___check_obj_id({full}, {self.id_ref(full)})")
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
