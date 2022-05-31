@@ -272,14 +272,14 @@ class GuardBuilder:
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        keys = list()
+        keys = set()
         for name, param in value.named_parameters(recurse=False):
-            keys.append(name)
+            keys.add(name)
             full = f"{ref}._parameters['{name}']"
             self.code.append(f"___check_obj_id({full}, {self.id_ref(full)})")
 
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
-        self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
+        self.code.append(f"{{k for k, v in {ref}.named_parameters(recurse=False)}} == {keys!r}")
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
