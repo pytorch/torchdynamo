@@ -1,11 +1,12 @@
 #!/usr/bin/env pytest
 
+from copy import deepcopy
+
 import torch
 from torch.nn import functional as F
 
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
-from copy import deepcopy
 
 from . import test_functions
 
