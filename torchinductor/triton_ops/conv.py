@@ -3,7 +3,48 @@ import triton
 import numpy as np
 
 import triton.language as tl
+from .conv_perf_model import early_config_prune, estimate_conv_time
 
+
+@triton.autotune(
+    configs=[
+        # basic configs for compute-bound matmuls
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 128, 'BLOCK_CRS': 32}, num_stages=2, num_warps=8),
+        triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 64, 'BLOCK_CRS': 32}, num_stages=2, num_warps=8),
+        triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 32, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 16, 'BLOCK_CRS': 32}, num_stages=4, num_warps=2),
+        triton.Config({'BLOCK_NHW': 64, 'BLOCK_K': 128, 'BLOCK_CRS': 32}, num_stages=4, num_warps=8),
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 64, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 32, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 64, 'BLOCK_K': 64, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 16, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
+        # good for int8
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 128, 'BLOCK_CRS': 128}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 64, 'BLOCK_CRS': 128}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 32, 'BLOCK_CRS': 128}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 64, 'BLOCK_K': 128, 'BLOCK_CRS': 128}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 64, 'BLOCK_CRS': 128}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 32, 'BLOCK_CRS': 64}, num_stages=4, num_warps=2),
+        triton.Config({'BLOCK_NHW': 64, 'BLOCK_K': 64, 'BLOCK_CRS': 64}, num_stages=4, num_warps=2),
+        triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 16, 'BLOCK_CRS': 64}, num_stages=4, num_warps=2),
+        triton.Config({'BLOCK_NHW': 64, 'BLOCK_K': 16, 'BLOCK_CRS': 64}, num_stages=5, num_warps=2),
+    ],
+    # the above configs will be evaluated anytime the key changes
+    key=["BATCH", "IN_C", "IN_H", "IN_W",
+         "KERNEL_N", "KERNEL_H", "KERNEL_W",
+         "OUT_H", "OUT_W",
+         # parameters of conv
+         "stride_h", "stride_w",
+         "padding_h", "padding_w",
+         "dilation_h", "dilation_w",
+         "output_padding_h", "output_padding_w",
+         "groups"],
+    prune_configs_by={
+        'early_config_prune': early_config_prune,
+        'perf_model': estimate_conv_time,
+        'top_k': 10
+    },
+)
 
 @triton.jit
 def _kernel(x, w, bias, y,
@@ -55,15 +96,14 @@ def _kernel(x, w, bias, y,
     off_x_n = off_y_n
     off_x_h = off_y_h * stride_h - padding_h
     off_x_w = off_y_w * stride_w - padding_w
-    # solve misaligned address issue for stride > 1
-    off_x_h = tl.multiple_of(off_x_h, 1)
-    off_x_w = tl.multiple_of(off_x_w, 1)
     off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
     off_x_crs = tl.arange(0, BLOCK_CRS)
 
     CRS = IN_C * KERNEL_H * KERNEL_W
     # load inc ptr of x, upade x_ptrs
-    off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
+    delta_x_ptrs = delta_x_ptr + off_x_crs
+    off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+    delta_x_ptrs += BLOCK_CRS
 
     x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
     mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H)
@@ -90,7 +130,8 @@ def _kernel(x, w, bias, y,
         w_ptrs += BLOCK_CRS
         # load inc ptr of x, upade x_ptrs
         off_x_crs = crs + tl.arange(0, BLOCK_CRS)
-        off_x_crs_unpacked = tl.load(delta_x_ptr + off_x_crs, mask=off_x_crs < CRS)
+        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+        delta_x_ptrs += BLOCK_CRS
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         # x_ptrs += BLOCK_CRS
 
@@ -130,6 +171,7 @@ def _kernel(x, w, bias, y,
 
 
 class _conv(torch.autograd.Function):
+    kernel = _kernel
 
     @staticmethod
     def _extract_strides(shape):
@@ -168,9 +210,9 @@ class _conv(torch.autograd.Function):
         window_unpack_h = window_unpack[h]
         window_unpack_w = window_unpack[w]
         window_unpack_c = window_unpack[c]
-        r_dilation_h = dilation_h * window_unpack_h[:, None, None]
-        r_dilation_w = dilation_w * window_unpack_w[None, :, None]
-        r_inc = window_unpack_c[None, None, :]
+        r_dilation_h = dilation_h * window_unpack_h
+        r_dilation_w = dilation_w * window_unpack_w
+        r_inc = window_unpack_c
         delta_x = r_dilation_h * stride_xh + r_dilation_w * stride_xw \
             + r_inc * stride_xc
         return delta_x
@@ -200,6 +242,8 @@ class _conv(torch.autograd.Function):
             f"bias shape did not match{shape_bias} != {shape_w[wn]}"
         in_channel = shape_w[wc] * groups
 
+        assert(shape_x[xc] % groups == 0), "in_channels must be divisible by groups"
+        assert(shape_w[wn] % groups == 0), "out_channels must be divisible by groups"
         assert(shape_x[xc] == in_channel), \
             f"in_channel did not match {shape_x[xc]} != {in_channel}"
 
@@ -262,6 +306,7 @@ class _conv(torch.autograd.Function):
                                    dilation[0], dilation[1],
                                    stride_x[xh], stride_x[xw], stride_x[xc])
             delta_x = torch.from_numpy(delta_x).cuda()
+            # print('delta_x', delta_x)
             # launch kernel, 2-dim, batch*h*w, kernel
             grid = lambda META: (triton.cdiv(BATCH * OUT_H * OUT_W, META['BLOCK_NHW']),
                                  triton.cdiv(KERNEL_N, META['BLOCK_K']))
@@ -285,8 +330,8 @@ class _conv(torch.autograd.Function):
                           groups,
                           # Metaparameters
                           ACC_TYPE=ACC_TYPE,
-                          BLOCK_NHW=128, BLOCK_K=32,
-                          BLOCK_CRS=16,
+                          # BLOCK_NHW=128, BLOCK_K=32,
+                          # BLOCK_CRS=32,
                           GROUP_H=1
                           )
         # do matrix multiplication
@@ -296,13 +341,16 @@ class _conv(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, w, bias,
-                stride=[1, 1], padding=[0, 0],
-                dilation=[1, 1], transposed=False,
-                output_padding=[0, 0], groups=1,
+                stride=(1, 1), padding=(0, 0),
+                dilation=(1, 1), transposed=False,
+                output_padding=(0, 0), groups=1,
                 layout_x='nhwc', layout_w='nhwc',
                 layout_y='nhwc'):
         if groups != 1:
-            print(f"doesn't support groups = {groups}")
+            print(f"Do not support groups = {groups}")
+            return
+        if transposed:
+            print("Do not support transposed")
         return _conv._call(x, w, bias,
                            stride, padding,
                            dilation, transposed,
