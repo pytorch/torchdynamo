@@ -522,6 +522,8 @@ class TritonKernel(Kernel):
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
+            elif tree.prefix == "r" and tree.numel != 1:
+                sizes.append("1")
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, code, name: str):

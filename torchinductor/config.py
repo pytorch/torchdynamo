@@ -40,7 +40,9 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
+    # Use cudagraphs on output code
     cudagraphs = True
+    # Monkey patching to lower overheads
     hackery = False
     # Always load full blocks (rather than broadcasting inside the block)
-    dense_indexing = False
+    dense_indexing = True
