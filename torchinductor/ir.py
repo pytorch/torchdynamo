@@ -1192,10 +1192,18 @@ class ComputedBuffer(Buffer):
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
         )
 
+        # TODO(jansel): support tiling with modular indexing
+        has_modular_indexing = any(
+            ("ModularIndexing" in str(expr)
+            or "IndexingDiv" in str(expr))
+            for expr in body.indexing_exprs.values()
+        )
+
         if (
             self.get_device().type == "cuda"
             and not self.get_reduction_type()
             and iter_ranges
+            and not has_modular_indexing
         ):
             # TODO(jansel): should we include store strides here or just loads?
             strides = [
@@ -1269,6 +1277,7 @@ class ComputedBuffer(Buffer):
         other_ranges = []
         other_index = []
 
+        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
         for i in range(len(iter_ranges)):
             if broadcasting_stride[i] == 0:
                 broadcast_index.append(i)
