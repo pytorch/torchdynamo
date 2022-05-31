@@ -1,5 +1,5 @@
 # add some debug printouts
-debug = True
+debug = False
 
 # dead code elimination
 dce = False

@@ -130,7 +130,8 @@ def compile_fx(
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphs_inner(compiled_fn, example_inputs)
+            # return torch.cuda.make_graphed_callables(compiled_fn, example_inputs)
+            return cudagraphs_inner(compiled_fn, example_inputs, copy_outputs=False)
         else:
             return compiled_fn
     except Exception:

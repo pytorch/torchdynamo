@@ -123,6 +123,7 @@ def main():
         "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
     parser.add_argument("--transpose", action="store_true", help="transpose one input")
+    parser.add_argument("--broadcast", action="store_true", help="broadcast one input")
     args = parser.parse_args()
 
     # defaults
@@ -159,6 +160,8 @@ def main():
                 sys.stdout.write(f"{model.__name__:10} {device:4} {n:5} ")
                 sys.stdout.flush()
                 inputs = [torch.rand((n, n), device=device) for _ in range(nargs)]
+                if args.broadcast:
+                    inputs[-1] = torch.rand((1, n), device=device)
                 if args.transpose:
                     inputs[-1] = inputs[-1].transpose(0, 1)
                 result = microbenchmark(args, model, inputs)

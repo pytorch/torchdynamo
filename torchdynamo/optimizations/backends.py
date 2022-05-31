@@ -493,7 +493,7 @@ def cudagraphs_ts_ofi(subgraph):
     return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
 
 
-def cudagraphs_inner(model, inputs):
+def cudagraphs_inner(model, inputs, copy_outputs=True):
     assert isinstance(inputs, (list, tuple))
     static_inputs = [torch.zeros_like(x) for x in inputs]
 
@@ -519,7 +519,10 @@ def cudagraphs_inner(model, inputs):
         for dst, src in zip(static_inputs, new_inputs):
             dst.copy_(src)
         graph.replay()
-        return [x.clone() for x in static_outputs]
+        if copy_outputs:
+            return [x.clone() for x in static_outputs]
+        else:
+            return static_outputs
 
     return run
 

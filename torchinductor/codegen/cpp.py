@@ -360,15 +360,16 @@ class CppScheduling:
     def codegen(self, *groups):
         group, reduction_group = groups
 
-        def check_group1(other_groups):
+        def check_group1(other_node):
+            other_groups = other_node.group
             return (
-                check_group2(other_groups)
+                check_group2(other_node)
                 or other_groups == groups
                 or other_groups == (group + reduction_group, ())
             )
 
-        def check_group2(other_groups):
-            return other_groups == (group, ())
+        def check_group2(other_node):
+            return other_node.group == (group, ())
 
         kernel_group = self.kernel_group
         scheduler = self.scheduler

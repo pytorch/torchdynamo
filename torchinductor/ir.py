@@ -1192,29 +1192,35 @@ class ComputedBuffer(Buffer):
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
         )
 
-        # TODO(jansel): should we include store strides here or just loads?
-        strides = [
-            V.graph.sizevars.stride_hints(expr, iter_vars)
-            for expr in body.reads
-            if "indirect" not in str(expr)
-        ]
-
         if (
             self.get_device().type == "cuda"
             and not self.get_reduction_type()
             and iter_ranges
         ):
-            iter_ranges = self._tile_loops(iter_ranges, strides)
-            return (*iter_ranges, reduce_ranges), body
-        else:
-            return (iter_ranges, reduce_ranges), body
+            # TODO(jansel): should we include store strides here or just loads?
+            strides = [
+                V.graph.sizevars.stride_hints(expr, iter_vars)
+                for expr in body.reads
+                if "indirect" not in str(expr)
+            ]
+            tiled_ranges = self._tile_contiguous(iter_ranges, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), body
+
+            # alternate tiling heuristic
+            tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), call
+
+        return (iter_ranges, reduce_ranges), body
 
     @classmethod
-    def _tile_loops(cls, iter_ranges: List[sympy.Expr], strides, max_tiles=2):
+    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides, max_tiles=2):
         """
-        Break iter_vars up into at most max_tiles tiles.
+        Break iter_ranges up into at most max_tiles tiles based on stride==1
+        dimensions.
 
-        Transformation on iter_vars like:
+        Transformation on iter_range like:
             (s0, s1, s2, s3) => (s0, s1), (s2, s3)
 
         Where each group will be tiled in a different dimension in the
@@ -1227,7 +1233,7 @@ class ComputedBuffer(Buffer):
         for i in range(len(iter_ranges)):
             current_tile.append(iter_ranges[i])
             # break tiles on stride 1
-            if any(stride[i] == 1 for stride in strides) and len(tiles) < max_tiles:
+            if any(stride[i] == 1 for stride in strides) and len(tiles) < max_tiles - 1:
                 # split rest into a new tile
                 tiles.append(current_tile)
                 current_tile = []
@@ -1235,7 +1241,58 @@ class ComputedBuffer(Buffer):
         if current_tile:
             tiles.append(current_tile)
 
+        assert len(tiles) <= max_tiles
         return tiles
+
+    @classmethod
+    def _tile_broadcasting(cls, iter_ranges: List[sympy.Expr], body, strides):
+        """
+        Break ranges up so that one dimension is all broadcasting.
+
+        Transformation on iter_ranges like:
+            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
+
+        Where each group will be tiled in a different dimension in the
+        output kernel.
+        """
+        broadcasting_strides = [
+            stride for stride in strides if any(s == 0 for s in stride)
+        ]
+        if not broadcasting_strides:
+            return (iter_ranges,), body
+
+        # TODO(jansel): consider another load?  for now just take first one
+        broadcasting_stride = broadcasting_strides[0]
+
+        broadcast_ranges = []
+        broadcast_index = []
+        other_ranges = []
+        other_index = []
+
+        for i in range(len(iter_ranges)):
+            if broadcasting_stride[i] == 0:
+                broadcast_index.append(i)
+                broadcast_ranges.append(iter_ranges[i])
+            else:
+                other_index.append(i)
+                other_ranges.append(iter_ranges[i])
+
+        def call(broadcast, other, reduction=None):
+            assert not reduction
+            assert len(broadcast) == len(broadcast_index)
+            assert len(other) == len(other_index)
+            args = [None] * len(iter_ranges)
+            for i, v in itertools.chain(
+                zip(broadcast_index, broadcast),
+                zip(other_index, other),
+            ):
+                args[i] = v
+            return body(args)
+
+        if broadcast_ranges and other_ranges:
+            return (broadcast_ranges, other_ranges), call
+        else:
+            return (iter_ranges,), body
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):

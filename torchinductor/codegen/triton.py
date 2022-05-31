@@ -520,12 +520,24 @@ class TritonScheduling:
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
-        def is_group_matching(other_groups):
+        def is_group_matching(other_node):
+            other_groups = other_node.group
             if groups == other_groups:
                 return True
             if len(groups) == 2 and groups[-1] != 1:
-                if other_groups == (product(groups), sympy.Integer(1)):
-                    return True
+                group, reduction_group = groups
+                if other_groups == (group * reduction_group, sympy.Integer(1)):
+                    sizes, _ = node.get_ranges()
+                    split = split_sizes(sizes, group, reduction_group)
+                    return split is not None
+                return other_groups == (group, sympy.Integer(1))
+            elif len(groups) == 3:
+                tile1, tile2, _ = groups
+                if other_groups == (tile1 * tile2, sympy.Integer(1)):
+                    sizes, _ = node.get_ranges()
+                    split = split_sizes(sizes, tile1, tile2)
+                    return split is not None
+
             return False
 
         reschedule = []
@@ -536,11 +548,12 @@ class TritonScheduling:
                     node.run(*kernel.set_ranges(*node.get_ranges()))
                     node.mark_fusable(broadcast_after_reduce=True)
 
+                # the rest of this function could be correctly removed
+                # it is various cases of horizonal fusions
                 if kernel.inside_reduction:
                     # TODO(jansel): rewrite this to support tiled reductions
                     group, reduction_group = groups
 
-                    """
                     # Add pointwise with compatible dimensions
                     for node in scheduler.pop_group(
                         (group * reduction_group, sympy.Integer(1)),
@@ -550,9 +563,11 @@ class TritonScheduling:
                         if split is None:
                             reschedule.append(node)
                         else:
+                            scheduler.maybe_remove_buffer(
+                                node, check_group=is_group_matching
+                            )
                             node.run(*kernel.set_ranges(sizes[:split], sizes[split:]))
                             node.mark_fusable()
-                    """
 
                     # Add more pointwise with fewer dimensions
                     with kernel.disable_reduction():
@@ -561,6 +576,24 @@ class TritonScheduling:
                                 node, check_group=is_group_matching
                             )
                             node.run(*kernel.set_ranges(*node.get_ranges()))
+                            node.mark_fusable()
+                elif len(groups) == 3:
+                    tile1, tile2, _ = groups
+                    # Add pointwise with compatible dimensions
+                    for node in scheduler.pop_group(
+                        (tile1 * tile2, sympy.Integer(1)),
+                    ):
+                        sizes, _ = node.get_ranges()
+                        split = split_sizes(sizes, tile1, tile2)
+                        if split is None:
+                            reschedule.append(node)
+                        else:
+                            scheduler.maybe_remove_buffer(
+                                node, check_group=is_group_matching
+                            )
+                            node.run(
+                                *kernel.set_ranges(sizes[:split], sizes[split:], [])
+                            )
                             node.mark_fusable()
 
         kernel_name = wrapper.next_kernel_name()

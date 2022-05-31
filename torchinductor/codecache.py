@@ -2,6 +2,7 @@ import base64
 import functools
 import getpass
 import hashlib
+import operator
 import os
 import random
 import re
@@ -217,34 +218,60 @@ def block_size_fn(maximum, hint, key):
     return block_size
 
 
+def conditional_product(*args):
+    return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=1):
+    from triton import Config
+
+    target = conditional_product(x, y, z)
+
+    # shrink sizes to size hints
+    x = min(x, size_hints[0])
+    if y:
+        y = min(y, size_hints[1])
+    if z:
+        z = min(z, size_hints[2])
+
+    # if we are below original block size, scale up where we can
+    while x < size_hints[0] and conditional_product(x, y, z) < target:
+        x *= 2
+    while y and y < size_hints[1] and conditional_product(x, y, z) < target:
+        y *= 2
+    while z and z < size_hints[2] and conditional_product(x, y, z) < target:
+        z *= 2
+
+    cfg = {"XBLOCK": x}
+    if y:
+        cfg["YBLOCK"] = y
+    if z:
+        cfg["ZBLOCK"] = z
+    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
+
+
+def apply_triton_config(config):
+    from triton import heuristics
+
+    def getter(name):
+        def get(args):
+            return config.kwargs[name]
+
+        return get
+
+    return heuristics({name: getter(name) for name in config.kwargs.keys()})
+
+
 def pointwise_heuristics(size_hints):
     """
     Construct @triton.heuristics() based on size_hints.
     """
-    from triton import heuristics
-
-    # TODO(jansel): try tuning these, current just a guess
     if len(size_hints) == 1:
-        return heuristics(
-            {
-                "XBLOCK": block_size_fn(1024, size_hints[0], "xnumel"),
-            }
-        )
+        return apply_triton_config(triton_config(size_hints, 1024))
     if len(size_hints) == 2:
-        return heuristics(
-            {
-                "XBLOCK": block_size_fn(32, size_hints[0], "xnumel"),
-                "YBLOCK": block_size_fn(32, size_hints[1], "ynumel"),
-            }
-        )
+        return apply_triton_config(triton_config(size_hints, 64, 64))
     if len(size_hints) == 3:
-        return heuristics(
-            {
-                "XBLOCK": block_size_fn(16, size_hints[0], "xnumel"),
-                "YBLOCK": block_size_fn(16, size_hints[1], "ynumel"),
-                "ZBLOCK": block_size_fn(16, size_hints[2], "znumel"),
-            }
-        )
+        return apply_triton_config(triton_config(size_hints, 16, 16, 16))
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
@@ -265,6 +292,7 @@ def reduction_heuristics(size_hints):
                     size_hints[0],
                     "xnumel",
                 ),
+                # "num_warps": lambda args: num_warps(args["rnumel"]),
             }
         )
     raise NotImplementedError(f"size_hints: {size_hints}")

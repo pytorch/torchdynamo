@@ -198,7 +198,7 @@ class SchedulerNode(BaseSchedulerNode):
             and len(self.users[0].node.unmet_dependencies) == 1
         ):
             user = self.users[0].node
-            if not check_group(user.group):
+            if not check_group(user):
                 return False
             dep = next(iter(user.unmet_dependencies))
             writes = self.read_writes.writes
