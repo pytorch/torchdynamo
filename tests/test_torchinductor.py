@@ -26,8 +26,9 @@ try:
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires functorch")
 
-
 aten = torch.ops.aten
+
+print("torch.cuda.is_available(): ", torch.cuda.is_available())
 
 HAS_CUDA = False
 if torch.cuda.is_available():
