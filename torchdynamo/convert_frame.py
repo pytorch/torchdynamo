@@ -229,6 +229,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
                 f"for function {format_func_info(code)}, "
                 f"due to the following guard failures: {format_guard_failures(code)}"
+                f"to diagnose recompilation issues, try using torchdynamo.utils.CompileProfiler."
             )
             unimplemented("cache_size_limit reached")
         output = None

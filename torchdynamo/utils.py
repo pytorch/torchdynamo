@@ -427,3 +427,83 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
         )
     else:
         raise RuntimeError(f"unsupported type: {type(a).__name__}")
+
+
+import contextlib
+import sys
+
+import tabulate
+
+import torchdynamo.config
+
+from .guards import guard_failures
+
+
+def format_func_info(code):
+    short_filename = code.co_filename.split("/")[-1]
+    return f"'{code.co_name}' ({short_filename}:{code.co_firstlineno})"
+
+
+@contextlib.contextmanager
+def disable_cache_limit():
+    prior = torchdynamo.config.cache_size_limit
+    torchdynamo.config.cache_size_limit = sys.maxsize
+
+    try:
+        yield
+    finally:
+        pass
+        torchdynamo.config.cache_size_limit = prior
+
+
+class CompileProfiler:
+    """Utility for profiling how and what dynamo would compile.
+
+    Can be used for
+     * diagnosing recompilation issues
+     * determining an appropriate compile cache limit
+     * (TODO)confirming which functions got compiled/skipped
+    """
+
+    def __init__(self):
+        self.frame_count = 0
+        self.op_count = 0
+        self.backend_ctx_ctor = lambda: disable_cache_limit()
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.frame_count += 1
+        for node in gm.graph.nodes:
+            if "call" in node.op:
+                self.op_count += 1
+        return gm.forward
+
+    def get_metrics(self):
+        return {"guard_failures": guard_failures}
+
+    def report(self):
+        metrics = self.get_metrics()
+        gf = metrics["guard_failures"]
+
+        def num_recompiles(code):
+            return len(gf[code])
+
+        def recompile_reasons(code):
+            return "\n".join([str(x) for x in gf[code]])
+
+        summarized_gf = [
+            [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
+            for code in gf
+        ]
+        max_recompiles = max([num_recompiles(code) for code in gf]) if len(gf) else 1
+        rpt = "Torchdynamo Profiler Report"
+        rpt += "\n\n"
+        if len(gf):
+            rpt += tabulate.tabulate(
+                summarized_gf,
+                headers=["Function", "Num Recompiles", "Recompile Reasons"],
+            )
+            rpt += "\n"
+            rpt += f"Set torchdynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited."
+        else:
+            rpt += "No cache-limited recompilations detected."
+        return rpt
