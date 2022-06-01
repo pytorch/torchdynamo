@@ -12,6 +12,7 @@ from .conv_perf_model import early_config_prune, estimate_conv_time
         triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 128, 'BLOCK_CRS': 32}, num_stages=2, num_warps=8),
         triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 64, 'BLOCK_CRS': 32}, num_stages=2, num_warps=8),
         triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 32, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 32, 'BLOCK_CRS': 64}, num_stages=4, num_warps=4),
         triton.Config({'BLOCK_NHW': 256, 'BLOCK_K': 16, 'BLOCK_CRS': 32}, num_stages=4, num_warps=2),
         triton.Config({'BLOCK_NHW': 64, 'BLOCK_K': 128, 'BLOCK_CRS': 32}, num_stages=4, num_warps=8),
         triton.Config({'BLOCK_NHW': 128, 'BLOCK_K': 64, 'BLOCK_CRS': 32}, num_stages=4, num_warps=4),
@@ -236,7 +237,7 @@ class _conv(torch.autograd.Function):
         wn, wc, wh, ww = [layout_w.find(x) for x in 'nchw']
 
         # out_channel, in_channel, kernel_height, kernel_width
-        kernel_size = [shape_w[yh], shape_w[yw]]
+        kernel_size = [shape_w[wh], shape_w[ww]]
         input_size = [shape_x[xh], shape_x[xw]]
         assert not shape_bias or shape_bias[0] == shape_w[wn], \
             f"bias shape did not match{shape_bias} != {shape_w[wn]}"
