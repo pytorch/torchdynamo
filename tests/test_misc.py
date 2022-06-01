@@ -1472,3 +1472,21 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res2 = fn(x)
         self.assertTrue(same(res1, res2))
+
+    def test_dict_reconstruct_keeps_original_order(self):
+        def fn():
+            modules = collections.OrderedDict([("act", torch.nn.ReLU())])
+            module_dict = torch.nn.ModuleDict(modules)
+
+            next_modules = {"fc4": torch.nn.Linear(5, 6), "act3": torch.nn.Sigmoid()}
+            modules.update(next_modules.items())
+            module_dict.update(next_modules)
+            return modules, module_dict
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            modules, module_dict = fn()
+
+        self.assertEqual(len(module_dict), len(modules))
+        for k1, m2 in zip(modules, module_dict.children()):
+            self.assertTrue(modules[k1] is m2)
