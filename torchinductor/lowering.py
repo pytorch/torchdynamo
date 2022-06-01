@@ -411,7 +411,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split)
-def split(x, sizes, dim):
+def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, int):
