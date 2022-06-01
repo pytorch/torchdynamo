@@ -1067,8 +1067,12 @@ class ReproTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnt, nopython=True):
             model(inp)
             model(inp)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 12)
+        if torchdynamo.config.guard_nn_modules:
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.op_count, 24)
+        else:
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(cnt.op_count, 12)
 
     def test_exec_import(self):
         def fn1():

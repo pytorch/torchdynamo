@@ -232,7 +232,8 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        self.NN_MODULE_PARAM_NAMES(guard)
+        if config.guard_nn_modules:
+            self.NN_MODULE_PARAM_NAMES(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(val.training, bool)
@@ -263,6 +264,8 @@ class GuardBuilder:
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        print("LEN")
+        print(self.code)
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)

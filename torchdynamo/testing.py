@@ -113,7 +113,7 @@ class CompileCounter:
         return gm.forward
 
 
-def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
+def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None, expected_frame_count=None):
     if torchdynamo.config.dynamic_shapes and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
@@ -142,7 +142,11 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
     self.assertTrue(same(val2b, correct2))
-    self.assertEqual(actual.frame_count, 1)
+    if expected_frame_count is not None and config.guard_nn_modules:
+        self.assertEqual(actual.frame_count, expected_frame_count)
+    else:
+        self.assertEqual(actual.frame_count, 1)
+
     if expected_ops is not None:
         self.assertEqual(actual.op_count, expected_ops)
 

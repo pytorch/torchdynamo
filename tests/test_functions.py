@@ -24,9 +24,23 @@ def func_with_default(a, b, some_default_arg=True):
     if some_default_arg:
         return a - b
 
+def make_test_with_frame_count(expected_frame_count=None):
+    def make_test(fn):
+        nargs = len(inspect.signature(fn).parameters)
+
+        # expected_frame_count = kwargs['expected_frame_count'] if 'expected_frame_count' in kwargs else None 
+
+        def test_fn(self):
+            return torchdynamo.testing.standard_test(self, fn=fn, nargs=nargs, expected_frame_count=expected_frame_count)
+        
+        return test_fn
+
+    return make_test
 
 def make_test(fn):
     nargs = len(inspect.signature(fn).parameters)
+
+    # expected_frame_count = kwargs['expected_frame_count'] if 'expected_frame_count' in kwargs else None 
 
     def test_fn(self):
         return torchdynamo.testing.standard_test(self, fn=fn, nargs=nargs)
@@ -202,7 +216,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_globalvar(a, b):
         return a - b + d
 
-    @make_test
+    @make_test_with_frame_count(4)
     def test_globalmodule(x):
         return e(x)
 
