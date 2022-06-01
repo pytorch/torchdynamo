@@ -150,12 +150,10 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
 class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
-        torchdynamo.reset()
         cls._exit_stack.close()
 
     @classmethod
     def setUpClass(cls):
-        torchdynamo.reset()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(patch.object(config, "debug", True))
         cls._exit_stack.enter_context(
@@ -163,11 +161,13 @@ class TestCase(unittest.TestCase):
         )
 
     def setUp(self):
+        torchdynamo.reset()
         torchdynamo.utils.counters.clear()
 
     def tearDown(self):
         for k, v in torchdynamo.utils.counters.items():
             print(k, v.most_common())
+        torchdynamo.reset()
         torchdynamo.utils.counters.clear()
 
 
@@ -198,5 +198,7 @@ def rand_strided(size, stride, dtype, device="cpu"):
     if dtype.is_floating_point:
         buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
-        buffer = torch.randint(0, 2, needed_size, dtype=dtype, device=device)
+        buffer = torch.randint(
+            low=0, high=2, size=[needed_size], dtype=dtype, device=device
+        )
     return torch.as_strided(buffer, size, stride)

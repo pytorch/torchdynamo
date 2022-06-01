@@ -1382,3 +1382,111 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts, nopython=True):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_inline_list_mutation(self):
+        def f1(x):
+            x.append(torch.ones(8))
+            return x
+
+        def f2():
+            x = [torch.ones(6)]
+            f1(x)
+            return x
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_inline_dict_mutation(self):
+        def f1(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        def f2():
+            d = {"a": torch.ones(5), "b": torch.ones(5)}
+            f1(d)
+            return d
+
+        res1 = f2()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f2()
+        self.assertTrue(same(res1, res2))
+
+    def test_recursive_inline_list_mutation(self):
+        def f1(x, y):
+            x.append(torch.tensor([1.1]))
+            y.append(torch.tensor([1.2]))
+            return x, y
+
+        def f2(x, y):
+            x.append(torch.tensor([2.1]))
+            y.append(torch.tensor([2.2]))
+            f1(x, y)
+            return x, y
+
+        def f3(x):
+            x.append(torch.tensor([3.1]))
+            y = [torch.tensor([3.2])]
+            f2(x, y)
+            return x, y
+
+        def f4():
+            x = [torch.tensor([4.1])]
+            return f3(x)
+
+        res1 = f4()
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = f4()
+        self.assertTrue(same(res1, res2))
+
+    def test_sample_input(self):
+        from torch.testing._internal.common_methods_invocations import SampleInput
+
+        def fn(sample):
+            if isinstance(sample.input, torch.Tensor):
+                return sample.input * 2
+            return torch.zeros(())
+
+        sample = SampleInput(torch.ones(2))
+        ref = fn(sample)
+
+        with torchdynamo.optimize("eager"):
+            res = fn(sample)
+
+        self.assertTrue(same(ref, res))
+
+    def test_update_locals_and_stack_uses_shared_cache(self):
+        def fn(x):
+            perm = [0, 3, 5]
+            perm = [i for i in range(min(perm))] + perm
+            perm.extend(i for i in range(x.dim()) if i not in perm)
+            return perm
+
+        x = torch.rand([2, 2, 2, 2, 2, 2])
+        res1 = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x)
+        self.assertTrue(same(res1, res2))
+
+    def test_dict_reconstruct_keeps_original_order(self):
+        def fn():
+            modules = collections.OrderedDict([("act", torch.nn.ReLU())])
+            module_dict = torch.nn.ModuleDict(modules)
+
+            next_modules = {"fc4": torch.nn.Linear(5, 6), "act3": torch.nn.Sigmoid()}
+            modules.update(next_modules.items())
+            module_dict.update(next_modules)
+            return modules, module_dict
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            modules, module_dict = fn()
+
+        self.assertEqual(len(module_dict), len(modules))
+        for k1, m2 in zip(modules, module_dict.children()):
+            self.assertTrue(modules[k1] is m2)

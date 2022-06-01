@@ -8,3 +8,4 @@ pytest
 tabulate
 torch
 sympy
+expecttest

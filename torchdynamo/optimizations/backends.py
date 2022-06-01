@@ -322,9 +322,13 @@ def fx2trt(subgraph, **kwargs):
     from fx2trt_oss.fx.trt_module import TRTModule
     from fx2trt_oss.fx.utils import LowerPrecision
 
+    from .normalize import normalize_ir
+
     try:
-        model = subgraph.model
-        inputs = subgraph.example_inputs
+        model = copy.deepcopy(subgraph.model)
+        inputs = copy.deepcopy(subgraph.example_inputs)
+        # normalize
+        model = normalize_ir(model, inputs)
         # pass rewrite
         model = transform_setitem(model, inputs)
         acc_model = acc_tracer.trace(model, inputs)
@@ -334,8 +338,19 @@ def fx2trt(subgraph, **kwargs):
         splitter = TRTSplitter(acc_model, inputs, settings=splitter_setting)
         splitter.node_support_preview()
         split_mod = splitter()
+        num_piece = 0
         for name, _ in split_mod.named_children():
             print(f"graph is split into {name}")
+            num_piece += 1
+
+        # if the graph module is split into pieces larger than 8, we consider its perf
+        # is not good and fall back to non-TRT
+        if num_piece > 8:
+            print(
+                f"The graph module is split into {num_piece} which is large than the \
+                threshold=8. Fall back to non-TRT module."
+            )
+            return None
 
         if kwargs["fp16_mode"]:
             precision = LowerPrecision.FP16
@@ -357,6 +372,7 @@ def fx2trt(subgraph, **kwargs):
         for name, _ in split_mod.named_children():
             if "_run_on_acc" in name:
                 submod = getattr(split_mod, name)
+                # print("acc=",submod.code)
                 # Get submodule inputs for fx2trt
                 acc_inputs = get_submod_inputs(split_mod, submod, inputs)
 
@@ -369,11 +385,17 @@ def fx2trt(subgraph, **kwargs):
                 r = interp.run(
                     max_workspace_size=20 << 30,
                     lower_precision=precision,
+                    # profiling_verbosity=trt.ProfilingVerbosity.DETAILED, #For profile
                 )
+                # For profile
+                # from fx2trt_oss.fx.tools.trt_profiler_sorted import profile_trt_module
+                # profile_trt_module("", trt_mod, acc_inputs)
                 trt_mod = TRTModule(*r)
+
                 setattr(split_mod, name, trt_mod)
             else:
                 submod = getattr(split_mod, name)
+                # print("gpu=",submod.code)
         return subgraph.wrap_returns(split_mod)
     except Exception:
         log.exception("FX2TRT conversion error")

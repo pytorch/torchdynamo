@@ -1,5 +1,7 @@
 #!/usr/bin/env pytest
 
+from copy import deepcopy
+
 import torch
 from torch.nn import functional as F
 
@@ -528,6 +530,36 @@ class SelfMutatingModule(torch.nn.Module):
         return F.relu(result)
 
 
+class ModuleAttributePrecedenceBase(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def linear(self, x):
+        return x * 2.0
+
+
+class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
+    def __init__(self):
+        super().__init__()
+        self.activation = torch.nn.ReLU()
+        self.linear = torch.nn.Linear(10, 10)
+        self.initializer = torch.ones([10, 10])
+        self.scale = 0.5
+
+    def activation(self, x):
+        return x * 1.2
+
+    def initializer(self):
+        return torch.zeros([10, 10])
+
+    def scale(self):
+        return 2.0
+
+    def forward(self, x):
+        # object attribute takes precedence unless it's a nn.Module
+        return self.activation(self.linear(self.initializer + x)) * self.scale
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
@@ -577,6 +609,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
+    test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
@@ -610,6 +643,28 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out3))
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_generation_tag(self):
+        cnt = torchdynamo.testing.CompileCounter()
+
+        # guarantee that we have installed
+        # the generation tagging function
+        with torchdynamo.optimize_assert(cnt):
+            pass
+
+        m1 = torch.nn.Linear(10, 10)
+        prev_generation = m1.generation
+        cur_generation = prev_generation + 1
+
+        with torchdynamo.optimize_assert(cnt):
+            m2 = torch.nn.Linear(10, 10)
+
+        self.assertEqual(m1.generation, prev_generation)
+        self.assertEqual(m2.generation, cur_generation)
+        # check that newly constructed instances
+        # also have the same generation (even if copied from an old instance)
+        m3 = deepcopy(m1)
+        self.assertEqual(m3.generation, cur_generation)
 
     def test_simple_torch_function(self):
         def foo(x):

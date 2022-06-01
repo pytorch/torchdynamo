@@ -12,7 +12,8 @@ from torchdynamo.utils import clone_inputs
 from . import config
 from . import convert_frame
 from . import skipfiles
-from .mutation_guard import install_generation_tagging_new
+from . import utils
+from .mutation_guard import install_generation_tagging_init
 from .utils import same
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ unsupported = _eval_frame.unsupported
 skip_code = _eval_frame.skip_code
 set_guard_fail_hook = _eval_frame.set_guard_fail_hook
 set_guard_error_hook = _eval_frame.set_guard_error_hook
+
+always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 
 
 def nothing():
@@ -65,21 +68,30 @@ class _TorchDynamoContext:
         assert callable(fn)
         callback = self.callback
         on_enter = self.on_enter
+        backend_ctx_ctor = self.extra_ctx_ctor
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             on_enter()
             prior = set_eval_frame(callback)
+            backend_ctx = backend_ctx_ctor()
+            backend_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
+                backend_ctx.__exit__()
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
             _fn._torchdynamo_disable = True
         else:
             _fn._torchdynamo_inline = fn
+
+        # If the function is called with torchdynamo.optimize decorator, we
+        # should prevent any type of skipping.
+        if callback not in (None, False):
+            always_optimize_code_objects[fn.__code__] = True
 
         return _fn
 
@@ -88,7 +100,7 @@ class OptimizeContext(_TorchDynamoContext):
     def __init__(self, callback, backend_ctx_ctor):
         super().__init__(
             callback=callback,
-            on_enter=install_generation_tagging_new,
+            on_enter=install_generation_tagging_init,
             backend_ctx_ctor=backend_ctx_ctor,
         )
 
@@ -202,7 +214,6 @@ def optimize(backend, nopython=False):
         with torchdynamo.optimize(my_compiler):
            ...
     """
-
     backend_ctx_ctor = null_context
     if hasattr(backend, "backend_ctx_ctor"):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")

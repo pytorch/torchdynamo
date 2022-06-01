@@ -18,11 +18,18 @@ decompositions = get_decompositions(
         aten.native_layer_norm,
         aten.native_batch_norm,
         aten.cudnn_batch_norm,
+        aten.native_group_norm,
         aten.leaky_relu,
         aten.hardtanh,
         aten.hardsigmoid,
         aten.hardswish,
         aten.transpose.int,
+        aten.clamp_min,
+        aten.clamp_max,
+        # don't exist (yet), but wish they did:
+        aten._embedding_bag,
+        aten.grid_sampler_2d,
+        aten.norm,
     ]
 )
 
@@ -97,6 +104,22 @@ def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))
 
 
+@register_decomposition([aten.round.decimals])
+def round_dec(x, decimals=0):
+    ten_pow_decimals = 10.0**decimals
+    return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
+
+
+@register_decomposition([aten.div.Tensor_mode])
+def div_mode(a, b, rounding_mode=None):
+    result = aten.div(a, b)
+    if rounding_mode == "floor":
+        return torch.floor(result)
+    if rounding_mode == "trunc":
+        return torch.trunc(result)
+    return result
+
+
 @register_decomposition([aten.gelu])
 def gelu(x, approximate="none"):
     if config.approximations or approximate != "none":
@@ -147,6 +170,23 @@ def masked_fill(value, mask, other):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
     value, mask, other = torch.broadcast_tensors(value, mask, other)
     return torch.where(mask, other, value)
+
+
+@register_decomposition([aten.nan_to_num])
+def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    if nan is None:
+        nan = 0.0
+    if posinf is None:
+        posinf = torch.finfo(x.dtype).max
+    if neginf is None:
+        neginf = torch.finfo(x.dtype).min
+    nan, posinf, neginf = (
+        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
+    )
+    x = torch.where(x != x, nan, x)
+    x = torch.where(x == float("inf"), posinf, x)
+    x = torch.where(x == float("-inf"), neginf, x)
+    return x
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:

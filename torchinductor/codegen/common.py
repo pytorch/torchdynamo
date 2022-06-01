@@ -90,6 +90,10 @@ class OpOverrides:
         return f"~{ExprPrinter.paren(x)}"
 
     @staticmethod
+    def logical_not(a):
+        return f"{ExprPrinter.paren(a)} == 0"
+
+    @staticmethod
     def bitwise_and(x, y):
         return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
 
@@ -197,14 +201,15 @@ class KernelArgs:
         self.sizevars = sizevars or collections.OrderedDict()
 
     def input(self, name):
+        name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
+        name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
-        assert name not in self.input_buffers, name
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):
@@ -375,16 +380,16 @@ class Kernel(CodeGen):
         self.stores = stores
         self.cse = cse
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         raise NotImplementedError()
 
-    def indirect_load(self, name: str, index: sympy.Expr):
+    def indirect_load(self, name: str, index: sympy.Expr, upcast: bool = False):
         """A load the depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
             self.loads = self.compute
-            return self.load(name, index)
+            return self.load(name, index, upcast)
         finally:
             self.loads = prior
 
@@ -410,16 +415,16 @@ class Kernel(CodeGen):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
-            def load(name: str, index: sympy.Expr):
+            def load(name: str, index: sympy.Expr, upcast: bool = False):
                 if "tmp" in str(index):
-                    return self.indirect_load(name, index)
+                    return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
                 if (name, index) in store_cache:
                     return store_cache[(name, index)]
                 if (name, self.rename_indexing(index)) in store_cache:
                     # TODO(jansel): figure out why we need this second case
                     return store_cache[(name, self.rename_indexing(index))]
-                return self.load(name, index)
+                return self.load(name, index, upcast)
 
             @staticmethod
             def store(name, index, value):
