@@ -38,6 +38,7 @@ from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
 from .exc import Unsupported
 from .exc import unimplemented
+from .guards import GuardBuilder
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
@@ -1212,7 +1213,18 @@ class InstructionTranslator(InstructionTranslatorBase):
             if isinstance(
                 val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
             ):
-                self.output.guards.update(VariableTracker.propagate(val)["guards"])
+                local_guards = VariableTracker.propagate(val)["guards"]
+                index_guards = [
+                    guard
+                    for guard in local_guards
+                    if guard.create_fn
+                    in (
+                        GuardBuilder.LIST_LENGTH,
+                        GuardBuilder.DICT_KEYS,
+                        GuardBuilder.ODICT_KEYS,
+                    )
+                ]
+                self.output.guards.update(index_guards)
 
         self._freevars_ids = dict()
         for name in self.code_options["co_freevars"]:
