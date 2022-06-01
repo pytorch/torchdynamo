@@ -24,23 +24,27 @@ def func_with_default(a, b, some_default_arg=True):
     if some_default_arg:
         return a - b
 
+
 def make_test_with_frame_count(expected_frame_count=None):
     def make_test(fn):
         nargs = len(inspect.signature(fn).parameters)
 
-        # expected_frame_count = kwargs['expected_frame_count'] if 'expected_frame_count' in kwargs else None 
+        # expected_frame_count = kwargs['expected_frame_count'] if 'expected_frame_count' in kwargs else None
 
         def test_fn(self):
-            return torchdynamo.testing.standard_test(self, fn=fn, nargs=nargs, expected_frame_count=expected_frame_count)
-        
+            return torchdynamo.testing.standard_test(
+                self, fn=fn, nargs=nargs, expected_frame_count=expected_frame_count
+            )
+
         return test_fn
 
     return make_test
 
+
 def make_test(fn):
     nargs = len(inspect.signature(fn).parameters)
 
-    # expected_frame_count = kwargs['expected_frame_count'] if 'expected_frame_count' in kwargs else None 
+    # expected_frame_count = kwargs['expected_frame_count'] if 'expected_frame_count' in kwargs else None
 
     def test_fn(self):
         return torchdynamo.testing.standard_test(self, fn=fn, nargs=nargs)

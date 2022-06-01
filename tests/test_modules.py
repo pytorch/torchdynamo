@@ -561,7 +561,11 @@ class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
 def make_test(fn, expected_ops=None, expected_frame_count=4):
     def test_fn(self):
         return torchdynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=expected_ops, expected_frame_count=expected_frame_count
+            self,
+            fn=fn,
+            nargs=1,
+            expected_ops=expected_ops,
+            expected_frame_count=expected_frame_count,
         )
 
     fn.eval()
@@ -595,19 +599,26 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     test_modulelist = make_test(ModuleList())
     test_moduledict = make_test(ModuleDict())
     test_super1 = make_test(SuperModule())
-    test_super_class_method = make_test(SuperChildCallsClassMethod(), expected_frame_count=1)
+    test_super_class_method = make_test(
+        SuperChildCallsClassMethod(), expected_frame_count=1
+    )
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks(), expected_frame_count=1)
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
-    test_parameters3 = make_test(ParametersModule3(), expected_ops=20 if torchdynamo.config.guard_nn_modules else 5)
+    test_parameters3 = make_test(
+        ParametersModule3(),
+        expected_ops=20 if torchdynamo.config.guard_nn_modules else 5,
+    )
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues(), expected_frame_count=1)
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty(), expected_frame_count=1)
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
-    test_module_attribute_precedence = make_test(ModuleAttributePrecedence(), expected_frame_count=1)
+    test_module_attribute_precedence = make_test(
+        ModuleAttributePrecedence(), expected_frame_count=1
+    )
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
@@ -642,7 +653,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         if torchdynamo.config.guard_nn_modules:
             self.assertEqual(cnt.frame_count, 6)
-        else:    
+        else:
             self.assertEqual(cnt.frame_count, 3)
 
     def test_simple_torch_function(self):

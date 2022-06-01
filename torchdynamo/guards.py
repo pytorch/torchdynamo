@@ -279,11 +279,9 @@ class GuardBuilder:
         keys = set()
         for key in value._parameters.keys():
             keys.add(key)
-        
+
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
-        self.code.append(
-            f"{ref}._parameters.keys() == {keys!r}"
-        )
+        self.code.append(f"{ref}._parameters.keys() == {keys!r}")
 
         for key in keys:
             full = f"{ref}._parameters['{key}']"
