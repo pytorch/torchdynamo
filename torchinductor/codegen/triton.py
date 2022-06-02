@@ -414,6 +414,7 @@ class TritonKernel(Kernel):
         line = f"tl.load({var} + {index}, {mask})"
         if upcast:
             line += ".to(tl.float32)"
+        return self.cse.generate(self.loads, line)
 
     def store(self, name, index, value):
         var = self.args.output(name)
