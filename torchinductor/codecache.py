@@ -222,7 +222,7 @@ def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
-def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=1):
+def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=2):
     from triton import Config
 
     target = conditional_product(x, y, z)
@@ -266,10 +266,16 @@ def pointwise_heuristics(size_hints):
     """
     Construct @triton.heuristics() based on size_hints.
     """
+    from triton import autotune
+
     if len(size_hints) == 1:
         return apply_triton_config(triton_config(size_hints, 1024))
     if len(size_hints) == 2:
-        return apply_triton_config(triton_config(size_hints, 64, 64))
+        return autotune([
+            triton_config(size_hints, 64, 64),
+            triton_config(size_hints, 128, 8),
+            triton_config(size_hints, 8, 128)
+        ], key=["xnumel", "ynumel"])
     if len(size_hints) == 3:
         return apply_triton_config(triton_config(size_hints, 16, 16, 16))
     raise NotImplementedError(f"size_hints: {size_hints}")
