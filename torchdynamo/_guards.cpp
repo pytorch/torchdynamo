@@ -274,7 +274,7 @@ PyObject *TensorGuards_check_verbose(TensorGuards *self, PyObject *args,
     }
   }
 
-  return NULL;
+  Py_RETURN_TRUE;
 }
 
 static PyMethodDef TensorGuards_methods[] = {
