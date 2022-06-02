@@ -446,7 +446,7 @@ class Scheduler:
             for alt_name in node.get_mutations():
                 self.mutation_renames[rename(alt_name)] = node.get_name()
                 self.mutation_renames[alt_name] = node.get_name()
-                self.mutation_real_name[node.get_name()] = alt_name
+                self.mutation_real_name[node.get_name()] = self.mutation_real_name.get(alt_name, alt_name)
 
         # make sure outputs aren't dead-code-eliminated
         for node in V.graph.graph_outputs:

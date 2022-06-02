@@ -1268,8 +1268,8 @@ class ComputedBuffer(Buffer):
 
         if len(tiles) > max_tiles:
             split = len(tiles) - max_tiles + 1
-            tiles = [*itertools.chain(*tiles[:split])] + tiles[split:]
-            assert len(tiles) == max_tiles
+            tiles = [[*itertools.chain(*tiles[:split])]] + tiles[split:]
+            assert len(tiles) == max_tiles, (len(tiles), max_tiles, split)
 
         return tiles
 
