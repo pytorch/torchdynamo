@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import Any
 from typing import Dict
 
+import numpy as np
 import torch
 from torch import fx
 
@@ -76,6 +77,22 @@ def istype(obj, allowed_types):
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def is_numpy_int_type(value):
+    return istype(
+        value,
+        (
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    )
 
 
 def istensor(obj):

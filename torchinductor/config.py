@@ -25,6 +25,9 @@ pick_loop_orders = True
 # generate inplace computations
 inplace_buffers = False
 
+# codegen benchmark harness
+benchmark_harness = True
+
 
 # config specific to codegen/cpp.pp
 class cpp:

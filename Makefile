@@ -34,7 +34,7 @@ lint:
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
-	grep -E '(black|flake8|isort|click)' requirements.txt | xargs pip install
+	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs pip install
 
 setup_lint: lint-deps
 
@@ -43,7 +43,7 @@ setup:
 
 setup_nightly:
 	pip install ninja
-	pip install --pre torch==1.12.0.dev20220515+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install --pre torch==1.13.0.dev20220601+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
 	pip install -r requirements.txt
 	python setup.py develop

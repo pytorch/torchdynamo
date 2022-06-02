@@ -187,6 +187,7 @@ def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=
     return inner
 
 
+@register_lowering(torch.ops.prims.convert_element_type, type_promote=False)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
         return x
@@ -272,6 +273,11 @@ def register_pointwise(
 def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
+
+    if isinstance(a, (float, int)):
+        a = constant_like(a)(b)
+    if isinstance(b, (float, int)):
+        b = constant_like(b)(a)
 
     dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
     return make_pointwise(fn, override_dtype=dtype)(
@@ -405,7 +411,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split)
-def split(x, sizes, dim):
+def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, int):
@@ -420,7 +426,7 @@ def split(x, sizes, dim):
 
 
 @register_lowering(aten.split_with_sizes)
-def split_with_sizes(x, sizes, dim):
+def split_with_sizes(x, sizes, dim=0):
     return split(x, sizes, dim)
 
 
@@ -751,6 +757,9 @@ def _local_scalar_dense(data):
 
 
 def _full(fill_value, device, dtype, size):
+    if isinstance(fill_value, ir.Constant):
+        fill_value = fill_value.value
+    assert isinstance(fill_value, (int, float)), fill_value
     return Pointwise.create(
         device=device,
         dtype=dtype,
