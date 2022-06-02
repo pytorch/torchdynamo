@@ -27,13 +27,13 @@ from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardedCode
-from .guards import guard_failures
-from .guards import orig_code_map
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import guard_failures
 from .utils import is_namedtuple
 from .utils import istype
+from .utils import orig_code_map
 
 log = logging.getLogger(__name__)
 

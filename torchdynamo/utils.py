@@ -24,7 +24,6 @@ from torch import fx
 import torchdynamo.config
 
 from . import config
-from .guards import guard_failures
 
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
@@ -452,6 +451,13 @@ def disable_cache_limit():
         torchdynamo.config.cache_size_limit = prior
 
 
+# map from transformed code back to original user code
+orig_code_map = ExactWeakKeyDictionary()
+
+# keep a record of code_obj -> list of guard failure reasons for logging
+guard_failures = collections.defaultdict(list)
+
+
 class CompileProfiler:
     """Utility for profiling how and what dynamo would compile.
 
@@ -494,7 +500,10 @@ class CompileProfiler:
         if "graph_break" in counters:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
-            rpt += "You may gain additional insight by passing `nopython=True` to torchdynamo.optimize, to break on the first condition.\n"
+            rpt += (
+                "You may gain additional insight by passing `nopython=True` to torchdynamo.optimize, "
+                "to break on the first condition.\n"
+            )
             graph_breaks = counters["graph_break"]
             rpt += tabulate.tabulate(
                 [[msg, graph_breaks[msg]] for msg in graph_breaks],
@@ -507,7 +516,10 @@ class CompileProfiler:
             rpt += (
                 "These subgraphs were recompiled more than once due to guard failures."
             )
-            rpt += "Guard failures indicate some condition assumed to be static by the tracer changed, making it unsafe to reuse the compiled program."
+            rpt += (
+                "Guard failures indicate some condition assumed to be static by the tracer changed, "
+                "making it unsafe to reuse the compiled program."
+            )
             rpt += tabulate.tabulate(
                 summarized_gf,
                 headers=["Function", "Num Recompiles", "Recompile Reasons"],
