@@ -732,6 +732,7 @@ class CommonTemplate:
                 torch.randn(2, 8, 8),
                 torch.randn(2, 8, 8),
             ),
+            check_lowp=False,
         )
         self.common(
             fn,
@@ -739,6 +740,7 @@ class CommonTemplate:
                 torch.randn(1, 16, 8),
                 torch.randn(1, 8, 10),
             ),
+            check_lowp=False,
         )
 
     def test_gather(self):
@@ -911,6 +913,7 @@ class CommonTemplate:
                 torch.randn([32, 16, 8]),
                 torch.randn([16]),
             ),
+            check_lowp=False,
         )
 
     def test_adaptive_avg_pool2d1(self):

@@ -188,7 +188,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 from torchdynamo.testing import rand_strided
                 from torchinductor.microbench import print_performance
-            """,
+                """,
                 strip=True,
             )
             for name, value in V.graph.graph_inputs.items():

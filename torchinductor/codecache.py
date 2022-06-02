@@ -124,7 +124,7 @@ class PyCodeCache:
                 cls.cache[key] = mod
                 cls.cache[key].key = key
         if config.debug:
-            print("PyCodeCache", path)
+            print(f"PyCodeCache {path}")
         return cls.cache[key]
 
 

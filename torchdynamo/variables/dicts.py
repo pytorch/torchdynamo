@@ -28,7 +28,7 @@ class ConstDictVariable(VariableTracker):
     def reconstruct(self, codegen):
         if len(self.items) == 0:
             return [create_instruction("BUILD_MAP", 0)]
-        keys = tuple(sorted(self.items.keys()))
+        keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
         return [

@@ -80,9 +80,11 @@ class PyCodegen(object):
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
                 output.append(self.create_load(self.tempvars[value.mutable_local]))
+                self.top_of_stack = value
                 return
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
+                self.top_of_stack = value
                 return
 
         if value.source is not None and allow_cache:
