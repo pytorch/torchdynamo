@@ -1,25 +1,37 @@
 import heapq
 
 import torch
-
 import triton
 import triton._C.libtriton.triton as _triton
-from triton.ops.matmul_perf_model import get_tflops as get_tflops
 from triton.ops.matmul_perf_model import get_dram_gbps as get_dram_gbps
+from triton.ops.matmul_perf_model import get_tflops as get_tflops
 
 
 def estimate_conv_time(
     # backend, device,
-    num_warps, num_stages,
-    x, w, bias, y,
-    BATCH, IN_C, IN_H, IN_W,
-    KERNEL_N, KERNEL_H, KERNEL_W,
-    OUT_H, OUT_W,
-    BLOCK_M, BLOCK_K, BLOCK_N,
-    debug=False, **kwargs
+    num_warps,
+    num_stages,
+    x,
+    w,
+    bias,
+    y,
+    BATCH,
+    IN_C,
+    IN_H,
+    IN_W,
+    KERNEL_N,
+    KERNEL_H,
+    KERNEL_W,
+    OUT_H,
+    OUT_W,
+    BLOCK_M,
+    BLOCK_K,
+    BLOCK_N,
+    debug=False,
+    **kwargs,
 ):
-    ''' return estimated running time in ms
-          = max(compute, loading) + store '''
+    """return estimated running time in ms
+    = max(compute, loading) + store"""
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     dtype = x.dtype
@@ -44,9 +56,15 @@ def estimate_conv_time(
     # time to load data
     num_sm = _triton.runtime.num_sm(backend, device)
     active_cta_ratio = min(1, num_ctas / num_sm)
-    active_cta_ratio_bw1 = min(1, num_ctas / 32)  # 32 active ctas are enough to saturate
-    active_cta_ratio_bw2 = max(min(1, (num_ctas - 32) / (108 - 32)), 0)  # 32-108, remaining 5%
-    dram_bw = get_dram_gbps(backend, device) * (active_cta_ratio_bw1 * 0.95 + active_cta_ratio_bw2 * 0.05)  # in GB/s
+    active_cta_ratio_bw1 = min(
+        1, num_ctas / 32
+    )  # 32 active ctas are enough to saturate
+    active_cta_ratio_bw2 = max(
+        min(1, (num_ctas - 32) / (108 - 32)), 0
+    )  # 32-108, remaining 5%
+    dram_bw = get_dram_gbps(backend, device) * (
+        active_cta_ratio_bw1 * 0.95 + active_cta_ratio_bw2 * 0.05
+    )  # in GB/s
     l2_bw = dram_bw * 4  # rough estimation (should be 4.7 for A100?)
     # assume 80% of (following) loads are in L2 cache
     load_a_dram = M * K * dtsize * (1 + 0.2 * (num_cta_n - 1))
@@ -66,9 +84,11 @@ def estimate_conv_time(
 
     total_time_ms = max(compute_ms, load_ms) + store_ms
     if debug:
-        print(f'Total time: {total_time_ms}ms, compute time: {compute_ms}ms, '
-              f'loading time: {load_ms}ms, store time: {store_ms}ms, '
-              f'Activate CTAs: {active_cta_ratio*100}%')
+        print(
+            f"Total time: {total_time_ms}ms, compute time: {compute_ms}ms, "
+            f"loading time: {load_ms}ms, store time: {store_ms}ms, "
+            f"Activate CTAs: {active_cta_ratio*100}%"
+        )
     return total_time_ms
 
 
@@ -77,15 +97,19 @@ def early_config_prune(configs, named_args):
     device = torch.cuda.current_device()
     cc = _triton.runtime.cc(backend, device)
     # BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps, num_stages
-    dtsize = named_args['x'].element_size()
-    dtype = named_args['x'].dtype
+    dtsize = named_args["x"].element_size()
+    # dtype = named_args["x"].dtype
 
     # 1. make sure we have enough smem
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
-        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = \
-            kw['BLOCK_M'], kw['BLOCK_N'], kw['BLOCK_K'], config.num_stages
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = (
+            kw["BLOCK_M"],
+            kw["BLOCK_N"],
+            kw["BLOCK_K"],
+            config.num_stages,
+        )
         max_shared_memory = _triton.runtime.max_shared_memory(backend, device)
         required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
         if required_shared_memory <= max_shared_memory:
@@ -96,8 +120,13 @@ def early_config_prune(configs, named_args):
     configs_map = {}
     for config in configs:
         kw = config.kwargs
-        BLOCK_M, BLOCK_N, BLOCK_K, num_warps, num_stages = \
-            kw['BLOCK_M'], kw['BLOCK_N'], kw['BLOCK_K'], config.num_warps, config.num_stages
+        BLOCK_M, BLOCK_N, BLOCK_K, num_warps, num_stages = (
+            kw["BLOCK_M"],
+            kw["BLOCK_N"],
+            kw["BLOCK_K"],
+            config.num_warps,
+            config.num_stages,
+        )
 
         key = (BLOCK_M, BLOCK_N, BLOCK_K, num_warps)
         if key in configs_map:
@@ -117,8 +146,13 @@ def early_config_prune(configs, named_args):
             optimal_num_stages = ldgsts_latency / mma_cycles
 
             # nearest stages, prefer large #stages
-            nearest = heapq.nsmallest(2, v, key=lambda x: 10 + abs(x[1] - optimal_num_stages)
-                                      if (x[1] - optimal_num_stages) < 0 else x[1] - optimal_num_stages)
+            nearest = heapq.nsmallest(
+                2,
+                v,
+                key=lambda x: 10 + abs(x[1] - optimal_num_stages)
+                if (x[1] - optimal_num_stages) < 0
+                else x[1] - optimal_num_stages,
+            )
 
             for n in nearest:
                 pruned_configs.append(n[0])

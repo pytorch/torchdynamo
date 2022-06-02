@@ -18,8 +18,8 @@ conv_confs = [
         args={"BATCH": BATCH, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
               "KERNEL_H": 1, "KERNEL_W": 1},
     ) for BATCH in [32, 64]
-    for IN_C in [64, 128]  #powspace(16, 256, 2, 1)
-    for KERNEL_N in [32, 64, 128]  #powspace(16, 256, 2, 1)
+    for IN_C in [64, 128]  # powspace(16, 256, 2, 1)
+    for KERNEL_N in [32, 64, 128]  # powspace(16, 256, 2, 1)
 ]
 
 
