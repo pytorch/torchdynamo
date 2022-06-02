@@ -8,7 +8,6 @@ import types
 from abc import ABCMeta
 from typing import Any
 
-import numpy as np
 import torch
 
 import torchdynamo
@@ -27,6 +26,7 @@ from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
 from ..utils import is_namedtuple
+from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype
 from ..utils import tuple_iterator
@@ -125,7 +125,7 @@ class VariableBuilder:
             # One can index a tensor with a list/tuple. Therefore, we need to
             # have a stricter match.
             if istype(value, (tuple, list)) and all(
-                [isinstance(x, int) or x is None for x in value]
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
             ):
                 guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             else:
@@ -273,19 +273,7 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        if istype(
-            value,
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
-        ):
+        elif is_numpy_int_type(value):
             return self._wrap(int(value))
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
