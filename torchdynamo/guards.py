@@ -216,11 +216,19 @@ class GuardBuilder:
             # TODO(jansel): is this slow? perhaps optimize it
             self.code.append(f"str({ref}) == {str(val)!r}")
             return
+
+        # Add type check to prevent equality check between tensor and non-tensor.
+        if istype(val, (list, tuple)):
+            self.LIST_LENGTH(guard)
+            for idx, elem in enumerate(val):
+                self.code.append(
+                    f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
+                )
+        elif not istype(val, torch.Size):
+            self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
+
         if istype(val, torch.Size):
             val = tuple(val)
-
-        # Add a type check to prevent boolean check of a tensor and non-tensor.
-        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
         self.code.append(f"{ref} == {val!r}")
 
     def CONSTANT_MATCH(self, guard: Guard):

@@ -50,6 +50,10 @@ class VariableTracker:
             if type(var) in (list, tuple, dict_values, odict_values):
                 for i in var:
                     visit(i)
+            elif isinstance(var, variables.BaseListVariable):
+                guards.update(var.guards)
+                for i in var.items:
+                    visit(i)
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
