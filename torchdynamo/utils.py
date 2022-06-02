@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import functools
 import gc
@@ -7,6 +8,7 @@ import itertools
 import logging
 import operator
 import re
+import sys
 import time
 import types
 import weakref
@@ -15,10 +17,14 @@ from typing import Any
 from typing import Dict
 
 import numpy as np
+import tabulate
 import torch
 from torch import fx
 
+import torchdynamo.config
+
 from . import config
+from .guards import guard_failures
 
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
@@ -429,16 +435,6 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
         raise RuntimeError(f"unsupported type: {type(a).__name__}")
 
 
-import contextlib
-import sys
-
-import tabulate
-
-import torchdynamo.config
-
-from .guards import guard_failures
-
-
 def format_func_info(code):
     short_filename = code.co_filename.split("/")[-1]
     return f"'{code.co_name}' ({short_filename}:{code.co_firstlineno})"
@@ -494,16 +490,31 @@ class CompileProfiler:
             [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
             for code in gf
         ]
-        max_recompiles = max([num_recompiles(code) for code in gf]) if len(gf) else 1
-        rpt = "Torchdynamo Profiler Report"
-        rpt += "\n\n"
+        rpt = "Torchdynamo Profiler Report\n"
+        if "graph_break" in counters:
+            rpt += "\n"
+            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
+            rpt += "You may gain additional insight by passing `nopython=True` to torchdynamo.optimize, to break on the first condition.\n"
+            graph_breaks = counters["graph_break"]
+            rpt += tabulate.tabulate(
+                [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                headers=["Graph Break Reason", "Count"],
+            )
+
         if len(gf):
+            max_recompiles = max([num_recompiles(code) for code in gf])
+            rpt += "\n"
+            rpt += (
+                "These subgraphs were recompiled more than once due to guard failures."
+            )
+            rpt += "Guard failures indicate some condition assumed to be static by the tracer changed, making it unsafe to reuse the compiled program."
             rpt += tabulate.tabulate(
                 summarized_gf,
                 headers=["Function", "Num Recompiles", "Recompile Reasons"],
             )
             rpt += "\n"
-            rpt += f"Set torchdynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited."
+            rpt += f"Set torchdynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.\n"
         else:
-            rpt += "No cache-limited recompilations detected."
+            rpt += "No cache-limited recompilations detected.\n"
+
         return rpt
