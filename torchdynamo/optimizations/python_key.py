@@ -8,7 +8,7 @@ from torch.fx import GraphModule
 from torch.fx import Node
 from torch.nn.utils import _stateless
 
-from ..allowed_functions import _allowed_function_ids
+from ..allowed_functions import torch_get_name
 from ..utils import clone_inputs
 from ..utils import istype
 from .normalize import normalize_ir
@@ -37,8 +37,8 @@ def constant_inputs(n: torch.fx.Node):
 
 def debug_node(n: Node):
     target = n.target
-    target = _allowed_function_ids().get(
-        id(target),
+    target = torch_get_name(
+        target,
         f"{getattr(target, '__module__', '')}.{getattr(target, '__name__', '')} {target}",
     )
     return f"{n.op} {target} {n.args} {n.kwargs}"

@@ -1165,7 +1165,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["total"], 3)
 
-    def test_guard_fail(self):
+    def test_guard_fail_tensor_bool(self):
         @torchdynamo.skip
         def fn():
             condition_shape = (5, 5)
@@ -1210,3 +1210,16 @@ class ReproTests(torchdynamo.testing.TestCase):
         fn()
         with torchdynamo.optimize("eager"):
             fn()
+
+    def test_guard_fail_nested_tuple(self):
+        def fn(args):
+            return torch.ones(()), args[0] * 2
+
+        with torchdynamo.optimize("eager"):
+            # This adds a tensor check on args[1][0] and args[1][1]
+            args = (torch.ones(1), (torch.ones(1), torch.ones(1)))
+            ref = fn(args)
+            args = (torch.ones(1), torch.ones(1))
+            res = fn(args)
+
+        self.assertTrue(same(ref, res))
