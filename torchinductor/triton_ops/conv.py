@@ -104,7 +104,7 @@ def _kernel(x, w, bias, y,
     # load inc ptr of x, upade x_ptrs
     delta_x_ptrs = delta_x_ptr + off_x_crs
     off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
-    delta_x_ptrs += BLOCK_K
+    # delta_x_ptrs += BLOCK_K
 
     x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
     mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H)
@@ -126,22 +126,22 @@ def _kernel(x, w, bias, y,
     # allocate accumulator
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
     for crs in range(0, CRS, BLOCK_K):
-        
+
         # ------ matrix multiplication ------
         acc += tl.dot(matrix_x, matrix_w)
         # ------ update ptrs ------
         w_ptrs += BLOCK_K
         # load inc ptr of x, upade x_ptrs
-        off_x_crs = crs + tl.arange(0, BLOCK_K)
-        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
         delta_x_ptrs += BLOCK_K
+        off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
+        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         # x_ptrs += BLOCK_K
 
         mask_x = ((off_x_n < BATCH) & (off_x_h >= 0) & (off_x_h < IN_H)
                   & (off_x_w >= 0) & (off_x_w < IN_W))[:, None] \
-            & (off_x_crs + BLOCK_K < CRS)[None, :]
-        mask_w = (off_x_crs + BLOCK_K < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+            & (off_x_crs < CRS)[None, :]
+        mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
         # ------ prefetch ------
         # ------ load x ------
         matrix_x = tl.load(x_ptrs, mask=mask_x)
@@ -183,7 +183,7 @@ def _kernel(x, w, bias, y,
     return
 
 
-class _conv(torch.autograd.Function):
+class _conv():
     kernel = _kernel
 
     @staticmethod
@@ -353,7 +353,7 @@ class _conv(torch.autograd.Function):
         return y
 
     @staticmethod
-    def forward(ctx, x, w, bias,
+    def forward(x, w, bias,
                 stride=(1, 1), padding=(0, 0),
                 dilation=(1, 1), transposed=False,
                 output_padding=(0, 0), groups=1,
@@ -371,4 +371,4 @@ class _conv(torch.autograd.Function):
                            layout_x, layout_w, layout_y)
 
 
-conv = _conv.apply
+conv = _conv.forward
