@@ -1,29 +1,15 @@
-import math
 import torch
 import triton
 
 import torchinductor.triton_ops
-
-
-def rounded_linspace(low, high, steps, div):
-    ret = torch.linspace(low, high, steps)
-    ret = (ret.int() + div - 1) // div * div
-    ret = torch.unique(ret)
-    return list(map(int, ret))
-
-
-def powspace(start, stop, pow, steps):
-    start = math.log(start, pow)
-    stop = math.log(stop, pow)
-    ret = torch.pow(pow, torch.linspace(start, stop, steps))
-    return list(map(int, ret))
+from .utils import powspace
 
 
 # conv benchmarks
 conv_confs = [
     triton.testing.Benchmark(
         x_names=["IN_H", "IN_W"],
-        x_vals=[8, 16, 32, 64, 128, 256], #powspace(8, 256, 2, 1),
+        x_vals=powspace(8, 256, 2, 1),
         line_arg="provider",
         line_vals=["cublas", "triton"],
         line_names=["cuBLAS", "Triton"],
@@ -31,9 +17,9 @@ conv_confs = [
         plot_name=f"conv1x1-performance-BATCH={BATCH}-IN_C={IN_C}-KN={KERNEL_N}",
         args={"BATCH": BATCH, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
               "KERNEL_H": 1, "KERNEL_W": 1},
-    ) for BATCH in [32]
-    for IN_C in [128]  #powspace(16, 256, 2, 1)
-    for KERNEL_N in [32]  #powspace(16, 256, 2, 1)
+    ) for BATCH in [32, 64]
+    for IN_C in [64, 128]  #powspace(16, 256, 2, 1)
+    for KERNEL_N in [32, 64, 128]  #powspace(16, 256, 2, 1)
 ]
 
 
@@ -74,4 +60,4 @@ def bench_op(
         return tflops(ms), tflops(max_ms), tflops(min_ms)
 
 
-bench_op.run(show_plots=True, print_data=True)
+bench_op.run(print_data=True)
