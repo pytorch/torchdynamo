@@ -14,6 +14,7 @@ import torch
 from . import config
 from . import dependencies
 from . import ir
+from .codegen.common import product
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
@@ -187,7 +188,6 @@ class SchedulerNode(BaseSchedulerNode):
         ) = node.simplify_reorder_and_tile()
 
         self.group = (node.get_device(), group_fn(self._sizes))
-
         self.set_read_writes(dependencies.extract_read_writes(self._body, *self._sizes))
 
     def can_remove_buffer(self, check_group):
@@ -585,6 +585,7 @@ class Scheduler:
         if self.fusable_deps:
             fusable = True
             while fusable:
+                # keep poping fusable nodes as their depdencies are satisfied
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
 

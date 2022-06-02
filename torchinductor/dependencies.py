@@ -7,6 +7,7 @@ from typing import Set
 
 import sympy
 
+from .codegen.common import _simplify_loops
 from .virtualized import V
 
 
@@ -63,19 +64,37 @@ class ReadWrites:
 
 
 class RecordLoadStore(V.MockHandler):
-    def __init__(self, size):
+    def __init__(self, size, var_ranges):
         super(RecordLoadStore, self).__init__()
         self._reads = set()
         self._writes = set()
         self._index_exprs = set()
         self._size = tuple([x for x in size if x != 1])
+        self._var_ranges = var_ranges
+
+    def canonicalize(self, index):
+        sizes = list(self._var_ranges.values())
+        if len(self._var_ranges) > 1:
+            # Try to further simplify the indexes even if simplify_loops didn't
+            # convert it to the simpliest form because of the interference from
+            # different indexing formulas.
+            index_vars = list(self._var_ranges.keys())
+            new_sizes, reindex, prune = _simplify_loops(
+                index_vars, sizes, [index])
+            if len(new_sizes) < len(sizes):
+                replacement = dict(zip(index_vars, reindex(prune(index_vars))))
+                index = sympy.expand(index).subs(replacement).subs(dict(zip(index_vars, reversed(index_vars))))
+                sizes = new_sizes
+        return index, tuple([x for x in sizes if x != 1])
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        self._reads.add(MemoryDep(name, index, self._size))
+        canonicalized_index, canonicalized_size = self.canonicalize(index)
+        self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"load({name}, {index}, {upcast})"
 
     def store(self, name, index, value):
-        self._writes.add(MemoryDep(name, index, self._size))
+        canonicalized_index, canonicalized_size = self.canonicalize(index)
+        self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"store({name}, {index}, {value})"
 
     def reduction(self, name, dtype, reduction_type, index, value):
@@ -121,7 +140,7 @@ def index_vars_squeeze(*argsizes, prefix="d"):
 
 def extract_read_writes(fn, *argsizes):
     new_sizes, args, var_ranges = index_vars_squeeze(*argsizes)
-    rw = RecordLoadStore(new_sizes[0])
+    rw = RecordLoadStore(new_sizes[0], var_ranges)
     with V.set_ops_handler(rw):
         fn(*args)
     return ReadWrites(rw._reads, rw._writes, rw._index_exprs)

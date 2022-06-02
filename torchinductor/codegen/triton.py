@@ -602,6 +602,7 @@ class TritonScheduling:
         reschedule = []
         with scheduler.kernel(TritonKernel(*groups)) as kernel:
             for _ in scheduler.iter_fixed_point():
+                # scheduler.pop_group will keep iterating all reachable fusable nodes
                 for node in scheduler.pop_group(groups):
                     scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
                     node.run(*kernel.set_ranges(*node.get_ranges()))
