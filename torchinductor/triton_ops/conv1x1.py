@@ -67,9 +67,11 @@ class _conv1x1(torch.autograd.Function):
         assert KERNEL_H == 1 and KERNEL_W == 1, "only support 1x1 conv"
         assert layout_x == layout_w, "x and w should have the same layout"
 
-        if stride == (1, 1) and padding == (0, 0):
+        if padding == (0, 0):
             if layout_x != 'nhwc':
                 x = x.permute(xn, xh, xw, xc)
+            # select every stride's element (for stride > 1)
+            x = x[:, ::stride[0], ::stride[1], :]
             # 2d matrix
             mat_x = x.reshape(-1, IN_C)
             # 2d matrix
@@ -89,7 +91,8 @@ class _conv1x1(torch.autograd.Function):
             return y
 
         else:
-            y = torch.zeros((shape_y[yn], shape_y[yh], shape_y[yw], shape_y[yc]), device=device, dtype=x.dtype)
+            y = torch.empty((shape_y[yn], shape_y[yh], shape_y[yw], shape_y[yc]), device=device, dtype=x.dtype)
+            # y = bias.repeat((shape_y[yn], shape_y[yh], shape_y[yw], 1)).to(device).type(x.dtype)
             # convert x to channel-last layout;
             # don't care w layout since kernel size is 1
             if layout_x != 'nhwc':
@@ -105,9 +108,12 @@ class _conv1x1(torch.autograd.Function):
             mat_y = triton.ops.matmul(mat_x, mat_w)
             mat_y = mat_y.view(BATCH, OUT_H - 2 * padding[0], OUT_W - 2 * padding[1], KERNEL_N)
             # consider padding > 0
-            y[:, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :] = mat_y
+            y[:, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :] = mat_y + bias
             if bias is not None:
-                y += bias
+                y[:, :padding[0], :, :] = bias
+                y[:, :, :padding[1], :] = bias
+                y[:, OUT_H - padding[0]:, :, :] = bias
+                y[:, :, OUT_W - padding[1]:, :] = bias
             # convert back to the original layeout of y
             if layout_y != 'nhwc':
                 nhwc = [yn, yh, yw, yc]
@@ -115,7 +121,6 @@ class _conv1x1(torch.autograd.Function):
                 permute_idx = sorted(range(len(nhwc)), key=lambda k: nhwc[k])
                 y = y.permute(permute_idx)
             return y
-
 
     @staticmethod
     def forward(ctx, x, w, bias,

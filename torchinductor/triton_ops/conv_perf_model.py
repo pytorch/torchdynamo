@@ -15,7 +15,7 @@ def estimate_conv_time(
     BATCH, IN_C, IN_H, IN_W,
     KERNEL_N, KERNEL_H, KERNEL_W,
     OUT_H, OUT_W,
-    BLOCK_NHW, BLOCK_CRS, BLOCK_K,
+    BLOCK_M, BLOCK_K, BLOCK_N,
     debug=False, **kwargs
 ):
     ''' return estimated running time in ms
@@ -28,13 +28,13 @@ def estimate_conv_time(
     M = BATCH * OUT_H * OUT_W
     N = KERNEL_N
     K = KERNEL_H * KERNEL_W * IN_C
-    num_cta_m = triton.cdiv(M, BLOCK_NHW)
-    num_cta_n = triton.cdiv(N, BLOCK_K)
+    num_cta_m = triton.cdiv(M, BLOCK_M)
+    num_cta_n = triton.cdiv(N, BLOCK_N)
     num_cta_k = 1
     num_ctas = num_cta_m * num_cta_n * num_cta_k
 
     # If the input is smaller than the block size
-    M, N = max(M, BLOCK_NHW), max(N, BLOCK_K)
+    M, N = max(M, BLOCK_M), max(N, BLOCK_N)
 
     # time to compute
     total_ops = 2 * M * N * K / (1024 * 1024 * 1024)  # GOPS
@@ -76,7 +76,7 @@ def early_config_prune(configs, named_args):
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     cc = _triton.runtime.cc(backend, device)
-    # BLOCK_NHW, BLOCK_K, BLOCK_CRS, SPLIT_K, num_warps, num_stages
+    # BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps, num_stages
     dtsize = named_args['x'].element_size()
     dtype = named_args['x'].dtype
 
@@ -84,22 +84,22 @@ def early_config_prune(configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
-        BLOCK_NHW, BLOCK_K, BLOCK_CRS, num_stages = \
-            kw['BLOCK_NHW'], kw['BLOCK_K'], kw['BLOCK_CRS'], config.num_stages
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = \
+            kw['BLOCK_M'], kw['BLOCK_N'], kw['BLOCK_K'], config.num_stages
         max_shared_memory = _triton.runtime.max_shared_memory(backend, device)
-        required_shared_memory = (BLOCK_NHW + BLOCK_K) * BLOCK_CRS * num_stages * dtsize
+        required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
         if required_shared_memory <= max_shared_memory:
             pruned_configs.append(config)
     configs = pruned_configs
 
-    # group configs by (BLOCK_NHW,_N,_K, num_warps)
+    # group configs by (BLOCK_M,_N,_K, num_warps)
     configs_map = {}
     for config in configs:
         kw = config.kwargs
-        BLOCK_NHW, BLOCK_K, BLOCK_CRS, num_warps, num_stages = \
-            kw['BLOCK_NHW'], kw['BLOCK_K'], kw['BLOCK_CRS'], config.num_warps, config.num_stages
+        BLOCK_M, BLOCK_N, BLOCK_K, num_warps, num_stages = \
+            kw['BLOCK_M'], kw['BLOCK_N'], kw['BLOCK_K'], config.num_warps, config.num_stages
 
-        key = (BLOCK_NHW, BLOCK_K, BLOCK_CRS, num_warps)
+        key = (BLOCK_M, BLOCK_N, BLOCK_K, num_warps)
         if key in configs_map:
             configs_map[key].append((config, num_stages))
         else:
@@ -107,10 +107,10 @@ def early_config_prune(configs, named_args):
 
     pruned_configs = []
     for k, v in configs_map.items():
-        BLOCK_NHW, BLOCK_K, BLOCK_CRS, num_warps = k
+        BLOCK_M, BLOCK_N, BLOCK_K, num_warps = k
         if cc >= 80:
             # compute cycles (only works for ampere GPUs)
-            mmas = BLOCK_NHW * BLOCK_K * BLOCK_CRS / (16 * 8 * 16)
+            mmas = BLOCK_M * BLOCK_N * BLOCK_K / (16 * 8 * 16)
             mma_cycles = mmas / min(4, num_warps) * 8
 
             ldgsts_latency = 300  # Does this matter?
