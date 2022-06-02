@@ -2,6 +2,7 @@ import builtins
 import collections
 import copy
 import functools
+import inspect
 import itertools
 import math
 import operator
@@ -69,6 +70,7 @@ def _disallowed_function_ids():
         collections.OrderedDict,
         copy.copy,
         copy.deepcopy,
+        inspect.signature,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
         torch.autograd.grad,
