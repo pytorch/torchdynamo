@@ -4,6 +4,7 @@ import numpy as np
 
 import triton.language as tl
 from .conv_perf_model import early_config_prune, estimate_conv_time
+from torchinductor.triton_ops.utils import _unpack, _extract_strides, _roundup
 
 # a python implmentation of https://gist.github.com/ptillet/7f20c2006db1a30470675fad05cebdfe
 # BLOCK_K has to be fixed because of _delta_x() need to pass BLOCK_K param
@@ -216,28 +217,8 @@ def _kernel(x, w, bias, y,
     return
 
 
-class _conv_deltax(torch.autograd.Function):
+class _conv_deltax():
     kernel = _kernel
-
-    @staticmethod
-    def _extract_strides(shape):
-        rank = len(shape)
-        ret = [1] * rank
-        for i in range(rank - 1, 0, -1):
-            ret[i - 1] = ret[i] * shape[i]
-        return ret
-
-    @staticmethod
-    def _roundup(x, div):
-        return (x + div - 1) // div * div
-
-    @staticmethod
-    def _unpack(idx, order, shape):
-        _12 = idx  // shape[order[0]]
-        _0   = idx   % shape[order[0]]
-        _2  = _12 // shape[order[1]]
-        _1   = _12  % shape[order[1]]
-        return _0, _1, _2
 
     @staticmethod
     def _delta_x_ptr(wc, wh, ww,
@@ -251,11 +232,11 @@ class _conv_deltax(torch.autograd.Function):
         # the innermost two dimension of w
         window_contiguous_size = shape_w[order[0]] * shape_w[order[1]]
         # LUT size
-        K = _conv_deltax._roundup(BLOCK_K, window_contiguous_size)
+        K = _roundup(BLOCK_K, window_contiguous_size)
 
         # Initial k
         ki = np.arange(BLOCK_K, dtype=np.int32)[np.newaxis, np.newaxis, np.newaxis, :]
-        currentk = _conv_deltax._unpack(ki, order, shape_w)
+        currentk = _unpack(ki, order, shape_w)
         resulti = 0
         resulti += currentk[c] * stride_xc
         resulti += currentk[h] * stride_xh
@@ -263,8 +244,8 @@ class _conv_deltax(torch.autograd.Function):
 
         # delta k
         k = np.arange(K, dtype=np.int32)[np.newaxis, np.newaxis, np.newaxis, :]
-        currentk = _conv_deltax._unpack(k, order, shape_w)
-        nextk = _conv_deltax._unpack(k + BLOCK_K, order, shape_w)
+        currentk = _unpack(k, order, shape_w)
+        nextk = _unpack(k + BLOCK_K, order, shape_w)
 
         # Compute memory stride
         result = 0
@@ -336,10 +317,10 @@ class _conv_deltax(torch.autograd.Function):
         OUT_W = shape_y[yw]
 
         # get strides for tensors
-        stride_x = _conv_deltax._extract_strides(shape_x)
-        stride_w = _conv_deltax._extract_strides(shape_w)
-        stride_y = _conv_deltax._extract_strides(shape_y)
-        stride_bias = _conv_deltax._extract_strides(shape_bias) if shape_bias else None
+        stride_x = _extract_strides(shape_x)
+        stride_w = _extract_strides(shape_w)
+        stride_y = _extract_strides(shape_y)
+        stride_bias = _extract_strides(shape_bias) if shape_bias else None
         stride_biasn = stride_bias[0] if stride_bias else None
 
         assert((stride_x[0] >= stride_x[1]) and (stride_x[1] >= stride_x[2])
@@ -409,7 +390,7 @@ class _conv_deltax(torch.autograd.Function):
         return y
 
     @staticmethod
-    def forward(ctx, x, w, bias,
+    def forward(x, w, bias,
                 stride=(1, 1), padding=(0, 0),
                 dilation=(1, 1), transposed=False,
                 output_padding=(0, 0), groups=1,
@@ -427,4 +408,4 @@ class _conv_deltax(torch.autograd.Function):
                            layout_x, layout_w, layout_y)
 
 
-conv_deltax = _conv_deltax.apply
+conv_deltax = _conv_deltax.forward

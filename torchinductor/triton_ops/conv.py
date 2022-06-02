@@ -4,6 +4,7 @@ import numpy as np
 
 import triton.language as tl
 from .conv_perf_model import early_config_prune, estimate_conv_time
+from torchinductor.triton_ops.utils import _unpack, _extract_strides
 
 
 @triton.autotune(
@@ -186,26 +187,6 @@ def _kernel(x, w, bias, y,
 class _conv():
     kernel = _kernel
 
-    @staticmethod
-    def _extract_strides(shape):
-        rank = len(shape)
-        ret = [1] * rank
-        for i in range(rank - 1, 0, -1):
-            ret[i - 1] = ret[i] * shape[i]
-        return ret
-
-    @staticmethod
-    def _roundup(x, div):
-        return (x + div - 1) // div * div
-
-    @staticmethod
-    def _unpack(idx, order, shape):
-        _12 = idx  // shape[order[0]]
-        _0   = idx   % shape[order[0]]
-        _2  = _12 // shape[order[1]]
-        _1   = _12  % shape[order[1]]
-        return _0, _1, _2
-
     # for the contigous order of w ptr, what's the corresponding
     # ptr changes for x in a sliding window
     @staticmethod
@@ -219,7 +200,7 @@ class _conv():
         window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
 
         r_window = np.arange(0, window_size)
-        window_unpack = _conv._unpack(r_window, order, shape_w)
+        window_unpack = _unpack(r_window, order, shape_w)
         window_unpack_h = window_unpack[h]
         window_unpack_w = window_unpack[w]
         window_unpack_c = window_unpack[c]
@@ -289,10 +270,10 @@ class _conv():
         OUT_W = shape_y[yw]
 
         # get strides for tensors
-        stride_x = _conv._extract_strides(shape_x)
-        stride_w = _conv._extract_strides(shape_w)
-        stride_y = _conv._extract_strides(shape_y)
-        stride_bias = _conv._extract_strides(shape_bias) if shape_bias else None
+        stride_x = _extract_strides(shape_x)
+        stride_w = _extract_strides(shape_w)
+        stride_y = _extract_strides(shape_y)
+        stride_bias = _extract_strides(shape_bias) if shape_bias else None
         stride_biasn = stride_bias[0] if stride_bias else None
 
         assert((stride_x[0] >= stride_x[1]) and (stride_x[1] >= stride_x[2])
