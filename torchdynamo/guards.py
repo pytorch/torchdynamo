@@ -242,12 +242,21 @@ class GuardBuilder:
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        if not val._awaiting_init:
+
+        # There are cases where a patched object has a guard made between __new__ and __init__
+        def setup_guard():
             assert istype(val.training, bool)
             if val.training:
                 self.code.append(f"{ref}.training")
             else:
                 self.code.append(f"not {ref}.training")
+
+        if hasattr(val, "_awaiting_init"):
+            if not val._awaiting_init:
+                setup_guard()
+        else:
+            # Object was not monkeypatched on __new__ and __init__ by us
+            setup_guard()
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
