@@ -575,8 +575,6 @@ class TypingVariable(VariableTracker):
             )
         unimplemented("typing")
 
-    pass
-
 
 class NumpyVariable(VariableTracker):
     """
