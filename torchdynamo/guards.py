@@ -243,7 +243,7 @@ class GuardBuilder:
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        # There are cases where a patched object has a guard made between __new__ and __init__
+        # There are cases where a monkeypatched object has a guard made between __new__ and __init__
         def setup_guard():
             assert istype(val.training, bool)
             if val.training:
@@ -254,6 +254,7 @@ class GuardBuilder:
         if hasattr(val, "_awaiting_init"):
             if not val._awaiting_init:
                 setup_guard()
+
         else:
             # Object was not monkeypatched on __new__ and __init__ by us
             setup_guard()
