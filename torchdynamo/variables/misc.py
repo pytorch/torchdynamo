@@ -556,6 +556,28 @@ class SkipFilesVariable(VariableTracker):
             unimplemented("call_function in skip_files " + path)
 
 
+class TypingVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__getitem__":
+            return variables.ConstantVariable(
+                self.value[args[0].as_python_constant()],
+                **VariableTracker.propagate(self, args),
+            )
+        unimplemented("typing")
+
+    pass
+
+
 class NumpyVariable(VariableTracker):
     """
     Wrapper around `numpy.*` for better error messages.

@@ -113,7 +113,12 @@ def _allowed_function_ids():
                     if obj.__name__.startswith("torch."):
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
-                else:
+                elif inspect.getmodule(obj) and (
+                    inspect.getmodule(obj).__name__.startswith("torch")
+                    or inspect.getmodule(obj).__name__.startswith("math")
+                ):
+                    torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
+                elif inspect.getmodule(obj) is None:
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
