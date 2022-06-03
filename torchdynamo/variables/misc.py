@@ -61,7 +61,7 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn = self.const_getattr(self, name)
-        if name == "__init__":
+        if inner_fn == object.__init__:
             return LambdaVariable(identity, **options)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(inner_fn, **options).call_function(

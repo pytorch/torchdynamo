@@ -24,9 +24,11 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
+from .exc import unimplemented
 from .utils import ExactWeakKeyDictionary
 from .utils import istype
 from .utils import rename_implicit
+from .utils import training_state
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
 
@@ -42,6 +44,7 @@ CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
+        ("___training_state", training_state),
         ("___is_grad_enabled", torch.is_grad_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___tuple_iterator_len", tuple_iterator_len),
@@ -243,17 +246,16 @@ class GuardBuilder:
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        # There are cases where a monkeypatched object has a guard made between __new__ and __init__
         def setup_guard():
             assert istype(val.training, bool)
-            if val.training:
-                self.code.append(f"{ref}.training")
-            else:
-                self.code.append(f"not {ref}.training")
+            self.code.append(f"___training_state({ref}, {val.training})")
 
         if hasattr(val, "_awaiting_init"):
+            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
             if not val._awaiting_init:
                 setup_guard()
+            else:
+                unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
         else:
             # Object was not monkeypatched on __new__ and __init__ by us
