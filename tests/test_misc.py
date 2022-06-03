@@ -651,8 +651,8 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(*args), correct))
             self.assertTrue(same(fn(*args), correct))
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):

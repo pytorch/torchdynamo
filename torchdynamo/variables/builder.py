@@ -275,9 +275,7 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif (
-            is_numpy_int_type(value) or is_numpy_float_type(value)
-        ) and self.name.startswith("___stack"):
+        elif is_numpy_int_type(value) or is_numpy_float_type(value):
             self.tx.output.graphargs.append(
                 GraphArg(self.get_source(), torch.tensor(value))
             )
