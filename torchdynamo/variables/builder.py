@@ -26,6 +26,7 @@ from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
 from ..utils import is_namedtuple
+from ..utils import is_numpy_float_type
 from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype
@@ -54,6 +55,7 @@ from .misc import SkipFilesVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
+from .tensor import UnspecializedPrimitiveVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -273,8 +275,20 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif is_numpy_int_type(value):
-            return self._wrap(int(value))
+        elif (
+            is_numpy_int_type(value) or is_numpy_float_type(value)
+        ) and self.name.startswith("___stack"):
+            self.tx.output.graphargs.append(
+                GraphArg(self.get_source(), torch.tensor(value))
+            )
+            return UnspecializedPrimitiveVariable.create(
+                tx=self.tx,
+                proxy=self.tx.output.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                ),
+                example_value=torch.tensor(value),
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)

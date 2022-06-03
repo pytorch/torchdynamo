@@ -651,8 +651,8 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(*args), correct))
             self.assertTrue(same(fn(*args), correct))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -1534,3 +1534,26 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(len(module_dict), len(modules))
         for k1, m2 in zip(modules, module_dict.children()):
             self.assertTrue(modules[k1] is m2)
+
+    def test_unspecialized_primitive_variable(self):
+        def fn(x, y, z):
+            xy = [x + y, y, False]
+            np_x = x.numpy()
+            np_y = y.numpy()
+            return {
+                "x": x,
+                "z": z,
+                "a": np_y.sum(),
+                "b": xy,
+                "c": np_y[0][0] / 68,
+                "d": np_x.sum(),
+            }
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        y = torch.ones([2, 2], dtype=torch.int64)
+        z = np.int64(12)
+        res1 = fn(x, y, z)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x, y, z)
+        self.assertTrue(same(res1, res2))
