@@ -4,6 +4,9 @@ import triton
 import torchinductor.triton_ops
 import utils
 
+# https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/
+useCudaGraph = True
+
 # conv benchmarks
 conv_confs = [
     triton.testing.Benchmark(
@@ -19,8 +22,8 @@ conv_confs = [
     ) for BATCH in [32]
     for IN_C in [128]  # powspace(16, 256, 2, 1)
     for KERNEL_N in [32]  # powspace(16, 256, 2, 1)
-    for KERNEL_H in [2]
-    for KERNEL_W in [2]
+    for KERNEL_H in [1]
+    for KERNEL_W in [1]
 ]
 
 
@@ -45,20 +48,37 @@ def bench_op(
 
     tflops = lambda ms: 2. * BATCH * OUT_H * OUT_W * IN_C * KERNEL_H * KERNEL_W * KERNEL_N / ms * 1e-9
     if provider == "cublas":
-        conv2d_layer = torch.nn.Conv2d(IN_C, KERNEL_N, (KERNEL_H, KERNEL_W),
-                                       stride=stride, padding=padding, dilation=dilation,
-                                       groups=groups)
+        conv2d_layer = torch.nn.Conv2d(
+            IN_C, KERNEL_N, (KERNEL_H, KERNEL_W),
+            stride=stride, padding=padding, dilation=dilation,
+            groups=groups,
+        )
         conv2d_layer.weight.data = w.permute((0, 3, 1, 2))
         conv2d_layer.bias.data = bias
         x = x.permute((0, 3, 1, 2))
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: conv2d_layer(x), warmup=warmup, rep=rep)
-        return tflops(ms), tflops(max_ms), tflops(min_ms)
+        fn = lambda: conv2d_layer(x)
     if provider == "triton":
-        ms, min_ms, max_ms = \
-            triton.testing.do_bench(
-                lambda: torchinductor.triton_ops.conv(x, w, bias, stride, padding, dilation,
-                                                      False, (0, 0), groups), warmup=warmup, rep=rep)
-        return tflops(ms), tflops(max_ms), tflops(min_ms)
+        fn = lambda: torchinductor.triton_ops.conv(
+            x, w, bias, stride, padding, dilation, False, (0, 0), groups
+        )
+
+    if useCudaGraph:
+        # warmp up for cudagraph
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for i in range(3):
+                tmp = fn()
+        torch.cuda.current_stream().wait_stream(s)
+
+        # capture
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            tmp = fn()
+
+        fn = lambda: g.replay()
+    ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+    return tflops(ms), tflops(max_ms), tflops(min_ms)
 
 
 bench_op.run(print_data=True)

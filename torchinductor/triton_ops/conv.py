@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import triton
 import triton.language as tl
@@ -280,14 +279,23 @@ class _conv:
     # ptr changes for x in a sliding window
     @staticmethod
     def _delta_x_ptr(
-        wc, wh, ww, shape_w, dilation_h, dilation_w, stride_xh, stride_xw, stride_xc
+        wc,
+        wh,
+        ww,
+        shape_w,
+        dilation_h,
+        dilation_w,
+        stride_xh,
+        stride_xw,
+        stride_xc,
+        device,
     ):
         # get the order of axes in w, innermost dimension outward
         order = sorted([wc, wh, ww], reverse=True)
         c, h, w = [order.index(x) for x in [wc, wh, ww]]
         window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
 
-        r_window = np.arange(0, window_size)
+        r_window = torch.arange(0, window_size, 1, device=device)
         window_unpack = _unpack(r_window, order, shape_w)
         window_unpack_h = window_unpack[h]
         window_unpack_w = window_unpack[w]
@@ -418,7 +426,7 @@ class _conv:
         # into block of [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] because of better
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
         if True:
-            delta_x = conv._delta_x_ptr(
+            delta_x = _conv._delta_x_ptr(
                 wc,
                 wh,
                 ww,
@@ -428,8 +436,9 @@ class _conv:
                 stride_x[xh],
                 stride_x[xw],
                 stride_x[xc],
+                device,
             )
-            delta_x = torch.from_numpy(delta_x).cuda()
+            # delta_x = torch.from_numpy(np_delta_x).cuda()
             # print("delta_x", delta_x)
 
             # launch kernel, 2-dim, batch*h*w, kernel

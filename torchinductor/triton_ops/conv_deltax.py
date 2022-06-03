@@ -314,7 +314,7 @@ class _conv_deltax:
         K = _roundup(BLOCK_K, window_contiguous_size)
 
         # Initial k
-        ki = np.arange(BLOCK_K, dtype=np.int32)[np.newaxis, np.newaxis, np.newaxis, :]
+        ki = torch.arange(BLOCK_K, dtype=torch.int32)
         currentk = _unpack(ki, order, shape_w)
         resulti = 0
         resulti += currentk[c] * stride_xc
@@ -322,7 +322,7 @@ class _conv_deltax:
         resulti += currentk[w] * stride_xw
 
         # delta k
-        k = np.arange(K, dtype=np.int32)[np.newaxis, np.newaxis, np.newaxis, :]
+        k = torch.arange(K, dtype=torch.int32)
         currentk = _unpack(k, order, shape_w)
         nextk = _unpack(k + BLOCK_K, order, shape_w)
 
@@ -332,7 +332,7 @@ class _conv_deltax:
         result += (nextk[h] - currentk[h]) * stride_xh
         result += (nextk[w] - currentk[w]) * stride_xw
 
-        return np.concatenate((resulti, result), axis=-1)
+        return torch.cat((resulti, result), dim=-1)
 
     @staticmethod
     def _call(

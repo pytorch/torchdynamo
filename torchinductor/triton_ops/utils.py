@@ -1,3 +1,6 @@
+import torch
+
+
 def _extract_strides(shape):
     rank = len(shape)
     ret = [1] * rank
@@ -15,8 +18,14 @@ def _roundup(x, div):
 # order is the order of axes in tensor, innermost dimension outward
 # shape is the 3D tensor's shape
 def _unpack(idx, order, shape):
-    _12 = idx // shape[order[0]]
-    _0 = idx % shape[order[0]]
-    _2 = _12 // shape[order[1]]
-    _1 = _12 % shape[order[1]]
+    if torch.is_tensor(idx):
+        _12 = torch.div(idx, shape[order[0]], rounding_mode="trunc")
+        _0 = idx % shape[order[0]]
+        _2 = torch.div(_12, shape[order[1]], rounding_mode="trunc")
+        _1 = _12 % shape[order[1]]
+    else:
+        _12 = idx // shape[order[0]]
+        _0 = idx % shape[order[0]]
+        _2 = _12 // shape[order[1]]
+        _1 = _12 % shape[order[1]]
     return _0, _1, _2

@@ -184,4 +184,4 @@ class _conv1x1:
         )
 
 
-conv1x1 = _conv1x1.apply
+conv1x1 = _conv1x1.forward
