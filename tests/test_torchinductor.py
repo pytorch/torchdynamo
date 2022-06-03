@@ -20,6 +20,7 @@ from torchinductor.ir import ModularIndexing
 from torchinductor.sizevars import SizeVarAllocator
 
 try:
+    importlib.import_module("sympy")
     importlib.import_module("functorch")
 
     from torch._decomp import get_decompositions
