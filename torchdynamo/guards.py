@@ -24,10 +24,16 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
+<<<<<<< HEAD
 from .utils import guard_failures
+=======
+from .exc import unimplemented
+from .utils import ExactWeakKeyDictionary
+>>>>>>> 4d62b40a3c697d190faaecbb7574ee73c34353e4
 from .utils import istype
 from .utils import orig_code_map
 from .utils import rename_implicit
+from .utils import training_state
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
 from torch.nn import Parameter
@@ -45,6 +51,7 @@ CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
+        ("___training_state", training_state),
         ("___is_grad_enabled", torch.is_grad_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___tuple_iterator_len", tuple_iterator_len),
@@ -299,7 +306,26 @@ class GuardBuilder:
             module_code_map[module].valid = False
 
         val = self.get(guard.name)
-        NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+
+        # NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+
+        def setup_guard():
+            assert istype(val.training, bool)
+            self.code.append(f"___training_state({ref}, {val.training})")
+
+        if hasattr(val, "_awaiting_init"):
+            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
+            if not val._awaiting_init:
+                setup_guard()
+                print("INIT!")
+                NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+            else:
+                print("NO INIT!")
+                unimplemented(f"Guard setup for uninitialized class {type(val)}")
+
+        else:
+            # Object was not monkeypatched on __new__ and __init__ by us
+            setup_guard()
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -393,6 +419,7 @@ class GuardedCode:
         args += [a for a in local_builder.argnames if a != "___implicit0"]
         args += ["**___kwargs_ignored"]
         args = ",".join(args)
+
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
