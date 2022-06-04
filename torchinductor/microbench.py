@@ -101,7 +101,7 @@ class MicroBenchmarks:
 
     @staticmethod
     def sum(a, b):
-        return (a + b).sum()
+        return ((a + b).sum(),)
 
 
 def main():

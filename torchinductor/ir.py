@@ -64,8 +64,10 @@ class ModularIndexing(sympy.Function):
         ):
             return (base // divisor) % modulus
 
-        if divisor != 1 and sympy.gcd(base, divisor) == divisor:
-            return ModularIndexing(base / divisor, sympy.Integer(1), modulus)
+        if divisor != 1:
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return ModularIndexing(base / gcd, divisor / gcd, modulus)
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -92,8 +94,9 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        if sympy.gcd(base, divisor) == divisor:
-            return base / divisor
+        gcd = sympy.gcd(base, divisor)
+        if gcd != 1:
+            return IndexingDiv(base / gcd, divisor / gcd)
 
 
 class CleanDiv(IndexingDiv):
@@ -103,6 +106,11 @@ class CleanDiv(IndexingDiv):
     """
 
     pass
+
+
+def is_triton(device):
+    # TODO(jansel): a config check once we have multi-backend
+    return device.type == "cuda"
 
 
 class IRNode(object):
@@ -279,6 +287,22 @@ class Reduction(Loops):
 
             return Pointwise.create(device, dtype, fn, ranges)
 
+        if is_triton(device):
+            # triton doesn't support large reductions well, so break them up
+            reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
+            numel_hint = V.graph.sizevars.size_hint(product(ranges))
+            split = cls._pick_split(numel_hint, reduction_numel_hint)
+            if split:
+                return cls.create_multilayer(
+                    device,
+                    dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    split,
+                )
+
         return TensorBox.create(
             Reduction(
                 device,
@@ -286,6 +310,106 @@ class Reduction(Loops):
                 inner_fn,
                 ranges,
                 reduction_ranges,
+                reduction_type,
+            )
+        )
+
+    @staticmethod
+    def _pick_split(numel, reduction_numel):
+        from triton import next_power_of_2
+
+        numel = next_power_of_2(numel)
+        reduction_numel = next_power_of_2(reduction_numel)
+        if numel == 1:
+            if reduction_numel >= 128**2:
+                return 128
+            if reduction_numel >= 64**2:
+                return 64
+        if reduction_numel >= 32 * 1024:
+            return 1024
+        if reduction_numel > 4096:
+            return 128
+        return None
+
+    @staticmethod
+    def default_value(reduction_type, dtype):
+        return {"sum": 0, "max": float("-inf"), "min": float("inf")}[reduction_type]
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable,
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+        split,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        reduction_numel = product(reduction_ranges)
+
+        # TODO(jansel): convert this to dynamic shapes
+        # TODO(jansel): realize the reduction so we can do dynamic indexing
+        reduction_ranges = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in reduction_ranges
+        ]
+        reduction_numel = sympy.Integer(
+            V.graph.sizevars.guard_static_shape(reduction_numel)
+        )
+
+        if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
+            need_mask = False
+        else:
+            need_mask = True
+
+        split = sympy.Integer(split)
+        block_size = IndexingDiv(reduction_numel + (split - 1), split)
+
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+
+        def wrapper_fn(index, reduction_index):
+            (reduction_index,) = reduction_index
+            *new_index, reduction_block = index
+            indices = block_size * reduction_block + reduction_index
+
+            def body():
+                return inner_fn(new_index, reindex([indices]))
+
+            if need_mask:
+                mask = ops.lt(
+                    ops.index_expr(indices, torch.int32),
+                    ops.index_expr(reduction_numel, torch.int32),
+                )
+                return ops.masked(mask, body, cls.default_value(reduction_type, dtype))
+            else:
+                return body()
+
+        intermediate = Reduction.create(
+            device,
+            dtype,
+            wrapper_fn,
+            [*ranges, split],
+            [block_size],
+            reduction_type,
+        )
+        intermediate.realize()
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(index, reduction_index):
+            return intermediate_loader([*index, *reduction_index])
+
+        return TensorBox.create(
+            Reduction(
+                device,
+                dtype,
+                intermediate_fn,
+                ranges,
+                [split],
                 reduction_type,
             )
         )
@@ -559,15 +683,7 @@ class View(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        try:
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        except AssertionError:
-            # optimistic algorithm failed, lets do a fallback
-            flat = [product(old_size)]
-            reindex1 = cls.dynamic_reshape_indexer(old_size, flat)
-            reindex2 = cls.dynamic_reshape_indexer(flat, new_size)
-            reindex = fuse_reindexing(reindex1, reindex2)
-
+        reindex = cls.dynamic_reshape_indexer(old_size, new_size)
         return cls(x, tuple(new_size), reindex)
 
     @staticmethod
@@ -589,8 +705,20 @@ class View(BaseView):
         V.graph.sizevars.guard_equals(product(old_size), product(new_size))
         return old_size, new_size
 
+    @classmethod
+    def dynamic_reshape_indexer(cls, old_size, new_size):
+        try:
+            reindex = cls._dynamic_reshape_indexer(old_size, new_size)
+        except (AssertionError, IndexError):
+            # optimistic algorithm failed, lets do a fallback
+            flat = [product(old_size)]
+            reindex1 = cls._dynamic_reshape_indexer(old_size, flat)
+            reindex2 = cls._dynamic_reshape_indexer(flat, new_size)
+            reindex = fuse_reindexing(reindex1, reindex2)
+        return reindex
+
     @staticmethod
-    def dynamic_reshape_indexer(old_size, new_size):
+    def _dynamic_reshape_indexer(old_size, new_size):
         """
         Perform a reshape entirely by modifying indexing math
         """
@@ -1215,7 +1343,7 @@ class ComputedBuffer(Buffer):
         )
 
         if (
-            self.get_device().type == "cuda"
+            is_triton(self.get_device())
             and not self.get_reduction_type()
             and iter_ranges
             and not has_modular_indexing

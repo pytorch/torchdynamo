@@ -10,6 +10,7 @@ import torch
 
 from .. import codecache
 from .. import config
+from .. import ir
 from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
@@ -322,27 +323,33 @@ class TritonKernel(Kernel):
             )
             parts.append(index.subs(zero_vars(other_vars)) - offset)
 
-        assert index == offset + sum(
-            parts
-        ), f"failed to split indexing into base+reduction {index}"
+        if index != offset + sum(parts):
+            # split failed, do a fallback
+            offset = 0
+            mask = []
+            addr = [texpr(self.rename_indexing(self.simplify_indexing(index)))]
+            have_dense = False
+            need_dense = True
+        else:
+            offset = self.rename_indexing(self.simplify_indexing(offset))
+            parts = [
+                self.rename_indexing(self.simplify_indexing(part)) for part in parts
+            ]
 
-        offset = self.rename_indexing(self.simplify_indexing(offset))
-        parts = [self.rename_indexing(self.simplify_indexing(part)) for part in parts]
+            mask = []
+            addr = []
 
-        mask = []
-        addr = []
+            have_dense = True
+            need_dense = config.triton.dense_indexing or "tmp" in str(index)
 
-        have_dense = True
-        need_dense = config.triton.dense_indexing or "tmp" in str(index)
-
-        for part, tree in zip(parts, self.range_trees):
-            if part != 0:
-                addr.append(texpr(part))
-                mask.append(f"{tree.prefix}mask")
-            elif tree.prefix == "r" and not self.inside_reduction:
-                pass
-            else:
-                have_dense = False
+            for part, tree in zip(parts, self.range_trees):
+                if part != 0:
+                    addr.append(texpr(part))
+                    mask.append(f"{tree.prefix}mask")
+                elif tree.prefix == "r" and not self.inside_reduction:
+                    pass
+                else:
+                    have_dense = False
 
         if need_dense and not have_dense:
             mask = [
@@ -370,15 +377,17 @@ class TritonKernel(Kernel):
 
         return " + ".join(addr), " & ".join(mask)
 
-    def simplify_indexing(self, expr: sympy.Expr):
-        expr = V.graph.sizevars.simplify_with_ranges(
-            expr,
+    def var_ranges(self):
+        return (
             dict(
                 itertools.chain.from_iterable(
                     tree.var_ranges.items() for tree in self.range_trees
                 )
             ),
         )
+
+    def simplify_indexing(self, expr: sympy.Expr):
+        expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
 
         nodes = [
             self.range_tree_nodes[sym]
@@ -423,9 +432,7 @@ class TritonKernel(Kernel):
         self.stores.writeline(line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
-        default = {"sum": 0, "max": "float('-inf')", "min": "float('inf')"}[
-            reduction_type
-        ]
+        default = ops.constant(ir.Reduction.default_value(reduction_type, dtype), dtype)
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
