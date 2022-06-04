@@ -24,12 +24,10 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
-<<<<<<< HEAD
+
 from .utils import guard_failures
-=======
 from .exc import unimplemented
 from .utils import ExactWeakKeyDictionary
->>>>>>> 4d62b40a3c697d190faaecbb7574ee73c34353e4
 from .utils import istype
 from .utils import orig_code_map
 from .utils import rename_implicit
