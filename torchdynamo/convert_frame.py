@@ -33,6 +33,7 @@ from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
 from .utils import is_namedtuple
+from .utils import is_safe_constant
 from .utils import istype
 
 log = logging.getLogger(__name__)
@@ -133,7 +134,9 @@ def has_tensor_in_frame(frame):
     # Check if there is global import of torch.*
     for co_name in frame.f_code.co_names:
         if co_name in frame.f_globals:
-            if is_allowed(frame.f_globals[co_name]):
+            if is_allowed(frame.f_globals[co_name]) and not is_safe_constant(
+                frame.f_globals[co_name]
+            ):
                 return True
 
     seen_ids = dict()

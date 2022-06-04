@@ -71,6 +71,8 @@ def _disallowed_function_ids():
         copy.copy,
         copy.deepcopy,
         inspect.signature,
+        math.__package__,
+        torch.__builtins__,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
         torch.autograd.grad,
