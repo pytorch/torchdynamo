@@ -30,9 +30,16 @@ from .utils import orig_code_map
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
+from torch.nn import Parameter
+import inspect 
+from collections import OrderedDict
+from .utils import ExactWeakKeyDictionary
+
 
 log = logging.getLogger(__name__)
 
+# map from modules to guarded code
+module_code_map = ExactWeakKeyDictionary() # {nn.Module: GuardedCode}  
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -46,6 +53,55 @@ CLOSURE_VARS = collections.OrderedDict(
     ]
 )
 
+
+class NNModuleChangeTrackerUtil:
+    
+    @staticmethod
+    def setup(module, guarded_code):
+        # Setup hook dict
+        module._module_change_hooks = OrderedDict()
+
+        # patch in hook registration
+        module.register_on_module_change_hook = types.MethodType(NNModuleChangeTrackerUtil._register_on_module_change_hook, module)
+        
+        # Preserve real register_parameter call as _register_parameter_real
+        register_parameter_real = module.register_parameter
+        module._register_parameter_real = register_parameter_real
+
+        # patch in our register_parameter
+        module.register_parameter = types.MethodType(NNModuleChangeTrackerUtil._register_parameter_module_change_patched, module)
+
+        set_attr_real = module.__setattr__
+        module._real__setattr__ = set_attr_real
+        module.__setattr__ = types.MethodType(NNModuleChangeTrackerUtil._dynamo__setattr__, module)
+
+        # if module in module_code_map:
+            # print("UNEXPECTED ENTRY")
+        
+        # associate our module with the transformed code   
+        module_code_map[module] = guarded_code
+
+    def _register_on_module_change_hook(self, hook: Callable[..., None]) -> "hooks.RemovableHandle":
+        import torch.utils.hooks as hooks
+
+        handle = hooks.RemovableHandle(self._module_change_hooks)
+        self._module_change_hooks[handle.id] = hook
+        
+        return handle
+
+    def _register_parameter_module_change_patched(self, name: str, param: Optional[Parameter]) -> None:
+        self._register_parameter_real(name, param)
+        print("_register_parameter_module_change_patched called")
+        hooks = self._module_change_hooks.values()
+        for hook in hooks:
+            hook(self)
+
+    def _dynamo__setattr__(self, name, value) -> None:
+        self._real__setattr__(name, value)
+        print("_dynamo__setattr__ called")
+        hooks = self._module_change_hooks.values()
+        for hook in hooks:
+            hook(self)
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -117,6 +173,9 @@ def strip_getattr_getitem(name):
     """
     return re.split(r"[.\[]", name)[0]
 
+seen_modules = set()
+top_level_modules = set()
+top_level_modules_to_name = dict()
 
 class GuardBuilder:
     def __init__(
@@ -235,14 +294,12 @@ class GuardBuilder:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        self.ID_MATCH(guard)
-        ref = self.arg_ref(guard)
+        def on_module_changed(module):
+            print("INVALIDATION")
+            module_code_map[module].valid = False
+
         val = self.get(guard.name)
-        assert istype(val.training, bool)
-        if val.training:
-            self.code.append(f"{ref}.training")
-        else:
-            self.code.append(f"not {ref}.training")
+        NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
