@@ -2,28 +2,29 @@ import torch
 import triton
 
 import torchinductor.triton_ops
-import utils
+import model
+
+# The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+torch.backends.cuda.matmul.allow_tf32 = True
+# The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+torch.backends.cudnn.allow_tf32 = True
 
 # https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/
-useCudaGraph = True
+useCudaGraph = False
 
 # conv benchmarks
 conv_confs = [
     triton.testing.Benchmark(
-        x_names=["IN_H", "IN_W"],
-        x_vals=utils.powspace(8, 256, 2, 1),
+        x_names=["BATCH"],
+        x_vals=[32],
         line_arg="provider",
         line_vals=["cublas", "triton"],
         line_names=["cuBLAS", "Triton"],
         ylabel="TFLOPS",
-        plot_name=f"conv-performance-BATCH={BATCH}-IN_C={IN_C}-KN={KERNEL_N}-KH=KW={KERNEL_H}",
-        args={"BATCH": BATCH, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
-              "KERNEL_H": KERNEL_H, "KERNEL_W": KERNEL_W},
-    ) for BATCH in [32]
-    for IN_C in [128]  # powspace(16, 256, 2, 1)
-    for KERNEL_N in [32]  # powspace(16, 256, 2, 1)
-    for KERNEL_H in [1]
-    for KERNEL_W in [1]
+        plot_name="resnet50-conv-performance",
+        args={"IN_H": IN_H, "IN_W": IN_W, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
+              "KERNEL_H": KERNEL_H, "KERNEL_W": KERNEL_W, "stride": stride, "padding": padding},
+    ) for IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding in model.resnet50_layers
 ]
 
 
@@ -37,7 +38,7 @@ def bench_op(
         # parameters of conv
         stride=(1, 1), padding=(0, 0),
         dilation=(1, 1), groups=1,
-        dtype=torch.float32, warmup=25, rep=75):
+        dtype=torch.float16, warmup=25, rep=75):
 
     x = torch.randn((BATCH, IN_H, IN_W, IN_C), dtype=dtype, device='cuda')
     w = torch.randn((KERNEL_N, KERNEL_H, KERNEL_W, IN_C // groups),
@@ -58,10 +59,17 @@ def bench_op(
         x = x.permute((0, 3, 1, 2))
         fn = lambda: conv2d_layer(x)
     if provider == "triton":
+        # if KERNEL_H == 1 and KERNEL_W == 1:
+        #     fn = lambda: torchinductor.triton_ops.conv1x1(
+        #         x, w, bias, stride, padding, dilation, False, (0, 0), groups
+        #     )
+        # else:
         fn = lambda: torchinductor.triton_ops.conv(
             x, w, bias, stride, padding, dilation, False, (0, 0), groups
         )
 
+    # useCudaGraph won't change the TFLOPs,
+    # because do_bench() clear L2 cache to hide the latency of CPU launch time
     if useCudaGraph:
         # warmp up for cudagraph
         s = torch.cuda.Stream()
