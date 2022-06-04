@@ -100,6 +100,12 @@ def _allowed_function_ids():
     torch.distributions.Distribution.set_default_validate_args(False)
     torch_object_ids = dict()
 
+    def _is_allowed_module_prefix(obj):
+        allowed_module_name_prefix_list = ("torch", "math")
+        return inspect.getmodule(obj) and inspect.getmodule(obj).__name__.startswith(
+            allowed_module_name_prefix_list
+        )
+
     def _find_torch_objects(module):
         if any(
             module.__name__.startswith(mod_name)
@@ -113,10 +119,7 @@ def _allowed_function_ids():
                     if obj.__name__.startswith("torch."):
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
-                elif inspect.getmodule(obj) and (
-                    inspect.getmodule(obj).__name__.startswith("torch")
-                    or inspect.getmodule(obj).__name__.startswith("math")
-                ):
+                elif _is_allowed_module_prefix(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None:
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"

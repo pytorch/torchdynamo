@@ -231,7 +231,7 @@ class VariableBuilder:
         elif value is List:
             return TypingVariable(
                 value,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif value is inspect.signature:
             return LambdaVariable(

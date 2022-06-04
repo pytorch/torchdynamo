@@ -568,7 +568,7 @@ class TypingVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name == "__getitem__":
+        if name == "__getitem__" and len(args) == 1:
             return variables.ConstantVariable(
                 self.value[args[0].as_python_constant()],
                 **VariableTracker.propagate(self, args),
