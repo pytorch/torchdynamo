@@ -32,7 +32,6 @@ from .utils import ExactWeakKeyDictionary
 from .utils import istype
 from .utils import orig_code_map
 from .utils import rename_implicit
-from .utils import training_state
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
 from torch.nn import Parameter
@@ -50,7 +49,6 @@ CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
-        ("___training_state", training_state),
         ("___is_grad_enabled", torch.is_grad_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___tuple_iterator_len", tuple_iterator_len),
@@ -319,7 +317,7 @@ class GuardBuilder:
         
         def on_module_changed(module):
             if module not in module_code_map:
-                # Module is out of scope / deleted (weak ref key dict)
+                # Module is out of scope / deleted (weak ref key ref dict)
                 return
                                 
             for code in module_code_map[module]:
@@ -361,13 +359,6 @@ class GuardBuilder:
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
-
-    def NN_MODULE_PARAM_NAMES(self, guard):
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        keys = {k for k, v in value.named_parameters()}
-        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
-        self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
