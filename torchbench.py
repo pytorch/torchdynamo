@@ -297,6 +297,18 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
     return speedup_experiment(args, model_iter_fn, model, example_inputs)
 
 
+def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
+    prof = torchdynamo.utils.CompileProfiler()
+    with torchdynamo.optimize(prof, nopython=args.nopython):
+        model_iter_fn(model, example_inputs)
+    output_csv(
+        output_filename, ["model", "profiler report"], [current_name, prof.report()]
+    )
+    met = prof.get_metrics()
+    guard_failures = len(met["guard_failures"])
+    return [guard_failures]
+
+
 def randomize_input(inputs):
     if isinstance(inputs, (list, tuple)):
         return type(inputs)([randomize_input(x) for x in inputs])
@@ -816,6 +828,11 @@ def main():
         action="store_true",
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
+    group.add_argument(
+        "--recompile_profiler",
+        action="store_true",
+        help="Run the dynamo recompilation profiler on each model.",
+    )
 
     args = parser.parse_args()
 
@@ -1048,6 +1065,9 @@ def main():
     elif args.log_conv_args:
         optimize_ctx = torchdynamo.optimize(conv_args_analysis, nopython=args.nopython)
         output_filename = "log_conv_args.csv"
+    elif args.recompile_profiler:
+        output_filename = "recompile_profiler_log.csv"
+        experiment = recompile_profiler_experiment
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment

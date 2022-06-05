@@ -434,8 +434,8 @@ static PyObject *set_eval_frame_py(PyObject *dummy, PyObject *args) {
     PyErr_SetString(PyExc_TypeError, "expected a callable");
     return NULL;
   }
-  DEBUG_TRACE("python enabled=%d run_only=%d", callback != Py_None,
-              callable != Py_False);
+  DEBUG_TRACE("python enabled=%d and is run_only=%d", callback != Py_None,
+              callback == Py_False);
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
