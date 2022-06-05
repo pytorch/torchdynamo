@@ -735,6 +735,11 @@ def main():
         action="store_true",
         help="Disables functionalization",
     )
+    parser.add_argument(
+        "--inductor-settings",
+        action="store_true",
+        help="Use same settings as --inductor for baseline comparisons",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -828,11 +833,6 @@ def main():
         "--inductor-dynamic",
         action="store_true",
         help="Measure speedup with TorchInductor",
-    )
-    group.add_argument(
-        "--inductor-settings",
-        action="store_true",
-        help="Use same settings as --inductor for baselines",
     )
     group.add_argument(
         "--backend",
