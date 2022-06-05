@@ -250,16 +250,11 @@ class GuardBuilder:
             assert istype(val.training, bool)
             self.code.append(f"___training_state({ref}, {val.training})")
 
-        if hasattr(val, "_awaiting_init"):
+        if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            if not val._awaiting_init:
-                setup_guard()
-            else:
-                unimplemented(f"Guard setup for uninitialized class {type(val)}")
-
-        else:
-            # Object was not monkeypatched on __new__ and __init__ by us
             setup_guard()
+        else:
+            unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""

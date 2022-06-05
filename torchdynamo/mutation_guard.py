@@ -91,13 +91,11 @@ def install_generation_tagging_init():
                 obj = object.__new__(cls)
             except TypeError:
                 obj = object.__new__(type(cls))
-            obj._awaiting_init = True
             return obj
 
         def patched_init(self, *args, **kwargs):
             GenerationTracker.tag(self)
             init(self, *args, **kwargs)
-            self._awaiting_init = False
 
         Module.__new__ = patched_new
         Module.__init__ = patched_init
