@@ -9,6 +9,7 @@ import re
 import textwrap
 import types
 import weakref
+import traceback
 from collections import OrderedDict
 from typing import Any
 from typing import Callable
@@ -91,7 +92,7 @@ class NNModuleChangeTrackerUtil:
             modulecls.__setattr__ = custom_setattr
 
             # associate our module with the transformed code
-            # print(f"Done! Setup patching for code for {modulecls}")
+            print(f"Done! Setup patching for code for {modulecls}")
         else:
             pass
             # print(f"Patch attempt repeated on: {modulecls}")
@@ -99,7 +100,7 @@ class NNModuleChangeTrackerUtil:
         if not module in module_code_map:
             module_code_map[module] = list()
         module_code_map[module].append(guarded_code)
-        # print(f"Added {modulecls}::{id(module)} {len(module_code_map[module])}")
+        print(f"Added {modulecls}::{id(module)} {len(module_code_map[module])}")
 
     def _register_on_module_change_hook(
         self, hook: Callable[..., None]
@@ -239,11 +240,16 @@ class GuardBuilder:
         )
 
     def ID_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
+            
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
         if m:
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(Guard(m.group(1), guard.source, None))
+
         self.code.append(
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
@@ -260,6 +266,9 @@ class GuardBuilder:
             self.code.append(f"not hasattr({ref}, {attr!r})")
 
     def EQUALS_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(
@@ -299,10 +308,14 @@ class GuardBuilder:
         if istype(val, (list, tuple)):
             self.LIST_LENGTH(guard)
             for idx, elem in enumerate(val):
+                print(f"TYPE_ID MATCH OTHER - equals: {guard.name} @ {id(type(elem))}")
                 self.code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
         elif not istype(val, torch.Size):
+            print(f"TYPE_ID MATCH OTHER - EQUALS SIZE: {guard.name} @ {id(type(val))}")
+            print(f"nn? {guard.is_nn_module()}")
+            traceback.print_stack()
             self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
 
         if istype(val, torch.Size):
@@ -346,16 +359,21 @@ class GuardBuilder:
     def LIST_LENGTH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+        print(f"TYPE_ID MATCH OTHER - LIST: {guard.name} @ {id(self.get(guard.name))}")
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"len({ref}) == {len(value)}")
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+        print(f"TYPE_ID MATCH OTHER - TUPLE: {guard.name} @ {id(self.get(guard.name))}")
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
     def DICT_KEYS(self, guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return 
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
@@ -365,6 +383,7 @@ class GuardBuilder:
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+        print(f"TYPE_ID MATCH OTHER - OD KEYS: {guard.name} @ {id(self.get(guard.name))}")
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
 
@@ -407,10 +426,10 @@ class GuardedCode:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder)
+        self.check_fn = self.compile_check_fn(local_builder, global_builder, guard.is_nn_module())
         self._seen_ids.clear()
 
-    def compile_check_fn(self, local_builder, global_builder):
+    def compile_check_fn(self, local_builder, global_builder, debug):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         args = [a for a in local_builder.scope.keys() if a == "___implicit0"]
@@ -464,7 +483,7 @@ class GuardedCode:
                 return lambda {args}: {code}
             """
         )
-        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+        if debug or os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()

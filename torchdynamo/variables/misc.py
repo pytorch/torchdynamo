@@ -403,6 +403,22 @@ class BlackHoleVariable(VariableTracker):
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
+        
+
+class NoOpVariable(VariableTracker):
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert name in ("__setattr__", "save_for_backward"), name
+        return variables.ConstantVariable(
+            None, **VariableTracker.propagate(self, args, kwargs.values())
+        )
+        
+
 
 
 class LambdaVariable(VariableTracker):

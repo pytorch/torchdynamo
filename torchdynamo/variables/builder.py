@@ -159,6 +159,9 @@ class VariableBuilder:
         elif istype(value, (dict, collections.OrderedDict)) and all(
             map(ConstantVariable.is_literal, value.keys())
         ):
+            import traceback
+            print("Found via variable builder!")
+            traceback.print_stack()
             guards = self.make_guards(GuardBuilder.DICT_KEYS)
             result = dict(
                 (

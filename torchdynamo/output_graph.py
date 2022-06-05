@@ -179,13 +179,15 @@ class OutputGraph(fx.Tracer):
         else:
             assert isinstance(mod, torch.nn.Module)
             options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
-
+            print(f"Added guards for {id(mod)} - got names: {names}")
+            # traceback.print_stack()
             def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
 
         for k, v in self.nn_modules.items():
             if v is mod:
                 # it already exists
+                print(f"Adding wrap for: {id(mod)}")
                 return wrap_name(k)
 
         # create a new unique name
