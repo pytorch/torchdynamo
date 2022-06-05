@@ -1531,9 +1531,10 @@ class ComputedBuffer(Buffer):
             assert strides.shape == (len(memory_addrs), len(index_vars))
             order = list(reversed(pick_loop_order(strides, sizes)))
         except Exception:
-            log.warning(
-                f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
-            )
+            if config.debug:
+                log.warning(
+                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
@@ -1915,8 +1916,12 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
-        assert getattr(torch.ops.aten, kernel.__name__) is kernel
-        self.kernel = f"aten.{kernel.__name__}"
+        if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
+            self.kernel = f"aten.{kernel.__name__}"
+        else:
+            self.kernel = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+            )
         self.unflatten_args = unflatten_args
 
     def codegen_args(self):

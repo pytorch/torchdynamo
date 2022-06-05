@@ -75,6 +75,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.log({x})"
 
     @staticmethod
+    def isinf(x):
+        return f"{x}+1 == {x}"
+
+    @staticmethod
     def relu(x):
         return ops.maximum("0", x)
 

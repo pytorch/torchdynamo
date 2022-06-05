@@ -133,6 +133,10 @@ class CppOverrides(OpOverrides):
         return f"std::trunc({x})"
 
     @staticmethod
+    def isinf(x):
+        return f"std::isinf({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 

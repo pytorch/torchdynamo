@@ -552,6 +552,42 @@ def randperm(*args):
     return TensorBox.create(ir.FallbackKernel.create(aten.randperm, *args))
 
 
+"""
+@register_lowering(torch.randn, type_promote=False)
+def randn(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False):
+    if len(size) == 1 and isinstance(size[0], (list, tuple)):
+        size, = size
+    assert not out
+    assert not requires_grad
+    return TensorBox.create(ir.FallbackKernel.create(aten.randn, size, dtype=dtype, layout=layout, device=device))
+"""
+
+
+@register_lowering(aten.nll_loss_forward, type_promote=False)
+def nll_loss_forward(*args):
+    return list(
+        map(TensorBox.create, ir.FallbackKernel.create(aten.nll_loss_forward, *args))
+    )
+
+
+def has_torchvision_roi_align():
+    try:
+        from torchvision.ops import roi_align  # noqa
+
+        return roi_align is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+if has_torchvision_roi_align():
+
+    @register_lowering(torch.ops.torchvision.roi_align, type_promote=False)
+    def roi_align(*args):
+        return TensorBox.create(
+            ir.FallbackKernel.create(torch.ops.torchvision.roi_align, *args)
+        )
+
+
 @register_lowering(aten.grid_sampler_2d, type_promote=False)
 def grid_sampler_2d(*args):
     return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
@@ -1502,6 +1538,7 @@ register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.trunc)
 register_pointwise(aten.floor)
+register_pointwise(aten.isinf)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)

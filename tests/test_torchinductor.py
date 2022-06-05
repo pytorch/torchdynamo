@@ -17,6 +17,7 @@ from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 from torchinductor.ir import IndexingDiv
 from torchinductor.ir import ModularIndexing
+from torchinductor.lowering import has_torchvision_roi_align
 from torchinductor.sizevars import SizeVarAllocator
 
 try:
@@ -1712,6 +1713,33 @@ class CommonTemplate:
                 arg111,
                 arg190,
             ),
+        )
+
+    @unittest.skipIf(not has_torchvision_roi_align(), "requirs torchvision")
+    def test_roi_align(self):
+        def fn(a, b):
+            return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
+
+        self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
+
+    def test_nll_loss_forward(self):
+        def fn(a, b):
+            return aten.nll_loss_forward(a, b, None, 1, -100)
+
+        self.common(
+            fn,
+            (
+                torch.randn([5, 5]),
+                torch.zeros([5], dtype=torch.int64),
+            ),
+        )
+
+    def test_isinf(self):
+        def fn(x):
+            return x.isinf()
+
+        self.common(
+            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
         )
 
 

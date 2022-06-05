@@ -29,6 +29,7 @@ decompositions = get_decompositions(
         aten._embedding_bag,
         aten.grid_sampler_2d,
         aten.norm,
+        aten.nll_loss_forward,
     ]
 )
 

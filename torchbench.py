@@ -136,6 +136,31 @@ SLOW_BENCHMARKS = {
 }
 
 
+TORCHINDUCTOR_NOT_YET_WORKING = {
+    # Crash with no warning message
+    "Super_SloMo",
+    "fastNLP_Bert",
+    # RuntimeError: CUDA: Error- invalid value
+    "dlrm",
+    "vision_maskrcnn",
+    # RuntimeError: "index_select_out_cuda_impl" not implemented for 'Float'
+    # CUDA error: an illegal memory access was encountered
+    "hf_BigBird",
+    # LLVM ERROR: Broken function found, compilation aborted!
+    # torch.randn missing
+    "hf_Reformer",
+    # requires training
+    "maml",
+    # AttributeError: 'int' object has no attribute 'proxy'
+    "moco",
+    # AttributeError: 'Tensor' object has no attribute 'proxy'
+    "speech_transformer",
+    # RuntimeError: CUDA out of memory.
+    "timm_efficientdet",
+    # RuntimeError: Internal Triton PTX codegen error: uses too much parameter space
+    "tacotron2",
+}
+
 current_name = ""
 current_device = ""
 output_filename = None
@@ -805,6 +830,11 @@ def main():
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--inductor-settings",
+        action="store_true",
+        help="Use same settings as --inductor for baselines",
+    )
+    group.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
         help="measure speedup with a given backend",
@@ -883,6 +913,11 @@ def main():
     if args.devices == ["cpu"]:
         SKIP.update(VERY_SLOW_BENCHMARKS)
 
+    if args.inductor or args.inductor_dynamic or args.inductor_settings:
+        SKIP.update(TORCHINDUCTOR_NOT_YET_WORKING)
+        args.isolate = True
+        args.cosine = True
+
     if args.no_skip:
         SKIP.clear()
 
@@ -909,9 +944,6 @@ def main():
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-        args.isolate = True
-        args.float32 = True
-        args.cosine = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
