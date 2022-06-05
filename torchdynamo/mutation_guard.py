@@ -83,21 +83,14 @@ def install_generation_tagging_init():
     Monkey patch torch.nn.Module.__init__ and torch.nn.Module.__setstate__
     so we can detect nn.Module instances created dynamically inside forward methods.
     """
+
     if getattr(Module, "___needs_generation_tag_patch", True):
         init = Module.__init__
 
-        def patched_new(cls, *args, **kwargs):
-            try:
-                obj = object.__new__(cls)
-            except TypeError:
-                obj = object.__new__(type(cls))
-            return obj
-
         def patched_init(self, *args, **kwargs):
-            GenerationTracker.tag(self)
             init(self, *args, **kwargs)
+            GenerationTracker.tag(self)
 
-        Module.__new__ = patched_new
         Module.__init__ = patched_init
 
         setstate = Module.__setstate__
