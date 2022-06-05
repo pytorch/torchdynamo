@@ -95,9 +95,9 @@ def install_generation_tagging_init():
             return obj
 
         def patched_init(self, *args, **kwargs):
+            self._awaiting_init = False
             GenerationTracker.tag(self)
             init(self, *args, **kwargs)
-            self._awaiting_init = False
 
         Module.__new__ = patched_new
         Module.__init__ = patched_init

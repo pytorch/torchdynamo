@@ -7,6 +7,7 @@ import re
 import textwrap
 import types
 import weakref
+import functools
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -63,28 +64,46 @@ class NNModuleChangeTrackerUtil:
     
     @staticmethod
     def setup(module, guarded_code):
-        # Setup hook dict
-        module._module_change_hooks = OrderedDict()
+        modulecls = module.__class__
+        if getattr(modulecls, "__dynamo_module_patch", True):
+            modulecls.__dynamo_module_patch = False
 
-        # patch in hook registration
-        module.register_on_module_change_hook = types.MethodType(NNModuleChangeTrackerUtil._register_on_module_change_hook, module)
-        
-        # Preserve real register_parameter call as _register_parameter_real
-        register_parameter_real = module.register_parameter
-        module._register_parameter_real = register_parameter_real
+            # Setup hook dict
+            modulecls._module_change_hooks = OrderedDict()
 
-        # patch in our register_parameter
-        module.register_parameter = types.MethodType(NNModuleChangeTrackerUtil._register_parameter_module_change_patched, module)
+            # patch in hook registration
+            modulecls.register_on_module_change_hook = types.MethodType(NNModuleChangeTrackerUtil._register_on_module_change_hook, modulecls)
+            
+            register_parameter_real = modulecls.register_parameter
+            
+            @functools.wraps(register_parameter_real)
+            def custom_register_parameter(self, key, value):
+                # print("custom_register_parameter")
+                NNModuleChangeTrackerUtil._dynamo_register_parameter(self, key, value)
+                return register_parameter_real(self, key, value)
 
-        set_attr_real = module.__setattr__
-        module._real__setattr__ = set_attr_real
-        module.__setattr__ = types.MethodType(NNModuleChangeTrackerUtil._dynamo__setattr__, module)
+            modulecls.register_parameter = custom_register_parameter
 
-        # if module in module_code_map:
-            # print("UNEXPECTED ENTRY")
-        
-        # associate our module with the transformed code   
-        module_code_map[module] = guarded_code
+            original_setattr = modulecls.__setattr__
+
+            @functools.wraps(original_setattr)
+            def custom_setattr(self, key, value):
+                # print("custom_setattr")
+                NNModuleChangeTrackerUtil._dynamo__setattr__(self, key, value)
+                return original_setattr(self, key, value)
+
+            modulecls.__setattr__ = custom_setattr
+            
+            # associate our module with the transformed code 
+            # print(f"Done! Setup patching for code for {modulecls}")
+        else:
+            pass
+            # print(f"Patch attempt repeated on: {modulecls}")
+
+        if not module in module_code_map:
+            module_code_map[module] = list()
+        module_code_map[module].append(guarded_code)
+        # print(f"Added {modulecls}::{id(module)} {len(module_code_map[module])}")
 
     def _register_on_module_change_hook(self, hook: Callable[..., None]) -> "hooks.RemovableHandle":
         import torch.utils.hooks as hooks
@@ -94,16 +113,14 @@ class NNModuleChangeTrackerUtil:
         
         return handle
 
-    def _register_parameter_module_change_patched(self, name: str, param: Optional[Parameter]) -> None:
-        self._register_parameter_real(name, param)
-        print("_register_parameter_module_change_patched called")
+    def _dynamo_register_parameter(self, name: str, param: Optional[Parameter]) -> None:
+        # print("_dynamo_register_parameter called")
         hooks = self._module_change_hooks.values()
         for hook in hooks:
             hook(self)
 
     def _dynamo__setattr__(self, name, value) -> None:
-        self._real__setattr__(name, value)
-        print("_dynamo__setattr__ called")
+        # print("_dynamo__setattr__ called")
         hooks = self._module_change_hooks.values()
         for hook in hooks:
             hook(self)
@@ -299,30 +316,42 @@ class GuardBuilder:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        
         def on_module_changed(module):
-            print("INVALIDATION")
-            module_code_map[module].valid = False
+            if module not in module_code_map:
+                # Module is out of scope / deleted
+                return
+                                
+            # print("INVALIDATION")
+            for code in module_code_map[module]:
+                code.valid = False
 
         val = self.get(guard.name)
+        # print("NN registration: ", guard.name, id(val))
 
         # NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
 
         def setup_guard():
             assert istype(val.training, bool)
-            self.code.append(f"___training_state({ref}, {val.training})")
+            # self.code.append(f"___training_state({ref}, {val.training})")
 
         if hasattr(val, "_awaiting_init"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
             if not val._awaiting_init:
                 setup_guard()
-                print("INIT!")
+                # print("INIT!")
                 NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+                val.register_on_module_change_hook(on_module_changed)
             else:
-                print("NO INIT!")
+                # print("NO INIT!")
+                # self.ID_MATCH(guard)
                 unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
         else:
             # Object was not monkeypatched on __new__ and __init__ by us
+            # print("Init no val")
+            NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+            val.register_on_module_change_hook(on_module_changed)
             setup_guard()
 
     def FUNCTION_MATCH(self, guard: Guard):
