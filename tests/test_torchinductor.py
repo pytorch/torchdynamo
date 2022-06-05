@@ -1736,11 +1736,24 @@ class CommonTemplate:
 
     def test_isinf(self):
         def fn(x):
-            return x.isinf()
+            return x.isinf(), x.isnan()
 
         self.common(
             fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
         )
+
+    def test_any(self):
+        def fn(x):
+            return (
+                x.isinf().any(),
+                torch.all(x.isinf(), dim=0),
+                torch.all(torch.logical_not(x.isinf())),
+            )
+
+        self.common(fn, [torch.randn(64)])
+        tmp = torch.randn(16, 8)
+        tmp[1, 1] = float("inf")
+        self.common(fn, [tmp])
 
 
 if HAS_CPU:

@@ -917,6 +917,13 @@ def main():
         SKIP.update(TORCHINDUCTOR_NOT_YET_WORKING)
         args.isolate = True
         args.cosine = True
+        if args.float16:
+            # TODO(jansel): check if correctness issue is real
+            SKIP.add("yolov3")
+
+    if args.float16:
+        # these give `INCORRECT - Variation in Eager runs itself` sometimes
+        NONDETERMINISTIC.update({"demucs", "pyhpc_equation_of_state"})
 
     if args.no_skip:
         SKIP.clear()

@@ -52,3 +52,6 @@ class triton:
 
     # limit tiling dimensions
     max_tiles = 2
+
+    # put each kernel in its own file
+    many_files = False

@@ -333,7 +333,9 @@ class Reduction(Loops):
 
     @staticmethod
     def default_value(reduction_type, dtype):
-        return {"sum": 0, "max": float("-inf"), "min": float("inf")}[reduction_type]
+        return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
+            reduction_type
+        ]
 
     @classmethod
     def create_multilayer(

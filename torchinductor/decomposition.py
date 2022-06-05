@@ -187,3 +187,13 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     x = torch.where(x == float("inf"), posinf, x)
     x = torch.where(x == float("-inf"), neginf, x)
     return x
+
+
+@register_decomposition([aten.all.default])
+def all(input):
+    return torch.logical_not(torch.any(torch.logical_not(input)))
+
+
+@register_decomposition([aten.all.dim])
+def all_dim(input, dim, keeepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
