@@ -1,13 +1,15 @@
 import collections
 import dataclasses
 import enum
+import functools
+import inspect
 import logging
 import os
 import re
 import textwrap
 import types
 import weakref
-import functools
+from collections import OrderedDict
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -17,6 +19,7 @@ from typing import Set
 
 import numpy as np
 import torch
+from torch.nn import Parameter
 
 from . import config
 from . import mutation_guard
@@ -25,25 +28,19 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
-
-from .utils import guard_failures
 from .exc import unimplemented
 from .utils import ExactWeakKeyDictionary
+from .utils import guard_failures
 from .utils import istype
 from .utils import orig_code_map
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
-from torch.nn import Parameter
-import inspect 
-from collections import OrderedDict
-from .utils import ExactWeakKeyDictionary
-
 
 log = logging.getLogger(__name__)
 
 # map from modules to guarded code
-module_code_map = ExactWeakKeyDictionary() # {nn.Module: GuardedCode}  
+module_code_map = ExactWeakKeyDictionary()  # {nn.Module: GuardedCode}
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -59,7 +56,6 @@ CLOSURE_VARS = collections.OrderedDict(
 
 
 class NNModuleChangeTrackerUtil:
-    
     @staticmethod
     def setup(module, guarded_code):
         modulecls = module.__class__
@@ -70,10 +66,12 @@ class NNModuleChangeTrackerUtil:
             modulecls._module_change_hooks = OrderedDict()
 
             # patch in hook registration
-            modulecls.register_on_module_change_hook = types.MethodType(NNModuleChangeTrackerUtil._register_on_module_change_hook, modulecls)
-            
+            modulecls.register_on_module_change_hook = types.MethodType(
+                NNModuleChangeTrackerUtil._register_on_module_change_hook, modulecls
+            )
+
             register_parameter_real = modulecls.register_parameter
-            
+
             @functools.wraps(register_parameter_real)
             def custom_register_parameter(self, key, value):
                 # print("custom_register_parameter")
@@ -91,8 +89,8 @@ class NNModuleChangeTrackerUtil:
                 return original_setattr(self, key, value)
 
             modulecls.__setattr__ = custom_setattr
-            
-            # associate our module with the transformed code 
+
+            # associate our module with the transformed code
             # print(f"Done! Setup patching for code for {modulecls}")
         else:
             pass
@@ -103,12 +101,14 @@ class NNModuleChangeTrackerUtil:
         module_code_map[module].append(guarded_code)
         # print(f"Added {modulecls}::{id(module)} {len(module_code_map[module])}")
 
-    def _register_on_module_change_hook(self, hook: Callable[..., None]) -> "hooks.RemovableHandle":
+    def _register_on_module_change_hook(
+        self, hook: Callable[..., None]
+    ) -> "hooks.RemovableHandle":
         import torch.utils.hooks as hooks
 
         handle = hooks.RemovableHandle(self._module_change_hooks)
         self._module_change_hooks[handle.id] = hook
-        
+
         return handle
 
     def _dynamo_register_parameter(self, name: str, param: Optional[Parameter]) -> None:
@@ -122,6 +122,7 @@ class NNModuleChangeTrackerUtil:
         hooks = self._module_change_hooks.values()
         for hook in hooks:
             hook(self)
+
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -193,9 +194,11 @@ def strip_getattr_getitem(name):
     """
     return re.split(r"[.\[]", name)[0]
 
+
 seen_modules = set()
 top_level_modules = set()
 top_level_modules_to_name = dict()
+
 
 class GuardBuilder:
     def __init__(
@@ -314,12 +317,11 @@ class GuardBuilder:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        
         def on_module_changed(module):
             if module not in module_code_map:
                 # Module is out of scope / deleted (weak ref key ref dict)
                 return
-                                
+
             for code in module_code_map[module]:
                 code.valid = False
 
@@ -329,7 +331,6 @@ class GuardBuilder:
             val.register_on_module_change_hook(on_module_changed)
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
-
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
