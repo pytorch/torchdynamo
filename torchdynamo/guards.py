@@ -319,40 +319,19 @@ class GuardBuilder:
         
         def on_module_changed(module):
             if module not in module_code_map:
-                # Module is out of scope / deleted
+                # Module is out of scope / deleted (weak ref key dict)
                 return
                                 
-            # print("INVALIDATION")
             for code in module_code_map[module]:
                 code.valid = False
 
         val = self.get(guard.name)
-        # print("NN registration: ", guard.name, id(val))
-
-        # NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
-
-        def setup_guard():
-            assert istype(val.training, bool)
-            # self.code.append(f"___training_state({ref}, {val.training})")
-
-        if hasattr(val, "_awaiting_init"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            if not val._awaiting_init:
-                setup_guard()
-                # print("INIT!")
-                NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
-                val.register_on_module_change_hook(on_module_changed)
-            else:
-                # print("NO INIT!")
-                # self.ID_MATCH(guard)
-                unimplemented(f"Guard setup for uninitialized class {type(val)}")
-
-        else:
-            # Object was not monkeypatched on __new__ and __init__ by us
-            # print("Init no val")
+        if hasattr(val, "training"):
             NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
             val.register_on_module_change_hook(on_module_changed)
-            setup_guard()
+        else:
+            unimplemented(f"Guard setup for uninitialized class {type(val)}")
+
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
