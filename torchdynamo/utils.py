@@ -364,10 +364,6 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def training_state(mod, state):
-    return mod.training == state
-
-
 def rename_implicit(v):
     """
     Usage of inline comprehensions generates a implicit ".0" variable that
