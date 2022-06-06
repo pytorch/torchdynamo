@@ -24,6 +24,7 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
+from .exc import unimplemented
 from .utils import guard_failures
 from .utils import istype
 from .utils import orig_code_map
@@ -238,11 +239,16 @@ class GuardBuilder:
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        assert istype(val.training, bool)
-        if val.training:
-            self.code.append(f"{ref}.training")
+
+        def setup_guard():
+            assert istype(val.training, bool)
+            self.code.append(f"{ref}.training == {val.training}")
+
+        if hasattr(val, "training"):
+            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
+            setup_guard()
         else:
-            self.code.append(f"not {ref}.training")
+            unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -336,6 +342,7 @@ class GuardedCode:
         args += [a for a in local_builder.argnames if a != "___implicit0"]
         args += ["**___kwargs_ignored"]
         args = ",".join(args)
+
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
