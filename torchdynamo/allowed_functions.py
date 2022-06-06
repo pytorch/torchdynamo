@@ -16,6 +16,7 @@ import numpy
 import torch
 
 from . import config
+from .utils import is_safe_constant
 
 
 def make_function_id_set(lazy_initializer):
@@ -71,6 +72,8 @@ def _disallowed_function_ids():
         copy.copy,
         copy.deepcopy,
         inspect.signature,
+        math.__package__,
+        torch.__builtins__,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
         torch.autograd.grad,
@@ -100,6 +103,16 @@ def _allowed_function_ids():
     torch.distributions.Distribution.set_default_validate_args(False)
     torch_object_ids = dict()
 
+    def _is_allowed_module_prefix(obj):
+        allowed_modules = ("torch", "math")
+        allowed_modules_dot = tuple([x + "." for x in allowed_modules])
+        module = inspect.getmodule(obj)
+        if module is None:
+            return False
+
+        mod_name = module.__name__
+        return mod_name in allowed_modules or mod_name.startswith(allowed_modules_dot)
+
     def _find_torch_objects(module):
         if any(
             module.__name__.startswith(mod_name)
@@ -113,7 +126,9 @@ def _allowed_function_ids():
                     if obj.__name__.startswith("torch."):
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
-                else:
+                elif _is_allowed_module_prefix(obj):
+                    torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
+                elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
