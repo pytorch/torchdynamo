@@ -403,7 +403,7 @@ class BlackHoleVariable(VariableTracker):
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
-        
+
 
 class NoOpVariable(VariableTracker):
     def call_method(
@@ -417,8 +417,6 @@ class NoOpVariable(VariableTracker):
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
-        
-
 
 
 class LambdaVariable(VariableTracker):

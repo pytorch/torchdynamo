@@ -1,5 +1,6 @@
 import dis
 import functools
+import gc
 import itertools
 import logging
 import os
@@ -8,7 +9,6 @@ import traceback
 import types
 import typing
 from typing import Callable
-import gc
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -296,13 +296,13 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 print()
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
-            
-            if 'self' in frame.f_locals:
-                self_name = frame.f_locals['self'].__class__.__name__
+
+            if "self" in frame.f_locals:
+                self_name = frame.f_locals["self"].__class__.__name__
                 if self_name == "ModuleList":
                     # Protected by module invalidation, see NN_MODULE
                     return None
-            
+
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except (Unsupported, TorchRuntimeError):
             debug_print("WONT CONVERT")

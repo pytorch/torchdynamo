@@ -159,9 +159,6 @@ class VariableBuilder:
         elif istype(value, (dict, collections.OrderedDict)) and all(
             map(ConstantVariable.is_literal, value.keys())
         ):
-            import traceback
-            print("Found via variable builder!")
-            traceback.print_stack()
             guards = self.make_guards(GuardBuilder.DICT_KEYS)
             result = dict(
                 (
@@ -321,7 +318,7 @@ class VariableBuilder:
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
                     ),
                     example_value=value,
-                    guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                    # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                 )
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
