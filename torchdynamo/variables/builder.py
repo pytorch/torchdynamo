@@ -7,6 +7,7 @@ import re
 import types
 from abc import ABCMeta
 from typing import Any
+from typing import List
 
 import torch
 
@@ -51,6 +52,7 @@ from .misc import LambdaVariable
 from .misc import NumpyVariable
 from .misc import PythonModuleVariable
 from .misc import SkipFilesVariable
+from .misc import TypingVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
@@ -225,6 +227,11 @@ class VariableBuilder:
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif value is List:
+            return TypingVariable(
+                value,
+                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif value is inspect.signature:
             return LambdaVariable(

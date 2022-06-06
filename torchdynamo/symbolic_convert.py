@@ -1306,6 +1306,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
         if func.has_self():
             unimplemented("inline with __self__")
+
+        if func.get_name() == "patched_init":
+            unimplemented("Patched init cannot be inlined.")
+
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
