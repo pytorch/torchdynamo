@@ -97,6 +97,7 @@ class _conv1x1:
             mat_w = mat_w.permute(1, 0)
             # 2d matrix y, (BATCH * OUT_H * OUT_W, KERNEL_N)
             mat_y = triton.ops.matmul(mat_x, mat_w)
+            # mat_y = torch.empty((BATCH * OUT_H * OUT_W, KERNEL_N), device=device, dtype=x.dtype,)
             y = mat_y.view(BATCH, OUT_H, OUT_W, KERNEL_N)
             if bias is not None:
                 y += bias
@@ -122,7 +123,7 @@ class _conv1x1:
             # select every stride"s element (for stride > 1)
             x = x[:, :: stride[0], :: stride[1], :]
             # 2d matrix
-            mat_x = x.reshape(-1, IN_C)
+            mat_x = x.view(-1, IN_C)
             # 2d matrix
             mat_w = w.view(KERNEL_N, IN_C)
             mat_w = mat_w.permute(1, 0)
@@ -132,14 +133,22 @@ class _conv1x1:
                 BATCH, OUT_H - 2 * padding[0], OUT_W - 2 * padding[1], KERNEL_N
             )
             # consider padding > 0
-            y[
-                :, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :
-            ] = (mat_y + bias)
             if bias is not None:
+                y[
+                    :, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :
+                ] = (mat_y + bias)
                 y[:, : padding[0], :, :] = bias
                 y[:, :, : padding[1], :] = bias
                 y[:, OUT_H - padding[0] :, :, :] = bias
                 y[:, :, OUT_W - padding[1] :, :] = bias
+            else:
+                y[
+                    :, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :
+                ] = mat_y
+                y[:, : padding[0], :, :] = 0
+                y[:, :, : padding[1], :] = 0
+                y[:, OUT_H - padding[0] :, :, :] = 0
+                y[:, :, OUT_W - padding[1] :, :] = 0
             # convert back to the original layeout of y
             if layout_y != "nhwc":
                 nhwc = [yn, yh, yw, yc]
