@@ -16,6 +16,7 @@ import numpy
 import torch
 
 from . import config
+from .utils import is_safe_constant
 
 
 def make_function_id_set(lazy_initializer):
@@ -103,10 +104,14 @@ def _allowed_function_ids():
     torch_object_ids = dict()
 
     def _is_allowed_module_prefix(obj):
-        allowed_module_name_prefix_list = ("torch", "math")
-        return inspect.getmodule(obj) and inspect.getmodule(obj).__name__.startswith(
-            allowed_module_name_prefix_list
-        )
+        allowed_modules = ("torch", "math")
+        allowed_modules_dot = tuple([x + "." for x in allowed_modules])
+        module = inspect.getmodule(obj)
+        if module is None:
+            return False
+
+        mod_name = module.__name__
+        return mod_name in allowed_modules or mod_name.startswith(allowed_modules_dot)
 
     def _find_torch_objects(module):
         if any(
@@ -123,7 +128,7 @@ def _allowed_function_ids():
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
-                elif inspect.getmodule(obj) is None:
+                elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
