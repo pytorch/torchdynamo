@@ -1330,7 +1330,7 @@ def make_reduction(reduction_type: str, override_dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
         assert (
-            reduction_type in ("sum", "amax", "amin", "any", "all") or axis is None
+            reduction_type in ("sum", "amax", "amin", "any") or axis is None
         ), "TODO: max with index"
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))

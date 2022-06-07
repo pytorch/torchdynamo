@@ -33,7 +33,7 @@ try:
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
 except (ImportError, ModuleNotFoundError, AssertionError):
-    raise unittest.SkipTest("requires functorch")
+    raise unittest.SkipTest("requires sympy/functorch")
 
 HAS_CPU = False
 try:
