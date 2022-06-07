@@ -60,8 +60,6 @@ os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
 SKIP = {
-    # non-deterministic output / cant check correctness
-    "pyhpc_turbulent_kinetic_energy",
     # https://github.com/pytorch/torchdynamo/issues/101
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
@@ -76,6 +74,12 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+}
+
+# non-deterministic output / cant check correctness
+NONDETERMINISTIC = {
+    "pyhpc_turbulent_kinetic_energy",
+    "pyhpc_isoneutral_mixing",
 }
 
 # Some models have bad train dataset. We read eval dataset.
@@ -115,22 +119,47 @@ VERY_SLOW_BENCHMARKS = {
 
 # These benchmarks took >60s on an i9-11900K CPU
 SLOW_BENCHMARKS = {
-    *{
-        "BERT_pytorch",  # 137s
-        "demucs",  # 116s
-        "fastNLP_Bert",  # 242s
-        "hf_Albert",  # 221s
-        "hf_Bart",  # 400s
-        "hf_Bert",  # 334s
-        "hf_DistilBert",  # 187s
-        "hf_GPT2",  # 470s
-        "hf_Reformer",  # 141s
-        "speech_transformer",  # 317s
-        "vision_maskrcnn",  # 99s
-    },
     *VERY_SLOW_BENCHMARKS,
+    "BERT_pytorch",  # 137s
+    "demucs",  # 116s
+    "fastNLP_Bert",  # 242s
+    "hf_Albert",  # 221s
+    "hf_Bart",  # 400s
+    "hf_Bert",  # 334s
+    "hf_DistilBert",  # 187s
+    "hf_GPT2",  # 470s
+    "hf_Reformer",  # 141s
+    "speech_transformer",  # 317s
+    "vision_maskrcnn",  # 99s
 }
 
+# https://github.com/pytorch/torchdynamo/issues/331
+PYTHON_KEY_NOT_YET_WORKING = {
+    # RuntimeError: expected scalar type Half but found Float
+    "hf_BigBird",
+    # AttributeError: 'int' object has no attribute 'proxy'
+    "moco",
+    # AttributeError: 'Tensor' object has no attribute 'proxy'
+    "speech_transformer",
+    # torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
+    "tacotron2",
+    # requires training mode
+    "maml",
+}
+
+# https://github.com/pytorch/torchdynamo/issues/332
+TORCHINDUCTOR_NOT_YET_WORKING = {
+    *PYTHON_KEY_NOT_YET_WORKING,
+    # Crash with no warning message
+    "Super_SloMo",
+    "fastNLP_Bert",
+    # RuntimeError: CUDA: Error- invalid value
+    "dlrm",
+    "vision_maskrcnn",
+    # LLVM ERROR: Broken function found, compilation aborted!
+    # torch.randn missing
+    "hf_Reformer",
+}
 
 current_name = ""
 current_device = ""
@@ -718,6 +747,11 @@ def main():
         action="store_true",
         help="Disables functionalization",
     )
+    parser.add_argument(
+        "--inductor-settings",
+        action="store_true",
+        help="Use same settings as --inductor for baseline comparisons",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -854,6 +888,7 @@ def main():
             {
                 "hf_Longformer",
                 "timm_nfnet",
+                "timm_efficientdet",
             }
         )
 
@@ -896,6 +931,18 @@ def main():
     if args.devices == ["cpu"]:
         SKIP.update(VERY_SLOW_BENCHMARKS)
 
+    if args.inductor or args.inductor_dynamic or args.inductor_settings:
+        SKIP.update(TORCHINDUCTOR_NOT_YET_WORKING)
+        args.isolate = True
+        args.cosine = True
+        if args.float16:
+            # TODO(jansel): check if correctness issue is real
+            SKIP.add("yolov3")
+
+    if args.float16:
+        # these give `INCORRECT - Variation in Eager runs itself` sometimes
+        NONDETERMINISTIC.update({"demucs", "pyhpc_equation_of_state"})
+
     if args.no_skip:
         SKIP.clear()
 
@@ -919,12 +966,16 @@ def main():
         else:
             torchinductor.config.dynamic_shapes = False
 
-        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+        if args.training:
+            from torchinductor.compile_fx import compile_fx_training
+
+            optimize_ctx = torchdynamo.optimize(
+                compile_fx_training, nopython=args.nopython
+            )
+        else:
+            optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-        args.isolate = True
-        args.float32 = True
-        args.cosine = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
@@ -940,19 +991,7 @@ def main():
         experiment = speedup_experiment
         output_filename = "pythonkey.csv"
         if not args.no_skip:
-            SKIP.update(
-                [
-                    # requires training mode
-                    "maml",
-                    # RuntimeError: toIValue() cannot handle converting to type: QScheme
-                    "mobilenet_v2_quantized_qat",
-                    "resnet50_quantized_qat",
-                    # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
-                    "hf_BigBird",
-                    # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
-                    "hf_Reformer",
-                ]
-            )
+            SKIP.update(PYTHON_KEY_NOT_YET_WORKING)
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
@@ -1208,7 +1247,7 @@ def run_one_model(
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
 
         torch.manual_seed(1337)
-        if current_name != "pyhpc_turbulent_kinetic_energy":
+        if current_name not in NONDETERMINISTIC:
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
             if not same(correct_result, correct_rerun_result):
                 print("INCORRECT - Variation in Eager runs itself")
@@ -1224,7 +1263,7 @@ def run_one_model(
             logging.exception("unhandled error")
             print("ERROR")
             return sys.exit(-1)
-        if current_name == "pyhpc_turbulent_kinetic_energy":
+        if current_name in NONDETERMINISTIC:
             # This model has non-deterministic output so we cant
             # check correctness.
             # TODO(jansel): submit upstream fix for this
