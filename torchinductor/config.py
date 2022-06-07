@@ -47,6 +47,9 @@ class triton:
     # Monkey patching to lower overheads
     hackery = False
 
+    # use triton conv as backend
+    use_conv = False
+
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
