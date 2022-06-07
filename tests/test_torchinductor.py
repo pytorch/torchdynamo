@@ -1758,6 +1758,19 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    def test_inplace_activations(self):
+        def fn(x):
+            a = aten.hardswish_(x + 1)
+            b = aten.hardtanh(x + 1)
+            c = aten.leaky_relu_(x + 1)
+            d = aten.silu_(x + 1)
+            e = aten.log1p(x + 1)
+            f = aten.masked_fill_(x + 1, torch.zeros_like(x, dtype=torch.bool), 99.0)
+            h = aten.masked_fill_(x + 1, torch.ones_like(x, dtype=torch.bool), 99.0)
+            return (a, b, c, d, e, f, h)
+
+        self.common(fn, [torch.randn(64) * 10])
+
 
 if HAS_CPU:
 

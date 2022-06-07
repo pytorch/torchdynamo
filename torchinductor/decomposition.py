@@ -2,6 +2,7 @@ import math
 
 import functorch._src.decompositions
 import torch
+from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch._decomp import get_decompositions
 
 from torchinductor import config
@@ -53,6 +54,7 @@ decompositions = get_decompositions(
         aten.transpose.int,
     ]
 )
+decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
@@ -243,3 +245,8 @@ def silu_(x):
 @register_decomposition(aten.masked_fill_)
 def masked_fill_(x, mask, value):
     return x.copy_(aten.masked_fill(x, mask, value))
+
+
+@register_decomposition([aten.log1p])
+def log1p(x):
+    return torch.log(x + 1)
