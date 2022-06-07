@@ -100,6 +100,17 @@ def is_numpy_int_type(value):
     )
 
 
+def is_numpy_float_type(value):
+    return istype(
+        value,
+        (
+            np.float16,
+            np.float32,
+            np.float64,
+        ),
+    )
+
+
 def istensor(obj):
     """Check of obj is a tensor"""
     return istype(
@@ -412,6 +423,8 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
     elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
         return a == b
+    elif is_numpy_int_type(a) or is_numpy_float_type(a):
+        return (type(a) is type(b)) and (a == b)
     elif type(a).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",

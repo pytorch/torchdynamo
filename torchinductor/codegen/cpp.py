@@ -354,9 +354,24 @@ class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.kernel_group = KernelGroup()
-        self.group_fn = tuple
 
-    def codegen(self, group, reduction_group):
+    def group_fn(self, sizes):
+        return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+
+    def codegen(self, *groups):
+        group, reduction_group = groups
+
+        def check_group1(other_node):
+            other_groups = other_node.group
+            return (
+                check_group2(other_node)
+                or other_groups == groups
+                or other_groups == (group + reduction_group, ())
+            )
+
+        def check_group2(other_node):
+            return other_node.group == (group, ())
+
         kernel_group = self.kernel_group
         scheduler = self.scheduler
         with scheduler.kernel(kernel_group.new_kernel()) as kernel:
@@ -364,6 +379,7 @@ class CppScheduling:
 
             # first any pointwise sharing same loops
             for node in scheduler.pop_group((group + reduction_group, ())):
+                scheduler.maybe_remove_buffer(node, check_group1)
                 node.run(vars, reduction_vars)
                 node.mark_fusable()
 
@@ -371,15 +387,16 @@ class CppScheduling:
                 # reductions
                 reduction_nodes = list(scheduler.pop_group((group, reduction_group)))
                 for node in reduction_nodes:
-                    scheduler.maybe_remove_buffer(node)
                     node.run(vars, reduction_vars)
-                # can't yet fuse reduction into reduction
+
+                # can't fuse reduction into reduction, so do in seperate loop
                 for node in reduction_nodes:
                     node.mark_fusable()
 
                 # we can fuse in some extra pointwise into the suffix
                 with kernel.write_to_suffix():
                     for node in scheduler.pop_group((group, ())):
+                        scheduler.maybe_remove_buffer(node, check_group2)
                         node.run(vars, ())
                         node.mark_fusable()
 

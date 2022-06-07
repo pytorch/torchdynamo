@@ -2,7 +2,9 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import itertools
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import List
 
@@ -110,6 +112,10 @@ class BaseSchedulerNode:
                 return False
         return True
 
+    def get_priority(self):
+        """Controls the order this node will be executed in, higher runs first"""
+        raise NotImplementedError()
+
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
@@ -122,6 +128,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self.scheduler.kernels.append(self.node)
         codegen_extern_call(self.node)
 
+    def get_priority(self):
+        return 100
+
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
@@ -131,6 +140,9 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
+
+    def get_priority(self):
+        return 200
 
 
 def pick_loop_order(stride_lengths, sizes):
@@ -170,38 +182,30 @@ class SchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         super().__init__(scheduler, node)
         (
-            self._size,
-            self._reduction_size,
+            self._sizes,
             self._body,
-        ) = node.simplify_loops()
+        ) = node.simplify_reorder_and_tile()
 
-        self.group = (
-            node.get_device(),
-            group_fn(self._size),
-            group_fn(self._reduction_size),
-        )
+        self.group = (node.get_device(), group_fn(self._sizes))
 
-        self.set_read_writes(
-            dependencies.extract_read_writes(
-                self._body,
-                self._size,
-                self._reduction_size,
-            )
-        )
+        self.set_read_writes(dependencies.extract_read_writes(self._body, *self._sizes))
 
-    def can_remove_buffer(self, broadcast_after_reduce=False):
+    def can_remove_buffer(self, check_group):
         if (
             self.is_reduction()
             and len(self.users) == 1
+            and isinstance(self.users[0].node, SchedulerNode)
             and len(self.users[0].node.unmet_dependencies) == 1
         ):
             user = self.users[0].node
+            if not check_group(user):
+                return False
             dep = next(iter(user.unmet_dependencies))
             writes = self.read_writes.writes
-            if broadcast_after_reduce:
+            if self._sizes[-1] != 1:
                 writes = set(writes)
                 writes.update(
-                    [w.broadcast_extend_sizes(self._reduction_size) for w in writes]
+                    [w.broadcast_extend_sizes(self._sizes[-1]) for w in writes]
                 )
             # this will get fused into us, so we don't need to keep the buffer
             return not user.is_reduction() and dep in writes
@@ -209,14 +213,14 @@ class SchedulerNode(BaseSchedulerNode):
 
     def mark_fusable(self, broadcast_after_reduce=False):
         self.scheduler.fusable_deps.update(self.read_writes.writes)
-        if broadcast_after_reduce and self._reduction_size:
+        if broadcast_after_reduce and self.is_reduction():
             self.scheduler.fusable_deps.update(
-                w.broadcast_extend_sizes(self._reduction_size)
+                w.broadcast_extend_sizes(self._sizes[-1])
                 for w in self.read_writes.writes
             )
 
     def get_ranges(self):
-        return self._size, self._reduction_size
+        return self._sizes
 
     def is_reduction(self):
         return bool(self.node.data.get_reduction_type())
@@ -255,20 +259,19 @@ class SchedulerNode(BaseSchedulerNode):
                         return
         super().allocate()
 
-    def run(self, vars, reduction_vars):
+    def run(self, *index_vars):
         self.allocate()
         self.scheduler.run_count += 1
-        size = self._size
-        reduction_size = self._reduction_size
-        assert len(vars) + len(reduction_vars) == len(size) + len(reduction_size)
+        sizes = self._sizes
+        assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
             zip(
-                [*vars, *reduction_vars],
-                [*size, *reduction_size],
+                itertools.chain.from_iterable(index_vars),
+                itertools.chain.from_iterable(sizes),
             )
         )
         with V.set_ops_handler(SimplifyIndexing(V.get_ops_handler(), var_ranges)):
-            self._body(vars, reduction_vars)
+            self._body(*index_vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
@@ -278,6 +281,12 @@ class SchedulerNode(BaseSchedulerNode):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
+
+    def get_priority(self):
+        if self.is_reduction():
+            return len(self.group)
+        else:
+            return len(self.group) - 1
 
 
 @dataclasses.dataclass
@@ -342,8 +351,10 @@ class Scheduler:
         super(Scheduler, self).__init__()
         self.backends = {}
         self.current_device = None
-        self.runable_reduction_groups = collections.defaultdict(int)
-        self.runable_pointwise_groups = collections.defaultdict(int)
+        # runable_groups maps node group to priority
+        # we use self.runable_groups.most_common() to implement a priority queue
+        self.runable_groups = collections.Counter()
+        # runable_nodes  maps node group to nodes
         self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
         self.runable_extern_kernels = collections.deque()
         self.blocked_nodes = BlockedNodes()
@@ -435,7 +446,9 @@ class Scheduler:
             for alt_name in node.get_mutations():
                 self.mutation_renames[rename(alt_name)] = node.get_name()
                 self.mutation_renames[alt_name] = node.get_name()
-                self.mutation_real_name[node.get_name()] = alt_name
+                self.mutation_real_name[node.get_name()] = self.mutation_real_name.get(
+                    alt_name, alt_name
+                )
 
         # make sure outputs aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
@@ -467,11 +480,12 @@ class Scheduler:
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
-    def maybe_remove_buffer(self, node: SchedulerNode, broadcast_after_reduce=False):
+    def maybe_remove_buffer(self, node: SchedulerNode, check_group: Callable):
         name = node.get_name()
         if name in self.mutation_renames:
             return
-        if node.can_remove_buffer(broadcast_after_reduce=broadcast_after_reduce):
+        if node.can_remove_buffer(check_group=check_group):
+            print("REMOVING", name)
             V.graph.removed_buffers.add(name)
 
     def enqueue(self, node):
@@ -487,14 +501,14 @@ class Scheduler:
             if isinstance(node, ExternKernelSchedulerNode):
                 self.runable_extern_kernels.append(node)
             elif isinstance(node, NopKernelSchedulerNode):
-                node.run()
+                node.run()  # just schedule nop kernels eagerly
             else:
                 self.runable_nodes[node.group].append(node)
-                if node.is_reduction():
-                    # Do reductions first as they yield more possible fusions
-                    self.runable_reduction_groups[node.group] += 1
-                else:
-                    self.runable_pointwise_groups[node.group] += 1
+                old_priority, old_count = self.runable_groups.get(node.group, (0, 0))
+                self.runable_groups[node.group] = (
+                    max(old_priority, node.get_priority()),
+                    old_count + 1,
+                )
 
     def barrier(self):
         """
@@ -543,17 +557,13 @@ class Scheduler:
         return ctx()
 
     def iter_runable_groups(self):
-        while (
-            self.runable_reduction_groups
-            or self.runable_pointwise_groups
-            or self.runable_extern_kernels
-        ):
+        while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
                 self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
-            elif self.runable_reduction_groups:
-                yield next(iter(self.runable_reduction_groups.keys()))
             else:
-                yield next(iter(self.runable_pointwise_groups.keys()))
+                group, priority = self.runable_groups.most_common(1)[0]
+                del self.runable_groups[group]
+                yield group
         assert not self.runable_nodes
         assert len(self.nodes) == self.run_count
 
@@ -567,10 +577,10 @@ class Scheduler:
             yield
 
     def pop_group(self, group_without_device):
-        group = (self.current_device, *group_without_device)
+        group = (self.current_device, tuple(group_without_device))
         while group in self.runable_nodes:
-            self.runable_reduction_groups.pop(group, None)
-            self.runable_pointwise_groups.pop(group, None)
+            if group in self.runable_groups:
+                del self.runable_groups[group]
             yield from self.runable_nodes.pop(group)
         if self.fusable_deps:
             fusable = True
@@ -606,9 +616,9 @@ class Scheduler:
         return self.backends[device]
 
     def codegen(self):
-        for device, group, reduction_group in self.iter_runable_groups():
+        for device, group in self.iter_runable_groups():
             if device != self.current_device:
                 self.flush()
                 self.current_device = device
-            self.get_backend(device).codegen(group, reduction_group)
+            self.get_backend(device).codegen(*group)
         self.flush()

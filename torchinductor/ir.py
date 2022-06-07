@@ -1130,7 +1130,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars(
+            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -1154,9 +1154,19 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_loops(self):
-        _, args, var_ranges = dependencies.index_vars(
-            self.data.get_size(), self.data.get_reduction_size(), prefix="z"
+    def simplify_reorder_and_tile(self):
+        """
+        This is the main place where we do loop transformations in a
+        backend-agnostic way.
+
+        Here we:
+            1) Remove any 1 dimensions
+            2) Fuse contiguous dimensions together
+            3) Reorder dimensions based on stride orders
+            4) Split dimensions into tiles
+        """
+        _, args, var_ranges = dependencies.index_vars_squeeze(
+            self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         body = LoopBody(
             self.get_store_function(),
@@ -1190,16 +1200,129 @@ class ComputedBuffer(Buffer):
         iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
         reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
 
-        def body_wrapper(index, reduce_index=None):
-            if not reduce_ranges and reduce_index:
-                index = [*index, *reduce_index]
-                reduce_index = None
-            index = iter_reindex(index)
-            if reduce_index:
-                index = [*index, *reduce_reindex(reduce_index)]
-            return body(index)
+        # retrace the loop body with simplification and reordering applied
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_ranges, reduce_ranges, prefix="z"
+        )
+        body = LoopBody(
+            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+        )
 
-        return iter_ranges, reduce_ranges, body_wrapper
+        # TODO(jansel): support tiling with modular indexing
+        has_modular_indexing = any(
+            ("ModularIndexing" in str(expr) or "IndexingDiv" in str(expr))
+            for expr in body.indexing_exprs.values()
+        )
+
+        if (
+            self.get_device().type == "cuda"
+            and not self.get_reduction_type()
+            and iter_ranges
+            and not has_modular_indexing
+            and config.triton.max_tiles > 1
+        ):
+            # TODO(jansel): should we include store strides here or just loads?
+            strides = [
+                V.graph.sizevars.stride_hints(expr, iter_vars)
+                for expr in body.reads
+                # TODO(jansel): how should we tile indirect loads?
+                if "indirect" not in str(expr)
+            ]
+            tiled_ranges = self._tile_contiguous(iter_ranges, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), body
+
+            # alternate tiling heuristic
+            tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), call
+
+        return (iter_ranges, reduce_ranges), body
+
+    @classmethod
+    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides):
+        """
+        Break iter_ranges up into at most max_tiles tiles based on stride==1
+        dimensions.
+
+        Transformation on iter_range like:
+            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
+
+        Where each group will be tiled in a different dimension in the
+        output kernel.
+        """
+        tiles = []
+        current_tile = []
+        max_tiles = config.triton.max_tiles
+
+        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
+        for i in range(len(iter_ranges)):
+            current_tile.append(iter_ranges[i])
+            # break tiles on stride 1
+            if any(stride[i] == 1 for stride in strides):
+                tiles.append(current_tile)
+                current_tile = []
+
+        if current_tile:
+            tiles.append(current_tile)
+
+        if len(tiles) > max_tiles:
+            split = len(tiles) - max_tiles + 1
+            tiles = [[*itertools.chain(*tiles[:split])]] + tiles[split:]
+            assert len(tiles) == max_tiles, (len(tiles), max_tiles, split)
+
+        return tiles
+
+    @classmethod
+    def _tile_broadcasting(cls, iter_ranges: List[sympy.Expr], body, strides):
+        """
+        Break ranges up so that one dimension is all broadcasting.
+
+        Transformation on iter_ranges like:
+            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
+
+        Where each group will be tiled in a different dimension in the
+        output kernel.
+        """
+        broadcasting_strides = [
+            stride for stride in strides if any(s == 0 for s in stride)
+        ]
+        if not broadcasting_strides:
+            return (iter_ranges,), body
+
+        # TODO(jansel): consider another load?  for now just take first one
+        broadcasting_stride = broadcasting_strides[0]
+
+        broadcast_ranges = []
+        broadcast_index = []
+        other_ranges = []
+        other_index = []
+
+        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
+        for i in range(len(iter_ranges)):
+            if broadcasting_stride[i] == 0:
+                broadcast_index.append(i)
+                broadcast_ranges.append(iter_ranges[i])
+            else:
+                other_index.append(i)
+                other_ranges.append(iter_ranges[i])
+
+        def call(broadcast, other, reduction=None):
+            assert not reduction
+            assert len(broadcast) == len(broadcast_index)
+            assert len(other) == len(other_index)
+            args = [None] * len(iter_ranges)
+            for i, v in itertools.chain(
+                zip(broadcast_index, broadcast),
+                zip(other_index, other),
+            ):
+                args[i] = v
+            return body(args)
+
+        if broadcast_ranges and other_ranges:
+            return (broadcast_ranges, other_ranges), call
+        else:
+            return (iter_ranges,), body
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):
@@ -2026,7 +2149,8 @@ class LoopBody:
         self.indirect_vars.append([var])
         return var
 
-    def __call__(self, index=()):
+    def __call__(self, *indices):
+        index = list(itertools.chain(*indices))
         assert len(index) == len(self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))

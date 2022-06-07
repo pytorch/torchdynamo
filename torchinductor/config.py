@@ -40,6 +40,18 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
+
+    # Use cudagraphs on output code
     cudagraphs = True
+
+    # Monkey patching to lower overheads
     hackery = False
+
+    # use triton conv as backend
     use_conv = False
+
+    # Always load full blocks (rather than broadcasting inside the block)
+    dense_indexing = False
+
+    # limit tiling dimensions
+    max_tiles = 2

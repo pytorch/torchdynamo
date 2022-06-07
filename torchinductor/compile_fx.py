@@ -122,12 +122,15 @@ def compile_fx(
             wrap(graph.run)(*example_inputs)
             compiled_fn = wrap(graph.compile_to_fn())
 
+        # make sure it works, causes issues for mutation
+        # compiled_fn(*example_inputs)
+
         if (
             cudagraphs
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphs_inner(compiled_fn, example_inputs)
+            return cudagraphs_inner(compiled_fn, example_inputs, copy_outputs=False)
         else:
             return compiled_fn
     except Exception:
