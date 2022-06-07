@@ -1279,12 +1279,12 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def make_reduction(reduction_type: str):
+def make_reduction(reduction_type: str, override_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
         assert (
-            reduction_type in ("sum", "amax", "amin") or axis is None
+            reduction_type in ("sum", "amax", "amin", "any") or axis is None
         ), "TODO: max with index"
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
@@ -1325,11 +1325,13 @@ def make_reduction(reduction_type: str):
         inner_loader = x.make_loader()
         result = Reduction.create(
             device=x.get_device(),
-            dtype=x.get_dtype(),
+            dtype=override_dtype or x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
-            reduction_type=reduction_type.lstrip("a"),  # amax=>max
+            reduction_type={"amax": "max", "amin": "min"}.get(
+                reduction_type, reduction_type
+            ),
         )
         result.realize()
         return result
@@ -1474,6 +1476,7 @@ register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
+register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
 
 add = register_pointwise(aten.add)
 div = register_pointwise(aten.div)
@@ -1502,6 +1505,8 @@ register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.trunc)
 register_pointwise(aten.floor)
+register_pointwise(aten.isinf, override_dtype=torch.bool)
+register_pointwise(aten.isnan, override_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)

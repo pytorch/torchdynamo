@@ -35,7 +35,7 @@ INDEX_TYPE = "long"
 
 
 def reduction_init(reduction_type, dtype):
-    if reduction_type == "sum":
+    if reduction_type in ("sum", "any"):
         return 0
     # TODO(jansel): infinity for floats?
     if reduction_type == "max":
@@ -48,6 +48,8 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "any":
+        return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
 
 
@@ -131,6 +133,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def trunc(x):
         return f"std::trunc({x})"
+
+    @staticmethod
+    def isinf(x):
+        return f"std::isinf({x})"
+
+    @staticmethod
+    def isnan(x):
+        return f"std::isnan({x})"
 
     @staticmethod
     def relu(x):
@@ -511,7 +521,7 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
-            lookup = {"sum": "+", "min": "min", "max": "max"}
+            lookup = {"sum": "+", "min": "min", "max": "max", "any": "||"}
             reduction = " " + " ".join(
                 f"reduction({lookup[rtype]}:{var})"
                 for var, rtype in self.reduction_vars.items()
