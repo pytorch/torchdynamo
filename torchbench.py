@@ -155,8 +155,6 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     "moco",
     # AttributeError: 'Tensor' object has no attribute 'proxy'
     "speech_transformer",
-    # RuntimeError: CUDA out of memory.
-    "timm_efficientdet",
     # RuntimeError: Internal Triton PTX codegen error: uses too much parameter space
     "tacotron2",
 }
@@ -871,6 +869,7 @@ def main():
             {
                 "hf_Longformer",
                 "timm_nfnet",
+                "timm_efficientdet",
             }
         )
 
@@ -948,7 +947,14 @@ def main():
         else:
             torchinductor.config.dynamic_shapes = False
 
-        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+        if args.training:
+            from torchinductor.compile_fx import compile_fx_training
+
+            optimize_ctx = torchdynamo.optimize(
+                compile_fx_training, nopython=args.nopython
+            )
+        else:
+            optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.online_autotune:

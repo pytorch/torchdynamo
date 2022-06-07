@@ -527,6 +527,16 @@ def _cudnn_rnn(*args):
     )
 
 
+@register_lowering(aten.convolution_backward, type_promote=False)
+def convolution_backward(*args):
+    return list(
+        map(
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.convolution_backward, *args),
+        )
+    )
+
+
 @register_lowering(aten.sort, type_promote=False)
 def sort(*args):
     return list(
