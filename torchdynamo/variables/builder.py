@@ -123,6 +123,7 @@ class VariableBuilder:
         make_guards = self.make_guards
         if istensor(value):
             import traceback
+
             # traceback.print_stack()
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list)) or is_namedtuple(value):
