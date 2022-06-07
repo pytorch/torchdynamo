@@ -142,6 +142,7 @@ def _kernel(
     groups,
     # Metaparameters
     ACC_TYPE: tl.constexpr,
+    CONV1X1_NHWC: tl.constexpr,
     # blocks in different dimension
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -175,11 +176,13 @@ def _kernel(
 
     CRS = IN_C * KERNEL_H * KERNEL_W
     # load inc ptr of x, upade x_ptrs
-    delta_x_ptrs = delta_x_ptr + off_x_crs
-    off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
-    # delta_x_ptrs += BLOCK_K
+    if not CONV1X1_NHWC:
+        delta_x_ptrs = delta_x_ptr + off_x_crs
+        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+        x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
+    else:
+        x_ptrs = x + off_x_nhw[:, None] + off_x_crs[None, :]
 
-    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
     mask_x = (
         (off_x_n < BATCH)
         & (off_x_h >= 0)
@@ -209,11 +212,14 @@ def _kernel(
         # ------ update ptrs ------
         w_ptrs += BLOCK_K
         # load inc ptr of x, upade x_ptrs
-        delta_x_ptrs += BLOCK_K
-        off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
-        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
-        x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
-        # x_ptrs += BLOCK_K
+        if not CONV1X1_NHWC:
+            delta_x_ptrs += BLOCK_K
+            off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
+            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+            x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
+        else:
+            off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
+            x_ptrs += BLOCK_K
 
         mask_x = (
             (off_x_n < BATCH)
@@ -412,7 +418,10 @@ class _conv:
         # if input activation is channel-last, it"s good to tiling output
         # into block of [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] because of better
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
-        if True:
+        CONV1X1_NHWC = False
+        if stride_x[xc] == 1 and KERNEL_H == 1 and KERNEL_W == 1:
+            CONV1X1_NHWC = True
+        if not CONV1X1_NHWC:
             delta_x = _conv._delta_x_ptr(
                 IN_C,
                 KERNEL_H,
@@ -429,62 +438,65 @@ class _conv:
             )
             # delta_x = torch.from_numpy(np_delta_x).cuda()
             # print("delta_x", delta_x)
+        else:
+            delta_x = None
 
-            # launch kernel, 2-dim, batch*h*w, kernel
-            def grid(META):
-                return (
-                    triton.cdiv(BATCH * OUT_H * OUT_W, META["BLOCK_M"]),
-                    triton.cdiv(KERNEL_N, META["BLOCK_N"]),
-                )
-
-            _kernel[grid](
-                x,
-                w,
-                bias,
-                y,
-                # stride nchw for x,w,y tensor
-                stride_x[xn],
-                stride_x[xc],
-                stride_x[xh],
-                stride_x[xw],
-                stride_w[wn],
-                stride_w[wc],
-                stride_w[wh],
-                stride_w[ww],
-                stride_y[yn],
-                stride_y[yc],
-                stride_y[yh],
-                stride_y[yw],
-                stride_biasn,
-                # pointer inc for x
-                delta_x,
-                # Tensor dimensions
-                BATCH,
-                IN_C,
-                IN_H,
-                IN_W,
-                KERNEL_N,
-                KERNEL_H,
-                KERNEL_W,
-                OUT_H,
-                OUT_W,
-                # conv parameters
-                stride[0],
-                stride[1],
-                padding[0],
-                padding[1],
-                dilation[0],
-                dilation[1],
-                output_padding[0],
-                output_padding[1],
-                groups,
-                # Metaparameters
-                ACC_TYPE=ACC_TYPE,
-                # BLOCK_M=128,
-                # BLOCK_N=32,
-                # BLOCK_K=32,
-                GROUP_H=1,
+        # launch kernel, 2-dim, batch*h*w, kernel
+        def grid(META):
+            return (
+                triton.cdiv(BATCH * OUT_H * OUT_W, META["BLOCK_M"]),
+                triton.cdiv(KERNEL_N, META["BLOCK_N"]),
             )
+
+        _kernel[grid](
+            x,
+            w,
+            bias,
+            y,
+            # stride nchw for x,w,y tensor
+            stride_x[xn],
+            stride_x[xc],
+            stride_x[xh],
+            stride_x[xw],
+            stride_w[wn],
+            stride_w[wc],
+            stride_w[wh],
+            stride_w[ww],
+            stride_y[yn],
+            stride_y[yc],
+            stride_y[yh],
+            stride_y[yw],
+            stride_biasn,
+            # pointer inc for x
+            delta_x,
+            # Tensor dimensions
+            BATCH,
+            IN_C,
+            IN_H,
+            IN_W,
+            KERNEL_N,
+            KERNEL_H,
+            KERNEL_W,
+            OUT_H,
+            OUT_W,
+            # conv parameters
+            stride[0],
+            stride[1],
+            padding[0],
+            padding[1],
+            dilation[0],
+            dilation[1],
+            output_padding[0],
+            output_padding[1],
+            groups,
+            # Metaparameters
+            ACC_TYPE=ACC_TYPE,
+            CONV1X1_NHWC=CONV1X1_NHWC,
+            # BLOCK_M=128,
+            # BLOCK_N=32,
+            # BLOCK_K=32,
+            GROUP_H=1,
+        )
         # do matrix multiplication
         # else:
         #    _kernel_mm[grid]()
