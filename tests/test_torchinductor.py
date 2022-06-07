@@ -16,7 +16,7 @@ from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 
 try:
-    importlib.import_module("sympy")
+    import sympy
     importlib.import_module("functorch")
 
     from torch._decomp import get_decompositions
