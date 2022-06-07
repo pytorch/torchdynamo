@@ -122,6 +122,8 @@ class VariableBuilder:
     def _wrap(self, value):
         make_guards = self.make_guards
         if istensor(value):
+            import traceback
+            # traceback.print_stack()
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to
@@ -325,7 +327,7 @@ class VariableBuilder:
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
                     ),
                     example_value=value,
-                    # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                    guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                 )
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__

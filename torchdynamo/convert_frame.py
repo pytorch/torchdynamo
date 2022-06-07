@@ -301,7 +301,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 self_name = frame.f_locals["self"].__class__.__name__
                 if self_name == "ModuleList":
                     # Protected by module invalidation, see NN_MODULE
-                    return None
+                    output.guards = []
 
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except (Unsupported, TorchRuntimeError):

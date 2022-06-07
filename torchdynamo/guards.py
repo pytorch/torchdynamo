@@ -229,7 +229,6 @@ class GuardBuilder:
             return
 
         # ___check_type_id is same as `id(type(x)) == y`
-        traceback.print_stack()
         self.code.append(
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
@@ -370,6 +369,10 @@ class GuardBuilder:
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
+
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")

@@ -1096,6 +1096,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts, nopython=True):
             res0 = f(x)
             res1 = f(4)
+        print(ref1, res1)
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
