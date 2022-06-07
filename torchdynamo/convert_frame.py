@@ -1,6 +1,5 @@
 import dis
 import functools
-import gc
 import itertools
 import logging
 import os

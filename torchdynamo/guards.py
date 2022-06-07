@@ -194,11 +194,6 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
-seen_modules = set()
-top_level_modules = set()
-top_level_modules_to_name = dict()
-
-
 class GuardBuilder:
     def __init__(
         self, id_ref: Callable, scope: Dict[str, Any], guarded_code, renames=True

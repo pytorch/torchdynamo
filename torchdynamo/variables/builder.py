@@ -122,9 +122,6 @@ class VariableBuilder:
     def _wrap(self, value):
         make_guards = self.make_guards
         if istensor(value):
-            import traceback
-
-            # traceback.print_stack()
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to
