@@ -2,12 +2,10 @@ import collections
 import dataclasses
 import enum
 import functools
-import inspect
 import logging
 import os
 import re
 import textwrap
-import traceback
 import types
 import weakref
 from collections import OrderedDict
@@ -95,7 +93,7 @@ class NNModuleChangeTrackerUtil:
 
             modulecls.__setattr__ = custom_setattr
 
-        if not module in module_code_map:
+        if module not in module_code_map:
             module_code_map[module] = list()
         module_code_map[module].append(guarded_code)
 
