@@ -13,13 +13,8 @@ from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
-import torchinductor.config
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
-from torchinductor.ir import IndexingDiv
-from torchinductor.ir import ModularIndexing
-from torchinductor.lowering import has_torchvision_roi_align
-from torchinductor.sizevars import SizeVarAllocator
 
 try:
     importlib.import_module("sympy")
@@ -27,13 +22,19 @@ try:
 
     from torch._decomp import get_decompositions
 
-    from torchinductor import config
+    import torchinductor.config
     from torchinductor.compile_fx import compile_fx
+    from torchinductor import config
+    from torchinductor.ir import IndexingDiv
+    from torchinductor.ir import ModularIndexing
+    from torchinductor.lowering import has_torchvision_roi_align
+    from torchinductor.sizevars import SizeVarAllocator
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires sympy/functorch")
+
 
 HAS_CPU = False
 try:
