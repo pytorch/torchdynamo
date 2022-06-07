@@ -395,7 +395,7 @@ class _conv:
         stride_biasn = stride_bias[0] if stride_bias else None
 
         # output layout should be the same as x
-        if stride_x[xc] > stride_x[xh] and stride_x[xc] > stride_x[xw]:
+        if stride_x[xc] < stride_x[xh] and stride_x[xc] < stride_x[xw]:
             y = y.to(memory_format=torch.channels_last)
         stride_y = y.stride()
 

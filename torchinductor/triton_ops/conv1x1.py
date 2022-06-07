@@ -14,9 +14,6 @@ class _conv1x1:
         transposed,
         output_padding,
         groups,
-        layout_x,
-        layout_w,
-        layout_y,
     ):
         # Q: should we check x, w, bias dtypes?
         device = x.device
@@ -26,9 +23,9 @@ class _conv1x1:
         shape_bias = bias.shape if bias is not None else None
 
         # indicies for the layeout
-        xn, xc, xh, xw = [layout_x.find(x) for x in "nchw"]
-        yn, yc, yh, yw = [layout_y.find(x) for x in "nchw"]
-        wn, wc, wh, ww = [layout_w.find(x) for x in "nchw"]
+        xn, xc, xh, xw = 0, 1, 2, 3
+        yn, yc, yh, yw = 0, 1, 2, 3
+        wn, wc, wh, ww = 0, 1, 2, 3
 
         # out_channel, in_channel, kernel_height, kernel_width
         kernel_size = [shape_w[wh], shape_w[ww]]
@@ -83,12 +80,11 @@ class _conv1x1:
         OUT_W = shape_y[yw]
 
         assert KERNEL_H == 1 and KERNEL_W == 1, "only support 1x1 conv"
-        assert layout_x == layout_w, "x and w should have the same layout"
 
         if padding == (0, 0):
-            if layout_x != "nhwc":
-                x = x.permute(xn, xh, xw, xc)
-            # select every stride"s element (for stride > 1)
+            # nchw -> nhwc
+            x = x.permute(0, 2, 3, 1)
+            # select every stride's element (for stride > 1)
             x = x[:, :: stride[0], :: stride[1], :]
             # 2d matrix
             mat_x = x.reshape(-1, IN_C)
@@ -101,12 +97,9 @@ class _conv1x1:
             y = mat_y.view(BATCH, OUT_H, OUT_W, KERNEL_N)
             if bias is not None:
                 y += bias
-            # convert back to the original layeout of y
-            if layout_y != "nhwc":
-                nhwc = [yn, yh, yw, yc]
-                # the index of the sorted list
-                permute_idx = sorted(range(len(nhwc)), key=lambda k: nhwc[k])
-                y = y.permute(permute_idx)
+            # convert back to the original layout of y
+            # nhwc -> nchw
+            y = y.permute(0, 3, 1, 2)
             return y
 
         else:
@@ -117,9 +110,8 @@ class _conv1x1:
             )
             # y = bias.repeat((shape_y[yn], shape_y[yh], shape_y[yw], 1)).to(device).type(x.dtype)
             # convert x to channel-last layout;
-            # don"t care w layout since kernel size is 1
-            if layout_x != "nhwc":
-                x = x.permute(xn, xh, xw, xc)
+            # don't care w layout since kernel size is 1
+            x = x.permute(0, 2, 3, 1)
             # select every stride"s element (for stride > 1)
             x = x[:, :: stride[0], :: stride[1], :]
             # 2d matrix
@@ -135,26 +127,31 @@ class _conv1x1:
             # consider padding > 0
             if bias is not None:
                 y[
-                    :, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :
-                ] = (mat_y + bias)
+                    :,
+                    padding[0] : OUT_H - padding[0],
+                    padding[1] : OUT_W - padding[1],
+                    :,
+                ] = (
+                    mat_y + bias
+                )
                 y[:, : padding[0], :, :] = bias
                 y[:, :, : padding[1], :] = bias
                 y[:, OUT_H - padding[0] :, :, :] = bias
                 y[:, :, OUT_W - padding[1] :, :] = bias
             else:
                 y[
-                    :, padding[0] : OUT_H - padding[0], padding[1] : OUT_W - padding[1], :
+                    :,
+                    padding[0] : OUT_H - padding[0],
+                    padding[1] : OUT_W - padding[1],
+                    :,
                 ] = mat_y
                 y[:, : padding[0], :, :] = 0
                 y[:, :, : padding[1], :] = 0
                 y[:, OUT_H - padding[0] :, :, :] = 0
                 y[:, :, OUT_W - padding[1] :, :] = 0
-            # convert back to the original layeout of y
-            if layout_y != "nhwc":
-                nhwc = [yn, yh, yw, yc]
-                # the index of the sorted list
-                permute_idx = sorted(range(len(nhwc)), key=lambda k: nhwc[k])
-                y = y.permute(permute_idx)
+            # convert back to the original layout of y
+            # nhwc -> nchw
+            y = y.permute(0, 3, 1, 2)
             return y
 
     @staticmethod
@@ -168,9 +165,6 @@ class _conv1x1:
         transposed=False,
         output_padding=(0, 0),
         groups=1,
-        layout_x="nhwc",
-        layout_w="nhwc",
-        layout_y="nhwc",
     ):
         if groups != 1:
             print(f"Do not support groups = {groups}")
@@ -187,9 +181,6 @@ class _conv1x1:
             transposed,
             output_padding,
             groups,
-            layout_x,
-            layout_w,
-            layout_y,
         )
 
 
