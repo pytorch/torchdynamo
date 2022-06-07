@@ -15,9 +15,6 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
-from torchinductor.ir import IndexingDiv
-from torchinductor.ir import ModularIndexing
-from torchinductor.sizevars import SizeVarAllocator
 
 try:
     importlib.import_module("sympy")
@@ -27,11 +24,15 @@ try:
 
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx
+    from torchinductor.ir import IndexingDiv
+    from torchinductor.ir import ModularIndexing
+    from torchinductor.sizevars import SizeVarAllocator
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires functorch")
+
 
 HAS_CPU = False
 try:
