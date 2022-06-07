@@ -2,26 +2,25 @@ import torch
 import triton
 
 import torchinductor.triton_ops
-import utils
+import model
 
 # https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/
-useCudaGraph = True
+useCudaGraph = False
 
 # conv benchmarks
 conv_confs = [
     triton.testing.Benchmark(
-        x_names=["IN_H", "IN_W"],
-        x_vals=utils.powspace(8, 256, 2, 1),
+        x_names=["layout"],
+        x_vals=["nhwc", "nchw"],
         line_arg="provider",
         line_vals=["cublas", "triton"],
         line_names=["cuBLAS", "Triton"],
         ylabel="TFLOPS",
-        plot_name=f"conv1x1-performance-BATCH={BATCH}-IN_C={IN_C}-KN={KERNEL_N}",
-        args={"BATCH": BATCH, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
-              "KERNEL_H": 1, "KERNEL_W": 1},
-    ) for BATCH in [32, 64]
-    for IN_C in [64, 128]  # powspace(16, 256, 2, 1)
-    for KERNEL_N in [32, 64, 128]  # powspace(16, 256, 2, 1)
+        plot_name="conv1x1-resnet50-performance",
+        args={"BATCH": BATCH, "IN_H": IN_H, "IN_W": IN_W, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
+              "KERNEL_H": KERNEL_H, "KERNEL_W": KERNEL_W, "stride": stride, "padding": padding},
+    ) for IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding in model.resnet50_layers if KERNEL_H == 1 and KERNEL_W == 1
+    for BATCH in [32]
 ]
 
 
@@ -35,26 +34,24 @@ def bench_op(
         # parameters of conv
         stride=(1, 1), padding=(0, 0),
         dilation=(1, 1), groups=1,
-        dtype=torch.float32, warmup=25, rep=75):
+        dtype=torch.float32, layout="nhwc",
+        warmup=25, rep=75):
 
-    x = torch.randn((BATCH, IN_H, IN_W, IN_C), dtype=dtype, device='cuda')
-    w = torch.randn((KERNEL_N, KERNEL_H, KERNEL_W, IN_C // groups),
+    # allocate inputs, nchw
+    x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda')
+    w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
                     dtype=dtype, device='cuda')
     bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+    if layout == "nhwc":
+        x = x.to(memory_format=torch.channels_last)
+        w = w.to(memory_format=torch.channels_last)
     OUT_H = (IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]) // stride[0]
     OUT_W = (IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]) // stride[1]
 
     tflops = lambda ms: 2. * BATCH * OUT_H * OUT_W * IN_C * KERNEL_H * KERNEL_W * KERNEL_N / ms * 1e-9
+
     if provider == "cublas":
-        conv2d_layer = torch.nn.Conv2d(
-            IN_C, KERNEL_N, (KERNEL_H, KERNEL_W),
-            stride=stride, padding=padding, dilation=dilation,
-            groups=groups,
-        )
-        conv2d_layer.weight.data = w.permute((0, 3, 1, 2))
-        conv2d_layer.bias.data = bias
-        x = x.permute((0, 3, 1, 2))
-        fn = lambda: conv2d_layer(x)
+        fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
     if provider == "triton":
         fn = lambda: torchinductor.triton_ops.conv1x1(
             x, w, bias, stride, padding, dilation, False, (0, 0), groups
