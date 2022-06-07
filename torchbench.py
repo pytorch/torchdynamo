@@ -119,44 +119,44 @@ VERY_SLOW_BENCHMARKS = {
 
 # These benchmarks took >60s on an i9-11900K CPU
 SLOW_BENCHMARKS = {
-    *{
-        "BERT_pytorch",  # 137s
-        "demucs",  # 116s
-        "fastNLP_Bert",  # 242s
-        "hf_Albert",  # 221s
-        "hf_Bart",  # 400s
-        "hf_Bert",  # 334s
-        "hf_DistilBert",  # 187s
-        "hf_GPT2",  # 470s
-        "hf_Reformer",  # 141s
-        "speech_transformer",  # 317s
-        "vision_maskrcnn",  # 99s
-    },
     *VERY_SLOW_BENCHMARKS,
+    "BERT_pytorch",  # 137s
+    "demucs",  # 116s
+    "fastNLP_Bert",  # 242s
+    "hf_Albert",  # 221s
+    "hf_Bart",  # 400s
+    "hf_Bert",  # 334s
+    "hf_DistilBert",  # 187s
+    "hf_GPT2",  # 470s
+    "hf_Reformer",  # 141s
+    "speech_transformer",  # 317s
+    "vision_maskrcnn",  # 99s
 }
 
+PYTHON_KEY_NOT_YET_WORKING = {
+    # RuntimeError: expected scalar type Half but found Float
+    "hf_BigBird",
+    # AttributeError: 'int' object has no attribute 'proxy'
+    "moco",
+    # AttributeError: 'Tensor' object has no attribute 'proxy'
+    "speech_transformer",
+    # torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
+    "tacotron2",
+    # requires training mode
+    "maml",
+}
 
 TORCHINDUCTOR_NOT_YET_WORKING = {
+    *PYTHON_KEY_NOT_YET_WORKING,
     # Crash with no warning message
     "Super_SloMo",
     "fastNLP_Bert",
     # RuntimeError: CUDA: Error- invalid value
     "dlrm",
     "vision_maskrcnn",
-    # RuntimeError: "index_select_out_cuda_impl" not implemented for 'Float'
-    # CUDA error: an illegal memory access was encountered
-    "hf_BigBird",
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",
-    # requires training
-    "maml",
-    # AttributeError: 'int' object has no attribute 'proxy'
-    "moco",
-    # AttributeError: 'Tensor' object has no attribute 'proxy'
-    "speech_transformer",
-    # RuntimeError: Internal Triton PTX codegen error: uses too much parameter space
-    "tacotron2",
 }
 
 current_name = ""
@@ -989,19 +989,7 @@ def main():
         experiment = speedup_experiment
         output_filename = "pythonkey.csv"
         if not args.no_skip:
-            SKIP.update(
-                [
-                    # requires training mode
-                    "maml",
-                    # RuntimeError: toIValue() cannot handle converting to type: QScheme
-                    "mobilenet_v2_quantized_qat",
-                    "resnet50_quantized_qat",
-                    # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
-                    "hf_BigBird",
-                    # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
-                    "hf_Reformer",
-                ]
-            )
+            SKIP.update(PYTHON_KEY_NOT_YET_WORKING)
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
