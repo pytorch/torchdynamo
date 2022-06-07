@@ -21,27 +21,24 @@ def profile_op(
         # parameters of conv
         stride=(1, 1), padding=(0, 0),
         dilation=(1, 1), groups=1,
-        dtype=torch.float16, warmup=25, rep=50):
+        dtype=torch.float16, layout="nhwc",
+        warmup=25, rep=50):
 
 
-    x = torch.randn((BATCH, IN_H, IN_W, IN_C), dtype=dtype, device='cuda')
-    w = torch.randn((KERNEL_N, KERNEL_H, KERNEL_W, IN_C // groups),
+    # allocate inputs, nchw
+    x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda')
+    w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
                     dtype=dtype, device='cuda')
     bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+    if layout == "nhwc":
+        x = x.to(memory_format=torch.channels_last)
+        w = w.to(memory_format=torch.channels_last)
     OUT_H = (IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]) // stride[0]
     OUT_W = (IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]) // stride[1]
 
     if provider == "cublas":
-        conv2d_layer = torch.nn.Conv2d(
-            IN_C, KERNEL_N, (KERNEL_H, KERNEL_W),
-            stride=stride, padding=padding, dilation=dilation,
-            groups=groups,
-        )
-        conv2d_layer.weight.data = w.permute((0, 3, 1, 2))
-        conv2d_layer.bias.data = bias
-        x = x.permute((0, 3, 1, 2))
-        fn = lambda: conv2d_layer(x)
-    elif provider == "triton":
+        fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+    if provider == "triton":
         fn = lambda: torchinductor.triton_ops.conv(
             x, w, bias, stride, padding, dilation, False, (0, 0), groups
         )
@@ -50,7 +47,7 @@ def profile_op(
     # warm up
     for _ in range(warmup):
         fn()
-    with profile(activities=[ProfilerActivity.CUDA], record_shapes=True, use_cuda=True) as prof:
+    with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
         with record_function("model_inference"):
             for _ in range(rep):
                 fn()
@@ -69,5 +66,6 @@ for provider in ["cublas", "triton"]:
         # parameters of conv
         stride, padding,
         dilation, groups,
-        dtype=dtype, warmup=25, rep=50
+        dtype=dtype, layout="nhwc",
+        warmup=25, rep=50
     )
