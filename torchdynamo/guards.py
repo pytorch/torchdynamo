@@ -419,6 +419,7 @@ class GuardedCode:
 
 accumulated_failed_guards = []
 
+
 def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
 ):

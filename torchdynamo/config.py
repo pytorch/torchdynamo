@@ -67,4 +67,6 @@ allowed_functions_module_string_ignorelist = {
     "torch.testing",
 }
 
+# Enable this to print every guard that failed once we have exhausted the chain.
+# Note: This does not print guards as they fail to reduce noise, but rather accumulates them until the last has failed.
 print_all_failed_guards = False
