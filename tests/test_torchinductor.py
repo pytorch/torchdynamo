@@ -6,7 +6,6 @@ import importlib
 import unittest
 from unittest.mock import patch
 
-import sympy
 import torch
 from torch.nn import functional as F
 from torch.utils._pytree import tree_flatten
@@ -17,7 +16,8 @@ from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 
 try:
-    importlib.import_module("sympy")
+    import sympy
+
     importlib.import_module("functorch")
 
     from torch._decomp import get_decompositions
