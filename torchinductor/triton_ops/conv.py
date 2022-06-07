@@ -2,7 +2,6 @@ import torch
 import triton
 import triton.language as tl
 
-from torchinductor.triton_ops.utils import _extract_strides
 from torchinductor.triton_ops.utils import _unpack
 
 from .conv_perf_model import early_config_prune
@@ -192,7 +191,7 @@ def _kernel(
     # offset for the inital ptr for w
     off_w_crs = tl.arange(0, BLOCK_K)
     off_w_k = off_y_k
-    w_ptrs = w + off_w_crs[:, None] * stride_wc + off_w_k[None, :] * stride_wn
+    w_ptrs = w + off_w_crs[:, None] + off_w_k[None, :] * stride_wn
     mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
 
     # ------ load x ------
@@ -279,27 +278,29 @@ class _conv:
     # ptr changes for x in a sliding window
     @staticmethod
     def _delta_x_ptr(
-        wc,
-        wh,
-        ww,
-        shape_w,
+        IN_C,
+        KERNEL_H,
+        KERNEL_W,
         dilation_h,
         dilation_w,
+        stride_wc,
+        stride_wh,
+        stride_ww,
+        stride_xc,
         stride_xh,
         stride_xw,
-        stride_xc,
         device,
     ):
         # get the order of axes in w, innermost dimension outward
-        order = sorted([wc, wh, ww], reverse=True)
-        c, h, w = [order.index(x) for x in [wc, wh, ww]]
-        window_size = shape_w[order[0]] * shape_w[order[1]] * shape_w[order[2]]
+        stride_w_3d = [stride_wc, stride_wh, stride_ww]
+        order = sorted(range(len(stride_w_3d)), key=stride_w_3d.__getitem__)
+        window_size = IN_C * KERNEL_H * KERNEL_W
 
         r_window = torch.arange(0, window_size, 1, device=device)
-        window_unpack = _unpack(r_window, order, shape_w)
-        window_unpack_h = window_unpack[h]
-        window_unpack_w = window_unpack[w]
-        window_unpack_c = window_unpack[c]
+        window_unpack = _unpack(r_window, order, [IN_C, KERNEL_H, KERNEL_W])
+        window_unpack_c = window_unpack[order[0]]
+        window_unpack_h = window_unpack[order[1]]
+        window_unpack_w = window_unpack[order[2]]
         r_dilation_h = dilation_h * window_unpack_h
         r_dilation_w = dilation_w * window_unpack_w
         r_inc = window_unpack_c
@@ -319,9 +320,6 @@ class _conv:
         transposed,
         output_padding,
         groups,
-        layout_x,
-        layout_w,
-        layout_y,
     ):
         # Q: should we check x, w, bias dtypes?
         device = x.device
@@ -331,9 +329,9 @@ class _conv:
         shape_bias = bias.shape if bias is not None else None
 
         # indicies for the layeout
-        xn, xc, xh, xw = [layout_x.find(x) for x in "nchw"]
-        yn, yc, yh, yw = [layout_y.find(x) for x in "nchw"]
-        wn, wc, wh, ww = [layout_w.find(x) for x in "nchw"]
+        xn, xc, xh, xw = 0, 1, 2, 3
+        yn, yc, yh, yw = 0, 1, 2, 3
+        wn, wc, wh, ww = 0, 1, 2, 3
 
         # out_channel, in_channel, kernel_height, kernel_width
         kernel_size = [shape_w[wh], shape_w[ww]]
@@ -387,31 +385,20 @@ class _conv:
         OUT_H = shape_y[yh]
         OUT_W = shape_y[yw]
 
-        # get strides for tensors
-        stride_x = _extract_strides(shape_x)
-        stride_w = _extract_strides(shape_w)
-        stride_y = _extract_strides(shape_y)
-        stride_bias = _extract_strides(shape_bias) if shape_bias else None
-        stride_biasn = stride_bias[0] if stride_bias else None
-
-        assert (
-            (stride_x[0] >= stride_x[1])
-            and (stride_x[1] >= stride_x[2])
-            and (stride_x[2] > stride_x[3])
-        ), "stride and layout does not match for x"
-        assert (
-            (stride_w[0] >= stride_w[1])
-            and (stride_w[1] >= stride_w[2])
-            and (stride_w[2] > stride_w[3])
-        ), "stride and layout does not match for w"
-        assert (
-            (stride_y[0] >= stride_y[1])
-            and (stride_y[1] >= stride_y[2])
-            and (stride_y[2] > stride_y[3])
-        ), "stride and layout does not match for y"
-
         # allocate output
         y = torch.empty(shape_y, device=device, dtype=x.dtype)
+
+        # get strides for tensors
+        stride_x = x.stride()
+        stride_w = w.stride()
+        stride_bias = bias.stride() if shape_bias else None
+        stride_biasn = stride_bias[0] if stride_bias else None
+
+        # output layout should be the same as x
+        if stride_x[xc] > stride_x[xh] and stride_x[xc] > stride_x[xw]:
+            y = y.to(memory_format=torch.channels_last)
+        stride_y = y.stride()
+
         # allocate tmp
         # WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
         # tmp_x = torch.empty((BATCH * OUT_H * OUT_W, WINDOW_SIZE), device=device, dtype=x.dtype)
@@ -427,15 +414,17 @@ class _conv:
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
         if True:
             delta_x = _conv._delta_x_ptr(
-                wc,
-                wh,
-                ww,
-                shape_w,
+                IN_C,
+                KERNEL_H,
+                KERNEL_W,
                 dilation[0],
                 dilation[1],
+                stride_w[wc],
+                stride_w[wh],
+                stride_w[ww],
+                stride_x[xc],
                 stride_x[xh],
                 stride_x[xw],
-                stride_x[xc],
                 device,
             )
             # delta_x = torch.from_numpy(np_delta_x).cuda()
@@ -512,9 +501,6 @@ class _conv:
         transposed=False,
         output_padding=(0, 0),
         groups=1,
-        layout_x="nhwc",
-        layout_w="nhwc",
-        layout_y="nhwc",
     ):
         if groups != 1:
             print(f"Do not support groups = {groups}")
@@ -531,9 +517,6 @@ class _conv:
             transposed,
             output_padding,
             groups,
-            layout_x,
-            layout_w,
-            layout_y,
         )
 
 
