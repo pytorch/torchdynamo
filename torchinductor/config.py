@@ -42,3 +42,4 @@ class cpp:
 class triton:
     cudagraphs = True
     hackery = False
+    use_conv = False
