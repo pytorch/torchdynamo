@@ -43,7 +43,6 @@ unset = object()
 
 compile_lock = threading.Lock()
 
-
 class _TorchDynamoContext:
     def __init__(self, callback, on_enter=nothing, backend_ctx_ctor=null_context):
         super().__init__()

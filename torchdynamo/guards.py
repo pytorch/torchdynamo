@@ -71,6 +71,11 @@ class NNModuleChangeTrackerUtil:
                 NNModuleChangeTrackerUtil._register_on_module_change_hook, modulecls
             )
 
+            # patch in hook clearing
+            modulecls.clear_hooks = types.MethodType(
+                NNModuleChangeTrackerUtil._clear_hooks, modulecls
+            )
+
             register_parameter_real = modulecls.register_parameter
 
             @functools.wraps(register_parameter_real)
@@ -103,6 +108,9 @@ class NNModuleChangeTrackerUtil:
         self._module_change_hooks[handle.id] = hook
 
         return handle
+
+    def _clear_hooks(self):
+        self._module_change_hooks.clear()
 
     def _dynamo_register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         hooks = self._module_change_hooks.values()
@@ -320,6 +328,8 @@ class GuardBuilder:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        self.ID_MATCH(guard)
+
         def on_module_changed(module):
             if module not in module_code_map:
                 # Module is out of scope / deleted (weak ref key ref dict)
@@ -327,6 +337,8 @@ class GuardBuilder:
 
             for code in module_code_map[module]:
                 code.valid = False
+
+            module.clear_hooks()
 
         val = self.get(guard.name)
         if hasattr(val, "training"):

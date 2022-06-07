@@ -759,8 +759,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnt, nopython=True):
             out2 = m(data)
 
-        self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torchdynamo.testing.same(out1, out2))
+        self.assertEqual(cnt.op_count, 1)
 
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
         cnt = torchdynamo.testing.CompileCounter()
