@@ -23,8 +23,8 @@ try:
     from torch._decomp import get_decompositions
 
     import torchinductor.config
-    from torchinductor.compile_fx import compile_fx
     from torchinductor import config
+    from torchinductor.compile_fx import compile_fx
     from torchinductor.ir import IndexingDiv
     from torchinductor.ir import ModularIndexing
     from torchinductor.lowering import has_torchvision_roi_align
