@@ -55,3 +55,6 @@ class triton:
 
     # put each kernel in its own file
     many_files = False
+
+    # use triton.autotune?
+    autotune = True

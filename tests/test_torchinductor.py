@@ -13,6 +13,7 @@ from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
+import torchinductor.config
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 from torchinductor.ir import IndexingDiv
@@ -56,6 +57,7 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+torchinductor.config.triton.autotune = False  # too slow
 
 
 class TestCase(unittest.TestCase):

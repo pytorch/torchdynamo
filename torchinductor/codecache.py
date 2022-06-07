@@ -271,6 +271,8 @@ def pointwise_heuristics(size_hints):
     if len(size_hints) == 1:
         return apply_triton_config(triton_config(size_hints, 1024))
     if len(size_hints) == 2:
+        if not config.triton.autotune:
+            return apply_triton_config(triton_config(size_hints, 64, 64))
         return autotune(
             [
                 triton_config(size_hints, 64, 64),

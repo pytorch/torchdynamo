@@ -133,6 +133,7 @@ SLOW_BENCHMARKS = {
     "vision_maskrcnn",  # 99s
 }
 
+# https://github.com/pytorch/torchdynamo/issues/331
 PYTHON_KEY_NOT_YET_WORKING = {
     # RuntimeError: expected scalar type Half but found Float
     "hf_BigBird",
@@ -146,6 +147,7 @@ PYTHON_KEY_NOT_YET_WORKING = {
     "maml",
 }
 
+# https://github.com/pytorch/torchdynamo/issues/332
 TORCHINDUCTOR_NOT_YET_WORKING = {
     *PYTHON_KEY_NOT_YET_WORKING,
     # Crash with no warning message
