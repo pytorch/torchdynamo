@@ -7,8 +7,8 @@ from .eval_frame import optimize_assert
 from .eval_frame import reset_code
 from .eval_frame import run
 from .eval_frame import skip
-from .guards import guard_failures
-from .guards import orig_code_map
+from .utils import guard_failures
+from .utils import orig_code_map
 
 __all__ = [
     "optimize",

@@ -398,7 +398,6 @@ class TritonKernel(Kernel):
 
     def simplify_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
-
         nodes = [
             self.range_tree_nodes[sym]
             for sym in expr.free_symbols

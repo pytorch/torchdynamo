@@ -3,6 +3,7 @@ import collections
 import copy
 import inspect
 import itertools
+import random
 import unittest
 from abc import ABC
 from collections import namedtuple
@@ -1223,3 +1224,27 @@ class ReproTests(torchdynamo.testing.TestCase):
             res = fn(args)
 
         self.assertTrue(same(ref, res))
+
+    def test_numpy_list(self):
+        @torchdynamo.disable
+        def rand_gen():
+            return list(np.array([random.randint(5, 10) for _ in range(10)]))
+
+        def fn(x):
+            random_list = rand_gen()
+            z = torch.LongTensor(random_list)
+            return x * z
+
+        x = torch.ones(10) * 2
+
+        random.seed(0)
+        ref0 = fn(x)
+        ref1 = fn(x)
+
+        random.seed(0)
+        with torchdynamo.optimize("eager"):
+            res0 = fn(x)
+            res1 = fn(x)
+
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
