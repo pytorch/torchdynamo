@@ -235,7 +235,6 @@ class TestIndexingSimplification(unittest.TestCase):
         r3 = sympy.Symbol("r3")
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
-
         expr = (
             128 * i2
             + ModularIndexing(i1, 1, 64)
@@ -501,6 +500,22 @@ class CommonTemplate:
         ]:
             self.common(fn1, (torch.randn(size1),))
             self.common(fn2, (torch.randn(size1),))
+
+    def test_views3(self):
+        # example taken from hf_BigBird
+        def forward(arg1, arg2):
+            index = torch.ops.aten.index(arg1, [arg2])
+            view_1 = torch.ops.aten.view(index, [1, 2232, 64])
+            view_2 = torch.ops.aten.view(view_1, [1, 12, 62, 192])
+            return view_2
+
+        self.common(
+            forward,
+            (
+                rand_strided((64, 64), (64, 1), torch.float32),
+                rand_strided((2232,), (1,), torch.int64),
+            ),
+        )
 
     def test_relu(self):
         def fn(a, b):
@@ -1679,6 +1694,24 @@ class CommonTemplate:
             fn(arg2)
 
         self.assertTrue(same(arg1, arg2))
+
+    def test_indirect_load_broadcast(self):
+        def fn(in_ptr0, in_ptr1, in_ptr2):
+            return torch.gather(in_ptr1, 0, in_ptr2) + in_ptr0
+
+        arg190 = rand_strided((32, 21), (1, 32), device=self.device, dtype=torch.int64)
+        arg190.fill_(0)
+        arg111 = rand_strided(
+            (9521, 512), (512, 1), device=self.device, dtype=torch.float32
+        )
+        self.common(
+            fn,
+            (
+                torch.randn(32, 1),
+                arg111,
+                arg190,
+            ),
+        )
 
 
 if HAS_CPU:
