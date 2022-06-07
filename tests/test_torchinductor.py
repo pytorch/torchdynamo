@@ -6,7 +6,6 @@ import importlib
 import unittest
 from unittest.mock import patch
 
-import sympy
 import torch
 from torch.nn import functional as F
 from torch.utils._pytree import tree_flatten
