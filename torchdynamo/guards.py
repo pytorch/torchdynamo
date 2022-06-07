@@ -18,6 +18,7 @@ from typing import Set
 
 import numpy as np
 import torch
+import torch.utils.hooks as hooks
 from torch.nn import Parameter
 
 from . import config
@@ -100,7 +101,6 @@ class NNModuleChangeTrackerUtil:
     def _register_on_module_change_hook(
         self, hook: Callable[..., None]
     ) -> "hooks.RemovableHandle":
-        import torch.utils.hooks as hooks
 
         handle = hooks.RemovableHandle(self._module_change_hooks)
         self._module_change_hooks[handle.id] = hook
