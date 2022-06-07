@@ -17,6 +17,7 @@ from torchdynamo.testing import same
 
 try:
     import sympy
+
     importlib.import_module("functorch")
 
     from torch._decomp import get_decompositions
