@@ -16,7 +16,7 @@ useCudaGraph = False
 conv_confs = [
     triton.testing.Benchmark(
         x_names=["layout"],
-        x_vals=["nhwc", "nchw"],
+        x_vals=["nchw", "nhwc"],
         line_arg="provider",
         line_vals=["cublas", "triton"],
         line_names=["cuBLAS", "Triton"],
