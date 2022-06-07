@@ -66,3 +66,5 @@ allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
 }
+
+print_all_failed_guards = False

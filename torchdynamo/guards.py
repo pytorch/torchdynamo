@@ -417,6 +417,8 @@ class GuardedCode:
         return id(obj)
 
 
+accumulated_failed_guards = []
+
 def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
 ):
@@ -424,20 +426,26 @@ def guard_fail_hook(
     called whenever a guard fails.
     """
     if not last:
+        if config.print_all_failed_guards:
+            accumulated_failed_guards.append(guard_fn.verbose_code_parts)
         return
+    accumulated_failed_guards.append(guard_fn.verbose_code_parts)
+
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reasons = []
-    for part in guard_fn.verbose_code_parts:
-        fail_reason = eval(part, guard_fn.global_scope, scope)
-        # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
-        # is updated to return a string explaining the failure.
-        if isinstance(fail_reason, str):
-            reasons.append(fail_reason)
-            break
-        elif isinstance(fail_reason, bool) and not fail_reason:
-            reasons.append(part)
-            break
+    for failed_guards in accumulated_failed_guards:
+        for part in failed_guards:
+            fail_reason = eval(part, guard_fn.global_scope, scope)
+            # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
+            # is updated to return a string explaining the failure.
+            if isinstance(fail_reason, str):
+                reasons.append(fail_reason)
+                break
+            elif isinstance(fail_reason, bool) and not fail_reason:
+                reasons.append(part)
+                break
+    accumulated_failed_guards.clear()
     guard_failures[orig_code_map[code]].append(reasons)
 
 
