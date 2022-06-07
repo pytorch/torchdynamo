@@ -21,10 +21,10 @@ conv_confs = [
         line_vals=["cublas", "triton"],
         line_names=["cuBLAS", "Triton"],
         ylabel="TFLOPS",
-        plot_name="resnet50-conv-performance",
+        plot_name=f"resnet50-conv{i}-perf",
         args={"BATCH": BATCH, "IN_H": IN_H, "IN_W": IN_W, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
               "KERNEL_H": KERNEL_H, "KERNEL_W": KERNEL_W, "stride": stride, "padding": padding},
-    ) for IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding in model.resnet50_layers
+    ) for i, (IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding) in enumerate(model.resnet50_layers)
     for BATCH in [32]
 ]
 
