@@ -1740,7 +1740,7 @@ class CommonTemplate:
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
-            b = aten.hardtanh(x + 1)
+            b = aten.hardtanh_(x + 1)
             c = aten.leaky_relu_(x + 1)
             d = aten.silu_(x + 1)
             e = aten.log1p(x + 1)
