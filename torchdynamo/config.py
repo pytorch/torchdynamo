@@ -3,6 +3,8 @@ from os.path import abspath
 from os.path import dirname
 
 import torch
+import torch._refs
+import torch._prims
 
 # print out lots of stuff
 debug = False
@@ -56,6 +58,8 @@ raise_on_backend_error = True
 skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
+    torch._refs,
+    torch._prims,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -65,4 +69,6 @@ skipfiles_inline_module_allowlist = {
 allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
+    "torch._refs",
+    "torch._prims",
 }

@@ -87,6 +87,12 @@ SKIP_DIRS = [
 ]
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
+    torch._prims.__file__,
+    torch._prims.utils.__file__,
+    torch._prims.wrappers.__file__,
+    torch._refs.__file__,
+    torch._refs.special.__file__,
+    torch._refs.nn.functional.__file__,
 }
 SKIP_DIRS_RE = None
 
