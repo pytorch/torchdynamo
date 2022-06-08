@@ -3,9 +3,11 @@ from os.path import abspath
 from os.path import dirname
 
 import torch
+
 try:
-    import torch._refs
     import torch._prims
+    import torch._refs
+
     HAS_REFS_PRIMS = True
 except ImportError:
     HAS_REFS_PRIMS = False

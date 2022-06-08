@@ -32,8 +32,9 @@ import _weakrefset
 import torch
 
 try:
-    import torch._refs
     import torch._prims
+    import torch._refs
+
     HAS_PRIMS_REFS = True
 except ImportError:
     HAS_PRIMS_REFS = False
