@@ -1186,6 +1186,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.one_graph: bool = one_graph
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
         self.symbolic_locals = collections.OrderedDict(
             (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
             for k in vars

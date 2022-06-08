@@ -1,12 +1,14 @@
 import collections
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import re
 import textwrap
 import types
 import weakref
+from collections import OrderedDict
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -16,6 +18,8 @@ from typing import Set
 
 import numpy as np
 import torch
+import torch.utils.hooks as hooks
+from torch.nn import Parameter
 
 from . import config
 from . import mutation_guard
@@ -25,6 +29,7 @@ from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
 from .exc import unimplemented
+from .utils import ExactWeakKeyDictionary
 from .utils import guard_failures
 from .utils import istype
 from .utils import orig_code_map
@@ -34,6 +39,8 @@ from .utils import tuple_iterator_len
 
 log = logging.getLogger(__name__)
 
+# map from modules to guarded code
+module_code_map = ExactWeakKeyDictionary()  # {nn.Module: GuardedCode}
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -46,6 +53,72 @@ CLOSURE_VARS = collections.OrderedDict(
         ("inf", float("inf")),
     ]
 )
+
+
+class NNModuleChangeTrackerUtil:
+    @staticmethod
+    def setup(module, guarded_code):
+        modulecls = module.__class__
+        if getattr(modulecls, "__dynamo_module_patch", True):
+            modulecls.__dynamo_module_patch = False
+
+            # Setup hook dict
+            modulecls._module_change_hooks = OrderedDict()
+
+            # patch in hook registration
+            modulecls.register_on_module_change_hook = types.MethodType(
+                NNModuleChangeTrackerUtil._register_on_module_change_hook, modulecls
+            )
+
+            # patch in hook clearing
+            modulecls.clear_hooks = types.MethodType(
+                NNModuleChangeTrackerUtil._clear_hooks, modulecls
+            )
+
+            register_parameter_real = modulecls.register_parameter
+
+            @functools.wraps(register_parameter_real)
+            def custom_register_parameter(self, key, value):
+                NNModuleChangeTrackerUtil._dynamo_register_parameter(self, key, value)
+                return register_parameter_real(self, key, value)
+
+            modulecls.register_parameter = custom_register_parameter
+
+            original_setattr = modulecls.__setattr__
+
+            @functools.wraps(original_setattr)
+            def custom_setattr(self, key, value):
+                # print("custom_setattr")
+                NNModuleChangeTrackerUtil._dynamo__setattr__(self, key, value)
+                return original_setattr(self, key, value)
+
+            modulecls.__setattr__ = custom_setattr
+
+        if module not in module_code_map:
+            module_code_map[module] = list()
+        module_code_map[module].append(guarded_code)
+
+    def _register_on_module_change_hook(
+        self, hook: Callable[..., None]
+    ) -> "hooks.RemovableHandle":
+
+        handle = hooks.RemovableHandle(self._module_change_hooks)
+        self._module_change_hooks[handle.id] = hook
+
+        return handle
+
+    def _clear_hooks(self):
+        self._module_change_hooks.clear()
+
+    def _dynamo_register_parameter(self, name: str, param: Optional[Parameter]) -> None:
+        hooks = self._module_change_hooks.values()
+        for hook in hooks:
+            hook(self)
+
+    def _dynamo__setattr__(self, name, value) -> None:
+        hooks = self._module_change_hooks.values()
+        for hook in hooks:
+            hook(self)
 
 
 class GuardSource(enum.Enum):
@@ -152,17 +225,26 @@ class GuardBuilder:
         return name
 
     def TYPE_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
+
         # ___check_type_id is same as `id(type(x)) == y`
         self.code.append(
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
 
     def ID_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
+
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
         if m:
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(Guard(m.group(1), guard.source, None))
+
         self.code.append(
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
@@ -179,6 +261,9 @@ class GuardBuilder:
             self.code.append(f"not hasattr({ref}, {attr!r})")
 
     def EQUALS_MATCH(self, guard: Guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(
@@ -237,16 +322,21 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        ref = self.arg_ref(guard)
+
+        def on_module_changed(module):
+            if module not in module_code_map:
+                # Module is out of scope / deleted (weak ref key ref dict)
+                return
+
+            for code in module_code_map[module]:
+                code.valid = False
+
+            module.clear_hooks()
+
         val = self.get(guard.name)
-
-        def setup_guard():
-            assert istype(val.training, bool)
-            self.code.append(f"{ref}.training == {val.training}")
-
         if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
+            NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+            val.register_on_module_change_hook(on_module_changed)
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
@@ -274,20 +364,20 @@ class GuardBuilder:
         self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
     def DICT_KEYS(self, guard):
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
-    def NN_MODULE_PARAM_NAMES(self, guard):
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        keys = {k for k, v in value.named_parameters()}
-        self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
-        self.code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
-
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
+        if guard.is_nn_module():
+            # Protected by module invalidation, see NN_MODULE
+            return
+
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
