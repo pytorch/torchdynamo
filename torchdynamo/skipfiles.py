@@ -31,6 +31,13 @@ import _collections_abc
 import _weakrefset
 import torch
 
+try:
+    import torch._refs
+    import torch._prims
+    HAS_REFS_PRIMS = True
+except ImportError:
+    HAS_REFS_PRIMS = False
+
 from . import config
 
 
@@ -87,13 +94,16 @@ SKIP_DIRS = [
 ]
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
-    torch._prims.__file__,
-    torch._prims.utils.__file__,
-    torch._prims.wrappers.__file__,
-    torch._refs.__file__,
-    torch._refs.special.__file__,
-    torch._refs.nn.functional.__file__,
 }
+if HAS_PRIMS_REFS:
+    FILENAME_ALLOWLIST |= {
+        torch._prims.__file__,
+        torch._prims.utils.__file__,
+        torch._prims.wrappers.__file__,
+        torch._refs.__file__,
+        torch._refs.special.__file__,
+        torch._refs.nn.functional.__file__,
+    }
 SKIP_DIRS_RE = None
 
 
