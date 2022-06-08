@@ -294,9 +294,6 @@ def ipex(subgraph, **kwargs):
         try:
             traced_model = torch.jit.trace(model, inputs).eval()
             traced_model = torch.jit.freeze(traced_model)
-            # Warm up
-            for i in range(3):
-                traced_model(*inputs)
             return traced_model
         except Exception:
             warnings.warn("JIT trace failed during the 'ipex' optimize process.")
