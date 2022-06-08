@@ -1624,6 +1624,7 @@ class CommonTemplate:
                 torch.randn([2, 3, 16, 16]),
                 torch.randn([2, 3, 16, 16]),
             ),
+            check_lowp=False,
         )
 
     def test_triu(self):
