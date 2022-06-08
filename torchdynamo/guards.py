@@ -332,7 +332,10 @@ class GuardedCode:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder)
+        if not guards or len(guards) == 0:
+            unimplemented("Nothing to guard")
+        else:
+            self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
     def compile_check_fn(self, local_builder, global_builder):
