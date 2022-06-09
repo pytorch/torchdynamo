@@ -28,6 +28,9 @@ inplace_buffers = False
 # codegen benchmark harness
 benchmark_harness = True
 
+# autotune kernels
+autotune = False
+
 
 # config specific to codegen/cpp.pp
 class cpp:

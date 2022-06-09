@@ -1,8 +1,10 @@
 import builtins
-import time
-import triton
+
 import torch
+import triton
+
 import torchinductor
+import torchinductor.triton_ops
 
 aten = torch.ops.aten
 triton_ops = torchinductor.triton_ops
@@ -13,7 +15,7 @@ triton_ops = torchinductor.triton_ops
 #   1) Register that Node in the codegen of ExternKernelOP
 #   2) Autotuner
 #   1) register that IRNode "ExternKerneNode" in Autotuner - autotune()
-#   
+#
 # def autotune():
 #     """
 #     Decorator for auto-tuning a function.
@@ -39,42 +41,36 @@ class Autotuner:
         self.cache = dict()
 
     def _bench(self, *args, kernel, **kwargs):
-
         def kernel_call():
             kernel(*args, **kwargs)
 
         return triton.testing.do_bench(kernel_call, warmup=10, rep=50)
 
-    def register_node(self, op_name, *args, **kwargs):
-        # op_name = conv
-        # args
-        self.op += [op_name]
-
-    def __call__(self, *args, **kwargs):
-        # collect input shape/stride/device, layer params
-        self.fn.set_args(*args, **kwargs)
-        # get candidate kernels for fn
-        self.kernels = self.fn.candidate_kernels()
-        # filter kernels that args/kwargs does not meet requirements
-        self.fn.filter_kernels(self.kernels)
-        # if only one choice, return that kernel
-        if len(self.kernels) == 1:
-            kernel = self.kernels[0]
-            return kernel(*args, **kwargs)
-        # use input shape, stride, layer parameters as key to cache the best kernel to use
-        key = self.fn.gen_key()
-        if key not in self.cache:
-            bench_start = time.time()
-            timings = {
-                kernel: self._bench(*args, kernel=kernel, **kwargs) for kernel in self.kernels
-            }
-            bench_end = time.time()
-            self.bench_time = bench_end - bench_start
-            self.cache[key] = builtins.min(timings, key=timings.get)
-            self.kernels_timings = timings
-            kernel = self.cache[key]
-        self.best_kernel = kernel
-        return self.best_kernel(*args, **kwargs)
+    # def __call__(self, *args, **kwargs):
+    #     # collect input shape/stride/device, layer params
+    #     self.fn.set_args(*args, **kwargs)
+    #     # get candidate kernels for fn
+    #     self.kernels = self.fn.candidate_kernels()
+    #     # filter kernels that args/kwargs does not meet requirements
+    #     self.fn.filter_kernels(self.kernels)
+    #     # if only one choice, return that kernel
+    #     if len(self.kernels) == 1:
+    #         kernel = self.kernels[0]
+    #         return kernel(*args, **kwargs)
+    #     # use input shape, stride, layer parameters as key to cache the best kernel to use
+    #     key = self.fn.gen_key()
+    #     if key not in self.cache:
+    #         bench_start = time.time()
+    #         timings = {
+    #             kernel: self._bench(*args, kernel=kernel, **kwargs) for kernel in self.kernels
+    #         }
+    #         bench_end = time.time()
+    #         self.bench_time = bench_end - bench_start
+    #         self.cache[key] = builtins.min(timings, key=timings.get)
+    #         self.kernels_timings = timings
+    #         kernel = self.cache[key]
+    #     self.best_kernel = kernel
+    #     return self.best_kernel(*args, **kwargs)
 
 
 autotune = Autotuner()
@@ -105,17 +101,27 @@ def tuned_conv(*args, **kwargs):
     stride_w = w.stride()
     # the identifiable args for the layers
     id_args = [
-        BATCH, IN_C, IN_H, IN_W,
-        KERNEL_N, KERNEL_H, KERNEL_W,
-        stride, padding, dilation,
-        transposed, output_padding, groups,
-        stride_x, stride_w,
+        BATCH,
+        IN_C,
+        IN_H,
+        IN_W,
+        KERNEL_N,
+        KERNEL_H,
+        KERNEL_W,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        stride_x,
+        stride_w,
     ]
     use_cuda = x.is_cuda
 
     # gen_key
     key = tuple([arg for arg in id_args])
-    key = ("conv", ) + key
+    key = ("conv",) + key
 
     # candidate kernels
     kernels = ["aten.convolution"]
@@ -140,19 +146,18 @@ def tuned_conv(*args, **kwargs):
 
     # if only one choice, return that kernel
     if len(kernels) == 1:
-        kernel = kernels[0]
+        kernel = kernel_dict[kernels[0]]
         return kernel(*args, **kwargs)
     if key not in autotune.cache:
-        bench_start = time.time()
+        # bench_start = time.time()
         timings = {
-            kernel: autotune._bench(*args, kernel=kernel_dict[kernel], **kwargs) for kernel in kernels
+            kernel: autotune._bench(*args, kernel=kernel_dict[kernel], **kwargs)
+            for kernel in kernels
         }
-        print("timings", timings)
-        bench_end = time.time()
+        # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
         # kernels_timings = timings
-    kernel = autotune.cache[key]
-    print("best kernel", kernel)
-    best_kernel = kernel_dict[kernel]
+    best_kernel_name = autotune.cache[key]
+    best_kernel = kernel_dict[best_kernel_name]
     return best_kernel(*args, **kwargs)
