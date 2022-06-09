@@ -2039,6 +2039,24 @@ class MultiOutput(ExternKernel):
 class Convolution(ExternKernelAlloc):
     kernel = "aten.convolution"
 
+    def __init__(self, layout, inputs, constant_args=()):
+        if (
+            config.triton.use_conv
+            and len(inputs) > 0
+            and inputs[0].get_device().type == "cuda"
+        ):
+            self.kernel = "triton_ops_conv"
+        super().__init__(layout, self.unwrap_storage(inputs), constant_args)
+
+    def codegen(self, wrapper):
+        if self.kernel == "triton_ops_conv":
+            wrapper.writeline(f"import torchinductor.triton_ops.conv as {self.kernel}")
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
     @classmethod
     def create(
         cls,

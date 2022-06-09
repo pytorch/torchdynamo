@@ -6,7 +6,6 @@ import importlib
 import unittest
 from unittest.mock import patch
 
-import sympy
 import torch
 from torch.nn import functional as F
 from torch.utils._pytree import tree_flatten
@@ -17,7 +16,8 @@ from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 
 try:
-    importlib.import_module("sympy")
+    import sympy
+
     importlib.import_module("functorch")
 
     from torch._decomp import get_decompositions
@@ -1121,6 +1121,32 @@ class CommonTemplate:
         self.assertEqual(a.stride(), c.stride())
         self.assertEqual(c.stride()[2], 1)
 
+    @requires_cuda()
+    @patch.object(config.triton, "use_conv", True)
+    def test_triton_conv(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def triton_conv(
+            x,
+            w,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        ):
+            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+            return y
+
+        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
+        dtype = torch.float32
+        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
+        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
+        bias = torch.randn((32), dtype=dtype, device=self.device)
+
+        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
+        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
+
     def test_std(self):
         def fn(x):
             return (
@@ -1761,7 +1787,7 @@ class CommonTemplate:
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
-            b = aten.hardtanh(x + 1)
+            b = aten.hardtanh_(x + 1)
             c = aten.leaky_relu_(x + 1)
             d = aten.silu_(x + 1)
             e = aten.log1p(x + 1)
