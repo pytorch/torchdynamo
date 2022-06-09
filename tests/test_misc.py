@@ -1603,3 +1603,16 @@ class MiscTests(torchdynamo.testing.TestCase):
             res22 = f2(a, b)
         self.assertTrue(same(res11, res12))
         self.assertTrue(same(res21, res22))
+
+    def test_list_append_return_none(self):
+        def fn(x):
+            alist = []
+            blist = alist.append(x + 1)
+            return alist, blist
+
+        x = torch.tensor([2.3])
+        res = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x)
+        self.assertEqual(res, res2)
