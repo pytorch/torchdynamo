@@ -66,18 +66,20 @@ class NNModuleChangeTrackerUtil:
             modulecls.__dynamo_module_patch = False
 
             # patch in hook registration
-            modulecls.register_on_module_change_hook = NNModuleChangeTrackerUtil._register_on_module_change_hook
+            modulecls.register_on_module_change_hook = (
+                NNModuleChangeTrackerUtil._register_on_module_change_hook
+            )
 
             # patch in hook clearing
             modulecls.clear_hooks = NNModuleChangeTrackerUtil._clear_hooks
 
-            #patch in hook calling
+            # patch in hook calling
             modulecls.call_hooks = NNModuleChangeTrackerUtil._call_hooks
 
             # Note - the wrapping code below is a little redundant. TODO(voz): Refactor into a single util to be invoked per wrapped func.
             # register_param
             register_parameter_real = modulecls.register_parameter
-            
+
             @functools.wraps(register_parameter_real)
             def custom_register_parameter(self, key, value):
                 self.call_hooks()
@@ -85,7 +87,7 @@ class NNModuleChangeTrackerUtil:
 
             modulecls.register_parameter = custom_register_parameter
 
-                # add_module
+            # add_module
             original_add_module = modulecls.add_module
 
             @functools.wraps(original_add_module)
@@ -109,12 +111,10 @@ class NNModuleChangeTrackerUtil:
 
             @functools.wraps(original_setattr)
             def custom_setattr(self, key, value):
-                if not key in ['_module_change_hooks']:
-                    self.call_hooks()
+                self.call_hooks()
                 return original_setattr(self, key, value)
 
             modulecls.__setattr__ = custom_setattr
-
 
         if module not in module_code_map:
             module_code_map[module] = set()
@@ -129,6 +129,10 @@ class NNModuleChangeTrackerUtil:
         return handle
 
     def _call_hooks(self):
+        if not hasattr(self, "_module_change_hooks"):
+            # because of how we monkeypatch, setattr could be patched, but the instance has not yet been registered, (or may not be eligible).
+
+            return
         hooks = self._module_change_hooks.values()
         for hook in hooks:
             hook(self)
