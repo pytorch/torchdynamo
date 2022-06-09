@@ -1264,6 +1264,7 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         fn(torch.randn(3))
 
+    @unittest.skipIf(not isinstance(torch.ops.aten.abs, torch._ops.OpOverloadPacket), "old pt doesn't work")
     def test_torch_ops_aten(self):
         # Picked an op that doesn't show up in the default list
         @torchdynamo.optimize("eager", nopython=True)
