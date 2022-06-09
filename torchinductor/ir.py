@@ -2025,12 +2025,9 @@ class Convolution(ExternKernelAlloc):
             )
 
         # memory layout order of output depends on x
-        # symbolic stride of x, e.g. [s1**2*s0, 1, s0*s1, s1]
-        # order according to .atoms(), but constant "1" < "s1"
-        x_stride_order = [
-            len(expr.atoms()) - int(expr.is_number) for expr in x.get_stride()
-        ]
-        order = sorted(range(len(x_stride_order)), key=x_stride_order.__getitem__)
+        size_hint = V.graph.sizevars.size_hint
+        x_stride = [size_hint(i) for i in x.get_stride()]
+        order = sorted(range(len(x_stride)), key=x_stride.__getitem__)
 
         output_layout = FixedLayout(
             x.get_device(),
