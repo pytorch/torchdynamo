@@ -1256,9 +1256,22 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(ref1, res1))
 
     @unittest.skipIf(not HAS_REFS, "requires recent PT version")
+    @unittest.expectedFailure
     def test_primtorch(self):
         @torchdynamo.optimize("eager", nopython=True)
         def fn(x):
             torch._refs.abs(x)
+
+        fn(torch.randn(3))
+
+    @unittest.skipIf(
+        not isinstance(torch.ops.aten.abs, torch._ops.OpOverloadPacket),
+        "old pt doesn't work",
+    )
+    def test_torch_ops_aten(self):
+        # Picked an op that doesn't show up in the default list
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
