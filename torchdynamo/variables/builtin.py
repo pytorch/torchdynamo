@@ -13,7 +13,7 @@ from torchdynamo.variables.tensor import DynamicShapeVariable
 
 from .. import config
 from .. import variables
-from ..allowed_functions import is_disallowed
+from ..allowed_functions import is_allowed
 from ..exc import Unsupported
 from ..exc import unimplemented
 from ..source import AttrSource
@@ -480,7 +480,7 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if not is_disallowed(member):
+            if is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
