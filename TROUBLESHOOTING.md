@@ -55,11 +55,19 @@ Torchdynamo plans to support many common cases of dynamic tensor shapes, such as
 ## Debug/Profiling Tools
 
 ### Recompilation Profiler
+The recompilation profiler collects information about the guard failures and graph breaks that occur when running your program. It ignores the current setting of `torchdynamo.config.cache_size_limit`, instead behaving as if `cache_size_limit = 1`, in order to capture the worst case behavior.
+
+If graph breaks are observed, the profiler report will list the reasons for each graph break.  If recompilations of particular graphs are observed, The failing guards for each recompilation instance are listed separately.
+
 ```
 prof = torchdynamo.utils.CompilationProfiler()
 with torchdynamo.optimize(prof):
-    
+   my_model()
+print(prof.report())
+```
 
 ### Nopython Mode
+`torchdynamo.optimize(<compiler>, nopython=True)` causes torchdynamo to throw an exception on the first graph break, rather than falling back to python transparently as it does by default.  This can be a useful tool for finding the source of a graph break and getting a stack trace.
 
 ### Debug Mode
+Setting `torchdynamo.config.debug = True` offers verbose information about each compiled graph, and what it guards on.  It is generally useful for learning what torchdynamo is doing, and how it is treating your program.
