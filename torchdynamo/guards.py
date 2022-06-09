@@ -155,8 +155,7 @@ class GuardBuilder:
             and code_name_type_failure_count[key]
             >= config.same_failure_tolernace_threshold
         ):
-            print("woops")
-        #     unimplemented(f"code_name_type_failure_count for {key} passed threshold")
+            unimplemented(f"code_name_type_failure_count for {key} passed threshold")
         self.code.append(code)
         self.check_code_to_check_type_dict[code] = check_type_name
 
