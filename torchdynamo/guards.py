@@ -155,7 +155,8 @@ class GuardBuilder:
             and code_name_type_failure_count[key]
             >= config.same_failure_tolernace_threshold
         ):
-            unimplemented(f"code_name_type_failure_count for {key} passed threshold")
+            print("woops")
+        #     unimplemented(f"code_name_type_failure_count for {key} passed threshold")
         self.code.append(code)
         self.check_code_to_check_type_dict[code] = check_type_name
 
@@ -426,6 +427,10 @@ class GuardedCode:
             **local_builder.check_code_to_check_type_dict,
             **global_builder.check_code_to_check_type_dict,
         }
+        verbose_code_map["___guarded_code.valid"] = (
+            "VALIDATION_CHECK",
+            "",
+        )  # akin to a no op, this will never be checked in guards, but useful to have for logging and debugging.
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -448,7 +453,10 @@ class GuardedCode:
             )
             check_tensor_verbose_code = f"___check_tensors_verbose({verbose_args})"
             verbose_code_parts.append(check_tensor_verbose_code)
-            verbose_code_map[check_tensor_verbose_code] = "VERBOSE_TENSOR_CHECK"
+            verbose_code_map[check_tensor_verbose_code] = (
+                "VERBOSE_TENSOR_CHECK",
+                verbose_args,
+            )
 
         code = " and ".join(unique(code_parts))
 
@@ -530,7 +538,6 @@ def guard_fail_hook(
             if key not in code_name_type_failure_count:
                 code_name_type_failure_count[key] = 0
             code_name_type_failure_count[key] += 1
-
             break
 
     if not last:
