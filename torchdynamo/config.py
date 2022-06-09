@@ -22,6 +22,9 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
+# Turns otherwise installed guards into graph breaks if the same
+same_failure_tolernace_threshold = 3
+
 # Assume these functions return constants
 constant_functions = {
     torch.jit.is_scripting: False,
