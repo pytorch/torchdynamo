@@ -271,11 +271,13 @@ def pointwise_heuristics(size_hints):
     if len(size_hints) == 1:
         return apply_triton_config(triton_config(size_hints, 1024))
     if len(size_hints) == 2:
+        if not config.triton.autotune:
+            return apply_triton_config(triton_config(size_hints, 64, 64))
         return autotune(
             [
                 triton_config(size_hints, 64, 64),
-                triton_config(size_hints, 8, 256),
-                triton_config(size_hints, 256, 8),
+                triton_config(size_hints, 4, 256),
+                triton_config(size_hints, 256, 4),
             ],
             key=["xnumel", "ynumel"],
         )
@@ -297,7 +299,7 @@ def reduction_heuristics(size_hints):
             {
                 "RBLOCK": reduction_size,
                 "XBLOCK": block_size_fn(
-                    next_power_of_2(1024 // size_hints[-1] or 1),
+                    next_power_of_2(4096 // size_hints[-1] or 1),
                     size_hints[0],
                     "xnumel",
                 ),
