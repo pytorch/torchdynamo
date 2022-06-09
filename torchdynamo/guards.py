@@ -121,7 +121,12 @@ def strip_getattr_getitem(name):
 
 class GuardBuilder:
     def __init__(
-        self, id_ref: Callable, scope: Dict[str, Any], guarded_code, full_guarded_code: types.CodeType, renames=True
+        self,
+        id_ref: Callable,
+        scope: Dict[str, Any],
+        guarded_code,
+        full_guarded_code: types.CodeType,
+        renames=True,
     ):
         self.id_ref = id_ref
         if scope:
@@ -136,14 +141,20 @@ class GuardBuilder:
         self.tensor_check_names = []
         self.tensor_check_examples = []
         self.guarded_code = guarded_code
-        self.full_guarded_code_loc = f"{full_guarded_code.co_filename}:{full_guarded_code.co_firstlineno}"
+        self.full_guarded_code_loc = (
+            f"{full_guarded_code.co_filename}:{full_guarded_code.co_firstlineno}"
+        )
         self.check_code_to_check_type_dict = dict()
 
     def append_code_for_check_type(self, code, check_type, name):
         global code_name_type_failure_count
         check_type_name = (check_type, name)
         key = f"{self.full_guarded_code_loc}{check_type_name}"
-        if key in code_name_type_failure_count and code_name_type_failure_count[key] >= config.same_failure_tolernace_threshold:
+        if (
+            key in code_name_type_failure_count
+            and code_name_type_failure_count[key]
+            >= config.same_failure_tolernace_threshold
+        ):
             unimplemented(f"code_name_type_failure_count for {key} passed threshold")
         self.code.append(code)
         self.check_code_to_check_type_dict[code] = check_type_name
@@ -167,7 +178,7 @@ class GuardBuilder:
         self.append_code_for_check_type(
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})",
             "TYPE_MATCH",
-            guard.name
+            guard.name,
         )
 
     def ID_MATCH(self, guard: Guard):
@@ -179,7 +190,7 @@ class GuardBuilder:
         self.append_code_for_check_type(
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})",
             "ID_MATCH",
-            guard.name
+            guard.name,
         )
 
     def HASATTR(self, guard: Guard):
@@ -189,9 +200,13 @@ class GuardBuilder:
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
         if val:
-            self.append_code_for_check_type(f"hasattr({ref}, {attr!r})", "HAS_ATTR", guard.name)
+            self.append_code_for_check_type(
+                f"hasattr({ref}, {attr!r})", "HAS_ATTR", guard.name
+            )
         else:
-            self.append_code_for_check_type(f"not hasattr({ref}, {attr!r})", "HAS_ATTR", guard.name)
+            self.append_code_for_check_type(
+                f"not hasattr({ref}, {attr!r})", "HAS_ATTR", guard.name
+            )
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -226,7 +241,9 @@ class GuardBuilder:
         ), type(val).__name__
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
-            self.append_code_for_check_type(f"str({ref}) == {str(val)!r}", "EQUALS_MATCH", guard.name)
+            self.append_code_for_check_type(
+                f"str({ref}) == {str(val)!r}", "EQUALS_MATCH", guard.name
+            )
             return
 
         # Add type check to prevent equality check between tensor and non-tensor.
@@ -234,10 +251,16 @@ class GuardBuilder:
             self.LIST_LENGTH(guard)
             for idx, elem in enumerate(val):
                 self.append_code_for_check_type(
-                    f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})", "EQUALS_MATCH", guard.name
+                    f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})",
+                    "EQUALS_MATCH",
+                    guard.name,
                 )
         elif not istype(val, torch.Size):
-            self.append_code_for_check_type(f"___check_type_id({ref}, {self.id_ref(type(val))})", "EQUALS_MATCH", guard.name)
+            self.append_code_for_check_type(
+                f"___check_type_id({ref}, {self.id_ref(type(val))})",
+                "EQUALS_MATCH",
+                guard.name,
+            )
 
         if istype(val, torch.Size):
             val = tuple(val)
@@ -279,20 +302,40 @@ class GuardBuilder:
     def LIST_LENGTH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        self.append_code_for_check_type(f"___check_type_id({ref}, {self.id_ref(type(value))})", "LIST_LENGTH", guard.name)
-        self.append_code_for_check_type(f"len({ref}) == {len(value)}", "LIST_LENGTH", guard.name)
+        self.append_code_for_check_type(
+            f"___check_type_id({ref}, {self.id_ref(type(value))})",
+            "LIST_LENGTH",
+            guard.name,
+        )
+        self.append_code_for_check_type(
+            f"len({ref}) == {len(value)}", "LIST_LENGTH", guard.name
+        )
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        self.append_code_for_check_type(f"___check_type_id({ref}, {self.id_ref(type(value))})", "TUPLE_ITERATOR_LEN", guard.name)
-        self.append_code_for_check_type(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}", "TUPLE_ITERATOR_LEN", guard.name)
+        self.append_code_for_check_type(
+            f"___check_type_id({ref}, {self.id_ref(type(value))})",
+            "TUPLE_ITERATOR_LEN",
+            guard.name,
+        )
+        self.append_code_for_check_type(
+            f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}",
+            "TUPLE_ITERATOR_LEN",
+            guard.name,
+        )
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        self.append_code_for_check_type(f"___check_type_id({ref}, {self.id_ref(type(value))})", "DICT_KEYS", guard.name)
-        self.append_code_for_check_type(f"{ref}.keys() == {set(value.keys())!r}", "DICT_KEYS", guard.name)
+        self.append_code_for_check_type(
+            f"___check_type_id({ref}, {self.id_ref(type(value))})",
+            "DICT_KEYS",
+            guard.name,
+        )
+        self.append_code_for_check_type(
+            f"{ref}.keys() == {set(value.keys())!r}", "DICT_KEYS", guard.name
+        )
 
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
@@ -305,8 +348,14 @@ class GuardBuilder:
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        self.append_code_for_check_type(f"___check_type_id({ref}, {self.id_ref(type(value))})", "ODICT_KEYS", guard.name)
-        self.append_code_for_check_type(f"str({ref}.keys()) == {str(value.keys())!r}", "ODICT_KEYS", guard.name)
+        self.append_code_for_check_type(
+            f"___check_type_id({ref}, {self.id_ref(type(value))})",
+            "ODICT_KEYS",
+            guard.name,
+        )
+        self.append_code_for_check_type(
+            f"str({ref}.keys()) == {str(value.keys())!r}", "ODICT_KEYS", guard.name
+        )
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
@@ -316,9 +365,13 @@ class GuardBuilder:
         assert guard.name == ""
         assert guard.source is GuardSource.GLOBAL
         if torch.is_grad_enabled():
-            self.append_code_for_check_type("___is_grad_enabled()", "GRAD_MODE", guard.name)
+            self.append_code_for_check_type(
+                "___is_grad_enabled()", "GRAD_MODE", guard.name
+            )
         else:
-            self.append_code_for_check_type("not ___is_grad_enabled()", "GRAD_MODE", guard.name)
+            self.append_code_for_check_type(
+                "not ___is_grad_enabled()", "GRAD_MODE", guard.name
+            )
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -341,8 +394,12 @@ class GuardedCode:
         self._weakrefs = []
         self._seen_ids = set()
 
-        local_builder = GuardBuilder(self.id_ref, f_locals, self, renames=True, full_guarded_code=code)
-        global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False, full_guarded_code=code)
+        local_builder = GuardBuilder(
+            self.id_ref, f_locals, self, renames=True, full_guarded_code=code
+        )
+        global_builder = GuardBuilder(
+            self.id_ref, f_globals, self, renames=False, full_guarded_code=code
+        )
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
@@ -365,7 +422,10 @@ class GuardedCode:
         verbose_code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
-        verbose_code_map = {**local_builder.check_code_to_check_type_dict, **global_builder.check_code_to_check_type_dict}
+        verbose_code_map = {
+            **local_builder.check_code_to_check_type_dict,
+            **global_builder.check_code_to_check_type_dict,
+        }
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
@@ -435,7 +495,9 @@ class GuardedCode:
             pass  # cannot weakref bool object
         return id(obj)
 
+
 code_name_type_failure_count = dict()
+
 
 def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
@@ -453,7 +515,7 @@ def guard_fail_hook(
         # is updated to return a string explaining the failure.
         global code_name_type_failure_count
         if isinstance(fail_reason, str):
-            reasons.append(fail_reason)            
+            reasons.append(fail_reason)
             type_and_name = guard_fn.verbose_code_map[part]
             key = f"{loc}{type_and_name}"
             if not key in code_name_type_failure_count:
