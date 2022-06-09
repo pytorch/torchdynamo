@@ -518,7 +518,7 @@ def guard_fail_hook(
             reasons.append(fail_reason)
             type_and_name = guard_fn.verbose_code_map[part]
             key = f"{loc}{type_and_name}"
-            if not key in code_name_type_failure_count:
+            if key not in code_name_type_failure_count:
                 code_name_type_failure_count[key] = 0
             code_name_type_failure_count[key] += 1
 
@@ -527,7 +527,7 @@ def guard_fail_hook(
             reasons.append(part)
             type_and_name = guard_fn.verbose_code_map[part]
             key = f"{loc}{type_and_name}"
-            if not key in code_name_type_failure_count:
+            if key not in code_name_type_failure_count:
                 code_name_type_failure_count[key] = 0
             code_name_type_failure_count[key] += 1
 
