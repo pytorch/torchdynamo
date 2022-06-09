@@ -111,10 +111,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
     def test_verbose_tensor_check(self):
         def func(a):
-            # Warning: choose a function here whose meta implementation lives
-            # entirely in C++.  If you do a Python one, Dynamo will dive into
-            # torch._refs which is OK but it will muddy up the warnings
-            return torch.add(a, 4)
+            return torch.sum(a)
 
         def cache_fail_test(cached_input, missed_input, expected_failure):
             # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient

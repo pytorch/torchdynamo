@@ -4,14 +4,6 @@ from os.path import dirname
 
 import torch
 
-try:
-    import torch._prims
-    import torch._refs
-
-    HAS_REFS_PRIMS = True
-except ImportError:
-    HAS_REFS_PRIMS = False
-
 # print out lots of stuff
 debug = False
 
@@ -65,11 +57,6 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
 }
-if HAS_REFS_PRIMS:
-    skipfiles_inline_module_allowlist |= {
-        torch._refs,
-        torch._prims,
-    }
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -78,6 +65,4 @@ if HAS_REFS_PRIMS:
 allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
-    "torch._refs",
-    "torch._prims",
 }
