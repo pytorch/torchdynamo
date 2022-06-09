@@ -14,9 +14,6 @@ import torchdynamo.convert_frame
 from torchdynamo.optimizations.subgraph import SubGraph
 from torchdynamo.utils import identity
 
-torch.jit.trace = torchdynamo.disable(torch.jit.trace)
-torch.jit.trace_module = torchdynamo.disable(torch.jit.trace_module)
-
 log = logging.getLogger(__name__)
 BACKENDS = dict()
 _NP_DTYPE = {
@@ -30,6 +27,15 @@ _NP_DTYPE = {
     torch.int64: np.longlong,
     torch.bool: np.bool_,
 }
+
+# Disable TorchDynamo on some torch.* compilers generated frames
+torch.jit.trace = torchdynamo.disable(torch.jit.trace)
+torch.jit.trace_module = torchdynamo.disable(torch.jit.trace_module)
+torch.jit._get_trace_graph = torchdynamo.disable(torch.jit._get_trace_graph)
+
+torch.onnx.export_to_pretty_string = torchdynamo.disable(
+    torch.onnx.export_to_pretty_string
+)
 
 
 def create_backend(fn):
