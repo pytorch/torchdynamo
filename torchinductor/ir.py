@@ -2024,12 +2024,17 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
+        # memory layout order of output depends on x
+        # symbolic stride of x, e.g. [s1**2*s0, 1, s0*s1, s1]
+        # order according to .atoms(), but constant "1" < "s1"
+        x_stride_order = [len(expr.atoms()) - int(expr.is_number) for expr in x.get_stride()]
+        order = sorted(range(len(x_stride_order)), key=x_stride_order.__getitem__)
+
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            # TODO(jansel): fix channels last case
-            FlexibleLayout.contiguous_strides(output_size),
+            FlexibleLayout.ordered_strides(output_size, order),
         )
 
         if bias is not None:
