@@ -16,6 +16,7 @@ from torchdynamo.utils import identity
 
 torch.jit.script = torchdynamo.disable(torch.jit.script)
 torch.jit.trace = torchdynamo.disable(torch.jit.trace)
+torch.jit.trace_module = torchdynamo.disable(torch.jit.trace_module)
 
 log = logging.getLogger(__name__)
 BACKENDS = dict()
