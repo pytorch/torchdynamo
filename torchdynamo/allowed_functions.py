@@ -138,9 +138,6 @@ def _allowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]
 
-    for v in sorted(torch_object_ids.values()):
-        if "torch.ops" in v:
-            print(v)
     return torch_object_ids
 
 
