@@ -14,6 +14,9 @@ import torchdynamo.convert_frame
 from torchdynamo.optimizations.subgraph import SubGraph
 from torchdynamo.utils import identity
 
+torch.jit.script = torchdynamo.disable(torch.jit.script)
+torch.jit.trace = torchdynamo.disable(torch.jit.trace)
+
 log = logging.getLogger(__name__)
 BACKENDS = dict()
 _NP_DTYPE = {
