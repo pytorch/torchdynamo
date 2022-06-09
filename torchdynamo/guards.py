@@ -59,66 +59,82 @@ class NNModuleChangeTrackerUtil:
     @staticmethod
     def setup(module, guarded_code):
         modulecls = module.__class__
+        if not hasattr(module, "_module_change_hooks"):
+            module._module_change_hooks = OrderedDict()
+
         if getattr(modulecls, "__dynamo_module_patch", True):
             modulecls.__dynamo_module_patch = False
 
-            # Setup hook dict
-            modulecls._module_change_hooks = OrderedDict()
-
             # patch in hook registration
-            modulecls.register_on_module_change_hook = types.MethodType(
-                NNModuleChangeTrackerUtil._register_on_module_change_hook, modulecls
-            )
+            modulecls.register_on_module_change_hook = NNModuleChangeTrackerUtil._register_on_module_change_hook
 
             # patch in hook clearing
-            modulecls.clear_hooks = types.MethodType(
-                NNModuleChangeTrackerUtil._clear_hooks, modulecls
-            )
+            modulecls.clear_hooks = NNModuleChangeTrackerUtil._clear_hooks
 
+            #patch in hook calling
+            modulecls.call_hooks = NNModuleChangeTrackerUtil._call_hooks
+
+            # Note - the wrapping code below is a little redundant. TODO(voz): Refactor into a single util to be invoked per wrapped func.
+            # register_param
             register_parameter_real = modulecls.register_parameter
-
+            
             @functools.wraps(register_parameter_real)
             def custom_register_parameter(self, key, value):
-                NNModuleChangeTrackerUtil._dynamo_register_parameter(self, key, value)
+                self.call_hooks()
                 return register_parameter_real(self, key, value)
 
             modulecls.register_parameter = custom_register_parameter
+
+                # add_module
+            original_add_module = modulecls.add_module
+
+            @functools.wraps(original_add_module)
+            def custom_add_module(self, name, module):
+                self.call_hooks()
+                return original_add_module(self, name, module)
+
+            modulecls.add_module = custom_add_module
+
+            # load_state_dict
+            original_load_state_dict = modulecls.load_state_dict
+
+            @functools.wraps(original_load_state_dict)
+            def custom_load_state_dict(self, state_dict, strict):
+                self.call_hooks()
+                return original_load_state_dict(self, state_dict, strict)
+
+            modulecls.load_state_dict = custom_load_state_dict
 
             original_setattr = modulecls.__setattr__
 
             @functools.wraps(original_setattr)
             def custom_setattr(self, key, value):
-                # print("custom_setattr")
-                NNModuleChangeTrackerUtil._dynamo__setattr__(self, key, value)
+                if not key in ['_module_change_hooks']:
+                    self.call_hooks()
                 return original_setattr(self, key, value)
 
             modulecls.__setattr__ = custom_setattr
 
+
         if module not in module_code_map:
-            module_code_map[module] = list()
-        module_code_map[module].append(guarded_code)
+            module_code_map[module] = set()
+        module_code_map[module].add(guarded_code)
 
     def _register_on_module_change_hook(
         self, hook: Callable[..., None]
     ) -> "hooks.RemovableHandle":
-
         handle = hooks.RemovableHandle(self._module_change_hooks)
         self._module_change_hooks[handle.id] = hook
 
         return handle
 
+    def _call_hooks(self):
+        hooks = self._module_change_hooks.values()
+        for hook in hooks:
+            hook(self)
+
     def _clear_hooks(self):
         self._module_change_hooks.clear()
-
-    def _dynamo_register_parameter(self, name: str, param: Optional[Parameter]) -> None:
-        hooks = self._module_change_hooks.values()
-        for hook in hooks:
-            hook(self)
-
-    def _dynamo__setattr__(self, name, value) -> None:
-        hooks = self._module_change_hooks.values()
-        for hook in hooks:
-            hook(self)
 
 
 class GuardSource(enum.Enum):
@@ -261,9 +277,6 @@ class GuardBuilder:
             self.code.append(f"not hasattr({ref}, {attr!r})")
 
     def EQUALS_MATCH(self, guard: Guard):
-        if guard.is_nn_module():
-            # Protected by module invalidation, see NN_MODULE
-            return
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(
@@ -329,9 +342,11 @@ class GuardBuilder:
                 return
 
             for code in module_code_map[module]:
+                print("Invalidating: ", code)
                 code.valid = False
 
             module.clear_hooks()
+            del module_code_map[module]
 
         val = self.get(guard.name)
         if hasattr(val, "training"):
