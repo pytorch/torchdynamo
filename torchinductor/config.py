@@ -64,4 +64,3 @@ class triton:
 
     # enable codegen to use Triton's mm
     use_mm = False
-
