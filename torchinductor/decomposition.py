@@ -2,6 +2,7 @@ import math
 
 import functorch._src.decompositions
 import torch
+from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch._decomp import get_decompositions
 
 from torchinductor import config
@@ -10,27 +11,50 @@ aten = torch.ops.aten
 
 decompositions = get_decompositions(
     [
+        aten._adaptive_avg_pool2d_backward,
+        aten.avg_pool2d_backward,
         aten.clamp_max,
         aten.clamp_min,
         aten.cudnn_batch_norm,
+        aten.cudnn_batch_norm_backward,
+        aten.elu_backward,
+        aten._embedding_bag,
+        aten.embedding_dense_backward,
+        aten.expand_as,
+        aten._fused_moving_avg_obs_fq_helper,
+        aten.gelu_backward,
+        aten.glu_backward,
+        aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardswish,
         aten.hardtanh,
         aten.l1_loss,
         aten.leaky_relu,
+        aten._log_softmax_backward_data,
         aten.logsumexp.default,
+        aten.masked_fill_,
+        aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.native_batch_norm,
+        aten.native_batch_norm_backward,
+        aten.native_dropout_backward,
         aten.native_group_norm,
         aten.native_layer_norm,
-        aten.stack,
-        aten.transpose.int,
-        # don't exist (yet), but wish they did:
-        aten._embedding_bag,
-        aten.grid_sampler_2d,
+        aten.native_layer_norm_backward,
+        aten.nll_loss_forward,
         aten.norm,
+        aten.reflection_pad2d_backward,
+        aten.select_backward,
+        aten.select_scatter,
+        aten.sigmoid_backward,
+        aten._softmax_backward_data,
+        aten.stack,
+        aten.tanh_backward,
+        aten.threshold_backward,
+        aten.transpose.int,
     ]
 )
+decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
@@ -186,3 +210,43 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     x = torch.where(x == float("inf"), posinf, x)
     x = torch.where(x == float("-inf"), neginf, x)
     return x
+
+
+@register_decomposition([aten.all.default])
+def all(input):
+    return torch.logical_not(torch.any(torch.logical_not(input)))
+
+
+@register_decomposition([aten.all.dim])
+def all_dim(input, dim, keeepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+
+
+@register_decomposition(aten.hardswish_)
+def hardswish_(x):
+    return x.copy_(aten.hardswish(x))
+
+
+@register_decomposition(aten.hardtanh_)
+def hardtanh_(x, min_val=-1, max_val=1):
+    return x.copy_(aten.hardtanh(x, min_val, max_val))
+
+
+@register_decomposition(aten.leaky_relu_)
+def leaky_relu_(x, negative_slope=0.01):
+    return x.copy_(aten.leaky_relu(x, negative_slope))
+
+
+@register_decomposition(aten.silu_)
+def silu_(x):
+    return x.copy_(aten.silu(x))
+
+
+@register_decomposition(aten.masked_fill_)
+def masked_fill_(x, mask, value):
+    return x.copy_(aten.masked_fill(x, mask, value))
+
+
+@register_decomposition([aten.log1p])
+def log1p(x):
+    return torch.log(x + 1)
