@@ -1146,6 +1146,7 @@ class CommonTemplate:
 
     @requires_cuda()
     @patch.object(config.triton, "use_conv", False)
+    @patch.object(config, "autotune", True)
     def test_conv_autotune(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def triton_conv(

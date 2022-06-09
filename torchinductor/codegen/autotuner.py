@@ -157,6 +157,9 @@ def tuned_conv(*args, **kwargs):
         # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
+        if torchinductor.config.debug:
+            print("for key = ", key)
+            print("best_kernel", autotune.cache[key])
         # kernels_timings = timings
     best_kernel_name = autotune.cache[key]
     best_kernel = kernel_dict[best_kernel_name]

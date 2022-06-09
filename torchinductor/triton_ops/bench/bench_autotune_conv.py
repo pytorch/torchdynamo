@@ -3,7 +3,7 @@ import triton
 
 import torchdynamo
 import model
-import torchdynamo.config as config
+import torchinductor.config as config
 
 # enable autotune conv kernels
 config.autotune = True
