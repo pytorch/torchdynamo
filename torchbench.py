@@ -399,7 +399,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
 
             dc1, dc2 = dynamo compilation iterations (with Prof Exec)
             d, e = dynamo, eager warmed up iteration
-            B = break even # iters
+            B = num iters to break even
             dc1 + dc2 + (B-2)d = B*e
             B = (dc1 + dc2 - 2d) / (e - d)
         """
@@ -424,8 +424,6 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
             breakeven(dynamo_times, eager_times),
         ],
     )
-
-    print([f"{t:.2f}" for t in dynamo_times], [f"{t:.2f}" for t in eager_times])
 
     def format_speedup(
         speedup, pvalue, breakeven_iters, is_correct=True, pvalue_threshold=0.1
@@ -1044,7 +1042,7 @@ def main():
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = "cold_start_{backend_str}.csv"
         args.isolate = True
-        # horace said so
+        # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
