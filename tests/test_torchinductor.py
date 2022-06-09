@@ -1144,6 +1144,32 @@ class CommonTemplate:
         y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
 
+    @requires_cuda()
+    @patch.object(config.triton, "use_conv", False)
+    def test_conv_autotune(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def triton_conv(
+            x,
+            w,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        ):
+            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+            return y
+
+        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
+        dtype = torch.float32
+        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
+        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
+        bias = torch.randn((32), dtype=dtype, device=self.device)
+
+        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
+        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
+
     def test_std(self):
         def fn(x):
             return (
