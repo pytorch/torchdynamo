@@ -4,6 +4,14 @@ from os.path import dirname
 
 import torch
 
+try:
+    import torch._prims
+    import torch._refs
+
+    HAS_REFS_PRIMS = True
+except ImportError:
+    HAS_REFS_PRIMS = False
+
 # print out lots of stuff
 debug = False
 
@@ -21,6 +29,10 @@ dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
+
+# Turns otherwise installed guards into graph breaks if the same failure occurs equal to or over the
+# threshold number of times. Setting this to, or over, cache_size_limit is akin to disabling it.
+same_failure_tolernace_threshold = 3
 
 # Assume these functions return constants
 constant_functions = {
@@ -57,6 +69,11 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
 }
+if HAS_REFS_PRIMS:
+    skipfiles_inline_module_allowlist |= {
+        torch._refs,
+        torch._prims,
+    }
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -65,4 +82,6 @@ skipfiles_inline_module_allowlist = {
 allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
+    "torch._refs",
+    "torch._prims",
 }

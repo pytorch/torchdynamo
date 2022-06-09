@@ -10,6 +10,7 @@ import torch
 
 from .. import codecache
 from .. import config
+from .. import ir
 from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
@@ -74,6 +75,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def log(x):
         return f"tl.log({x})"
+
+    @staticmethod
+    def isinf(x):
+        return f"{x}+1 == {x}"
+
+    @staticmethod
+    def isnan(x):
+        return f"{x} != {x}"
 
     @staticmethod
     def relu(x):
@@ -425,9 +434,7 @@ class TritonKernel(Kernel):
         self.stores.writeline(line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
-        default = {"sum": 0, "max": "float('-inf')", "min": "float('inf')"}[
-            reduction_type
-        ]
+        default = ops.constant(ir.Reduction.default_value(reduction_type, dtype), dtype)
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
@@ -437,6 +444,8 @@ class TritonKernel(Kernel):
         )
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
         sizes[-1] = "1"
+        if reduction_type == "any":
+            reduction_type = "max"
         res = self.cse.generate(
             self.compute,
             f"tl.reshape(tl.{reduction_type}({res}, {len(self.range_trees) - 1}), [{', '.join(sizes)}])",
@@ -445,7 +454,7 @@ class TritonKernel(Kernel):
         with self.disable_reduction():
             ops.store(name, index, res)
 
-    def codegen_kernel(self):
+    def codegen_kernel(self, name=None):
         from triton import next_power_of_2
 
         code = IndentedBuffer()
@@ -458,12 +467,18 @@ class TritonKernel(Kernel):
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]
 
+        if name is None:
+            code.splice(
+                f"""
+                    import triton
+                    import triton.language as tl
+                    from {codecache.__name__} import {heuristics}
+
+                """
+            )
+
         code.splice(
             f"""
-                import triton
-                import triton.language as tl
-                from {codecache.__name__} import {heuristics}
-
                 @{heuristics}(size_hints={size_hints!r})
                 @triton.jit
             """
@@ -484,7 +499,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
-        code.writeline(f"def kernel({', '.join(argdefs)}):")
+        code.writeline(f"def {name or 'kernel'}({', '.join(argdefs)}):")
         with code.indent():
             for i, tree in enumerate(self.range_trees):
                 x = tree.prefix
@@ -508,6 +523,9 @@ class TritonKernel(Kernel):
             code.splice(self.loads)
             code.splice(self.compute)
             code.splice(self.stores)
+
+        if name is not None:
+            return code.getvalue()
 
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")
@@ -636,7 +654,10 @@ class TritonScheduling:
                             node.mark_fusable()
 
         kernel_name = wrapper.next_kernel_name()
-        wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        if config.triton.many_files:
+            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        else:
+            wrapper.header.splice(kernel.codegen_kernel(kernel_name))
         kernel.call_kernel(wrapper, kernel_name)
 
         scheduler.enqueue(reschedule)
