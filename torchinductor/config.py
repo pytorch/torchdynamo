@@ -61,3 +61,7 @@ class triton:
 
     # use triton.autotune?
     autotune = True
+
+    # enable codegen to use Triton's mm
+    use_mm = False
+

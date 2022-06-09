@@ -73,6 +73,16 @@ class WrapperCodeGen(CodeGen):
                 aten = torch.ops.aten
             """
         )
+
+        if config.triton.use_mm:
+            self.header.splice(
+                """
+                try:
+                    from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out
+                except ImportError:
+                    pass
+                """
+            )
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
