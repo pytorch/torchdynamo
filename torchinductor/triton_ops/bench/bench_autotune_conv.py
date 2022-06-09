@@ -59,8 +59,8 @@ def bench_op(
         fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
     if provider == "autotune":
         @torchdynamo.optimize("inductor")
-        def wrap_conv(x, w, bias, stride, padding, dilation, groups):
-            return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        def wrap_conv(*args, **kwargs):
+            return torch.conv2d(*args, **kwargs)
 
         fn = lambda: wrap_conv(x, w, bias, stride, padding, dilation, groups)
 
