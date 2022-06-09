@@ -31,6 +31,7 @@ troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
 )
 
+
 def count_calls(g: fx.Graph):
     c = 0
     for n in g.nodes:
