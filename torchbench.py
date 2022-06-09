@@ -361,6 +361,7 @@ def randomize_input(inputs):
             f"randomize_input can not handle input of type {type(inputs)}"
         )
 
+
 def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_ctx):
     compile_iters = 2
     total_iters = compile_iters + 2
@@ -388,6 +389,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
             is_correct = is_correct and same(expected_output, actual_output)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     worst = np.max(timings, axis=0)
+
     def breakeven(dynamo_times, eager_times):
         """
         Solve for the number of iterations it takes dynamo to 'catch up' with eager,
@@ -407,7 +409,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
             return (dc1 + dc2 + 2 * d) / (e - d)
         else:
             # if optimized dynamo is not faster than eager we'll compute
-            # a nonsense negative number 
+            # a nonsense negative number
             return 0
 
     speedup = worst[0] / worst[1]
@@ -415,18 +417,29 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
     output_csv(
         output_filename,
         ("dev", "name", "cold-start speedup", "breakeven iters"),
-        [current_device, current_name, float(speedup), breakeven(dynamo_times, eager_times)],
+        [
+            current_device,
+            current_name,
+            float(speedup),
+            breakeven(dynamo_times, eager_times),
+        ],
     )
- 
+
     print([f"{t:.2f}" for t in dynamo_times], [f"{t:.2f}" for t in eager_times])
-    def format_speedup(speedup, pvalue, breakeven_iters, is_correct=True, pvalue_threshold=0.1):
+
+    def format_speedup(
+        speedup, pvalue, breakeven_iters, is_correct=True, pvalue_threshold=0.1
+    ):
         if not is_correct:
             return "ERROR"
         if pvalue > pvalue_threshold:
             return f"{speedup:.3f}x breakeven={breakeven_iters:.2f} iters SAME"
         return f"{speedup:.3f}x breakeven={breakeven_iters:.2f} iters p={pvalue:.2f}"
 
-    return format_speedup(speedup, pvalue, breakeven(dynamo_times, eager_times), is_correct=is_correct)
+    return format_speedup(
+        speedup, pvalue, breakeven(dynamo_times, eager_times), is_correct=is_correct
+    )
+
 
 def speedup_experiment(args, model_iter_fn, model, example_inputs):
     """
