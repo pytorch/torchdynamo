@@ -51,6 +51,7 @@ for torchbench_dir in (
     "../torchbenchmark",
     "../torchbench",
     "../benchmark",
+    "ci_torchbench",
 ):
     if exists(torchbench_dir):
         break
