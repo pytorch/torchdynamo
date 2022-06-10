@@ -17,7 +17,7 @@ jobs:
         cache: 'pip'
     - uses: actions/checkout@master
       with:
-        name: pytorch/benchmark
+        repository: pytorch/benchmark
         path: torchbenchmark
     - run: make setup_nightly
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
