@@ -28,15 +28,6 @@ _NP_DTYPE = {
     torch.bool: np.bool_,
 }
 
-# Disable TorchDynamo on some torch.* compilers generated frames
-torch.jit.trace = torchdynamo.disable(torch.jit.trace)
-torch.jit.trace_module = torchdynamo.disable(torch.jit.trace_module)
-torch.jit._get_trace_graph = torchdynamo.disable(torch.jit._get_trace_graph)
-
-torch.onnx.export_to_pretty_string = torchdynamo.disable(
-    torch.onnx.export_to_pretty_string
-)
-
 
 def create_backend(fn):
     @functools.wraps(fn)
