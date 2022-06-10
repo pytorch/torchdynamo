@@ -23,7 +23,7 @@ jobs:
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - run: pip install pandas
     - run: pip install scipy
-    - run: ./torchbench.py -dcuda --inductor -k BERT_pytorch
+    - run: ./torchbench.py -k BERT_pytorch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
