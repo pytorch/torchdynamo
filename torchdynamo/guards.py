@@ -40,7 +40,7 @@ from .utils import tuple_iterator_len
 log = logging.getLogger(__name__)
 
 # map from modules to guarded code
-module_code_map = ExactWeakKeyDictionary()  # {nn.Module: GuardedCode}
+module_code_map = ExactWeakKeyDictionary()  # {nn.Module: Set[GuardedCode]}
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -131,7 +131,6 @@ class NNModuleChangeTrackerUtil:
     def _call_hooks(self):
         if not hasattr(self, "_module_change_hooks"):
             # because of how we monkeypatch, setattr could be patched, but the instance has not yet been registered, (or may not be eligible).
-
             return
         hooks = self._module_change_hooks.values()
         for hook in hooks:
