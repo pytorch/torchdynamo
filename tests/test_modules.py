@@ -630,6 +630,10 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, 6)
 
     def test_self_mutating1(self):
+        old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
+        if old_tolerance < torchdynamo.config.cache_size_limit:
+            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+
         m1 = torch.nn.Linear(10, 10)
         m2 = SelfMutatingModule(m1)
         m3 = SelfMutatingModule(m1)
@@ -643,6 +647,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out3))
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
+        torchdynamo.config.same_failure_tolerance_threshold = old_tolerance
 
     def test_generation_tag(self):
         cnt = torchdynamo.testing.CompileCounter()

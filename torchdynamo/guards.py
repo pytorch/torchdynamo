@@ -153,7 +153,7 @@ class GuardBuilder:
         if (
             key in code_name_type_failure_count
             and code_name_type_failure_count[key]
-            >= config.same_failure_tolernace_threshold
+            >= config.same_failure_tolerance_threshold
         ):
             unimplemented(f"code_name_type_failure_count for {key} passed threshold")
         self.code.append(code)
@@ -404,8 +404,6 @@ class GuardedCode:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        if not guards or len(guards) == 0:
-            unimplemented("Nothing to guard")
         else:
             self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()

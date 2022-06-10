@@ -32,7 +32,7 @@ cache_size_limit = 64
 
 # Turns otherwise installed guards into graph breaks if the same failure occurs equal to or over the
 # threshold number of times. Setting this to, or over, cache_size_limit is akin to disabling it.
-same_failure_tolernace_threshold = 3
+same_failure_tolerance_threshold = 3
 
 # Assume these functions return constants
 constant_functions = {
