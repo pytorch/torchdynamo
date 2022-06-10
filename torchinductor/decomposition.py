@@ -250,3 +250,13 @@ def masked_fill_(x, mask, value):
 @register_decomposition([aten.log1p])
 def log1p(x):
     return torch.log(x + 1)
+
+
+@register_decomposition([aten.baddbmm])
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    result = torch.bmm(batch1, batch2)
+    if not isinstance(alpha, (int, float)) or alpha != 1:
+        result = result * alpha
+    if not isinstance(beta, (int, float)) or beta != 1:
+        self = self * beta
+    return self + result

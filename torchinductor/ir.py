@@ -1689,6 +1689,10 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def realize_input(cls, x):
+        if isinstance(x, Constant):
+            return V.graph.add_tensor_constant(
+                torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
+            )
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):

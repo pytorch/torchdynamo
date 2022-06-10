@@ -1797,6 +1797,19 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64) * 10])
 
+    def test_baddbmm(self):
+        def fn(a, b, c):
+            return aten.baddbmm(a, b, c)
+
+        self.common(
+            fn,
+            [
+                torch.randn(6, 1, 100),
+                torch.randn(6, 128, 64),
+                torch.randn(6, 64, 100),
+            ],
+        )
+
 
 if HAS_CPU:
 
