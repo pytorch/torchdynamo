@@ -17,7 +17,7 @@ jobs:
         cache: 'pip'
     - run: make setup_nightly
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
-    - run: conda install pandas
+    - run: conda install -y pandas
     - run: ./torchbench.py -dcuda --inductor -k BERT_pytorch
 
 concurrency:
