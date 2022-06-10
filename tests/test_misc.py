@@ -31,7 +31,9 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
 
         def boolarg(aa, bb, flag):
             if flag:
@@ -60,7 +62,9 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_callpacked(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
 
         def call_packed(args):
             a, b, c = args
@@ -82,7 +86,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(val4, correct))
         self.assertEqual(counter.frame_count, 2)
         torchdynamo.config.same_failure_tolerance_threshold = old_tolerance
-
 
     def test_raises(self):
         def fn(a, b, c, cls):
@@ -189,8 +192,10 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_config_obj(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
-        
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
+
         class Cfg:
             def __init__(self):
                 self.val = 0.5
@@ -221,7 +226,10 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_config_getattr_default(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
+
         class Cfg:
             def __init__(self):
                 self.val = 0.5
@@ -1144,7 +1152,9 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_slice_input(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
         cnts = torchdynamo.testing.CompileCounter()
 
         def getitem(a, idx):
@@ -1172,7 +1182,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(ref1 == res1)
         self.assertTrue(ref2 == res2)
         torchdynamo.config.same_failure_tolerance_threshold = old_tolerance
-
 
     def test_grad(self):
         cnts = torchdynamo.testing.CompileCounter()

@@ -731,7 +731,9 @@ class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
 
         torchdynamo.utils.counters.clear()
         with torchdynamo.optimize(torchdynamo.testing.CompileCounter()):
@@ -776,7 +778,6 @@ class ReproTests(torchdynamo.testing.TestCase):
             torchdynamo.utils.counters["frames"]["ok"],
         )
         torchdynamo.config.same_failure_tolerance_threshold = old_tolerance
-
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [

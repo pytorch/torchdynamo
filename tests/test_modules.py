@@ -632,7 +632,9 @@ class NNModuleTests(torchdynamo.testing.TestCase):
     def test_self_mutating1(self):
         old_tolerance = torchdynamo.config.same_failure_tolerance_threshold
         if old_tolerance < torchdynamo.config.cache_size_limit:
-            torchdynamo.config.same_failure_tolerance_threshold = torchdynamo.config.cache_size_limit
+            torchdynamo.config.same_failure_tolerance_threshold = (
+                torchdynamo.config.cache_size_limit
+            )
 
         m1 = torch.nn.Linear(10, 10)
         m2 = SelfMutatingModule(m1)

@@ -522,22 +522,22 @@ def guard_fail_hook(
         # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
         # is updated to return a string explaining the failure.
         global code_name_type_failure_count
-        if isinstance(fail_reason, str):
-            reasons.append(fail_reason)
+
+        def write_fail_reason_record(reason):
+            if last:
+                reasons.append(reason)
+
             type_and_name = guard_fn.verbose_code_map[part]
             key = f"{loc}{type_and_name}"
             if key not in code_name_type_failure_count:
                 code_name_type_failure_count[key] = 0
             code_name_type_failure_count[key] += 1
 
+        if isinstance(fail_reason, str):
+            write_fail_reason_record(fail_reason)
             break
         elif isinstance(fail_reason, bool) and not fail_reason:
-            reasons.append(part)
-            type_and_name = guard_fn.verbose_code_map[part]
-            key = f"{loc}{type_and_name}"
-            if key not in code_name_type_failure_count:
-                code_name_type_failure_count[key] = 0
-            code_name_type_failure_count[key] += 1
+            write_fail_reason_record(part)
             break
 
     if not last:
