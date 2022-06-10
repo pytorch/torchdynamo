@@ -19,6 +19,10 @@ jobs:
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - run: pip install pandas
     - run: pip install scipy
+    - run: CUR=$(pwd)
+    - run: cd ..
+    - run: git clone git@github.com:pytorch/benchmark.git torchbenchmark
+    - run: cd $CUR
     - run: ./torchbench.py -dcuda --inductor -k BERT_pytorch
 
 concurrency:
