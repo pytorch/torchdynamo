@@ -61,15 +61,28 @@ class WrapperCodeGen(CodeGen):
                 from ctypes import c_void_p, c_long
                 import torch
                 from torch import empty_strided, as_strided
-                from {codecache.__name__} import CppCodeCache, TritonCodeCache, grid
+                from {codecache.__name__} import CppCodeCache, TritonCodeCache
+                from {codecache.__name__} import grid, pointwise_heuristics, reduction_heuristics
+
                 try:
                     import triton
                     import triton.language as tl
                 except ImportError:
                     pass
+
                 aten = torch.ops.aten
             """
         )
+
+        if config.triton.use_mm:
+            self.header.splice(
+                """
+                try:
+                    from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out
+                except ImportError:
+                    pass
+                """
+            )
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
@@ -182,7 +195,7 @@ class WrapperCodeGen(CodeGen):
         """
         if not config.benchmark_harness:
             return
-        output.writelines(["", 'if __name__ == "__main__":'])
+        output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
                 """

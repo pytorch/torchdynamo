@@ -55,3 +55,12 @@ class triton:
 
     # limit tiling dimensions
     max_tiles = 2
+
+    # put each kernel in its own file
+    many_files = False
+
+    # use triton.autotune?
+    autotune = True
+
+    # enable codegen to use Triton's mm
+    use_mm = False

@@ -22,6 +22,7 @@ try:
 
     from torch._decomp import get_decompositions
 
+    import torchinductor.config
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx
     from torchinductor.ir import IndexingDiv
@@ -31,7 +32,7 @@ try:
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
 except (ImportError, ModuleNotFoundError, AssertionError):
-    raise unittest.SkipTest("requires functorch")
+    raise unittest.SkipTest("requires sympy/functorch")
 
 
 HAS_CPU = False
@@ -56,6 +57,7 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+torchinductor.config.triton.autotune = False  # too slow
 
 
 class TestCase(unittest.TestCase):
@@ -1144,6 +1146,19 @@ class CommonTemplate:
         y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
 
+    @patch.object(config.triton, "use_mm", True)
+    def test_triton_mm2(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        N = 1024
+        a = torch.randn([N, N], device=self.device, dtype=torch.float32)
+        b = torch.randn([N, N], device=self.device, dtype=torch.float32)
+        c1 = torch.mm(a, b)
+        c = fn(a, b)
+        assert torch.allclose(c1, c, atol=1e-3, rtol=1e-3)
+
     def test_std(self):
         def fn(x):
             return (
@@ -1740,6 +1755,40 @@ class CommonTemplate:
                 arg190,
             ),
         )
+
+    def test_isinf(self):
+        def fn(x):
+            return x.isinf(), x.isnan()
+
+        self.common(
+            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
+        )
+
+    def test_any(self):
+        def fn(x):
+            return (
+                x.isinf().any(),
+                torch.all(x.isinf(), dim=0),
+                torch.all(torch.logical_not(x.isinf())),
+            )
+
+        self.common(fn, [torch.randn(64)])
+        tmp = torch.randn(16, 8)
+        tmp[1, 1] = float("inf")
+        self.common(fn, [tmp])
+
+    def test_inplace_activations(self):
+        def fn(x):
+            a = aten.hardswish_(x + 1)
+            b = aten.hardtanh_(x + 1)
+            c = aten.leaky_relu_(x + 1)
+            d = aten.silu_(x + 1)
+            e = aten.log1p(x + 1)
+            f = aten.masked_fill_(x + 1, torch.zeros_like(x, dtype=torch.bool), 99.0)
+            h = aten.masked_fill_(x + 1, torch.ones_like(x, dtype=torch.bool), 99.0)
+            return (a, b, c, d, e, f, h)
+
+        self.common(fn, [torch.randn(64) * 10])
 
 
 if HAS_CPU:

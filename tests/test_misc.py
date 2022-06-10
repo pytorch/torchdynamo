@@ -1571,3 +1571,48 @@ class MiscTests(torchdynamo.testing.TestCase):
                 fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_side_effects_codegen_update_mutated(self):
+        # codegen to update mutated variables with side effect
+        # should after stack value's codegen
+        def f1(x):
+            alist = [x]
+            alist.append(x + 1)
+            alist[0].sum().item()  # graph break
+            res = alist.pop()
+            res.sum().item()  # graph break
+            return res
+
+        def f2(a, b):
+            d = {"a": a + 1, "b": b + 2}
+            x = d.pop("b")
+            x.sum().item()  # graph break
+            y = d["a"] + x
+            y.sum().item()  # graph break
+            d["c"] = y
+            return d
+
+        x = torch.rand([2, 3])
+        a = torch.rand([5, 6])
+        b = torch.rand([5, 6])
+        res11 = f1(x)
+        res21 = f2(a, b)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res12 = f1(x)
+            res22 = f2(a, b)
+        self.assertTrue(same(res11, res12))
+        self.assertTrue(same(res21, res22))
+
+    def test_list_append_return_none(self):
+        def fn(x):
+            alist = []
+            blist = alist.append(x + 1)
+            return alist, blist
+
+        x = torch.tensor([2.3])
+        res = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x)
+        self.assertEqual(res, res2)
