@@ -150,12 +150,21 @@ class GuardBuilder:
         global code_name_type_failure_count
         check_type_name = (check_type, name)
         key = f"{self.full_guarded_code_loc}{check_type_name}"
-        if (
-            key in code_name_type_failure_count
-            and code_name_type_failure_count[key]
-            >= config.same_failure_tolerance_threshold
-        ):
-            unimplemented(f"code_name_type_failure_count for {key} passed threshold")
+        if key in code_name_type_failure_count:
+            count = code_name_type_failure_count[key]
+            if check_type in config.same_failure_tolerance_threshold_override:
+                if (
+                    count
+                    >= config.same_failure_tolerance_threshold_override[check_type]
+                ):
+                    unimplemented(
+                        f"code_name_type_failure_count for {key} passed overriden threshold for {check_type}"
+                    )
+            elif count >= config.same_failure_tolerance_threshold:
+                unimplemented(
+                    f"code_name_type_failure_count for {key} passed threshold"
+                )
+
         self.code.append(code)
         self.check_code_to_check_type_dict[code] = check_type_name
 
