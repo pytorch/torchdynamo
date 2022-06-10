@@ -298,6 +298,12 @@ class Reduction(Loops):
             )
         )
 
+    @staticmethod
+    def default_value(reduction_type, dtype):
+        return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
+            reduction_type
+        ]
+
 
 def is_storage_and_layout(x):
     try:
