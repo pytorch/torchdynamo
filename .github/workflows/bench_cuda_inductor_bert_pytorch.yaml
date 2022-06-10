@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@master
       with:
         repository: pytorch/benchmark
-        path: torchbenchmark
+        path: ../torchbenchmark
     - run: make setup_nightly
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - run: pip install pandas
