@@ -156,6 +156,13 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     # RuntimeError: CUDA: Error- invalid value
     "dlrm",
     "vision_maskrcnn",
+    "dhen_5x_dense_over",
+    "dhen_5x_over",
+    # https://github.com/openai/triton/issues/540
+    "inline_cvr_7x_dense_over",
+    "inline_cvr_7x_over",
+    "ctr_mbl_feed_30x_dense_over",
+    "ctr_mbl_feed_30x_over",
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",

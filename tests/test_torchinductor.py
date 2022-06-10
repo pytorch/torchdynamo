@@ -1810,6 +1810,18 @@ class CommonTemplate:
             ],
         )
 
+    def test_expand_as(self):
+        def fn(a, b):
+            return aten.expand_as(a, b), aten.expand_as(a + 1, b + 1) + 1
+
+        self.common(
+            fn,
+            [
+                torch.randn(6, 1, 100),
+                torch.randn(6, 128, 100),
+            ],
+        )
+
 
 if HAS_CPU:
 

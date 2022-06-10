@@ -417,7 +417,7 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().numpy()}")
+                print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)

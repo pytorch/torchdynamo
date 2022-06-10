@@ -1689,6 +1689,8 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def realize_input(cls, x):
+        if x is None:
+            return V.graph.add_tensor_constant(torch.tensor(()))
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -1993,15 +1995,19 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             )
             return [
-                MultiOutput(
-                    FixedLayout(
-                        example_output[i].device,
-                        example_output[i].dtype,
-                        [sympy.Integer(s) for s in example_output[i].size()],
-                        [sympy.Integer(s) for s in example_output[i].stride()],
-                    ),
-                    packed,
-                    i,
+                (
+                    MultiOutput(
+                        FixedLayout(
+                            example_output[i].device,
+                            example_output[i].dtype,
+                            [sympy.Integer(s) for s in example_output[i].size()],
+                            [sympy.Integer(s) for s in example_output[i].stride()],
+                        ),
+                        packed,
+                        i,
+                    )
+                    if example_output[i] is not None
+                    else None
                 )
                 for i in range(len(example_output))
             ]

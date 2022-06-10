@@ -13,6 +13,7 @@ decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
         aten.avg_pool2d_backward,
+        aten.bernoulli_,
         aten.clamp_max,
         aten.clamp_min,
         aten.cudnn_batch_norm,
@@ -30,6 +31,7 @@ decompositions = get_decompositions(
         aten.hardtanh,
         aten.l1_loss,
         aten.leaky_relu,
+        aten.leaky_relu_backward,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
         aten.masked_fill_,
@@ -52,6 +54,7 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.upsample_nearest2d_backward,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
