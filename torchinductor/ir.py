@@ -1902,22 +1902,13 @@ class MultiOutput(ExternKernel):
 
 
 class Convolution(ExternKernelAlloc):
-    kernel = "aten.convolution"
-
-    def __init__(self, layout, inputs, constant_args=()):
-        if (
-            config.triton.use_conv
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_ops_conv"
-        elif (
-            config.autotune
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "tuned_conv"
-        super().__init__(layout, self.unwrap_storage(inputs), constant_args)
+    config_conv = config.triton.convolution
+    if config_conv == "aten":
+        kernel = "aten.convolution"
+    elif config_conv == "triton":
+        kernel = "triton_ops_conv"
+    else:
+        kernel = "tuned_conv"
 
     def codegen(self, wrapper):
         if self.kernel == "triton_ops_conv":

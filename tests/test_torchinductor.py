@@ -1119,7 +1119,7 @@ class CommonTemplate:
         self.assertEqual(c.stride()[2], 1)
 
     @requires_cuda()
-    @patch.object(config.triton, "use_conv", True)
+    @patch.object(config.triton, "convolution", "triton")
     def test_triton_conv(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def triton_conv(
@@ -1145,8 +1145,7 @@ class CommonTemplate:
         self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
 
     @requires_cuda()
-    @patch.object(config.triton, "use_conv", False)
-    @patch.object(config, "autotune", True)
+    @patch.object(config.triton, "convolution", "autotune")
     def test_conv_autotune(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def triton_conv(

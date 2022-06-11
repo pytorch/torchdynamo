@@ -28,9 +28,6 @@ inplace_buffers = False
 # codegen benchmark harness
 benchmark_harness = True
 
-# autotune kernels
-autotune = False
-
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -50,8 +47,8 @@ class triton:
     # Monkey patching to lower overheads
     hackery = False
 
-    # use triton conv as backend
-    use_conv = False
+    # choose conv backend, "aten" or "triton" or "autotune"
+    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
