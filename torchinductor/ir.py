@@ -1934,14 +1934,17 @@ class Convolution(ExternKernelAlloc):
     elif config_conv == "triton":
         kernel = "triton_ops_conv"
     else:
+        assert config_conv == "autotune"
         kernel = "tuned_conv"
 
     def codegen(self, wrapper):
         if self.kernel == "triton_ops_conv":
-            wrapper.writeline(f"import torchinductor.triton_ops.conv as {self.kernel}")
+            wrapper.header.writeline(
+                f"import torchinductor.triton_ops.conv as {self.kernel}"
+            )
         # choose from different conv kernels
         elif self.kernel == "tuned_conv":
-            wrapper.writeline(
+            wrapper.header.writeline(
                 f"from torchinductor.codegen.autotuner import {self.kernel}"
             )
         wrapper.writeline(
