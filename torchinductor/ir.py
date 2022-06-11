@@ -1934,20 +1934,25 @@ class MultiOutput(ExternKernel):
 
 
 class Convolution(ExternKernelAlloc):
-    kernel = "aten.convolution"
-
-    def __init__(self, layout, inputs, constant_args=()):
-        if (
-            config.triton.use_conv
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_ops_conv"
-        super().__init__(layout, self.unwrap_storage(inputs), constant_args)
+    config_conv = config.triton.convolution
+    if config_conv == "aten":
+        kernel = "aten.convolution"
+    elif config_conv == "triton":
+        kernel = "triton_ops_conv"
+    else:
+        assert config_conv == "autotune"
+        kernel = "tuned_conv"
 
     def codegen(self, wrapper):
         if self.kernel == "triton_ops_conv":
-            wrapper.writeline(f"import torchinductor.triton_ops.conv as {self.kernel}")
+            wrapper.header.writeline(
+                f"import torchinductor.triton_ops.conv as {self.kernel}"
+            )
+        # choose from different conv kernels
+        elif self.kernel == "tuned_conv":
+            wrapper.header.writeline(
+                f"from torchinductor.codegen.autotuner import {self.kernel}"
+            )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
@@ -2039,12 +2044,18 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
+        # memory layout order of output depends on x
+        size_hint = V.graph.sizevars.size_hint
+        x_stride = [size_hint(i) for i in x.get_stride()]
+        order = sorted(range(len(x_stride)), key=x_stride.__getitem__)
+
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
             # TODO(jansel): fix channels last case
-            FlexibleLayout.contiguous_strides(output_size),
+            # FlexibleLayout.contiguous_strides(output_size),
+            FlexibleLayout.ordered_strides(output_size, order),
         )
 
         if bias is not None:

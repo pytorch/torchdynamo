@@ -80,6 +80,7 @@ class _conv1x1:
         OUT_W = shape_y[yw]
 
         assert KERNEL_H == 1 and KERNEL_W == 1, "only support 1x1 conv"
+        channels_last = x.stride()[1] == 1
 
         if padding == (0, 0):
             # nchw -> nhwc
@@ -100,6 +101,8 @@ class _conv1x1:
             # convert back to the original layout of y
             # nhwc -> nchw
             y = y.permute(0, 3, 1, 2)
+            if not channels_last:
+                y = y.to(memory_format=torch.contiguous_format)
             return y
 
         else:
@@ -108,6 +111,8 @@ class _conv1x1:
                 device=device,
                 dtype=x.dtype,
             )
+            if channels_last:
+                y = y.to(memory_format=torch.channels_last)
             # y = bias.repeat((shape_y[yn], shape_y[yh], shape_y[yw], 1)).to(device).type(x.dtype)
             # convert x to channel-last layout;
             # don't care w layout since kernel size is 1
