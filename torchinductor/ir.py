@@ -314,11 +314,13 @@ class Reduction(Loops):
             )
         )
 
+    @staticmethod
     def default_value(reduction_type, dtype):
         return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
             reduction_type
         ]
 
+    @staticmethod
     def _pick_split(numel, reduction_numel):
         from triton import next_power_of_2
 
