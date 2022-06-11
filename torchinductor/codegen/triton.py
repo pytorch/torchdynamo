@@ -74,7 +74,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.log({x})"
+        # workaround https://github.com/openai/triton/issues/543
+        return f"tl.log({x}.to(tl.float32))"
 
     @staticmethod
     def isinf(x):
