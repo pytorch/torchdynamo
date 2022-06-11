@@ -34,6 +34,7 @@ from .utils import guard_failures
 from .utils import is_namedtuple
 from .utils import istype
 from .utils import orig_code_map
+from .utils import troubleshooting_url
 
 log = logging.getLogger(__name__)
 
@@ -229,7 +230,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
                 f"for function {format_func_info(code)}, "
                 f"due to the following guard failures: {format_guard_failures(code)}"
-                f"to diagnose recompilation issues, try using torchdynamo.utils.CompileProfiler."
+                f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
         output = None

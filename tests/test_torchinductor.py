@@ -22,6 +22,7 @@ try:
 
     from torch._decomp import get_decompositions
 
+    import torchinductor.config
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx
     from torchinductor.ir import IndexingDiv
@@ -31,7 +32,7 @@ try:
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
 except (ImportError, ModuleNotFoundError, AssertionError):
-    raise unittest.SkipTest("requires functorch")
+    raise unittest.SkipTest("requires sympy/functorch")
 
 
 HAS_CPU = False
@@ -56,6 +57,7 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+torchinductor.config.triton.autotune = False  # too slow
 
 
 class TestCase(unittest.TestCase):
@@ -1650,6 +1652,7 @@ class CommonTemplate:
                 torch.randn([2, 3, 16, 16]),
                 torch.randn([2, 3, 16, 16]),
             ),
+            check_lowp=False,
         )
 
     def test_triu(self):
@@ -1765,6 +1768,40 @@ class CommonTemplate:
                 arg190,
             ),
         )
+
+    def test_isinf(self):
+        def fn(x):
+            return x.isinf(), x.isnan()
+
+        self.common(
+            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
+        )
+
+    def test_any(self):
+        def fn(x):
+            return (
+                x.isinf().any(),
+                torch.all(x.isinf(), dim=0),
+                torch.all(torch.logical_not(x.isinf())),
+            )
+
+        self.common(fn, [torch.randn(64)])
+        tmp = torch.randn(16, 8)
+        tmp[1, 1] = float("inf")
+        self.common(fn, [tmp])
+
+    def test_inplace_activations(self):
+        def fn(x):
+            a = aten.hardswish_(x + 1)
+            b = aten.hardtanh_(x + 1)
+            c = aten.leaky_relu_(x + 1)
+            d = aten.silu_(x + 1)
+            e = aten.log1p(x + 1)
+            f = aten.masked_fill_(x + 1, torch.zeros_like(x, dtype=torch.bool), 99.0)
+            h = aten.masked_fill_(x + 1, torch.ones_like(x, dtype=torch.bool), 99.0)
+            return (a, b, c, d, e, f, h)
+
+        self.common(fn, [torch.randn(64) * 10])
 
 
 if HAS_CPU:

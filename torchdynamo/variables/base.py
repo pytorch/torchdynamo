@@ -104,7 +104,7 @@ class VariableTracker:
                 cls.apply(fn, v, cache) for v in value.items()
             )
         elif istype(value, dict):
-            result = {k: cls.apply(fn, v, cache) for k, v in value.items()}
+            result = {k: cls.apply(fn, v, cache) for k, v in list(value.items())}
         else:
             result = value
 

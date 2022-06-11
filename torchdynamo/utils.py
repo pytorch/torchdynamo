@@ -27,6 +27,9 @@ from . import config
 
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
+troubleshooting_url = (
+    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
+)
 
 
 def count_calls(g: fx.Graph):

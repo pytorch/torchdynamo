@@ -117,6 +117,8 @@ output         output  output                   ((mul,),)  {}
 Note that the order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 
+## Troubleshooting
+See [TROUBLESHOOTING.md].
 
 ## Adding Backends
 

@@ -64,8 +64,10 @@ class ModularIndexing(sympy.Function):
         ):
             return (base // divisor) % modulus
 
-        if divisor != 1 and sympy.gcd(base, divisor) == divisor:
-            return ModularIndexing(base / divisor, sympy.Integer(1), modulus)
+        if divisor != 1:
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return ModularIndexing(base / gcd, divisor / gcd, modulus)
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -92,8 +94,9 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        if sympy.gcd(base, divisor) == divisor:
-            return base / divisor
+        gcd = sympy.gcd(base, divisor)
+        if gcd != 1:
+            return IndexingDiv(base / gcd, divisor / gcd)
 
 
 class CleanDiv(IndexingDiv):
@@ -103,6 +106,11 @@ class CleanDiv(IndexingDiv):
     """
 
     pass
+
+
+def is_triton(device):
+    # TODO(jansel): a config check once we have multi-backend
+    return device.type == "cuda"
 
 
 class IRNode(object):
@@ -559,15 +567,7 @@ class View(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        try:
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        except AssertionError:
-            # optimistic algorithm failed, lets do a fallback
-            flat = [product(old_size)]
-            reindex1 = cls.dynamic_reshape_indexer(old_size, flat)
-            reindex2 = cls.dynamic_reshape_indexer(flat, new_size)
-            reindex = fuse_reindexing(reindex1, reindex2)
-
+        reindex = cls.dynamic_reshape_indexer(old_size, new_size)
         return cls(x, tuple(new_size), reindex)
 
     @staticmethod
@@ -589,8 +589,20 @@ class View(BaseView):
         V.graph.sizevars.guard_equals(product(old_size), product(new_size))
         return old_size, new_size
 
+    @classmethod
+    def dynamic_reshape_indexer(cls, old_size, new_size):
+        try:
+            reindex = cls._dynamic_reshape_indexer(old_size, new_size)
+        except (AssertionError, IndexError):
+            # optimistic algorithm failed, lets do a fallback
+            flat = [product(old_size)]
+            reindex1 = cls._dynamic_reshape_indexer(old_size, flat)
+            reindex2 = cls._dynamic_reshape_indexer(flat, new_size)
+            reindex = fuse_reindexing(reindex1, reindex2)
+        return reindex
+
     @staticmethod
-    def dynamic_reshape_indexer(old_size, new_size):
+    def _dynamic_reshape_indexer(old_size, new_size):
         """
         Perform a reshape entirely by modifying indexing math
         """
@@ -1215,7 +1227,7 @@ class ComputedBuffer(Buffer):
         )
 
         if (
-            self.get_device().type == "cuda"
+            is_triton(self.get_device())
             and not self.get_reduction_type()
             and iter_ranges
             and not has_modular_indexing
@@ -1403,9 +1415,10 @@ class ComputedBuffer(Buffer):
             assert strides.shape == (len(memory_addrs), len(index_vars))
             order = list(reversed(pick_loop_order(strides, sizes)))
         except Exception:
-            log.warning(
-                f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
-            )
+            if config.debug:
+                log.warning(
+                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
@@ -1787,8 +1800,12 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
-        assert getattr(torch.ops.aten, kernel.__name__) is kernel
-        self.kernel = f"aten.{kernel.__name__}"
+        if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
+            self.kernel = f"aten.{kernel.__name__}"
+        else:
+            self.kernel = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+            )
         self.unflatten_args = unflatten_args
 
     def codegen_args(self):

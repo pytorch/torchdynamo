@@ -179,12 +179,13 @@ def _numpy_function_ids():
 
 def is_allowed(obj):
     """Is this safe to trace like torch.add ?"""
-    return id(obj) in _allowed_function_ids
-
-
-def is_disallowed(obj):
-    """Is this safe to trace like torch.add ?"""
-    return id(obj) in _disallowed_function_ids
+    # torch.ops is populated lazily so we don't necessarily have them in
+    # _allowed_function_ids.  Figure it out by testing the type instead
+    # in those cases
+    return id(obj) in _allowed_function_ids or isinstance(
+        obj,
+        (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
+    )
 
 
 def torch_get_name(obj, default):

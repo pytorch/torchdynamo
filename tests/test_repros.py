@@ -4,6 +4,7 @@ import copy
 import inspect
 import itertools
 import random
+import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
@@ -18,6 +19,13 @@ import torchdynamo.testing
 import torchdynamo.utils
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
+
+try:
+    import torch._refs
+
+    HAS_REFS = True
+except ImportError:
+    HAS_REFS = False
 
 
 def ifdyn(count1, count2):
@@ -1246,3 +1254,24 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
+
+    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
+    @unittest.expectedFailure
+    def test_primtorch(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            torch._refs.abs(x)
+
+        fn(torch.randn(3))
+
+    @unittest.skipIf(
+        not isinstance(torch.ops.aten.abs, torch._ops.OpOverloadPacket),
+        "old pt doesn't work",
+    )
+    def test_torch_ops_aten(self):
+        # Picked an op that doesn't show up in the default list
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return torch.ops.aten.absolute(x)
+
+        fn(torch.randn(3))

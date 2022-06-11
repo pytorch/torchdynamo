@@ -190,7 +190,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
-        assert isinstance(result, tuple)
+        assert isinstance(result, (tuple, list)), type(result)
         assert all(isinstance(x, TensorBox) for x in result), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
 
