@@ -186,7 +186,7 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def convert_frame_assert(compiler_fn: Callable, one_graph=True):
+def convert_frame_assert(compiler_fn: Callable, one_graph=True, guard_accumulating=False):
     """Fully convert a frame into an FX graph"""
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
@@ -251,6 +251,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 code_options,
                 compiler_fn,
                 one_graph,
+                guard_accumulating,
             )
             tracer.run()
             output = tracer.output
@@ -276,7 +277,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         try:
             for attempt in itertools.count():
                 try:
-                    code = transform_code_object(frame.f_code, transform)
+                    code = transform_code_object(frame.f_code, transform, guard_accumulating)
                     orig_code_map[code] = frame.f_code
                     break
                 except exc.RestartAnalysis:
@@ -296,7 +297,12 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 print()
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
-            return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            produced_guarded_code = GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            print("convert", output)
+            if hasattr(output, "gm") and guard_accumulating:
+                output.call_user_compiler(output.gm, produced_guarded_code.check_fn.verbose_code_map)
+            print("guard_accumulating? ", guard_accumulating)
+            return produced_guarded_code
         except (Unsupported, TorchRuntimeError):
             debug_print("WONT CONVERT")
             raise
@@ -314,9 +320,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     return wrap_convert_context(_convert_frame_assert)
 
 
-def convert_frame(compiler_fn: typing.Callable):
+def convert_frame(compiler_fn: typing.Callable, guard_accumulating: bool):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False, guard_accumulating=guard_accumulating)
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1

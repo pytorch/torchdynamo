@@ -186,7 +186,7 @@ class WrapperBackend:
             self.restore()
 
 
-def optimize(backend, nopython=False):
+def optimize(backend, nopython=False, guard_accumulating=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -219,18 +219,17 @@ def optimize(backend, nopython=False):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor)
+        return optimize_assert(backend, backend_ctx_ctor, guard_accumulating)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_accumulating), backend_ctx_ctor
     )
 
-
-def optimize_assert(backend, backend_ctx_ctor=null_context):
+def optimize_assert(backend, backend_ctx_ctor=null_context, guard_accumulating=False):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, guard_accumulating), backend_ctx_ctor
     )
 
 

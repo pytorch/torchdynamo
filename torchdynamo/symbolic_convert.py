@@ -1184,6 +1184,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         code_options,
         compiler_fn,
         one_graph,
+        guard_accumulating,
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1197,6 +1198,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
         )
         self.one_graph: bool = one_graph
+        self.guard_accumulating: bool = guard_accumulating
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(

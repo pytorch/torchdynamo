@@ -206,6 +206,7 @@ class OutputGraph(fx.Tracer):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        print("compiling guard_accumulating?", tx.guard_accumulating)
         self.partial_convert = partial_convert
 
         if not all(block.can_restore() for block in tx.block_stack):
@@ -286,6 +287,10 @@ class OutputGraph(fx.Tracer):
         """
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
+        # traceback.print_stack()
+        print("compile", self)
+        # print(self.converted)
+        # print("compile data", self.verbose_code_map)
         for output in rv:
             self.guards.update(output.guards)
 
@@ -306,8 +311,17 @@ class OutputGraph(fx.Tracer):
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")
-        compiled_fn = self.call_user_compiler(gm)
+        print("calling user")
+        # traceback.print_stack()
+        if not tx.guard_accumulating:
+            compiled_fn = self.call_user_compiler(gm)
+        else:
+            print("COMPILER SELF", self)
+            self.gm = gm
+            compiled_fn = gm
+            
         compiled_fn = torchdynamo.disable(compiled_fn)
+            
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
         if config.debug:
@@ -318,9 +332,9 @@ class OutputGraph(fx.Tracer):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
-    def call_user_compiler(self, gm):
+    def call_user_compiler(self, gm, guards=None):
         try:
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            compiled_fn = self.compiler_fn(gm, self.example_inputs(), guards)
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception:
             sys.stderr.write("-" * 40 + "\n")

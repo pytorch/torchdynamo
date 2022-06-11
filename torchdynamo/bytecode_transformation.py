@@ -307,7 +307,7 @@ def fix_vars(instructions: List[Instruction], code_options):
             instructions[i].arg = names[instructions[i].argval]
 
 
-def transform_code_object(code, transformations, safe=False):
+def transform_code_object(code, transformations, safe=False, guard_accumulating=False):
     keys = [
         "co_argcount",
         "co_posonlyargcount",  # python 3.8+
