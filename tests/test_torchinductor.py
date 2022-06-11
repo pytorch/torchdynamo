@@ -61,6 +61,21 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 torchinductor.config.triton.autotune = False  # too slow
 
 
+def requires_decomp(fn):
+    """Decorator to disable test of a decomp is missing"""
+
+    def wrap_test(test):
+        @functools.wraps(test)
+        def maybe_test(*args, **kwargs):
+            if len(get_decompositions([fn])) == 0:
+                raise unittest.SkipTest(f"requires decomp for {fn.__name__}")
+            return test(*args, **kwargs)
+
+        return maybe_test
+
+    return wrap_test
+
+
 class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1790,6 +1805,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
 
+    @requires_decomp(aten.nll_loss_forward)
     def test_nll_loss_forward(self):
         def fn(a, b):
             return aten.nll_loss_forward(a, b, None, 1, -100)
