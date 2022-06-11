@@ -45,13 +45,20 @@ compile_lock = threading.Lock()
 
 
 class _TorchDynamoContext:
-    def __init__(self, callback, on_enter=nothing, backend_ctx_ctor=null_context):
+    def __init__(
+        self,
+        callback,
+        on_enter=nothing,
+        backend_ctx_ctor=null_context,
+        patch_fn=nothing,
+    ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback = callback
         self.prior = unset
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
+        patch_fn()
 
     def __enter__(self):
         self.on_enter()
@@ -102,6 +109,7 @@ class OptimizeContext(_TorchDynamoContext):
             callback=callback,
             on_enter=install_generation_tagging_init,
             backend_ctx_ctor=backend_ctx_ctor,
+            patch_fn=patch_torch,
         )
 
 
@@ -261,3 +269,14 @@ def skip(fn=None):
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True
     return fn
+
+
+@functools.lru_cache(None)
+def patch_torch():
+    # Disable TorchDynamo on some torch.* compilers generated frames
+    torch.jit.trace = disable(torch.jit.trace)
+    torch.jit.trace_module = disable(torch.jit.trace_module)
+    torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+
+    torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
+    torch.distributions.Distribution.set_default_validate_args(False)

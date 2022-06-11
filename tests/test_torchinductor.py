@@ -1172,6 +1172,19 @@ class CommonTemplate:
         y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
 
+    @patch.object(config.triton, "use_mm", True)
+    def test_triton_mm2(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        N = 1024
+        a = torch.randn([N, N], device=self.device, dtype=torch.float32)
+        b = torch.randn([N, N], device=self.device, dtype=torch.float32)
+        c1 = torch.mm(a, b)
+        c = fn(a, b)
+        assert torch.allclose(c1, c, atol=1e-3, rtol=1e-3)
+
     def test_std(self):
         def fn(x):
             return (
