@@ -58,6 +58,11 @@ def bench_op(
         )
 
     if useCudaGraph:
+        # prepare new data
+        new_x = x.clone()
+        new_w = w.clone()
+        new_bias = bias.clone()
+        
         # warmp up for cudagraph
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
@@ -71,7 +76,12 @@ def bench_op(
         with torch.cuda.graph(g):
             tmp = fn()
 
-        fn = lambda: g.replay()
+        def fn():
+            x.copy_(new_x)
+            w.copy_(new_w)
+            bias.copy_(new_bias)
+            return g.replay()
+
     ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     return tflops(ms), tflops(max_ms), tflops(min_ms)
 
