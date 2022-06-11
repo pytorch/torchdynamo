@@ -47,6 +47,15 @@ DTYPE_ID_LOOKUP = {
 }
 
 
+def has_torchvision_roi_align():
+    try:
+        from torchvision.ops import roi_align  # noqa
+
+        return roi_align is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def decode_dtype(dtype: int):
     if not isinstance(dtype, int):
         return dtype
@@ -335,6 +344,11 @@ def expand(x, sizes):
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
+@register_lowering(aten.expand_as)
+def expand_as(x, y):
+    return expand(x, y.get_size())
+
+
 @register_lowering(aten.repeat)
 def repeat(x, repeats):
     old_size = list(x.get_size())
@@ -517,51 +531,6 @@ def _embedding_bag(
     )
 
 
-@register_lowering(aten._cudnn_rnn, type_promote=False)
-def _cudnn_rnn(*args):
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten._cudnn_rnn, *args),
-        )
-    )
-
-
-@register_lowering(aten.sort, type_promote=False)
-def sort(*args):
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten.sort, *args),
-        )
-    )
-
-
-@register_lowering(aten.topk, type_promote=False)
-def topk(*args):
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten.topk, *args),
-        )
-    )
-
-
-@register_lowering(torch.randperm, type_promote=False)
-def randperm(*args):
-    return TensorBox.create(ir.FallbackKernel.create(aten.randperm, *args))
-
-
-@register_lowering(aten.grid_sampler_2d, type_promote=False)
-def grid_sampler_2d(*args):
-    return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
-
-
-@register_lowering(aten.norm, type_promote=False)
-def norm(*args):
-    return TensorBox.create(ir.FallbackKernel.create(aten.norm, *args))
-
-
 @register_lowering(aten.native_dropout, type_promote=False)
 def native_dropout(x, p, train):
     # There is a decomp in core for this, but it produces different answers than eager
@@ -573,6 +542,35 @@ def native_dropout(x, p, train):
             )
         )
     return x, ones_like(x, dtype=torch.bool)
+
+
+def make_fallback(kernel):
+    @register_lowering(kernel, type_promote=False)
+    def handler(*args):
+        result = ir.FallbackKernel.create(kernel, *args)
+        if isinstance(result, (list, tuple)):
+            return list(map(TensorBox.create, result))
+        else:
+            return TensorBox.create(result)
+
+
+if has_torchvision_roi_align():
+    make_fallback(torch.ops.torchvision.roi_align)
+
+make_fallback(aten._cudnn_rnn)
+make_fallback(aten.convolution_backward)
+make_fallback(aten.sort)
+make_fallback(aten.topk)
+make_fallback(aten.randperm)
+make_fallback(aten.grid_sampler_2d)
+make_fallback(aten.avg_pool2d_backward)
+make_fallback(aten._adaptive_avg_pool2d_backward)
+make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten.max_pool2d_with_indices_backward)
+make_fallback(aten.native_batch_norm_backward)
+make_fallback(aten.reflection_pad2d_backward)
+make_fallback(aten._cudnn_rnn_backward)
+make_fallback(aten.upsample_nearest2d_backward)
 
 
 @register_lowering(aten.convolution)
@@ -769,9 +767,12 @@ def _full(fill_value, device, dtype, size):
 
 
 def constant_like(fill_value):
-    def _constant_like(x, *, dtype=None, device=None, layout=0, pin_memory=False):
+    def _constant_like(
+        x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+    ):
         assert not pin_memory
         assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
         if dtype is None:
             dtype = x.get_dtype()
         else:
