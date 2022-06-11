@@ -10,6 +10,8 @@ jobs:
   test-inductor:
     runs-on: linux.8xlarge.nvidia.gpu
     steps:
+    - run: which python
+    - run: python --version
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
@@ -20,8 +22,6 @@ jobs:
         python-version: '3.x'
         architecture: 'x64' 
         cache: 'pip'
-    - run: which python
-    - run: python --version
     - run: make setup_nightly
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - run: pip install pandas
