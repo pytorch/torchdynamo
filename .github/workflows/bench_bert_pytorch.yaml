@@ -11,12 +11,12 @@ jobs:
     runs-on: linux.8xlarge.nvidia.gpu
     steps:
     - name: Install python
-      run: yum install -y python3 python-devel python3-devel build-essential
+      run: sudo yum install -y python3 python-devel python3-devel build-essential
     - name: Update pip
       run: |
-        yum update -y
-        yum -y install git python3-pip
-        pip3 install --upgrade pip
+        sudo yum update -y
+        sudo yum -y install git python3-pip
+        sudo pip3 install --upgrade pip
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
@@ -25,13 +25,13 @@ jobs:
     - name: Install CUDA 11.3
       shell: bash
       run: |
-        yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-        yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
-        yum clean expire-cache
-        yum install -y nvidia-driver-latest-dkms
-        yum install -y cuda-11-3
-        yum install -y cuda-drivers
-        yum install -y libcudnn8-devel
+        sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        sudo yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
+        sudo yum clean expire-cache
+        sudo yum install -y nvidia-driver-latest-dkms
+        sudo yum install -y cuda-11-3
+        sudo yum install -y cuda-drivers
+        sudo yum install -y libcudnn8-devel
     - name: setup Path
       run: |
         echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
