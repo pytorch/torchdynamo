@@ -59,7 +59,6 @@ jobs:
     - name: Install functorch
       shell: bash
       run: pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
-	  
     - name: Install other deps
       shell: bash
       run: pip install -r requirements.txt
