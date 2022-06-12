@@ -15,6 +15,7 @@ jobs:
         sudo yum update -y
         sudo yum -y install git python3-pip
         sudo pip3 install --upgrade pip
+        export PATH="$PATH:/usr/local/bin"
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
