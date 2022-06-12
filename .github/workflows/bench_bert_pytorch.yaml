@@ -1,4 +1,4 @@
-name: Torchbench - cuda - inductor - BERT_pytorch
+qname: Torchbench - cuda - inductor - BERT_pytorch
 
 on:
   push:
@@ -39,6 +39,9 @@ jobs:
     - name: nvcc check
       run: |
         nvcc --version
+    - name: Install setuptools
+      shell: bash
+      run: pip install setuptools
     - name: Install ninja
       shell: bash
       run: 	pip install ninja
