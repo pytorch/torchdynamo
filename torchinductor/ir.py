@@ -287,6 +287,7 @@ class Reduction(Loops):
 
             return Pointwise.create(device, dtype, fn, ranges)
 
+        """
         if is_triton(device):
             # triton doesn't support large reductions well, so break them up
             reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
@@ -302,6 +303,7 @@ class Reduction(Loops):
                     reduction_type,
                     split,
                 )
+        """
 
         return TensorBox.create(
             Reduction(

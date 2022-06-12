@@ -214,9 +214,12 @@ class RangeTreeEntry(RangeTree):
         self.codegen = functools.lru_cache(None)(self._codegen)
         self.codegen_next = functools.lru_cache(None)(self._codegen_next)
 
+    def writeline(self, line):
+        V.kernel.indexing_code.writeline(line)
+
     def _codegen_next(self):
         denom = texpr(V.kernel.rename_indexing(self.length))
-        V.kernel.indexing_code.writeline(
+        self.writeline(
             f"{self.name}_next = {self.parent.codegen_next()} // {TritonPrinter.paren(denom)}"
         )
         return f"{self.name}_next"
@@ -227,7 +230,7 @@ class RangeTreeEntry(RangeTree):
             line = f"{self.name} = {self.parent.codegen_next()}"
         else:
             line = f"{self.name} = {self.parent.codegen_next()} % {TritonPrinter.paren(denom)}"
-        V.kernel.indexing_code.writeline(line)
+        self.writeline(line)
         return self.name
 
     def symbol(self):
@@ -319,74 +322,40 @@ class TritonKernel(Kernel):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
-        all_vars = list(
-            itertools.chain.from_iterable(tree.var_list for tree in self.range_trees)
+        index_vars = set(index.free_symbols)
+        index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
+
+        # tmpX  means indirect indexing
+        need_dense = config.triton.dense_indexing or any(
+            str(v).startswith("tmp") for v in index_vars
         )
-        offset = index.subs(zero_vars(all_vars))
-        parts = []
-        for i in range(len(self.range_trees)):
-            other_vars = list(
-                itertools.chain.from_iterable(
-                    self.range_trees[j].var_list
-                    for j in range(len(self.range_trees))
-                    if i != j
-                )
-            )
-            parts.append(index.subs(zero_vars(other_vars)) - offset)
+        have_dense = True
+        have_loop_vars = False
+        mask = []
+        dense_mask = []
 
-        if index != offset + sum(parts):
-            # split failed, do a fallback
-            offset = 0
-            mask = []
-            addr = [texpr(self.rename_indexing(self.simplify_indexing(index)))]
-            have_dense = False
-            need_dense = True
-        else:
-            offset = self.rename_indexing(self.simplify_indexing(offset))
-            parts = [
-                self.rename_indexing(self.simplify_indexing(part)) for part in parts
-            ]
-
-            mask = []
-            addr = []
-
-            have_dense = True
-            need_dense = config.triton.dense_indexing or "tmp" in str(index)
-
-            for part, tree in zip(parts, self.range_trees):
-                if part != 0:
-                    addr.append(texpr(part))
-                    mask.append(f"{tree.prefix}mask")
-                elif tree.prefix == "r" and not self.inside_reduction:
-                    pass
-                else:
-                    have_dense = False
+        for tree in self.range_trees:
+            if tree.prefix == "r" and not self.inside_reduction:
+                continue
+            if index_vars.intersection(tree.var_list):
+                have_loop_vars = True
+                have_dense = False
+                mask.append(f"{tree.prefix}mask")
+            dense_mask.append(f"{tree.prefix}mask")
 
         if need_dense and not have_dense:
-            mask = [
-                f"{tree.prefix}mask"
-                for tree in self.range_trees
-                if tree.prefix != "r" or self.inside_reduction
-            ]
-            addr.append(f"tl.zeros({self.dense_size_str()}, tl.int32)")
-
-        if offset != 0:
-            addr.append(texpr(offset))
-
-        if not addr:
-            if copy_shape:
-                addr.append(f"tl.zeros({copy_shape}.shape, tl.int32)")
-                mask.extend([f"{tree.prefix}mask" for tree in self.range_trees[:-1]])
-            else:
-                addr.append("0")
+            mask = dense_mask
+            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+        elif not have_loop_vars and copy_shape:
+            mask = dense_mask
+            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
 
         if self._load_mask:
             mask.append(self._load_mask)
-
-        if not mask:
+        elif not mask:
             mask = ["None"]
 
-        return " + ".join(addr), " & ".join(mask)
+        return index_str, " & ".join(mask)
 
     def var_ranges(self):
         return (
