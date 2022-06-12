@@ -74,7 +74,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.log({x})"
+        # workaround https://github.com/openai/triton/issues/543
+        return f"tl.log({x}.to(tl.float32))"
 
     @staticmethod
     def isinf(x):
@@ -381,9 +382,8 @@ class TritonKernel(Kernel):
 
         return " + ".join(addr), " & ".join(mask)
 
-    def simplify_indexing(self, expr: sympy.Expr):
-        expr = V.graph.sizevars.simplify_with_ranges(
-            expr,
+    def var_ranges(self):
+        return (
             dict(
                 itertools.chain.from_iterable(
                     tree.var_ranges.items() for tree in self.range_trees
@@ -391,6 +391,8 @@ class TritonKernel(Kernel):
             ),
         )
 
+    def simplify_indexing(self, expr: sympy.Expr):
+        expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         nodes = [
             self.range_tree_nodes[sym]
             for sym in expr.free_symbols

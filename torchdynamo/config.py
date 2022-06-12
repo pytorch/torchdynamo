@@ -74,6 +74,7 @@ if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
         torch._refs,
         torch._prims,
+        torch._decomp,
     }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -85,4 +86,5 @@ allowed_functions_module_string_ignorelist = {
     "torch.testing",
     "torch._refs",
     "torch._prims",
+    "torch._decomp",
 }

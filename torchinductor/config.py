@@ -47,8 +47,8 @@ class triton:
     # Monkey patching to lower overheads
     hackery = False
 
-    # use triton conv as backend
-    use_conv = False
+    # choose conv backend, "aten" or "triton" or "autotune"
+    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
@@ -61,3 +61,6 @@ class triton:
 
     # use triton.autotune?
     autotune = True
+
+    # enable codegen to use Triton's mm
+    use_mm = False
