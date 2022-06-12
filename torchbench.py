@@ -60,8 +60,6 @@ os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 log = logging.getLogger(__name__)
 SKIP = {
-    # non-deterministic output / cant check correctness
-    "pyhpc_turbulent_kinetic_energy",
     # https://github.com/pytorch/torchdynamo/issues/101
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
@@ -76,6 +74,12 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+}
+
+# non-deterministic output / cant check correctness
+NONDETERMINISTIC = {
+    "pyhpc_turbulent_kinetic_energy",
+    "pyhpc_isoneutral_mixing",
 }
 
 # Some models have bad train dataset. We read eval dataset.
@@ -115,22 +119,47 @@ VERY_SLOW_BENCHMARKS = {
 
 # These benchmarks took >60s on an i9-11900K CPU
 SLOW_BENCHMARKS = {
-    *{
-        "BERT_pytorch",  # 137s
-        "demucs",  # 116s
-        "fastNLP_Bert",  # 242s
-        "hf_Albert",  # 221s
-        "hf_Bart",  # 400s
-        "hf_Bert",  # 334s
-        "hf_DistilBert",  # 187s
-        "hf_GPT2",  # 470s
-        "hf_Reformer",  # 141s
-        "speech_transformer",  # 317s
-        "vision_maskrcnn",  # 99s
-    },
     *VERY_SLOW_BENCHMARKS,
+    "BERT_pytorch",  # 137s
+    "demucs",  # 116s
+    "fastNLP_Bert",  # 242s
+    "hf_Albert",  # 221s
+    "hf_Bart",  # 400s
+    "hf_Bert",  # 334s
+    "hf_DistilBert",  # 187s
+    "hf_GPT2",  # 470s
+    "hf_Reformer",  # 141s
+    "speech_transformer",  # 317s
+    "vision_maskrcnn",  # 99s
 }
 
+# https://github.com/pytorch/torchdynamo/issues/331
+PYTHON_KEY_NOT_YET_WORKING = {
+    # RuntimeError: expected scalar type Half but found Float
+    "hf_BigBird",
+    # AttributeError: 'int' object has no attribute 'proxy'
+    "moco",
+    # AttributeError: 'Tensor' object has no attribute 'proxy'
+    "speech_transformer",
+    # torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
+    "tacotron2",
+    # requires training mode
+    "maml",
+}
+
+# https://github.com/pytorch/torchdynamo/issues/332
+TORCHINDUCTOR_NOT_YET_WORKING = {
+    *PYTHON_KEY_NOT_YET_WORKING,
+    # Crash with no warning message
+    "Super_SloMo",
+    "fastNLP_Bert",
+    # RuntimeError: CUDA: Error- invalid value
+    "dlrm",
+    "vision_maskrcnn",
+    # LLVM ERROR: Broken function found, compilation aborted!
+    # torch.randn missing
+    "hf_Reformer",
+}
 
 current_name = ""
 current_device = ""
@@ -297,6 +326,18 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
     return speedup_experiment(args, model_iter_fn, model, example_inputs)
 
 
+def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
+    prof = torchdynamo.utils.CompileProfiler()
+    with torchdynamo.optimize(prof, nopython=args.nopython):
+        model_iter_fn(model, example_inputs)
+    output_csv(
+        output_filename, ["model", "profiler report"], [current_name, prof.report()]
+    )
+    met = prof.get_metrics()
+    guard_failures = len(met["guard_failures"])
+    return [guard_failures]
+
+
 def randomize_input(inputs):
     if isinstance(inputs, (list, tuple)):
         return type(inputs)([randomize_input(x) for x in inputs])
@@ -319,6 +360,83 @@ def randomize_input(inputs):
         raise RuntimeError(
             f"randomize_input can not handle input of type {type(inputs)}"
         )
+
+
+def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_ctx):
+    compile_iters = 2
+    total_iters = compile_iters + 2
+    timings = np.zeros((total_iters, 2), np.float64)
+    # if we randomize the input, we should also check the result is correct
+    should_check_result = should_randomize_input = args.randomize_input
+    is_correct = True
+
+    for rep in range(total_iters):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+
+        # interleave the runs to handle frequency scaling and load changes
+        timings[rep, 0], expected_output = timed(
+            model, model_iter_fn, inputs, return_result=True
+        )
+        with optimize_ctx:
+            timings[rep, 1], actual_output = timed(
+                model, model_iter_fn, inputs, return_result=True
+            )
+        if should_check_result:
+            is_correct = is_correct and same(expected_output, actual_output)
+    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
+    worst = np.max(timings, axis=0)
+
+    def breakeven(dynamo_times, eager_times):
+        """
+        Solve for the number of iterations it takes dynamo to 'catch up' with eager,
+        taking into account the time it spent compiling.  Assumes all compilation
+        happens up front and the model is static thereafter, which is definitely not
+        true in general but might be across torchbench.
+
+            dc1, dc2 = dynamo compilation iterations (with Prof Exec)
+            d, e = dynamo, eager warmed up iteration
+            B = num iters to break even
+            dc1 + dc2 + (B-2)d = B*e
+            B = (dc1 + dc2 - 2d) / (e - d)
+        """
+        dc1, dc2, d = dynamo_times[0], dynamo_times[1], np.median(dynamo_times[2:])
+        e = np.median(eager_times)
+        if d < e:
+            return (dc1 + dc2 + 2 * d) / (e - d)
+        else:
+            # if optimized dynamo is not faster than eager we'll compute
+            # a nonsense negative number
+            return 0
+
+    speedup = worst[0] / worst[1]
+    eager_times, dynamo_times = timings[:, 0], timings[:, 1]
+    output_csv(
+        output_filename,
+        ("dev", "name", "cold-start speedup", "breakeven iters"),
+        [
+            current_device,
+            current_name,
+            float(speedup),
+            breakeven(dynamo_times, eager_times),
+        ],
+    )
+
+    def format_speedup(
+        speedup, pvalue, breakeven_iters, is_correct=True, pvalue_threshold=0.1
+    ):
+        if not is_correct:
+            return "ERROR"
+        if pvalue > pvalue_threshold:
+            return f"{speedup:.3f}x breakeven={breakeven_iters:.2f} iters SAME"
+        return f"{speedup:.3f}x breakeven={breakeven_iters:.2f} iters p={pvalue:.2f}"
+
+    return format_speedup(
+        speedup, pvalue, breakeven(dynamo_times, eager_times), is_correct=is_correct
+    )
 
 
 def speedup_experiment(args, model_iter_fn, model, example_inputs):
@@ -706,6 +824,11 @@ def main():
         action="store_true",
         help="Disables functionalization",
     )
+    parser.add_argument(
+        "--inductor-settings",
+        action="store_true",
+        help="Use same settings as --inductor for baseline comparisons",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -735,6 +858,9 @@ def main():
         "--speedup-ltc-trivial",
         action="store_true",
         help="speedup using the ltc backend without reusing compiled graph",
+    )
+    group.add_argument(
+        "--cold-start", action="store_true", help=help(cold_start_experiment)
     )
     group.add_argument(
         "--overhead", action="store_true", help=help(overhead_experiment)
@@ -816,6 +942,11 @@ def main():
         action="store_true",
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
+    group.add_argument(
+        "--recompile_profiler",
+        action="store_true",
+        help="Run the dynamo recompilation profiler on each model.",
+    )
 
     args = parser.parse_args()
 
@@ -837,6 +968,7 @@ def main():
             {
                 "hf_Longformer",
                 "timm_nfnet",
+                "timm_efficientdet",
             }
         )
 
@@ -879,6 +1011,21 @@ def main():
     if args.devices == ["cpu"]:
         SKIP.update(VERY_SLOW_BENCHMARKS)
 
+    if args.inductor or args.inductor_dynamic or args.inductor_settings:
+        SKIP.update(TORCHINDUCTOR_NOT_YET_WORKING)
+        args.isolate = True
+        args.cosine = True
+        if args.float16:
+            # TODO(jansel): check if correctness issue is real
+            SKIP.add("yolov3")
+        if not (args.float16 or args.float32):
+            # https://github.com/openai/triton/issues/543 causes only 98.8% similarity
+            NONDETERMINISTIC.add("pyhpc_equation_of_state")
+
+    if args.float16:
+        # these give `INCORRECT - Variation in Eager runs itself` sometimes
+        NONDETERMINISTIC.update({"demucs", "pyhpc_equation_of_state"})
+
     if args.no_skip:
         SKIP.clear()
 
@@ -890,6 +1037,16 @@ def main():
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
+    elif args.cold_start:
+        optimize_ctx = torchdynamo.optimize(
+            aot_autograd_speedup_strategy, nopython=args.nopython
+        )
+        experiment = cold_start_experiment
+        backend_str = "nvfuser" if args.nvfuser else "nnc"
+        output_filename = "cold_start_{backend_str}.csv"
+        args.isolate = True
+        # TODO(whc) should we move this to a more general part of the script?
+        torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
 
@@ -902,12 +1059,16 @@ def main():
         else:
             torchinductor.config.dynamic_shapes = False
 
-        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+        if args.training:
+            from torchinductor.compile_fx import compile_fx_training
+
+            optimize_ctx = torchdynamo.optimize(
+                compile_fx_training, nopython=args.nopython
+            )
+        else:
+            optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-        args.isolate = True
-        args.float32 = True
-        args.cosine = True
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
@@ -923,19 +1084,7 @@ def main():
         experiment = speedup_experiment
         output_filename = "pythonkey.csv"
         if not args.no_skip:
-            SKIP.update(
-                [
-                    # requires training mode
-                    "maml",
-                    # RuntimeError: toIValue() cannot handle converting to type: QScheme
-                    "mobilenet_v2_quantized_qat",
-                    "resnet50_quantized_qat",
-                    # RuntimeError: set_storage_offset is not allowed on a Tensor created from .data or .detach()
-                    "hf_BigBird",
-                    # RuntimeError: DispatchKey PythonTLSSnapshot doesn't correspond to a device
-                    "hf_Reformer",
-                ]
-            )
+            SKIP.update(PYTHON_KEY_NOT_YET_WORKING)
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
@@ -1048,6 +1197,9 @@ def main():
     elif args.log_conv_args:
         optimize_ctx = torchdynamo.optimize(conv_args_analysis, nopython=args.nopython)
         output_filename = "log_conv_args.csv"
+    elif args.recompile_profiler:
+        output_filename = "recompile_profiler_log.csv"
+        experiment = recompile_profiler_experiment
     else:
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
@@ -1188,7 +1340,7 @@ def run_one_model(
         correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
 
         torch.manual_seed(1337)
-        if current_name != "pyhpc_turbulent_kinetic_energy":
+        if current_name not in NONDETERMINISTIC:
             correct_rerun_result = model_iter_fn(copy.deepcopy(model), example_inputs)
             if not same(correct_result, correct_rerun_result):
                 print("INCORRECT - Variation in Eager runs itself")
@@ -1197,6 +1349,13 @@ def run_one_model(
 
         torch.manual_seed(1337)
         torchdynamo.reset()
+
+        if experiment.func is cold_start_experiment:
+            results = []
+            results.append(experiment(model, example_inputs, optimize_ctx))
+            print(" ".join(map(str, results)))
+            return 0
+
         try:
             with optimize_ctx:
                 new_result = model_iter_fn(model, example_inputs)
@@ -1204,7 +1363,7 @@ def run_one_model(
             logging.exception("unhandled error")
             print("ERROR")
             return sys.exit(-1)
-        if current_name == "pyhpc_turbulent_kinetic_energy":
+        if current_name in NONDETERMINISTIC:
             # This model has non-deterministic output so we cant
             # check correctness.
             # TODO(jansel): submit upstream fix for this

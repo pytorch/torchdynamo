@@ -35,7 +35,7 @@ INDEX_TYPE = "long"
 
 
 def reduction_init(reduction_type, dtype):
-    if reduction_type == "sum":
+    if reduction_type in ("sum", "any"):
         return 0
     # TODO(jansel): infinity for floats?
     if reduction_type == "max":
@@ -48,6 +48,8 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "any":
+        return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
 
 
@@ -133,6 +135,14 @@ class CppOverrides(OpOverrides):
         return f"std::trunc({x})"
 
     @staticmethod
+    def isinf(x):
+        return f"std::isinf({x})"
+
+    @staticmethod
+    def isnan(x):
+        return f"std::isnan({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 
@@ -203,7 +213,8 @@ class CppKernel(Kernel):
         self.reduction_suffix = IndentedBuffer()
         self.reduction_vars = {}
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+        # upcast argument is ignored on cpu
         var = self.args.input(name)
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
@@ -353,9 +364,24 @@ class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.kernel_group = KernelGroup()
-        self.group_fn = tuple
 
-    def codegen(self, group, reduction_group):
+    def group_fn(self, sizes):
+        return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+
+    def codegen(self, *groups):
+        group, reduction_group = groups
+
+        def check_group1(other_node):
+            other_groups = other_node.group
+            return (
+                check_group2(other_node)
+                or other_groups == groups
+                or other_groups == (group + reduction_group, ())
+            )
+
+        def check_group2(other_node):
+            return other_node.group == (group, ())
+
         kernel_group = self.kernel_group
         scheduler = self.scheduler
         with scheduler.kernel(kernel_group.new_kernel()) as kernel:
@@ -363,6 +389,7 @@ class CppScheduling:
 
             # first any pointwise sharing same loops
             for node in scheduler.pop_group((group + reduction_group, ())):
+                scheduler.maybe_remove_buffer(node, check_group1)
                 node.run(vars, reduction_vars)
                 node.mark_fusable()
 
@@ -370,15 +397,16 @@ class CppScheduling:
                 # reductions
                 reduction_nodes = list(scheduler.pop_group((group, reduction_group)))
                 for node in reduction_nodes:
-                    scheduler.maybe_remove_buffer(node)
                     node.run(vars, reduction_vars)
-                # can't yet fuse reduction into reduction
+
+                # can't fuse reduction into reduction, so do in seperate loop
                 for node in reduction_nodes:
                     node.mark_fusable()
 
                 # we can fuse in some extra pointwise into the suffix
                 with kernel.write_to_suffix():
                     for node in scheduler.pop_group((group, ())):
+                        scheduler.maybe_remove_buffer(node, check_group2)
                         node.run(vars, ())
                         node.mark_fusable()
 
@@ -493,7 +521,7 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
-            lookup = {"sum": "+", "min": "min", "max": "max"}
+            lookup = {"sum": "+", "min": "min", "max": "max", "any": "||"}
             reduction = " " + " ".join(
                 f"reduction({lookup[rtype]}:{var})"
                 for var, rtype in self.reduction_vars.items()

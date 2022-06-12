@@ -101,3 +101,70 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
                 func(a, b_p, c)  # a permutation should cause recompile
                 self.assertEqual(compile_counter.frame_count, 2)
+
+    def assert_single_log_contains(self, logs, contains_str):
+        self.assertEqual(len(logs.records), 1)
+        self.assertTrue(
+            logs.records[0].getMessage().find(contains_str) > 0,
+            msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
+        )
+
+    def test_verbose_tensor_check(self):
+        def func(a):
+            # Warning: choose a function here whose meta implementation lives
+            # entirely in C++.  If you do a Python one, Dynamo will dive into
+            # torch._refs which is OK but it will muddy up the warnings
+            return torch.add(a, 4)
+
+        def cache_fail_test(cached_input, missed_input, expected_failure):
+            # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient
+            torchdynamo.reset()
+            torchdynamo.utils.counters.clear()
+            with torchdynamo.optimize("eager"):
+                # warmup
+                func(cached_input)
+
+            with self.assertLogs(level="WARNING") as logs:
+                with torchdynamo.optimize("eager"):
+                    func(missed_input)
+            self.assert_single_log_contains(logs, expected_failure)
+
+        a = torch.rand(3, 4, 5)
+        cache_fail_test(
+            a, a[0:2, :, :], "tensor 'a' size mismatch at index 0. expected 3, actual 2"
+        )
+        cache_fail_test(
+            a,
+            a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
+            "tensor 'a' strides mismatch at index 0. expected 20, actual 1",
+        )
+        cache_fail_test(a, a[0, :, :], "tensor 'a' rank mismatch. expected 3, actual 2")
+        cache_fail_test(a, a.to("meta"), "tensor 'a' dispatch key set mismatch.")
+        cache_fail_test(
+            a,
+            a.to(torch.float16),
+            "tensor 'a' dtype mismatch. expected Float, actual Half",
+        )
+        a_grad = a.clone()
+        a_grad.requires_grad = True
+        cache_fail_test(
+            a, a_grad, "tensor 'a' requires_grad mismatch. expected requires_grad=0"
+        )
+
+    def test_mismatched_type(self):
+        a = torch.rand(3, 4, 5)
+        b = torch.rand(3, 4, 5)
+
+        def func(a, b):
+            return a + b
+
+        with torchdynamo.optimize("eager"):
+            # warmup
+            func(a, b)
+
+        with self.assertLogs(level="WARNING") as logs:
+            with torchdynamo.optimize("eager"):
+                func(a, 1)
+        self.assert_single_log_contains(
+            logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
+        )

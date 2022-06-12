@@ -2,6 +2,7 @@ import base64
 import functools
 import getpass
 import hashlib
+import operator
 import os
 import random
 import re
@@ -122,6 +123,8 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 cls.cache[key] = mod
                 cls.cache[key].key = key
+        if config.debug:
+            print(f"PyCodeCache {path}")
         return cls.cache[key]
 
 
@@ -203,40 +206,122 @@ class TritonCodeCache:
         return PyCodeCache.load(source_code)
 
 
-def pointwise_heuristics():
-    """args to @triton.heuristics()"""
+def block_size_fn(maximum, hint, key):
     from triton import next_power_of_2
 
+    if next_power_of_2(hint) >= maximum:
+        return lambda args: maximum
+
     def block_size(args):
-        return min(1024, next_power_of_2(args["numel"]))
+        return min(maximum, next_power_of_2(args[key]))
 
-    return {
-        "BLOCK_SIZE": block_size,
-    }
+    return block_size
 
 
-def reduction_heuristics():
+def conditional_product(*args):
+    return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=2):
+    from triton import Config
+
+    target = conditional_product(x, y, z)
+
+    # shrink sizes to size hints
+    x = min(x, size_hints[0])
+    if y:
+        y = min(y, size_hints[1])
+    if z:
+        z = min(z, size_hints[2])
+
+    # if we are below original block size, scale up where we can
+    while x < size_hints[0] and conditional_product(x, y, z) < target:
+        x *= 2
+    while y and y < size_hints[1] and conditional_product(x, y, z) < target:
+        y *= 2
+    while z and z < size_hints[2] and conditional_product(x, y, z) < target:
+        z *= 2
+
+    cfg = {"XBLOCK": x}
+    if y:
+        cfg["YBLOCK"] = y
+    if z:
+        cfg["ZBLOCK"] = z
+    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
+
+
+def apply_triton_config(config):
+    from triton import heuristics
+
+    def getter(name):
+        def get(args):
+            return config.kwargs[name]
+
+        return get
+
+    return heuristics({name: getter(name) for name in config.kwargs.keys()})
+
+
+def pointwise_heuristics(size_hints):
+    """
+    Construct @triton.heuristics() based on size_hints.
+    """
+    from triton import autotune
+
+    if len(size_hints) == 1:
+        return apply_triton_config(triton_config(size_hints, 1024))
+    if len(size_hints) == 2:
+        if not config.triton.autotune:
+            return apply_triton_config(triton_config(size_hints, 64, 64))
+        return autotune(
+            [
+                triton_config(size_hints, 64, 64),
+                triton_config(size_hints, 4, 256),
+                triton_config(size_hints, 256, 4),
+            ],
+            key=["xnumel", "ynumel"],
+        )
+    if len(size_hints) == 3:
+        return apply_triton_config(triton_config(size_hints, 16, 16, 16))
+    raise NotImplementedError(f"size_hints: {size_hints}")
+
+
+def reduction_heuristics(size_hints):
     """args to @triton.heuristics()"""
+    from triton import heuristics
     from triton import next_power_of_2
 
     def reduction_size(args):
-        return next_power_of_2(args["reduction_numel"])
+        return next_power_of_2(args["rnumel"])
 
-    def block_size(args):
-        return max(next_power_of_2(1024 // args["REDUCTION_SIZE"]), 1)
+    if len(size_hints) == 2:
+        return heuristics(
+            {
+                "RBLOCK": reduction_size,
+                "XBLOCK": block_size_fn(
+                    next_power_of_2(4096 // size_hints[-1] or 1),
+                    size_hints[0],
+                    "xnumel",
+                ),
+                # "num_warps": lambda args: num_warps(args["rnumel"]),
+            }
+        )
+    raise NotImplementedError(f"size_hints: {size_hints}")
 
-    return {
-        "REDUCTION_SIZE": reduction_size,
-        "BLOCK_SIZE": block_size,
-    }
+
+def cdiv(numel, bs):
+    return (numel + bs - 1) // bs
 
 
-def grid(numel):
-    """Helper function to compute triton grids for pointwise ops"""
+def grid(xnumel, ynumel=None, znumel=None):
+    """Helper function to compute triton grids"""
 
     def grid_fn(meta):
-        bs = meta["BLOCK_SIZE"]
-        # inlined triton.cdiv
-        return ((numel + bs - 1) // bs,)
+        result = [cdiv(xnumel, meta["XBLOCK"])]
+        if ynumel:
+            result.append(cdiv(ynumel, meta["YBLOCK"]))
+            if znumel:
+                result.append(cdiv(znumel, meta["ZBLOCK"]))
+        return result
 
     return grid_fn

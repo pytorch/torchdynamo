@@ -70,9 +70,9 @@ class RecordLoadStore(V.MockHandler):
         self._index_exprs = set()
         self._size = tuple([x for x in size if x != 1])
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         self._reads.add(MemoryDep(name, index, self._size))
-        return f"load({name}, {index})"
+        return f"load({name}, {index}, {upcast})"
 
     def store(self, name, index, value):
         self._writes.add(MemoryDep(name, index, self._size))
@@ -86,18 +86,32 @@ class RecordLoadStore(V.MockHandler):
         return f"index_expr({index}, {dtype})"
 
 
-def index_vars(*argsizes, prefix="d"):
-    from .ir import SqueezeView
+def var_builder(prefix):
+    cnt = itertools.count()
+    var_ranges = collections.OrderedDict()
 
     def add_var(length):
-        v = sympy.Symbol(f"{prefix}{next(cnt)}")
+        v = sympy.Symbol(f"{prefix}{next(cnt)}", is_integer=True)
         var_ranges[v] = length
         return v
 
-    var_ranges = collections.OrderedDict()
+    return var_ranges, add_var
+
+
+def index_vars_no_squeeze(*argsizes, prefix):
+    var_ranges, add_var = var_builder(prefix)
+    args = []
+    for size in argsizes:
+        args.append(list(map(add_var, size)))
+    return args, var_ranges
+
+
+def index_vars_squeeze(*argsizes, prefix="d"):
+    from torchinductor.ir import SqueezeView
+
+    var_ranges, add_var = var_builder(prefix)
     args = []
     new_sizes = []
-    cnt = itertools.count()
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -106,7 +120,7 @@ def index_vars(*argsizes, prefix="d"):
 
 
 def extract_read_writes(fn, *argsizes):
-    new_sizes, args, var_ranges = index_vars(*argsizes)
+    new_sizes, args, var_ranges = index_vars_squeeze(*argsizes)
     rw = RecordLoadStore(new_sizes[0])
     with V.set_ops_handler(rw):
         fn(*args)

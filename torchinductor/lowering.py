@@ -47,6 +47,15 @@ DTYPE_ID_LOOKUP = {
 }
 
 
+def has_torchvision_roi_align():
+    try:
+        from torchvision.ops import roi_align  # noqa
+
+        return roi_align is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def decode_dtype(dtype: int):
     if not isinstance(dtype, int):
         return dtype
@@ -187,6 +196,7 @@ def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=
     return inner
 
 
+@register_lowering(torch.ops.prims.convert_element_type, type_promote=False)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
         return x
@@ -273,6 +283,11 @@ def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
 
+    if isinstance(a, (float, int)):
+        a = constant_like(a)(b)
+    if isinstance(b, (float, int)):
+        b = constant_like(b)(a)
+
     dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
     return make_pointwise(fn, override_dtype=dtype)(
         cond, to_dtype(a, dtype), to_dtype(b, dtype)
@@ -327,6 +342,11 @@ def expand(x, sizes):
         return x
     x.mark_reuse(V.graph.sizevars.size_hint(product(sizes) / product(x.get_size())))
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
+
+
+@register_lowering(aten.expand_as)
+def expand_as(x, y):
+    return expand(x, y.get_size())
 
 
 @register_lowering(aten.repeat)
@@ -405,7 +425,7 @@ def select(x, dim, idx):
 
 
 @register_lowering(aten.split)
-def split(x, sizes, dim):
+def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, int):
@@ -420,7 +440,7 @@ def split(x, sizes, dim):
 
 
 @register_lowering(aten.split_with_sizes)
-def split_with_sizes(x, sizes, dim):
+def split_with_sizes(x, sizes, dim=0):
     return split(x, sizes, dim)
 
 
@@ -511,51 +531,6 @@ def _embedding_bag(
     )
 
 
-@register_lowering(aten._cudnn_rnn, type_promote=False)
-def _cudnn_rnn(*args):
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten._cudnn_rnn, *args),
-        )
-    )
-
-
-@register_lowering(aten.sort, type_promote=False)
-def sort(*args):
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten.sort, *args),
-        )
-    )
-
-
-@register_lowering(aten.topk, type_promote=False)
-def topk(*args):
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten.topk, *args),
-        )
-    )
-
-
-@register_lowering(torch.randperm, type_promote=False)
-def randperm(*args):
-    return TensorBox.create(ir.FallbackKernel.create(aten.randperm, *args))
-
-
-@register_lowering(aten.grid_sampler_2d, type_promote=False)
-def grid_sampler_2d(*args):
-    return TensorBox.create(ir.FallbackKernel.create(aten.grid_sampler_2d, *args))
-
-
-@register_lowering(aten.norm, type_promote=False)
-def norm(*args):
-    return TensorBox.create(ir.FallbackKernel.create(aten.norm, *args))
-
-
 @register_lowering(aten.native_dropout, type_promote=False)
 def native_dropout(x, p, train):
     # There is a decomp in core for this, but it produces different answers than eager
@@ -567,6 +542,35 @@ def native_dropout(x, p, train):
             )
         )
     return x, ones_like(x, dtype=torch.bool)
+
+
+def make_fallback(kernel):
+    @register_lowering(kernel, type_promote=False)
+    def handler(*args):
+        result = ir.FallbackKernel.create(kernel, *args)
+        if isinstance(result, (list, tuple)):
+            return list(map(TensorBox.create, result))
+        else:
+            return TensorBox.create(result)
+
+
+if has_torchvision_roi_align():
+    make_fallback(torch.ops.torchvision.roi_align)
+
+make_fallback(aten._cudnn_rnn)
+make_fallback(aten.convolution_backward)
+make_fallback(aten.sort)
+make_fallback(aten.topk)
+make_fallback(aten.randperm)
+make_fallback(aten.grid_sampler_2d)
+make_fallback(aten.avg_pool2d_backward)
+make_fallback(aten._adaptive_avg_pool2d_backward)
+make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten.max_pool2d_with_indices_backward)
+make_fallback(aten.native_batch_norm_backward)
+make_fallback(aten.reflection_pad2d_backward)
+make_fallback(aten._cudnn_rnn_backward)
+make_fallback(aten.upsample_nearest2d_backward)
 
 
 @register_lowering(aten.convolution)
@@ -751,6 +755,9 @@ def _local_scalar_dense(data):
 
 
 def _full(fill_value, device, dtype, size):
+    if isinstance(fill_value, ir.Constant):
+        fill_value = fill_value.value
+    assert isinstance(fill_value, (int, float)), fill_value
     return Pointwise.create(
         device=device,
         dtype=dtype,
@@ -760,9 +767,12 @@ def _full(fill_value, device, dtype, size):
 
 
 def constant_like(fill_value):
-    def _constant_like(x, *, dtype=None, device=None, layout=0, pin_memory=False):
+    def _constant_like(
+        x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+    ):
         assert not pin_memory
         assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1270,12 +1280,12 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def make_reduction(reduction_type: str):
+def make_reduction(reduction_type: str, override_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
         assert (
-            reduction_type in ("sum", "amax", "amin") or axis is None
+            reduction_type in ("sum", "amax", "amin", "any") or axis is None
         ), "TODO: max with index"
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
@@ -1316,11 +1326,13 @@ def make_reduction(reduction_type: str):
         inner_loader = x.make_loader()
         result = Reduction.create(
             device=x.get_device(),
-            dtype=x.get_dtype(),
+            dtype=override_dtype or x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
-            reduction_type=reduction_type.lstrip("a"),  # amax=>max
+            reduction_type={"amax": "max", "amin": "min"}.get(
+                reduction_type, reduction_type
+            ),
         )
         result.realize()
         return result
@@ -1465,6 +1477,7 @@ register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
+register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
 
 add = register_pointwise(aten.add)
 div = register_pointwise(aten.div)
@@ -1493,6 +1506,8 @@ register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.trunc)
 register_pointwise(aten.floor)
+register_pointwise(aten.isinf, override_dtype=torch.bool)
+register_pointwise(aten.isnan, override_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)

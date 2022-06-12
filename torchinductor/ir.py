@@ -64,8 +64,10 @@ class ModularIndexing(sympy.Function):
         ):
             return (base // divisor) % modulus
 
-        if divisor != 1 and sympy.gcd(base, divisor) == divisor:
-            return ModularIndexing(base / divisor, sympy.Integer(1), modulus)
+        if divisor != 1:
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return ModularIndexing(base / gcd, divisor / gcd, modulus)
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -92,8 +94,9 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        if sympy.gcd(base, divisor) == divisor:
-            return base / divisor
+        gcd = sympy.gcd(base, divisor)
+        if gcd != 1:
+            return IndexingDiv(base / gcd, divisor / gcd)
 
 
 class CleanDiv(IndexingDiv):
@@ -103,6 +106,11 @@ class CleanDiv(IndexingDiv):
     """
 
     pass
+
+
+def is_triton(device):
+    # TODO(jansel): a config check once we have multi-backend
+    return device.type == "cuda"
 
 
 class IRNode(object):
@@ -289,6 +297,12 @@ class Reduction(Loops):
                 reduction_type,
             )
         )
+
+    @staticmethod
+    def default_value(reduction_type, dtype):
+        return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
+            reduction_type
+        ]
 
 
 def is_storage_and_layout(x):
@@ -559,15 +573,7 @@ class View(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        try:
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        except AssertionError:
-            # optimistic algorithm failed, lets do a fallback
-            flat = [product(old_size)]
-            reindex1 = cls.dynamic_reshape_indexer(old_size, flat)
-            reindex2 = cls.dynamic_reshape_indexer(flat, new_size)
-            reindex = fuse_reindexing(reindex1, reindex2)
-
+        reindex = cls.dynamic_reshape_indexer(old_size, new_size)
         return cls(x, tuple(new_size), reindex)
 
     @staticmethod
@@ -589,8 +595,20 @@ class View(BaseView):
         V.graph.sizevars.guard_equals(product(old_size), product(new_size))
         return old_size, new_size
 
+    @classmethod
+    def dynamic_reshape_indexer(cls, old_size, new_size):
+        try:
+            reindex = cls._dynamic_reshape_indexer(old_size, new_size)
+        except (AssertionError, IndexError):
+            # optimistic algorithm failed, lets do a fallback
+            flat = [product(old_size)]
+            reindex1 = cls._dynamic_reshape_indexer(old_size, flat)
+            reindex2 = cls._dynamic_reshape_indexer(flat, new_size)
+            reindex = fuse_reindexing(reindex1, reindex2)
+        return reindex
+
     @staticmethod
-    def dynamic_reshape_indexer(old_size, new_size):
+    def _dynamic_reshape_indexer(old_size, new_size):
         """
         Perform a reshape entirely by modifying indexing math
         """
@@ -697,7 +715,10 @@ class ReinterpretView(BaseView):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            return ops.load(self.get_name(), indexer(index))
+            upcast = (
+                self.get_dtype() == torch.float16 or self.get_dtype == torch.bfloat16
+            )
+            return ops.load(self.get_name(), indexer(index), upcast)
 
         return loader
 
@@ -1033,7 +1054,10 @@ class Buffer(IRNode):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            return ops.load(self.name, indexer(index))
+            upcast = (
+                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
+            )
+            return ops.load(self.name, indexer(index), upcast)
 
         return loader
 
@@ -1124,7 +1148,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars(
+            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -1148,9 +1172,19 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_loops(self):
-        _, args, var_ranges = dependencies.index_vars(
-            self.data.get_size(), self.data.get_reduction_size(), prefix="z"
+    def simplify_reorder_and_tile(self):
+        """
+        This is the main place where we do loop transformations in a
+        backend-agnostic way.
+
+        Here we:
+            1) Remove any 1 dimensions
+            2) Fuse contiguous dimensions together
+            3) Reorder dimensions based on stride orders
+            4) Split dimensions into tiles
+        """
+        _, args, var_ranges = dependencies.index_vars_squeeze(
+            self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         body = LoopBody(
             self.get_store_function(),
@@ -1184,16 +1218,129 @@ class ComputedBuffer(Buffer):
         iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
         reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
 
-        def body_wrapper(index, reduce_index=None):
-            if not reduce_ranges and reduce_index:
-                index = [*index, *reduce_index]
-                reduce_index = None
-            index = iter_reindex(index)
-            if reduce_index:
-                index = [*index, *reduce_reindex(reduce_index)]
-            return body(index)
+        # retrace the loop body with simplification and reordering applied
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_ranges, reduce_ranges, prefix="z"
+        )
+        body = LoopBody(
+            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+        )
 
-        return iter_ranges, reduce_ranges, body_wrapper
+        # TODO(jansel): support tiling with modular indexing
+        has_modular_indexing = any(
+            ("ModularIndexing" in str(expr) or "IndexingDiv" in str(expr))
+            for expr in body.indexing_exprs.values()
+        )
+
+        if (
+            is_triton(self.get_device())
+            and not self.get_reduction_type()
+            and iter_ranges
+            and not has_modular_indexing
+            and config.triton.max_tiles > 1
+        ):
+            # TODO(jansel): should we include store strides here or just loads?
+            strides = [
+                V.graph.sizevars.stride_hints(expr, iter_vars)
+                for expr in body.reads
+                # TODO(jansel): how should we tile indirect loads?
+                if "indirect" not in str(expr)
+            ]
+            tiled_ranges = self._tile_contiguous(iter_ranges, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), body
+
+            # alternate tiling heuristic
+            tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), call
+
+        return (iter_ranges, reduce_ranges), body
+
+    @classmethod
+    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides):
+        """
+        Break iter_ranges up into at most max_tiles tiles based on stride==1
+        dimensions.
+
+        Transformation on iter_range like:
+            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
+
+        Where each group will be tiled in a different dimension in the
+        output kernel.
+        """
+        tiles = []
+        current_tile = []
+        max_tiles = config.triton.max_tiles
+
+        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
+        for i in range(len(iter_ranges)):
+            current_tile.append(iter_ranges[i])
+            # break tiles on stride 1
+            if any(stride[i] == 1 for stride in strides):
+                tiles.append(current_tile)
+                current_tile = []
+
+        if current_tile:
+            tiles.append(current_tile)
+
+        if len(tiles) > max_tiles:
+            split = len(tiles) - max_tiles + 1
+            tiles = [[*itertools.chain(*tiles[:split])]] + tiles[split:]
+            assert len(tiles) == max_tiles, (len(tiles), max_tiles, split)
+
+        return tiles
+
+    @classmethod
+    def _tile_broadcasting(cls, iter_ranges: List[sympy.Expr], body, strides):
+        """
+        Break ranges up so that one dimension is all broadcasting.
+
+        Transformation on iter_ranges like:
+            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
+
+        Where each group will be tiled in a different dimension in the
+        output kernel.
+        """
+        broadcasting_strides = [
+            stride for stride in strides if any(s == 0 for s in stride)
+        ]
+        if not broadcasting_strides:
+            return (iter_ranges,), body
+
+        # TODO(jansel): consider another load?  for now just take first one
+        broadcasting_stride = broadcasting_strides[0]
+
+        broadcast_ranges = []
+        broadcast_index = []
+        other_ranges = []
+        other_index = []
+
+        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
+        for i in range(len(iter_ranges)):
+            if broadcasting_stride[i] == 0:
+                broadcast_index.append(i)
+                broadcast_ranges.append(iter_ranges[i])
+            else:
+                other_index.append(i)
+                other_ranges.append(iter_ranges[i])
+
+        def call(broadcast, other, reduction=None):
+            assert not reduction
+            assert len(broadcast) == len(broadcast_index)
+            assert len(other) == len(other_index)
+            args = [None] * len(iter_ranges)
+            for i, v in itertools.chain(
+                zip(broadcast_index, broadcast),
+                zip(other_index, other),
+            ):
+                args[i] = v
+            return body(args)
+
+        if broadcast_ranges and other_ranges:
+            return (broadcast_ranges, other_ranges), call
+        else:
+            return (iter_ranges,), body
 
     @classmethod
     def _simplify_loops(cls, index_vars, sizes, index_formulas):
@@ -1274,9 +1421,10 @@ class ComputedBuffer(Buffer):
             assert strides.shape == (len(memory_addrs), len(index_vars))
             order = list(reversed(pick_loop_order(strides, sizes)))
         except Exception:
-            log.warning(
-                f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
-            )
+            if config.debug:
+                log.warning(
+                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
@@ -1429,6 +1577,12 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def realize_input(cls, x):
+        if x is None:
+            return V.graph.add_tensor_constant(torch.tensor(()))
+        if isinstance(x, Constant):
+            return V.graph.add_tensor_constant(
+                torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
+            )
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
@@ -1510,6 +1664,15 @@ class ExternKernelAlloc(ExternKernel):
 
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
+
+    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+        super().__init__(layout, inputs, constant_args, output_view)
+        if (
+            config.triton.use_mm
+            and len(inputs) > 0
+            and inputs[0].get_device().type == "cuda"
+        ):
+            self.kernel = "triton_mm_out"
 
     @classmethod
     def create(cls, a, b):
@@ -1658,8 +1821,12 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
-        assert getattr(torch.ops.aten, kernel.__name__) is kernel
-        self.kernel = f"aten.{kernel.__name__}"
+        if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
+            self.kernel = f"aten.{kernel.__name__}"
+        else:
+            self.kernel = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+            )
         self.unflatten_args = unflatten_args
 
     def codegen_args(self):
@@ -1725,15 +1892,19 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             )
             return [
-                MultiOutput(
-                    FixedLayout(
-                        example_output[i].device,
-                        example_output[i].dtype,
-                        [sympy.Integer(s) for s in example_output[i].size()],
-                        [sympy.Integer(s) for s in example_output[i].stride()],
-                    ),
-                    packed,
-                    i,
+                (
+                    MultiOutput(
+                        FixedLayout(
+                            example_output[i].device,
+                            example_output[i].dtype,
+                            [sympy.Integer(s) for s in example_output[i].size()],
+                            [sympy.Integer(s) for s in example_output[i].stride()],
+                        ),
+                        packed,
+                        i,
+                    )
+                    if example_output[i] is not None
+                    else None
                 )
                 for i in range(len(example_output))
             ]
@@ -1773,7 +1944,30 @@ class MultiOutput(ExternKernel):
 
 
 class Convolution(ExternKernelAlloc):
-    kernel = "aten.convolution"
+    config_conv = config.triton.convolution
+    if config_conv == "aten":
+        kernel = "aten.convolution"
+    elif config_conv == "triton":
+        kernel = "triton_ops_conv"
+    else:
+        assert config_conv == "autotune"
+        kernel = "tuned_conv"
+
+    def codegen(self, wrapper):
+        if self.kernel == "triton_ops_conv":
+            wrapper.header.writeline(
+                f"import torchinductor.triton_ops.conv as {self.kernel}"
+            )
+        # choose from different conv kernels
+        elif self.kernel == "tuned_conv":
+            wrapper.header.writeline(
+                f"from torchinductor.codegen.autotuner import {self.kernel}"
+            )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
 
     @classmethod
     def create(
@@ -1860,12 +2054,18 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
+        # memory layout order of output depends on x
+        size_hint = V.graph.sizevars.size_hint
+        x_stride = [size_hint(i) for i in x.get_stride()]
+        order = sorted(range(len(x_stride)), key=x_stride.__getitem__)
+
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
             # TODO(jansel): fix channels last case
-            FlexibleLayout.contiguous_strides(output_size),
+            # FlexibleLayout.contiguous_strides(output_size),
+            FlexibleLayout.ordered_strides(output_size, order),
         )
 
         if bias is not None:
@@ -2002,7 +2202,8 @@ class LoopBody:
         self.indirect_vars.append([var])
         return var
 
-    def __call__(self, index=()):
+    def __call__(self, *indices):
+        index = list(itertools.chain(*indices))
         assert len(index) == len(self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
@@ -2032,9 +2233,9 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
-            def load(self, name: str, index: sympy.Expr):
+            def load(self, name: str, index: sympy.Expr, upcast: bool = False):
                 index = add_index(index, "reads")
-                return self._inner.load(name, index)
+                return self._inner.load(name, index, upcast)
 
             def store(self, name, index, value):
                 index = add_index(index, "writes")

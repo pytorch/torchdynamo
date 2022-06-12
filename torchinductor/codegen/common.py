@@ -61,6 +61,11 @@ class OpOverrides:
         return getattr(self._parent, item)
 
     @staticmethod
+    def identity(value):
+        # used to trigger cse
+        return value
+
+    @staticmethod
     def constant(value, dtype):
         return repr(value)
 
@@ -321,6 +326,7 @@ class CSE:
         )
 
     def generate(self, buffer: IndentedBuffer, expr: str, write=True):
+        assert isinstance(expr, str), expr
         if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
             return expr
         if expr not in self.cache:
@@ -380,16 +386,16 @@ class Kernel(CodeGen):
         self.stores = stores
         self.cse = cse
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         raise NotImplementedError()
 
-    def indirect_load(self, name: str, index: sympy.Expr):
+    def indirect_load(self, name: str, index: sympy.Expr, upcast: bool = False):
         """A load the depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
             self.loads = self.compute
-            return self.load(name, index)
+            return self.load(name, index, upcast)
         finally:
             self.loads = prior
 
@@ -415,16 +421,16 @@ class Kernel(CodeGen):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
-            def load(name: str, index: sympy.Expr):
+            def load(name: str, index: sympy.Expr, upcast: bool = False):
                 if "tmp" in str(index):
-                    return self.indirect_load(name, index)
+                    return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
                 if (name, index) in store_cache:
                     return store_cache[(name, index)]
                 if (name, self.rename_indexing(index)) in store_cache:
                     # TODO(jansel): figure out why we need this second case
                     return store_cache[(name, self.rename_indexing(index))]
-                return self.load(name, index)
+                return self.load(name, index, upcast)
 
             @staticmethod
             def store(name, index, value):

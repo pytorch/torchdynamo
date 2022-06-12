@@ -67,8 +67,8 @@ class TensorVariable(VariableTracker):
         assert "example_value" not in proxy.node.meta
         if not config.dynamic_propagation:
             if isinstance(example_value, torch.Tensor):
-                options.update(TensorVariable.specialize(example_value))
-            return TensorVariable(proxy, **options)
+                options.update(cls.specialize(example_value))
+            return cls(proxy, **options)
 
         with preserve_rng_state():
             if example_value is None:
@@ -93,8 +93,8 @@ class TensorVariable(VariableTracker):
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = clone_tensor(example_value)
-            options.update(TensorVariable.specialize(example_value))
-            return TensorVariable(proxy, **options)
+            options.update(cls.specialize(example_value))
+            return cls(proxy, **options)
         elif (
             istype(example_value, (torch.Size, int, bool, float))
             and config.dynamic_shapes
@@ -126,7 +126,7 @@ class TensorVariable(VariableTracker):
                     )
                 else:
                     unpacked.append(
-                        TensorVariable.create(
+                        cls.create(
                             tx,
                             proxy.tracer.create_proxy(
                                 "call_function", operator.getitem, (proxy, i), {}
@@ -314,7 +314,7 @@ class TensorVariable(VariableTracker):
                 assert not config.dynamic_shapes
                 return ConstantVariable(self.size[0], **options)
             else:
-                return TensorVariable.create(
+                return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
                         "call_function", len, (self.as_proxy(),), {}
@@ -340,7 +340,7 @@ class TensorVariable(VariableTracker):
             ):
                 name = "new_empty"
 
-            return TensorVariable.create(
+            return self.__class__.create(
                 tx,
                 tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
@@ -482,3 +482,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
         # example tensor from going into the override.
         with torch._C.DisableTorchFunction():
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
+
+
+class UnspecializedPrimitiveVariable(TensorVariable):
+    """
+    This is a 1-element tensor represents unspecialized primitive type,
+    e.g, int, float, np.int, np.float, etc
+    """
+
+    pass

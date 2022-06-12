@@ -3,6 +3,8 @@ import collections
 import copy
 import inspect
 import itertools
+import random
+import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
@@ -17,6 +19,13 @@ import torchdynamo.testing
 import torchdynamo.utils
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
+
+try:
+    import torch._refs
+
+    HAS_REFS = True
+except ImportError:
+    HAS_REFS = False
 
 
 def ifdyn(count1, count2):
@@ -1163,7 +1172,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["total"], 3)
 
-    def test_guard_fail(self):
+    def test_guard_fail_tensor_bool(self):
         @torchdynamo.skip
         def fn():
             condition_shape = (5, 5)
@@ -1208,3 +1217,61 @@ class ReproTests(torchdynamo.testing.TestCase):
         fn()
         with torchdynamo.optimize("eager"):
             fn()
+
+    def test_guard_fail_nested_tuple(self):
+        def fn(args):
+            return torch.ones(()), args[0] * 2
+
+        with torchdynamo.optimize("eager"):
+            # This adds a tensor check on args[1][0] and args[1][1]
+            args = (torch.ones(1), (torch.ones(1), torch.ones(1)))
+            ref = fn(args)
+            args = (torch.ones(1), torch.ones(1))
+            res = fn(args)
+
+        self.assertTrue(same(ref, res))
+
+    def test_numpy_list(self):
+        @torchdynamo.disable
+        def rand_gen():
+            return list(np.array([random.randint(5, 10) for _ in range(10)]))
+
+        def fn(x):
+            random_list = rand_gen()
+            z = torch.LongTensor(random_list)
+            return x * z
+
+        x = torch.ones(10) * 2
+
+        random.seed(0)
+        ref0 = fn(x)
+        ref1 = fn(x)
+
+        random.seed(0)
+        with torchdynamo.optimize("eager"):
+            res0 = fn(x)
+            res1 = fn(x)
+
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
+
+    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
+    @unittest.expectedFailure
+    def test_primtorch(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            torch._refs.abs(x)
+
+        fn(torch.randn(3))
+
+    @unittest.skipIf(
+        not isinstance(torch.ops.aten.abs, torch._ops.OpOverloadPacket),
+        "old pt doesn't work",
+    )
+    def test_torch_ops_aten(self):
+        # Picked an op that doesn't show up in the default list
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return torch.ops.aten.absolute(x)
+
+        fn(torch.randn(3))

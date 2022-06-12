@@ -7,8 +7,8 @@ import re
 import types
 from abc import ABCMeta
 from typing import Any
+from typing import List
 
-import numpy as np
 import torch
 
 import torchdynamo
@@ -27,6 +27,8 @@ from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
 from ..utils import is_namedtuple
+from ..utils import is_numpy_float_type
+from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype
 from ..utils import tuple_iterator
@@ -51,9 +53,11 @@ from .misc import LambdaVariable
 from .misc import NumpyVariable
 from .misc import PythonModuleVariable
 from .misc import SkipFilesVariable
+from .misc import TypingVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
+from .tensor import UnspecializedPrimitiveVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -125,7 +129,7 @@ class VariableBuilder:
             # One can index a tensor with a list/tuple. Therefore, we need to
             # have a stricter match.
             if istype(value, (tuple, list)) and all(
-                [isinstance(x, int) or x is None for x in value]
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
             ):
                 guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             else:
@@ -226,6 +230,11 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif value is List:
+            return TypingVariable(
+                value,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         elif value is inspect.signature:
             return LambdaVariable(
                 InspectSignatureVariable.create,
@@ -273,20 +282,18 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        if istype(
-            value,
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            ),
-        ):
-            return self._wrap(int(value))
+        elif is_numpy_int_type(value) or is_numpy_float_type(value):
+            self.tx.output.graphargs.append(
+                GraphArg(self.get_source(), torch.tensor(value))
+            )
+            return UnspecializedPrimitiveVariable.create(
+                tx=self.tx,
+                proxy=self.tx.output.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                ),
+                example_value=torch.tensor(value),
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)

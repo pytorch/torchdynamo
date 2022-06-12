@@ -13,6 +13,7 @@ import types
 import typing
 from typing import Any
 from typing import Dict
+from typing import Iterable
 from typing import List
 from unittest.mock import patch
 
@@ -38,6 +39,7 @@ from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
 from .exc import Unsupported
 from .exc import unimplemented
+from .guards import GuardBuilder
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
@@ -224,10 +226,11 @@ class InstructionTranslatorBase(object):
                 return newvar
             return v
 
-        self.output.side_effects.apply(repl)
-        self.stack = [VariableTracker.apply(repl, x) for x in self.stack]
+        cache = dict()
+        self.output.side_effects.apply(repl, cache)
+        self.stack = [VariableTracker.apply(repl, x, cache) for x in self.stack]
         for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(repl, x)
+            self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(
@@ -283,7 +286,7 @@ class InstructionTranslatorBase(object):
             return inst.opname != "RETURN_VALUE"
         except Unsupported as exc:
             exc.real_stack.append(self.frame_summary())
-            if not self.checkpoint:
+            if self.empty_checkpoint():
                 raise
 
         # generate code from checkpoint
@@ -1104,6 +1107,18 @@ class InstructionTranslatorBase(object):
         ) = state
         self.output.restore_graphstate(output_state)
 
+    def empty_checkpoint(self):
+        if self.checkpoint is None:
+            return True
+        output_graphstate = self.checkpoint[1][0]
+        graphstate = self.checkpoint[1][1:]
+        state = (*output_graphstate, *graphstate)
+        for obj in state:
+            if isinstance(obj, Iterable):
+                if len(obj) != 0:
+                    return False
+        return True
+
     def frame_summary(self):
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
@@ -1190,12 +1205,39 @@ class InstructionTranslator(InstructionTranslatorBase):
             if k in f_locals
         )
 
-        # TODO(jansel): figure out why the following is needed for detectron2_maskrcnn
+        # symbolic_locals contains the mapping from original f_locals to the
+        # Variable objects. During the Variable building phase, each object also
+        # has its associated guards. At the end, we will accumulate these
+        # guards.
+        #
+        # One way of handling these guards is to just accumulate all of them
+        # right now. However, many f_locals might not be used in the frame and
+        # thus can unnecessarily increase guard execution overhead.  Therefore,
+        # we selectively update output.guards as we run the Python Bytecode
+        # instruction by instruction.
+        #
+        # An exception here is list/dict variables. Guards related to these
+        # variables have indexed access, like Tensor_match on args[0], and if
+        # args is not used in this frame, we will miss a LIST_LENGTH check like
+        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+        # next invocation when args is not a list, and args[0] is a runtime
+        # error. Therefore, we recursively add guards for list/dict variable here.
         for val in self.symbolic_locals.values():
             if isinstance(
                 val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
             ):
-                self.output.guards.update(val.guards)
+                local_guards = VariableTracker.propagate(val)["guards"]
+                index_guards = [
+                    guard
+                    for guard in local_guards
+                    if guard.create_fn
+                    in (
+                        GuardBuilder.LIST_LENGTH,
+                        GuardBuilder.DICT_KEYS,
+                        GuardBuilder.ODICT_KEYS,
+                    )
+                ]
+                self.output.guards.update(index_guards)
 
         self._freevars_ids = dict()
         for name in self.code_options["co_freevars"]:
@@ -1277,6 +1319,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
         if func.has_self():
             unimplemented("inline with __self__")
+
+        if func.get_name() == "patched_init":
+            unimplemented("Patched init cannot be inlined.")
+
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):

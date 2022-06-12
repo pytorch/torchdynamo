@@ -1,5 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <sstream>
 #include <torch/extension.h>
 
 namespace {
@@ -57,6 +58,62 @@ public:
       }
     }
     return true;
+  }
+
+  std::string check_verbose(const LocalState &state, const at::Tensor &v,
+                            std::string tensor_name) {
+    std::stringstream fail_reason;
+    fail_reason << "tensor '" << tensor_name << "' ";
+    if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+      // return fmt::format("tensor dispatch key mismatch. expected {}, actual
+      // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
+      fail_reason << "dispatch key set mismatch. expected "
+                  << c10::DispatchKeySet(c10::DispatchKeySet::RAW,
+                                         dispatch_key_)
+                  << ", actual " << state.apply(v.key_set());
+      return fail_reason.str();
+    } else if (dtype_ != v.dtype().toScalarType()) {
+      // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
+      // dtype_, v.dtype().toScalarType());
+      fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
+                  << v.dtype().toScalarType();
+      return fail_reason.str();
+    } else if (requires_grad_ !=
+               (state.grad_mode_enabled && v.requires_grad())) {
+      // return fmt::format("tensor requires_grad mismatch. expected {}",
+      // requires_grad_);
+      fail_reason << "requires_grad mismatch. expected requires_grad="
+                  << requires_grad_;
+      return fail_reason.str();
+    }
+    size_t ndim = static_cast<size_t>(v.ndimension());
+    if (ndim != sizes_.size()) {
+      // return fmt::format("tensor rank mismatch. expected {}, actual {}",
+      // sizes_.size(), ndim);
+      fail_reason << "rank mismatch. expected " << sizes_.size() << ", actual "
+                  << ndim;
+      return fail_reason.str();
+    }
+    if (!dynamic_shapes_) {
+      const auto &sizes = v.sizes();
+      const auto &strides = v.strides();
+      for (size_t i = 0; i < ndim; ++i) {
+        if (sizes_[i] != sizes[i]) {
+          // return fmt::format("tensor size mismatch at index {}. expected {},
+          // actual {}", i, sizes_[i], sizes[i]);
+          fail_reason << "size mismatch at index " << i << ". expected "
+                      << sizes_[i] << ", actual " << sizes[i];
+          return fail_reason.str();
+        } else if (strides_[i] != strides[i]) {
+          // return fmt::format("tensor strides mismatch at index {}. expected
+          // {}, actual {}", i, strides_[i]);
+          fail_reason << "strides mismatch at index " << i << ". expected "
+                      << strides_[i] << ", actual " << strides[i];
+          return fail_reason.str();
+        }
+      }
+    }
+    return "";
   }
 
   PyTypeObject *pytype;
@@ -151,8 +208,80 @@ PyObject *TensorGuards_check(TensorGuards *self, PyObject *args) {
   Py_RETURN_TRUE;
 }
 
+PyObject *TensorGuards_check_verbose(TensorGuards *self, PyObject *args,
+                                     PyObject *kwargs) {
+  if (!PyTuple_CheckExact(args)) {
+    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    return NULL;
+  }
+  auto &checks = *self->checks;
+  ssize_t len = PyTuple_GET_SIZE(args);
+
+  if (static_cast<ssize_t>(checks.size()) != len) {
+    PyErr_SetString(PyExc_TypeError, "wrong length");
+    return NULL;
+  }
+
+  PyObject *tensor_check_names_py =
+      PyDict_GetItemString(kwargs, "tensor_check_names");
+  if (tensor_check_names_py == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing tensor_check_names kwarg");
+    return NULL;
+  }
+
+  if (!PyList_Check(tensor_check_names_py)) {
+    PyErr_SetString(PyExc_TypeError, "tensor_check_names kwarg must be a list");
+    return NULL;
+  }
+
+  size_t names_size = PyList_Size(tensor_check_names_py);
+  if (names_size != checks.size()) {
+    PyErr_SetString(PyExc_TypeError,
+                    "tensor_check_names should be the same size as # tensors");
+    return NULL;
+  }
+
+  std::vector<std::string> tensor_check_names;
+  tensor_check_names.reserve(names_size);
+  for (Py_ssize_t i = 0; i < names_size; i++) {
+    PyObject *value = PyList_GetItem(tensor_check_names_py, i);
+    if (!PyUnicode_Check(value)) {
+      PyErr_SetString(PyExc_TypeError,
+                      "tensor_check_names must only contain strings");
+      return NULL;
+    }
+    tensor_check_names.emplace_back(PyUnicode_AsUTF8(value));
+  }
+
+  LocalState state;
+  for (ssize_t i = 0; i < len; ++i) {
+    PyObject *item = PyTuple_GET_ITEM(args, i);
+    if (Py_TYPE(item) != checks[i].pytype) {
+      std::stringstream fail_reason;
+      PyObject *type_str = PyObject_Str(PyObject_Type(item));
+      fail_reason << "expected type of '" << tensor_check_names[i]
+                  << "' to be a tensor type, ";
+      if (!type_str) {
+        fail_reason << "but found a different type";
+      } else {
+        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+      }
+      return Py_BuildValue("s", fail_reason.str().c_str());
+    }
+    std::string fail_reason = checks[i].check_verbose(
+        state, THPVariable_Unpack(item), tensor_check_names[i]);
+    if (fail_reason.length() > 0) {
+      return Py_BuildValue("s", fail_reason.c_str());
+    }
+  }
+
+  Py_RETURN_TRUE;
+}
+
 static PyMethodDef TensorGuards_methods[] = {
     {"check", (PyCFunction)TensorGuards_check, METH_VARARGS, ""},
+    {"check_verbose", (PyCFunction)TensorGuards_check_verbose,
+     METH_VARARGS | METH_KEYWORDS, "verbose fail reasons for failed checks"},
     {NULL} /* Sentinel */
 };
 

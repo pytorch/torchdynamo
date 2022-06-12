@@ -23,6 +23,10 @@ from torchdynamo.testing import unsupported
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
 
+def my_custom_function(x):
+    return x + 1
+
+
 class MiscTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -648,7 +652,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(*args), correct))
             self.assertTrue(same(fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -1442,3 +1446,173 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res2 = f4()
         self.assertTrue(same(res1, res2))
+
+    def test_disallow_in_graph(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = torch.sub(x, 1)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        torchdynamo.disallow_in_graph(torch.sub)
+        fn(torch.randn(10))
+        torchdynamo.allow_in_graph(torch.sub)
+
+        # check for graph break on sub
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+    def test_allow_in_graph(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = my_custom_function(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        torchdynamo.allow_in_graph(my_custom_function)
+        fn(torch.randn(10))
+        torchdynamo.disallow_in_graph(my_custom_function)
+
+        # check for no graph break
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
+
+    def test_sample_input(self):
+        from torch.testing._internal.common_methods_invocations import SampleInput
+
+        def fn(sample):
+            if isinstance(sample.input, torch.Tensor):
+                return sample.input * 2
+            return torch.zeros(())
+
+        sample = SampleInput(torch.ones(2))
+        ref = fn(sample)
+
+        with torchdynamo.optimize("eager"):
+            res = fn(sample)
+
+        self.assertTrue(same(ref, res))
+
+    def test_update_locals_and_stack_uses_shared_cache(self):
+        def fn(x):
+            perm = [0, 3, 5]
+            perm = [i for i in range(min(perm))] + perm
+            perm.extend(i for i in range(x.dim()) if i not in perm)
+            return perm
+
+        x = torch.rand([2, 2, 2, 2, 2, 2])
+        res1 = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x)
+        self.assertTrue(same(res1, res2))
+
+    def test_dict_reconstruct_keeps_original_order(self):
+        def fn():
+            modules = collections.OrderedDict([("act", torch.nn.ReLU())])
+            module_dict = torch.nn.ModuleDict(modules)
+
+            next_modules = {"fc4": torch.nn.Linear(5, 6), "act3": torch.nn.Sigmoid()}
+            modules.update(next_modules.items())
+            module_dict.update(next_modules)
+            return modules, module_dict
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            modules, module_dict = fn()
+
+        self.assertEqual(len(module_dict), len(modules))
+        for k1, m2 in zip(modules, module_dict.children()):
+            self.assertTrue(modules[k1] is m2)
+
+    def test_unspecialized_primitive_variable(self):
+        # correctness check
+        def fn(x, y, z):
+            xy = [x + y, y, False]
+            np_x = x.numpy()
+            np_y = y.numpy()
+            return {
+                "x": x,
+                "z": z,
+                "a": np_y.sum(),
+                "b": xy,
+                "c": np_y[0][0] / 68,
+                "d": np_x.sum(),
+            }
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        y = torch.ones([2, 2], dtype=torch.int64)
+        z = np.int64(12)
+        res1 = fn(x, y, z)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x, y, z)
+        self.assertTrue(same(res1, res2))
+
+    def test_unspecialized_primitive_variable2(self):
+        # no recompilations if passing on different numpy int values
+        def fn(x, y):
+            return {"a": x + 1, "b": y / 2}
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            for i in range(10):
+                fn(x, np.int64(i))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_side_effects_codegen_update_mutated(self):
+        # codegen to update mutated variables with side effect
+        # should after stack value's codegen
+        def f1(x):
+            alist = [x]
+            alist.append(x + 1)
+            alist[0].sum().item()  # graph break
+            res = alist.pop()
+            res.sum().item()  # graph break
+            return res
+
+        def f2(a, b):
+            d = {"a": a + 1, "b": b + 2}
+            x = d.pop("b")
+            x.sum().item()  # graph break
+            y = d["a"] + x
+            y.sum().item()  # graph break
+            d["c"] = y
+            return d
+
+        x = torch.rand([2, 3])
+        a = torch.rand([5, 6])
+        b = torch.rand([5, 6])
+        res11 = f1(x)
+        res21 = f2(a, b)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res12 = f1(x)
+            res22 = f2(a, b)
+        self.assertTrue(same(res11, res12))
+        self.assertTrue(same(res21, res22))
+
+    def test_list_append_return_none(self):
+        def fn(x):
+            alist = []
+            blist = alist.append(x + 1)
+            return alist, blist
+
+        x = torch.tensor([2.3])
+        res = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x)
+        self.assertEqual(res, res2)

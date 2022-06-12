@@ -50,6 +50,10 @@ class VariableTracker:
             if type(var) in (list, tuple, dict_values, odict_values):
                 for i in var:
                     visit(i)
+            elif isinstance(var, variables.BaseListVariable):
+                guards.update(var.guards)
+                for i in var.items:
+                    visit(i)
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
@@ -100,7 +104,7 @@ class VariableTracker:
                 cls.apply(fn, v, cache) for v in value.items()
             )
         elif istype(value, dict):
-            result = {k: cls.apply(fn, v, cache) for k, v in value.items()}
+            result = {k: cls.apply(fn, v, cache) for k, v in list(value.items())}
         else:
             result = value
 

@@ -2,7 +2,6 @@ import contextlib
 import dataclasses
 import functools
 import itertools
-from itertools import chain
 from typing import Dict
 from typing import List
 
@@ -11,6 +10,7 @@ import torch
 
 from .. import codecache
 from .. import config
+from .. import ir
 from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
@@ -48,6 +48,8 @@ class TritonOverrides(OpOverrides):
         triton_type_name = str(dtype).split(".")[-1]
         if triton_type_name == "bool":
             triton_type_name = "int1"
+        if triton_type_name in ("float16", "bfloat16"):
+            triton_type_name = "float32"
         return f"{x}.to(tl.{triton_type_name})"
 
     @staticmethod
@@ -72,7 +74,16 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.log({x})"
+        # workaround https://github.com/openai/triton/issues/543
+        return f"tl.log({x}.to(tl.float32))"
+
+    @staticmethod
+    def isinf(x):
+        return f"{x}+1 == {x}"
+
+    @staticmethod
+    def isnan(x):
+        return f"{x} != {x}"
 
     @staticmethod
     def relu(x):
@@ -101,11 +112,22 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
+        # wonkyness to work around https://github.com/openai/triton/issues/532
+        # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
+        a = ops.identity(a)
+        b = ops.identity(b)
+        c = ops.identity(c)
+        a = ops.identity(
+            f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
+        )
+        a = ops.identity(
+            f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
+        )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
     def index_expr(expr, dtype):
-        return V.kernel.indexing(expr)
+        return V.kernel.indexing(expr)[0]
 
     @staticmethod
     def masked(mask, body, other):
@@ -130,7 +152,7 @@ class RangeTree:
     ):
         super(RangeTree, self).__init__()
         self.name = name
-        self.children: Dict[sympy.Expr, RangeTreeEntry] = dict()
+        self.children: Dict[sympy.Expr, RangeTreeEntry] = {}
         self.var_list = var_list
         self.var_ranges = var_ranges
         self.numel = numel
@@ -157,7 +179,7 @@ class RangeTreeRoot(RangeTree):
         super(RangeTreeRoot, self).__init__(
             name=name,
             var_list=[],
-            var_ranges=dict(),
+            var_ranges={},
             numel=numel,
             prefix=prefix,
         )
@@ -247,23 +269,28 @@ class RangeTreeEntry(RangeTree):
         return self.name == other.name
 
 
+def zero_vars(it):
+    return {k: 0 for k in it}
+
+
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, numel, reduction_numel):
+    def __init__(self, *groups):
         super(TritonKernel, self).__init__()
-        if reduction_numel is None:
-            reduction_numel = sympy.Integer(1)
-        self.numel = V.graph.sizevars.simplify(numel)
-        self.reduction_numel = V.graph.sizevars.simplify(reduction_numel)
-        self.iter_range_tree = RangeTreeRoot("indices", numel, "i")
-        self.reduction_range_tree = RangeTreeRoot("reduction", reduction_numel, "r")
-        self.range_tree_nodes = dict()
+        self.numels = [V.graph.sizevars.simplify(s) for s in groups]
+        self.range_trees = []
+        names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
+        for i in range(len(self.numels)):
+            self.range_trees.append(
+                RangeTreeRoot(names[i], self.numels[i], names[i][0])
+            )
+        self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.indexing_code = IndentedBuffer()
-        self.inside_reduction = reduction_numel != 1
-        self.disabled_reduction_stores = dict()
+        self.inside_reduction = self.numels[-1] != 1
+        self.disabled_reduction_stores = {}
         self._load_mask = None
 
     def disable_reduction(self):
@@ -281,55 +308,91 @@ class TritonKernel(Kernel):
 
         return ctx()
 
-    def set_ranges(self, lengths, reduction_lengths):
-        return self.iter_range_tree.construct(
-            lengths
-        ), self.reduction_range_tree.construct(reduction_lengths)
+    def set_ranges(self, *lengths):
+        assert len(lengths) == len(self.range_trees)
+        return [
+            ranges.construct(length)
+            for length, ranges in zip(lengths, self.range_trees)
+        ]
 
-    def indexing(self, index: sympy.Expr):
-        iter_vars = self.iter_range_tree.var_list
-        reduction_vars = self.reduction_range_tree.var_list
+    def indexing(self, index: sympy.Expr, copy_shape=None):
+        """
+        Compute the index and mask to pass to tl.load() or tl.store()
+        """
+        all_vars = list(
+            itertools.chain.from_iterable(tree.var_list for tree in self.range_trees)
+        )
+        offset = index.subs(zero_vars(all_vars))
+        parts = []
+        for i in range(len(self.range_trees)):
+            other_vars = list(
+                itertools.chain.from_iterable(
+                    self.range_trees[j].var_list
+                    for j in range(len(self.range_trees))
+                    if i != j
+                )
+            )
+            parts.append(index.subs(zero_vars(other_vars)) - offset)
 
-        offset = index.subs({v: 0 for v in chain(iter_vars, reduction_vars)})
-        base_part = index.subs({v: 0 for v in reduction_vars}) - offset
-        reduction_part = index.subs({v: 0 for v in iter_vars}) - offset
-        assert (
-            index == offset + base_part + reduction_part
+        assert index == offset + sum(
+            parts
         ), f"failed to split indexing into base+reduction {index}"
 
-        offset = self.rename_indexing(offset)
-        base_part = self.rename_indexing(self.simplify_indexing(base_part))
-        reduction_part = self.rename_indexing(self.simplify_indexing(reduction_part))
+        offset = self.rename_indexing(self.simplify_indexing(offset))
+        parts = [self.rename_indexing(self.simplify_indexing(part)) for part in parts]
 
+        mask = []
         addr = []
+
+        have_dense = True
+        need_dense = config.triton.dense_indexing or "tmp" in str(index)
+
+        for part, tree in zip(parts, self.range_trees):
+            if part != 0:
+                addr.append(texpr(part))
+                mask.append(f"{tree.prefix}mask")
+            elif tree.prefix == "r" and not self.inside_reduction:
+                pass
+            else:
+                have_dense = False
+
+        if need_dense and not have_dense:
+            mask = [
+                f"{tree.prefix}mask"
+                for tree in self.range_trees
+                if tree.prefix != "r" or self.inside_reduction
+            ]
+            addr.append(f"tl.zeros({self.dense_size_str()}, tl.int32)")
+
         if offset != 0:
             addr.append(texpr(offset))
 
-        if base_part != 0:
-            addr.append(texpr(base_part))
-        else:
-            addr.append("tl.zeros((BLOCK_SIZE, ), tl.int32)")
-
-        if self.inside_reduction:
-            addr[-1] = f"tl.reshape({addr[-1]}, (BLOCK_SIZE, 1))"
-
-            if reduction_part != 0:
-                addr.append(texpr(reduction_part))
+        if not addr:
+            if copy_shape:
+                addr.append(f"tl.zeros({copy_shape}.shape, tl.int32)")
+                mask.extend([f"{tree.prefix}mask" for tree in self.range_trees[:-1]])
             else:
-                addr.append("tl.zeros((REDUCTION_SIZE, ), tl.int32)")
+                addr.append("0")
 
-            addr[-1] = f"tl.reshape({addr[-1]}, (1, REDUCTION_SIZE))"
-        else:
-            assert reduction_part == 0
+        if self._load_mask:
+            mask.append(self._load_mask)
 
-        return " + ".join(addr)
+        if not mask:
+            mask = ["None"]
 
-    def simplify_indexing(self, expr: sympy.Expr):
-        expr = V.graph.sizevars.simplify_with_ranges(
-            expr,
-            {**self.iter_range_tree.var_ranges, **self.reduction_range_tree.var_ranges},
+        return " + ".join(addr), " & ".join(mask)
+
+    def var_ranges(self):
+        return (
+            dict(
+                itertools.chain.from_iterable(
+                    tree.var_ranges.items() for tree in self.range_trees
+                )
+            ),
         )
 
+    def simplify_indexing(self, expr: sympy.Expr):
+        expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         nodes = [
             self.range_tree_nodes[sym]
             for sym in expr.free_symbols
@@ -345,72 +408,80 @@ class TritonKernel(Kernel):
 
         return expr
 
-    def mask(self, reductions=True):
-        if self._load_mask:
-            return self._load_mask
-        return (
-            "mask=mask_reduction"
-            if (self.inside_reduction and reductions)
-            else "mask=mask"
-        )
-
     @contextlib.contextmanager
     def mask_loads(self, mask):
+        """Context manager to add an additional mask to tl.load/store"""
         assert self._load_mask is None, "TODO: nesting"
-        var = self.cse.newvar()
-        if self.inside_reduction:
-            old_mask = "mask_reduction"
-        else:
-            old_mask = "mask"
-        self.compute.splice(
-            f"""
-                {var} = {old_mask} & {mask}
-            """
-        )
         prior = self._load_mask
-        self._load_mask = var
+        self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):
-            yield var
+            # TODO(jansel): do we need a reshape here?
+            yield mask
         self._load_mask = prior
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         if (name, index) in self.disabled_reduction_stores:
-            tmpvar = self.disabled_reduction_stores[(name, index)]
-            return f"tl.reshape({tmpvar}, (BLOCK_SIZE, 1))"
+            return self.disabled_reduction_stores[(name, index)]
         var = self.args.input(name)
-        line = f"tl.load({var} + {self.indexing(index)}, {self.mask()})"
+        index, mask = self.indexing(index)
+        line = f"tl.load({var} + {index}, {mask})"
+        if upcast:
+            line += ".to(tl.float32)"
         return self.cse.generate(self.loads, line)
 
     def store(self, name, index, value):
         var = self.args.output(name)
-        line = f"tl.store({var} + {self.indexing(index)}, {value}, {self.mask()})"
+        index, mask = self.indexing(index, value)
+        line = f"tl.store({var} + {index}, {value}, {mask})"
         self.stores.writeline(line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
-        default = {"sum": 0, "max": "float('-inf')", "min": "float('inf')"}[
-            reduction_type
-        ]
+        default = ops.constant(ir.Reduction.default_value(reduction_type, dtype), dtype)
+        masks = [f"{tree.prefix}mask" for tree in self.range_trees]
+        if self._load_mask:
+            masks.append(self._load_mask)
         res = self.cse.generate(
             self.compute,
-            f"tl.where(mask_reduction, {value}, {default})",
+            f"tl.where({' & '.join(masks)}, {value}, {default})",
         )
-        res = self.cse.generate(self.compute, f"tl.{reduction_type}({res}, 1)")
+        sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
+        sizes[-1] = "1"
+        if reduction_type == "any":
+            reduction_type = "max"
+        res = self.cse.generate(
+            self.compute,
+            f"tl.reshape(tl.{reduction_type}({res}, {len(self.range_trees) - 1}), [{', '.join(sizes)}])",
+        )
         assert self.inside_reduction
         with self.disable_reduction():
             ops.store(name, index, res)
 
-    def codegen_kernel(self):
+    def codegen_kernel(self, name=None):
+        from triton import next_power_of_2
+
         code = IndentedBuffer()
-        heuristics = (
-            "reduction_heuristics" if self.inside_reduction else "pointwise_heuristics"
-        )
+        size_hints = [
+            next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
+        ]
+        if self.inside_reduction:
+            heuristics = "reduction_heuristics"
+        else:
+            heuristics = "pointwise_heuristics"
+            size_hints = size_hints[:-1]
+
+        if name is None:
+            code.splice(
+                f"""
+                    import triton
+                    import triton.language as tl
+                    from {codecache.__name__} import {heuristics}
+
+                """
+            )
+
         code.splice(
             f"""
-                import triton
-                import triton.language as tl
-                from {codecache.__name__} import reduction_heuristics, pointwise_heuristics
-
-                @triton.heuristics({heuristics}())
+                @{heuristics}(size_hints={size_hints!r})
                 @triton.jit
             """
         )
@@ -422,54 +493,41 @@ class TritonKernel(Kernel):
         else:
             maybe_const = ": tl.constexpr"
 
-        if self.inside_reduction:
-            argdefs += [
-                f"numel{maybe_const}",
-                f"reduction_numel{maybe_const}",
-                "BLOCK_SIZE: tl.constexpr",
-                "REDUCTION_SIZE: tl.constexpr",
-            ]
+        for tree in self.range_trees:
+            if tree.prefix != "r" or self.inside_reduction:
+                argdefs.append(f"{tree.prefix}numel{maybe_const}")
 
-        else:
-            argdefs += [
-                f"numel{maybe_const}",
-                "BLOCK_SIZE: tl.constexpr",
-            ]
+        for tree in self.range_trees:
+            if tree.prefix != "r" or self.inside_reduction:
+                argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
-        code.writeline(f"def kernel({', '.join(argdefs)}):")
+        code.writeline(f"def {name or 'kernel'}({', '.join(argdefs)}):")
         with code.indent():
+            for i, tree in enumerate(self.range_trees):
+                x = tree.prefix
+                if x == "r":
+                    if not self.inside_reduction:
+                        continue
+                    # TODO(jansel): for now reduction must be in a single block
+                    code.writeline(f"{x}offset = 0")
+                else:
+                    code.writeline(f"{x}offset = tl.program_id({i}) * {x.upper()}BLOCK")
+                code.writeline(
+                    f"{tree.name} = {x}offset + tl.reshape(tl.arange(0, {x.upper()}BLOCK), "
+                    f"{self.reshape_size_str(i, x)})"
+                )
+                code.writeline(f"{x}mask = {tree.name} < {x}numel")
+
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
 
-            code.splice(
-                """
-                    offset = tl.program_id(0) * BLOCK_SIZE
-                    indices = offset + tl.arange(0, BLOCK_SIZE)
-                """,
-                strip=True,
-            )
-
-            if self.inside_reduction:
-                code.splice(
-                    """
-                        reduction = tl.arange(0, REDUCTION_SIZE)
-                        mask = indices < numel
-                        mask_reduction = (tl.reshape(mask, (BLOCK_SIZE, 1)) &
-                                          tl.reshape(reduction < reduction_numel, (1, REDUCTION_SIZE)))
-                    """,
-                    strip=True,
-                )
-            else:
-                code.splice(
-                    """
-                        mask = indices < numel
-                    """,
-                    strip=True,
-                )
             code.splice(self.indexing_code)
             code.splice(self.loads)
             code.splice(self.compute)
             code.splice(self.stores)
+
+        if name is not None:
+            return code.getvalue()
 
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")
@@ -477,37 +535,84 @@ class TritonKernel(Kernel):
         wrapper.writeline("''').kernel")
         return wrapper.getvalue()
 
+    def reshape_size_str(self, i=None, x=None):
+        sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+        if i is not None:
+            sizes[i] = f"{x.upper()}BLOCK"
+        return f"[{', '.join(sizes)}]"
+
+    def dense_size_str(self):
+        sizes = []
+        for tree in self.range_trees:
+            if tree.prefix != "r" or self.inside_reduction:
+                sizes.append(f"{tree.prefix.upper()}BLOCK")
+            elif tree.prefix == "r" and tree.numel != 1:
+                sizes.append("1")
+        return f"[{', '.join(sizes)}]"
+
     def call_kernel(self, code, name: str):
         _, call_args = self.args.python_argdefs()
-        code.writeline(f"{name}_numel = {texpr(self.numel)}")
-        call_args.append(f"{name}_numel")
-        if self.inside_reduction:
-            code.writeline(f"{name}_reduction_numel = {texpr(self.reduction_numel)}")
-            call_args.append(f"{name}_reduction_numel")
+        grid = []
+        # TODO(jansel): if there are constants, we shouldn't bother passing them as args
+        for tree in self.range_trees:
+            if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
+                expr = texpr(tree.numel)
+            else:
+                expr = f"{name}_{tree.prefix}numel"
+                code.writeline(f"{expr} = {texpr(tree.numel)}")
+            if tree.prefix != "r" or self.inside_reduction:
+                call_args.append(expr)
+            if tree.prefix != "r":
+                grid.append(expr)
         call_args = ", ".join(call_args)
-        code.writeline(f"{name}[grid({name}_numel)]({call_args})")
+        code.writeline(f"{name}[grid({', '.join(grid)})]({call_args})")
 
 
 class TritonScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.group_fn = product
 
-    def codegen(self, group, reduction_group):
+    def group_fn(self, sizes):
+        return tuple(V.graph.sizevars.simplify(product(s)) for s in sizes)
+
+    def codegen(self, *groups):
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
+        def is_group_matching(other_node):
+            other_groups = other_node.group
+            if groups == other_groups:
+                return True
+            if len(groups) == 2 and groups[-1] != 1:
+                group, reduction_group = groups
+                if other_groups == (group * reduction_group, sympy.Integer(1)):
+                    sizes, _ = node.get_ranges()
+                    split = split_sizes(sizes, group, reduction_group)
+                    return split is not None
+                return other_groups == (group, sympy.Integer(1))
+            elif len(groups) == 3:
+                tile1, tile2, _ = groups
+                if other_groups == (tile1 * tile2, sympy.Integer(1)):
+                    sizes, _ = node.get_ranges()
+                    split = split_sizes(sizes, tile1, tile2)
+                    return split is not None
+
+            return False
+
         reschedule = []
-        with scheduler.kernel(TritonKernel(group, reduction_group)) as kernel:
+        with scheduler.kernel(TritonKernel(*groups)) as kernel:
             for _ in scheduler.iter_fixed_point():
-                for node in scheduler.pop_group(
-                    (group, reduction_group),
-                ):
-                    scheduler.maybe_remove_buffer(node, broadcast_after_reduce=True)
+                for node in scheduler.pop_group(groups):
+                    scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
                     node.run(*kernel.set_ranges(*node.get_ranges()))
                     node.mark_fusable(broadcast_after_reduce=True)
 
+                # the rest of this function could be correctly removed
+                # it is various cases of horizonal fusions
                 if kernel.inside_reduction:
+                    # TODO(jansel): rewrite this to support tiled reductions
+                    group, reduction_group = groups
+
                     # Add pointwise with compatible dimensions
                     for node in scheduler.pop_group(
                         (group * reduction_group, sympy.Integer(1)),
@@ -517,17 +622,44 @@ class TritonScheduling:
                         if split is None:
                             reschedule.append(node)
                         else:
+                            scheduler.maybe_remove_buffer(
+                                node, check_group=is_group_matching
+                            )
                             node.run(*kernel.set_ranges(sizes[:split], sizes[split:]))
                             node.mark_fusable()
 
                     # Add more pointwise with fewer dimensions
                     with kernel.disable_reduction():
                         for node in scheduler.pop_group((group, sympy.Integer(1))):
+                            scheduler.maybe_remove_buffer(
+                                node, check_group=is_group_matching
+                            )
                             node.run(*kernel.set_ranges(*node.get_ranges()))
+                            node.mark_fusable()
+                elif len(groups) == 3:
+                    tile1, tile2, _ = groups
+                    # Add pointwise with compatible dimensions
+                    for node in scheduler.pop_group(
+                        (tile1 * tile2, sympy.Integer(1)),
+                    ):
+                        sizes, _ = node.get_ranges()
+                        split = split_sizes(sizes, tile1, tile2)
+                        if split is None:
+                            reschedule.append(node)
+                        else:
+                            scheduler.maybe_remove_buffer(
+                                node, check_group=is_group_matching
+                            )
+                            node.run(
+                                *kernel.set_ranges(sizes[:split], sizes[split:], [])
+                            )
                             node.mark_fusable()
 
         kernel_name = wrapper.next_kernel_name()
-        wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        if config.triton.many_files:
+            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        else:
+            wrapper.header.splice(kernel.codegen_kernel(kernel_name))
         kernel.call_kernel(wrapper, kernel_name)
 
         scheduler.enqueue(reschedule)

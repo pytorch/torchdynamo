@@ -294,9 +294,6 @@ def ipex(subgraph, **kwargs):
         try:
             traced_model = torch.jit.trace(model, inputs).eval()
             traced_model = torch.jit.freeze(traced_model)
-            # Warm up
-            for i in range(3):
-                traced_model(*inputs)
             return traced_model
         except Exception:
             warnings.warn("JIT trace failed during the 'ipex' optimize process.")
@@ -338,8 +335,19 @@ def fx2trt(subgraph, **kwargs):
         splitter = TRTSplitter(acc_model, inputs, settings=splitter_setting)
         splitter.node_support_preview()
         split_mod = splitter()
+        num_piece = 0
         for name, _ in split_mod.named_children():
             print(f"graph is split into {name}")
+            num_piece += 1
+
+        # if the graph module is split into pieces larger than 8, we consider its perf
+        # is not good and fall back to non-TRT
+        if num_piece > 8:
+            print(
+                f"The graph module is split into {num_piece} which is large than the \
+                threshold=8. Fall back to non-TRT module."
+            )
+            return None
 
         if kwargs["fp16_mode"]:
             precision = LowerPrecision.FP16
@@ -493,7 +501,7 @@ def cudagraphs_ts_ofi(subgraph):
     return subgraph.wrap_returns(cudagraphs_inner(model, inputs))
 
 
-def cudagraphs_inner(model, inputs):
+def cudagraphs_inner(model, inputs, copy_outputs=True):
     assert isinstance(inputs, (list, tuple))
     static_inputs = [torch.zeros_like(x) for x in inputs]
 
@@ -519,7 +527,10 @@ def cudagraphs_inner(model, inputs):
         for dst, src in zip(static_inputs, new_inputs):
             dst.copy_(src)
         graph.replay()
-        return [x.clone() for x in static_outputs]
+        if copy_outputs:
+            return [x.clone() for x in static_outputs]
+        else:
+            return static_outputs
 
     return run
 

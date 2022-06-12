@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import argparse
-import gc
 import inspect
 import sys
 import time
@@ -22,7 +21,6 @@ except ImportError:
 
 def timed(model, example_inputs, times=1):
     synchronize()
-    gc.collect()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
@@ -32,6 +30,13 @@ def timed(model, example_inputs, times=1):
     # GC the result after timing
     assert result is not None
     return t1 - t0
+
+
+def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
+    timings = [timed(fn, args, times) for _ in range(repeat)]
+    took = np.median(timings)
+    print(f"{took/baseline:.6f}")
+    return took
 
 
 def compute_speedups(args, models, example_inputs):
@@ -117,6 +122,8 @@ def main():
     parser.add_argument(
         "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
+    parser.add_argument("--transpose", action="store_true", help="transpose one input")
+    parser.add_argument("--broadcast", action="store_true", help="broadcast one input")
     args = parser.parse_args()
 
     # defaults
@@ -152,11 +159,12 @@ def main():
                 n = int(n)
                 sys.stdout.write(f"{model.__name__:10} {device:4} {n:5} ")
                 sys.stdout.flush()
-                result = microbenchmark(
-                    args,
-                    model,
-                    [torch.rand((n, n * 2), device=device) for _ in range(nargs)],
-                )
+                inputs = [torch.rand((n, n), device=device) for _ in range(nargs)]
+                if args.broadcast:
+                    inputs[-1] = torch.rand((1, n), device=device)
+                if args.transpose:
+                    inputs[-1] = inputs[-1].transpose(0, 1)
+                result = microbenchmark(args, model, inputs)
                 rows.append([model.__name__, device, str(n)] + result)
                 print(" ".join(f"{v:.2f}x" for v in result))
 

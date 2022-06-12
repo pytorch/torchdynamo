@@ -11,6 +11,7 @@ import torchdynamo.config
 from torchdynamo.optimizations.backends import cudagraphs_inner
 from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
+from torchdynamo.utils import identity
 
 from . import config
 from .decomposition import decompositions
@@ -106,15 +107,26 @@ def compile_fx(
     gm, wrap = python_key_normalize(
         model, example_inputs, decompositions=decompositions
     )
+
     if config.dce:
         gm.graph.eliminate_dead_code()
     if config.debug:
         gm.graph.print_tabular()
-    if cudagraphs is None:
-        cudagraphs = config.triton.cudagraphs
 
     if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
         wrap(CheckEachNode(gm).run)(*example_inputs)
+
+    return compile_fx_inner(gm, example_inputs, wrap=wrap, cudagraphs=cudagraphs)
+
+
+def compile_fx_inner(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    wrap=identity,
+    cudagraphs=None,
+):
+    if cudagraphs is None:
+        cudagraphs = config.triton.cudagraphs
 
     try:
         graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
@@ -122,12 +134,15 @@ def compile_fx(
             wrap(graph.run)(*example_inputs)
             compiled_fn = wrap(graph.compile_to_fn())
 
+        # make sure it works, causes issues for mutation
+        # compiled_fn(*example_inputs)
+
         if (
             cudagraphs
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphs_inner(compiled_fn, example_inputs)
+            return cudagraphs_inner(compiled_fn, example_inputs, copy_outputs=False)
         else:
             return compiled_fn
     except Exception:
@@ -135,3 +150,16 @@ def compile_fx(
             wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
         raise
+
+
+def compile_fx_training(
+    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+):
+    from torchdynamo.optimizations.backends import aot_autograd
+
+    return aot_autograd(
+        model,
+        example_inputs,
+        fw_compiler=compile_fx_inner,
+        decompositions=decompositions,
+    )

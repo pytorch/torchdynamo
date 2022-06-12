@@ -1,9 +1,9 @@
 import math
-from typing import List
+import numbers
 
 import functorch._src.decompositions
 import torch
-from torch import Tensor
+from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch._decomp import get_decompositions
 
 from torchinductor import config
@@ -12,26 +12,52 @@ aten = torch.ops.aten
 
 decompositions = get_decompositions(
     [
-        aten.l1_loss,
-        aten.mse_loss,
-        aten.stack,
-        aten.native_layer_norm,
-        aten.native_batch_norm,
+        aten._adaptive_avg_pool2d_backward,
+        aten.avg_pool2d_backward,
+        aten.clamp_max,
+        aten.clamp_min,
         aten.cudnn_batch_norm,
-        aten.native_group_norm,
-        aten.leaky_relu,
-        aten.hardtanh,
+        aten.cudnn_batch_norm_backward,
+        aten.elu_backward,
+        aten._embedding_bag,
+        aten.embedding_dense_backward,
+        aten.expand_as,
+        aten._fused_moving_avg_obs_fq_helper,
+        aten.gelu_backward,
+        aten.glu_backward,
+        aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardswish,
-        aten.transpose.int,
-        aten.clamp_min,
-        aten.clamp_max,
-        # don't exist (yet), but wish they did:
-        aten._embedding_bag,
-        aten.grid_sampler_2d,
+        aten.hardtanh,
+        aten.l1_loss,
+        aten.leaky_relu,
+        aten.leaky_relu_backward,
+        aten._log_softmax_backward_data,
+        aten.logsumexp.default,
+        aten.masked_fill_,
+        aten.max_pool2d_with_indices_backward,
+        aten.mse_loss,
+        aten.native_batch_norm,
+        aten.native_batch_norm_backward,
+        aten.native_dropout_backward,
+        aten.native_group_norm,
+        aten.native_layer_norm,
+        aten.native_layer_norm_backward,
+        aten.nll_loss_forward,
         aten.norm,
+        aten.reflection_pad2d_backward,
+        aten.select_backward,
+        aten.select_scatter,
+        aten.sigmoid_backward,
+        aten._softmax_backward_data,
+        aten.stack,
+        aten.tanh_backward,
+        aten.threshold_backward,
+        aten.transpose.int,
+        aten.upsample_nearest2d_backward,
     ]
 )
+decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
@@ -159,14 +185,14 @@ def special_erf(x):
 
 @register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
 def rsub(a, b):
-    if isinstance(b, (int, float)):
+    if isinstance(b, numbers.Number):
         b = torch.tensor(b, dtype=a.dtype, device=a.device)
     return b - a
 
 
 @register_decomposition([aten.masked_fill.Scalar])
 def masked_fill(value, mask, other):
-    if isinstance(other, (int, float)):
+    if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
     value, mask, other = torch.broadcast_tensors(value, mask, other)
     return torch.where(mask, other, value)
@@ -189,23 +215,51 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     return x
 
 
-def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
-    ndim = self.dim()
-    for idx in range(ndim - 1, -1, -1):
-        if idx in dims or idx - ndim in dims:
-            self = self.squeeze(idx)
-    return self
+@register_decomposition([aten.all.default])
+def all(input):
+    return torch.logical_not(torch.any(torch.logical_not(input)))
 
 
-# based on https://github.com/pytorch/pytorch/pull/77219
-@register_decomposition([aten.logsumexp.default])
-def logsumexp(self, dim, keepdim=False) -> Tensor:
-    if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
-    return result.log().add(maxes_squeezed)
+@register_decomposition([aten.all.dim])
+def all_dim(input, dim, keeepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+
+
+@register_decomposition(aten.hardswish_)
+def hardswish_(x):
+    return x.copy_(aten.hardswish(x))
+
+
+@register_decomposition(aten.hardtanh_)
+def hardtanh_(x, min_val=-1, max_val=1):
+    return x.copy_(aten.hardtanh(x, min_val, max_val))
+
+
+@register_decomposition(aten.leaky_relu_)
+def leaky_relu_(x, negative_slope=0.01):
+    return x.copy_(aten.leaky_relu(x, negative_slope))
+
+
+@register_decomposition(aten.silu_)
+def silu_(x):
+    return x.copy_(aten.silu(x))
+
+
+@register_decomposition(aten.masked_fill_)
+def masked_fill_(x, mask, value):
+    return x.copy_(aten.masked_fill(x, mask, value))
+
+
+@register_decomposition([aten.log1p])
+def log1p(x):
+    return torch.log(x + 1)
+
+
+@register_decomposition([aten.baddbmm])
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    result = torch.bmm(batch1, batch2)
+    if not isinstance(alpha, numbers.Number) or alpha != 1:
+        result = result * alpha
+    if not isinstance(beta, numbers.Number) or beta != 1:
+        self = self * beta
+    return self + result

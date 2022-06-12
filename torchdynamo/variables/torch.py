@@ -10,7 +10,7 @@ from torchdynamo.variables.misc import ProfileRecordFunctionVariable
 
 from .. import config
 from .. import variables
-from ..allowed_functions import _allowed_function_ids
+from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..utils import check_constant_args
 from ..utils import istype
@@ -51,10 +51,11 @@ class TorchVariable(VariableTracker):
         else:
             assert False, f"{value} found with __self__ set"
 
+    def __repr__(self):
+        return f"TorchVariable({self.value})"
+
     def unique_var_name(self):
-        name = _allowed_function_ids().get(
-            id(self.value), f"allowed_fn_{id(self.value)}"
-        )
+        name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
 
     def reconstruct(self, codegen):

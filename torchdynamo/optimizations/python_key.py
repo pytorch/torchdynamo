@@ -8,7 +8,7 @@ from torch.fx import GraphModule
 from torch.fx import Node
 from torch.nn.utils import _stateless
 
-from ..allowed_functions import _allowed_function_ids
+from ..allowed_functions import torch_get_name
 from ..utils import clone_inputs
 from ..utils import istype
 from .normalize import normalize_ir
@@ -37,8 +37,8 @@ def constant_inputs(n: torch.fx.Node):
 
 def debug_node(n: Node):
     target = n.target
-    target = _allowed_function_ids().get(
-        id(target),
+    target = torch_get_name(
+        target,
         f"{getattr(target, '__module__', '')}.{getattr(target, '__name__', '')} {target}",
     )
     return f"{n.op} {target} {n.args} {n.kwargs}"
@@ -113,7 +113,13 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
         ):
             out = PatchingInterpreter(gm).run(*args[params_len:])
         assert isinstance(out, (tuple, list)), "graph must output tuple()"
-        return tuple(x.proxy for x in out)
+
+        def unpack(x):
+            if hasattr(x, "proxy"):
+                return x.proxy
+            return x
+
+        return tuple(unpack(x) for x in out)
 
     with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
         tracer: torch.fx.Tracer = PythonKeyTracer()

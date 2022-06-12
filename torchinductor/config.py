@@ -25,6 +25,9 @@ pick_loop_orders = True
 # generate inplace computations
 inplace_buffers = False
 
+# codegen benchmark harness
+benchmark_harness = True
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -37,5 +40,27 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
+
+    # Use cudagraphs on output code
     cudagraphs = True
+
+    # Monkey patching to lower overheads
     hackery = False
+
+    # choose conv backend, "aten" or "triton" or "autotune"
+    convolution = "aten"
+
+    # Always load full blocks (rather than broadcasting inside the block)
+    dense_indexing = False
+
+    # limit tiling dimensions
+    max_tiles = 2
+
+    # put each kernel in its own file
+    many_files = False
+
+    # use triton.autotune?
+    autotune = True
+
+    # enable codegen to use Triton's mm
+    use_mm = False

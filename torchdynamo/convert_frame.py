@@ -27,13 +27,14 @@ from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardedCode
-from .guards import guard_failures
-from .guards import orig_code_map
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import guard_failures
 from .utils import is_namedtuple
 from .utils import istype
+from .utils import orig_code_map
+from .utils import troubleshooting_url
 
 log = logging.getLogger(__name__)
 
@@ -164,10 +165,10 @@ def has_tensor_in_frame(frame):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
-            if config.debug:
-                print(
-                    f"Assuming that object of type {type(obj)} does not have a tensor"
-                )
+            # if config.debug:
+            #     print(
+            #         f"Assuming that object of type {type(obj)} does not have a tensor"
+            #     )
             return False
 
     # Check if the passed arguments are of type Tensor
@@ -177,7 +178,7 @@ def has_tensor_in_frame(frame):
 
     if config.debug:
         print(
-            "skipping",
+            "skipping because no torch.*",
             frame.f_code.co_name,
             frame.f_code.co_filename,
             frame.f_code.co_firstlineno,
@@ -214,6 +215,15 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         if code.co_name == "<module>" and code.co_filename == "<string>":
             return None
 
+        if (
+            code.co_name == "<lambda>"
+            and code.co_filename == "<string>"
+            and not bool(frame.f_builtins)
+        ):
+            # namedtuple subclass constructor. Empty builtins cause issue with
+            # len keyword in LIST_LEN guard.
+            return None
+
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:
@@ -229,6 +239,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
                 f"for function {format_func_info(code)}, "
                 f"due to the following guard failures: {format_guard_failures(code)}"
+                f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
         output = None

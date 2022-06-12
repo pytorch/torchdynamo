@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import functools
 import gc
@@ -7,6 +8,7 @@ import itertools
 import logging
 import operator
 import re
+import sys
 import time
 import types
 import weakref
@@ -14,13 +16,20 @@ from functools import lru_cache
 from typing import Any
 from typing import Dict
 
+import numpy as np
+import tabulate
 import torch
 from torch import fx
+
+import torchdynamo.config
 
 from . import config
 
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
+troubleshooting_url = (
+    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
+)
 
 
 def count_calls(g: fx.Graph):
@@ -76,6 +85,33 @@ def istype(obj, allowed_types):
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def is_numpy_int_type(value):
+    return istype(
+        value,
+        (
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ),
+    )
+
+
+def is_numpy_float_type(value):
+    return istype(
+        value,
+        (
+            np.float16,
+            np.float32,
+            np.float64,
+        ),
+    )
 
 
 def istensor(obj):
@@ -384,12 +420,14 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().numpy()}")
+                print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
     elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
         return a == b
+    elif is_numpy_int_type(a) or is_numpy_float_type(a):
+        return (type(a) is type(b)) and (a == b)
     elif type(a).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -410,3 +448,101 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
         )
     else:
         raise RuntimeError(f"unsupported type: {type(a).__name__}")
+
+
+def format_func_info(code):
+    short_filename = code.co_filename.split("/")[-1]
+    return f"'{code.co_name}' ({short_filename}:{code.co_firstlineno})"
+
+
+@contextlib.contextmanager
+def disable_cache_limit():
+    prior = torchdynamo.config.cache_size_limit
+    torchdynamo.config.cache_size_limit = sys.maxsize
+
+    try:
+        yield
+    finally:
+        pass
+        torchdynamo.config.cache_size_limit = prior
+
+
+# map from transformed code back to original user code
+orig_code_map = ExactWeakKeyDictionary()
+
+# keep a record of code_obj -> list of guard failure reasons for logging
+guard_failures = collections.defaultdict(list)
+
+
+class CompileProfiler:
+    """Utility for profiling how and what dynamo would compile.
+
+    Can be used for
+     * diagnosing recompilation issues
+     * determining an appropriate compile cache limit
+     * (TODO)confirming which functions got compiled/skipped
+    """
+
+    def __init__(self):
+        self.frame_count = 0
+        self.op_count = 0
+        self.backend_ctx_ctor = lambda: disable_cache_limit()
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.frame_count += 1
+        for node in gm.graph.nodes:
+            if "call" in node.op:
+                self.op_count += 1
+        return gm.forward
+
+    def get_metrics(self):
+        return {"guard_failures": guard_failures}
+
+    def report(self):
+        metrics = self.get_metrics()
+        gf = metrics["guard_failures"]
+
+        def num_recompiles(code):
+            return len(gf[code])
+
+        def recompile_reasons(code):
+            return "\n".join([str(x) for x in gf[code]])
+
+        summarized_gf = [
+            [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
+            for code in gf
+        ]
+        rpt = "Torchdynamo Profiler Report\n"
+        if "graph_break" in counters:
+            rpt += "\n"
+            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
+            rpt += (
+                "You may gain additional insight by passing `nopython=True` to torchdynamo.optimize, "
+                "to break on the first condition.\n"
+            )
+            graph_breaks = counters["graph_break"]
+            rpt += tabulate.tabulate(
+                [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                headers=["Graph Break Reason", "Count"],
+            )
+
+        if len(gf):
+            max_recompiles = max([num_recompiles(code) for code in gf])
+            rpt += "\n"
+            rpt += (
+                "These subgraphs were recompiled more than once due to guard failures."
+            )
+            rpt += (
+                "Guard failures indicate some condition assumed to be static by the tracer changed, "
+                "making it unsafe to reuse the compiled program."
+            )
+            rpt += tabulate.tabulate(
+                summarized_gf,
+                headers=["Function", "Num Recompiles", "Recompile Reasons"],
+            )
+            rpt += "\n"
+            rpt += f"Set torchdynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.\n"
+        else:
+            rpt += "No cache-limited recompilations detected.\n"
+
+        return rpt

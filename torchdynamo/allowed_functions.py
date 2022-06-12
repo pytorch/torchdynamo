@@ -2,20 +2,67 @@ import builtins
 import collections
 import copy
 import functools
+import inspect
 import itertools
 import math
 import operator
 import types
 import warnings
-from functools import lru_cache
+from typing import Dict
+from typing import Optional
+from typing import Set
 
 import numpy
 import torch
 
 from . import config
+from .utils import is_safe_constant
 
 
-@lru_cache(None)
+def make_function_id_set(lazy_initializer):
+    """
+    Track a set of `id()`s of objects which are either allowed or not
+    allowed to go into the generated FX graph.  Use to test for torch.*,
+    numpy.*, builtins.*, etc.
+
+    Support user modification to permit customization of what can be
+    added to the graph and what will cause a graph break.
+    """
+
+    class FunctionIdSet:
+        function_ids: Optional[Set[int]] = None
+        function_names: Optional[Dict[int, str]] = None
+
+        def __call__(self):
+            if self.function_ids is None:
+                value = lazy_initializer()
+                if isinstance(value, dict):
+                    self.function_ids = set(value.keys())
+                    self.function_names = value
+                else:
+                    assert isinstance(value, set)
+                    self.function_ids = value
+            return self.function_ids
+
+        def get_name(self, idx: int, default: str):
+            self()  # lazy init
+            return self.function_names.get(idx, default)
+
+        def add(self, idx: int):
+            self()  # lazy init
+            self.function_ids.add(idx)
+
+        def remove(self, idx: int):
+            if idx in self():
+                self.function_ids.remove(idx)
+
+        def __contains__(self, idx: int):
+            return idx in self()
+
+    return FunctionIdSet()
+
+
+@make_function_id_set
 def _disallowed_function_ids():
     remove = [
         True,
@@ -24,6 +71,9 @@ def _disallowed_function_ids():
         collections.OrderedDict,
         copy.copy,
         copy.deepcopy,
+        inspect.signature,
+        math.__package__,
+        torch.__builtins__,
         torch.autocast_decrement_nesting,
         torch.autocast_increment_nesting,
         torch.autograd.grad,
@@ -44,14 +94,23 @@ def _disallowed_function_ids():
     return {id(x) for x in remove}
 
 
-@lru_cache(None)
+@make_function_id_set
 def _allowed_function_ids():
     """
     Walk torch.* and get the ids of all the stuff in it
     """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
-    torch.distributions.Distribution.set_default_validate_args(False)
     torch_object_ids = dict()
+
+    def _is_allowed_module_prefix(obj):
+        allowed_modules = ("torch", "math")
+        allowed_modules_dot = tuple([x + "." for x in allowed_modules])
+        module = inspect.getmodule(obj)
+        if module is None:
+            return False
+
+        mod_name = module.__name__
+        return mod_name in allowed_modules or mod_name.startswith(allowed_modules_dot)
 
     def _find_torch_objects(module):
         if any(
@@ -66,7 +125,9 @@ def _allowed_function_ids():
                     if obj.__name__.startswith("torch."):
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
-                else:
+                elif _is_allowed_module_prefix(obj):
+                    torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
+                elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -79,17 +140,7 @@ def _allowed_function_ids():
     return torch_object_ids
 
 
-def is_allowed(obj):
-    """Is this safe to trace like torch.add ?"""
-    return id(obj) in _allowed_function_ids()
-
-
-def is_disallowed(obj):
-    """Is this safe to trace like torch.add ?"""
-    return id(obj) in _disallowed_function_ids()
-
-
-@lru_cache(None)
+@make_function_id_set
 def _builtin_function_ids():
     rv = {
         id(v): f"builtins.{k}"
@@ -110,11 +161,7 @@ def _builtin_function_ids():
     return rv
 
 
-def is_builtin(obj):
-    return id(obj) in _builtin_function_ids()
-
-
-@lru_cache(None)
+@make_function_id_set
 def _numpy_function_ids():
     rv = dict()
     for mod in (numpy, numpy.random):
@@ -129,5 +176,25 @@ def _numpy_function_ids():
     return rv
 
 
+def is_allowed(obj):
+    """Is this safe to trace like torch.add ?"""
+    # torch.ops is populated lazily so we don't necessarily have them in
+    # _allowed_function_ids.  Figure it out by testing the type instead
+    # in those cases
+    return id(obj) in _allowed_function_ids or isinstance(
+        obj,
+        (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
+    )
+
+
+def torch_get_name(obj, default):
+    """Convert a torch.* funcion to a string"""
+    return _allowed_function_ids.get_name(id(obj), default)
+
+
+def is_builtin(obj):
+    return id(obj) in _builtin_function_ids
+
+
 def is_numpy(obj):
-    return isinstance(obj, numpy.ndarray) or id(obj) in _numpy_function_ids()
+    return isinstance(obj, numpy.ndarray) or id(obj) in _numpy_function_ids

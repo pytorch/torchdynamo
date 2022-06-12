@@ -84,12 +84,16 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
-    def apply(self, fn):
+    def apply(self, fn, cache=None):
+        if cache is None:
+            cache = dict()
+
         self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v)) for k, v in self.id_to_variable.items()
+            (k, VariableTracker.apply(fn, v, cache))
+            for k, v in self.id_to_variable.items()
         )
         self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v))
+            (k, VariableTracker.apply(fn, v, cache))
             for k, v in self.store_attr_mutations.items()
         )
 
@@ -251,12 +255,11 @@ class SideEffects(object):
             mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
         )
 
-    def codegen(self, cg: PyCodegen):
-        modified_vars = [
-            var for var in self.id_to_variable.values() if self.is_modified(var)
-        ]
+    def _get_modified_vars(self):
+        return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
-        for var in modified_vars:
+    def codegen_save_tempvars(self, cg: PyCodegen):
+        for var in self._get_modified_vars():
             if isinstance(
                 var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
             ) and isinstance(var, variables.NewCellVariable):
@@ -277,8 +280,9 @@ class SideEffects(object):
                 cg(var.mutable_local.source)
                 cg.add_cache(var)
 
+    def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
-        for var in modified_vars:
+        for var in self._get_modified_vars():
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
