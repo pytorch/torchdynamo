@@ -34,11 +34,6 @@ jobs:
       run: |
         echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
         echo /usr/local/bin >> $GITHUB_PATH
-    - uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
-        architecture: 'x64' 
-        cache: 'pip'
     - name: nvcc check
       run: |
         nvcc --version
