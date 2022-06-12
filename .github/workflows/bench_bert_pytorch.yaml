@@ -15,7 +15,6 @@ jobs:
         sudo yum update -y
         sudo yum -y install git python3-pip
         sudo pip3 install --upgrade pip
-        export PATH="$PATH:/usr/local/bin"
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
@@ -44,7 +43,7 @@ jobs:
     - name: Install PyTorch
       shell: bash
       run: |
-          python -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
+          python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - name: Install pandas
       shell: bash
