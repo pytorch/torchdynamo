@@ -1287,6 +1287,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         assert (
             reduction_type in ("sum", "amax", "amin", "any") or axis is None
         ), "TODO: max with index"
+        if reduction_type == "any":
+            x = to_dtype(x, torch.bool)
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 
@@ -1489,7 +1491,6 @@ sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub)
 
-register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_bool="logical_not")
 register_pointwise(aten.bitwise_or)
