@@ -57,8 +57,7 @@ jobs:
       shell: bash
       run: 	pip install scipy
     - name: Install functorch
-      shell: bash
-      run: pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
+      run: pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html --upgrade
     - name: Install other deps
       shell: bash
       run: pip install -r requirements.txt
