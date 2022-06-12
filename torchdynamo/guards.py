@@ -119,6 +119,25 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
+class GuardInfo:
+    def __init__(
+        self,
+        name: str,
+        check_type: str,
+        code: types.CodeType,
+        scope: Dict[str, Any],
+        renames: bool
+    ):
+        self.name = name
+        self.check_type = check_type
+        self.code = code
+        self.scope = scope
+        self.renames = renames
+
+    def __str__(self):
+        return f'(Name: {self.name}, Check Type: {self.check_type}, Code: {id(self.code)}, Renames: {self.renames})'
+
+
 class GuardBuilder:
     def __init__(
         self,
@@ -141,32 +160,17 @@ class GuardBuilder:
         self.tensor_check_names = []
         self.tensor_check_examples = []
         self.guarded_code = guarded_code
+        self.full_guarded_code = full_guarded_code
         self.full_guarded_code_loc = (
             f"{full_guarded_code.co_filename}:{full_guarded_code.co_firstlineno}"
         )
-        self.check_code_to_check_type_dict = dict()
+        self.renames = renames
+        self.guard_info = set()
 
     def append_code_for_check_type(self, code, check_type, name):
-        global code_name_type_failure_count
         check_type_name = (check_type, name)
-        key = f"{self.full_guarded_code_loc}{check_type_name}"
-        if key in code_name_type_failure_count:
-            count = code_name_type_failure_count[key]
-            if check_type in config.same_failure_tolerance_threshold_override:
-                if (
-                    count
-                    >= config.same_failure_tolerance_threshold_override[check_type]
-                ):
-                    unimplemented(
-                        f"code_name_type_failure_count for {key} passed overriden threshold for {check_type}"
-                    )
-            elif count >= config.same_failure_tolerance_threshold:
-                unimplemented(
-                    f"code_name_type_failure_count for {key} passed threshold"
-                )
-
         self.code.append(code)
-        self.check_code_to_check_type_dict[code] = check_type_name
+        self.guard_info.add(GuardInfo(name, check_type, self.full_guarded_code, self.scope, self.renames))
 
     def get(self, name: str):
         return eval(name, self.scope, CLOSURE_VARS)
@@ -432,15 +436,7 @@ class GuardedCode:
         verbose_code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
-        verbose_code_map = {
-            **local_builder.check_code_to_check_type_dict,
-            **global_builder.check_code_to_check_type_dict,
-        }
-        verbose_code_map["___guarded_code.valid"] = (
-            "VALIDATION_CHECK",
-            "",
-        )  # akin to a no op, this will never be checked in guards, but useful to have for logging and debugging.
-
+        verbose_guard_info = local_builder.guard_info.union(global_builder.guard_info)
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
@@ -462,10 +458,7 @@ class GuardedCode:
             )
             check_tensor_verbose_code = f"___check_tensors_verbose({verbose_args})"
             verbose_code_parts.append(check_tensor_verbose_code)
-            verbose_code_map[check_tensor_verbose_code] = (
-                "VERBOSE_TENSOR_CHECK",
-                verbose_args,
-            )
+            verbose_guard_info.add(GuardInfo(verbose_args, "VERBOSE_TENSOR_CHECK", self.code, self, False))
 
         code = " and ".join(unique(code_parts))
 
@@ -495,7 +488,7 @@ class GuardedCode:
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         guard_fn.global_scope = global_builder.scope
-        guard_fn.verbose_code_map = verbose_code_map
+        guard_fn.verbose_guard_info = verbose_guard_info
         return guard_fn
 
     def invalidate(self, ref):
@@ -513,8 +506,6 @@ class GuardedCode:
         return id(obj)
 
 
-code_name_type_failure_count = dict()
-
 
 def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
@@ -522,35 +513,22 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
+    if not last:
+        return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reasons = []
-    loc = f"{code.co_filename}:{code.co_firstlineno}"
     for part in guard_fn.verbose_code_parts:
         fail_reason = eval(part, guard_fn.global_scope, scope)
         # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
         # is updated to return a string explaining the failure.
-        global code_name_type_failure_count
-
-        def write_fail_reason_record(reason):
-            if last:
-                reasons.append(reason)
-
-            type_and_name = guard_fn.verbose_code_map[part]
-            key = f"{loc}{type_and_name}"
-            if key not in code_name_type_failure_count:
-                code_name_type_failure_count[key] = 0
-            code_name_type_failure_count[key] += 1
-
         if isinstance(fail_reason, str):
-            write_fail_reason_record(fail_reason)
+            reasons.append(fail_reason)
             break
         elif isinstance(fail_reason, bool) and not fail_reason:
-            write_fail_reason_record(part)
+            reasons.append(part)
             break
 
-    if not last:
-        return
     guard_failures[orig_code_map[code]].append(reasons)
 
 

@@ -298,10 +298,11 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True, guard_accumulati
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             produced_guarded_code = GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
-            print("convert", output)
+            # print("convert", output)
             if hasattr(output, "gm") and guard_accumulating:
-                output.call_user_compiler(output.gm, produced_guarded_code.check_fn.verbose_code_map)
-            print("guard_accumulating? ", guard_accumulating)
+                output.call_user_compiler(output.gm, produced_guarded_code.check_fn.verbose_guard_info)
+                delattr(output, "gm")
+            # print("guard_accumulating? ", guard_accumulating)
             return produced_guarded_code
         except (Unsupported, TorchRuntimeError):
             debug_print("WONT CONVERT")

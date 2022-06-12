@@ -206,7 +206,7 @@ class OutputGraph(fx.Tracer):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
-        print("compiling guard_accumulating?", tx.guard_accumulating)
+        # print("compiling guard_accumulating?", tx.guard_accumulating)
         self.partial_convert = partial_convert
 
         if not all(block.can_restore() for block in tx.block_stack):
@@ -288,7 +288,7 @@ class OutputGraph(fx.Tracer):
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
         # traceback.print_stack()
-        print("compile", self)
+        # print("compile", self)
         # print(self.converted)
         # print("compile data", self.verbose_code_map)
         for output in rv:
@@ -311,15 +311,14 @@ class OutputGraph(fx.Tracer):
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         name = unique_id("__compiled_fn")
-        print("calling user")
         # traceback.print_stack()
+        # print("Compile Output:", id(gm))
         if not tx.guard_accumulating:
             compiled_fn = self.call_user_compiler(gm)
         else:
-            print("COMPILER SELF", self)
             self.gm = gm
-            compiled_fn = gm
-            
+            compiled_fn = gm.forward    
+                    
         compiled_fn = torchdynamo.disable(compiled_fn)
             
         counters["stats"]["unique_graphs"] += 1
