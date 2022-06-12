@@ -48,7 +48,7 @@ jobs:
     - name: Install PyTorch
       shell: bash
       run: |
-          python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
+          sudo python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - name: Install pandas
       shell: bash
