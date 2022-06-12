@@ -1,4 +1,4 @@
-qname: Torchbench - cuda - inductor - BERT_pytorch
+name: Torchbench - cuda - inductor - BERT_pytorch
 
 on:
   push:
