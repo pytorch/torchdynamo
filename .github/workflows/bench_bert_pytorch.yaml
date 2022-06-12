@@ -10,22 +10,62 @@ jobs:
   test-inductor:
     runs-on: linux.8xlarge.nvidia.gpu
     steps:
-    - run: which python
-    - run: python --version
+    - name: Update pip
+      run: |
+        sudo yum update -y
+        sudo yum -y install git python3-pip
+        sudo pip3 install --upgrade pip
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
         repository: pytorch/benchmark
         path: ci_torchbenchmark
+    - name: Install CUDA 11.3
+      shell: bash
+      run: |
+        sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        sudo yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
+        sudo yum clean expire-cache
+        sudo yum install -y nvidia-driver-latest-dkms
+        sudo yum install -y cuda-11-3
+        sudo yum install -y cuda-drivers
+        sudo yum install -y libcudnn8-devel
+    - name: setup Path
+      run: |
+        echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
+        echo /usr/local/bin >> $GITHUB_PATH
     - uses: actions/setup-python@v4
       with:
         python-version: '3.x'
         architecture: 'x64' 
         cache: 'pip'
-    - run: make setup_nightly
+    - name: nvcc check
+      run: |
+        nvcc --version
+    - name: Install ninja
+      shell: bash
+      run: 	pip install ninja
+    - name: Install PyTorch
+      shell: bash
+      run: |
+          python -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
-    - run: pip install pandas
-    - run: pip install scipy
+    - name: Install pandas
+      shell: bash
+      run: 	pip install pandas
+    - name: Install scipy
+      shell: bash
+      run: 	pip install scipy
+    - name: Install functorch
+      shell: bash
+      run: pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
+	  
+    - name: Install other deps
+      shell: bash
+      run: pip install -r requirements.txt
+    - name: Setup
+      shell: bash
+      run: python setup.py develop
     - run: ./torchbench.py -k BERT_pytorch
 
 concurrency:
