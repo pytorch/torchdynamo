@@ -11,12 +11,12 @@ jobs:
     runs-on: linux.8xlarge.nvidia.gpu
     steps:
     - name: Install python
-      run: sudo yum install -y python3 python-devel python3-devel build-essential
+      run: yum install -y python3 python-devel python3-devel build-essential
     - name: Update pip
       run: |
-        sudo yum update -y
-        sudo yum -y install git python3-pip
-        sudo pip3 install --upgrade pip
+        yum update -y
+        yum -y install git python3-pip
+        pip3 install --upgrade pip
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
@@ -25,17 +25,17 @@ jobs:
     - name: Install CUDA 11.3
       shell: bash
       run: |
-        sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-        sudo yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
-        sudo yum clean expire-cache
-        sudo yum install -y nvidia-driver-latest-dkms
-        sudo yum install -y cuda-11-3
-        sudo yum install -y cuda-drivers
-        sudo yum install -y libcudnn8-devel
+        yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
+        yum clean expire-cache
+        yum install -y nvidia-driver-latest-dkms
+        yum install -y cuda-11-3
+        yum install -y cuda-drivers
+        yum install -y libcudnn8-devel
     - name: setup Path
       run: |
-        sudo echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
-        sudo echo /usr/local/bin >> $GITHUB_PATH
+        echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
+        echo /usr/local/bin >> $GITHUB_PATH
     - name: nvcc check
       run: |
         nvcc --version
@@ -48,7 +48,7 @@ jobs:
     - name: Install PyTorch
       shell: bash
       run: |
-          sudo python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
+          python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - name: Install pandas
       shell: bash
@@ -63,8 +63,8 @@ jobs:
       run: pip install -r requirements.txt
     - name: Setup
       shell: bash
-      run: sudo python3 setup.py develop
-    - run: sudo ./torchbench.py -k BERT_pytorch
+      run: python3 setup.py develop
+    - run: ./torchbench.py -k BERT_pytorch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
