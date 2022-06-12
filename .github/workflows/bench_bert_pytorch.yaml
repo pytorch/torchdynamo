@@ -34,8 +34,8 @@ jobs:
         sudo yum install -y libcudnn8-devel
     - name: setup Path
       run: |
-        echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
-        echo /usr/local/bin >> $GITHUB_PATH
+        sudo echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
+        sudo echo /usr/local/bin >> $GITHUB_PATH
     - name: nvcc check
       run: |
         nvcc --version
