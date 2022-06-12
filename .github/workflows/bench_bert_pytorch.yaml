@@ -10,6 +10,8 @@ jobs:
   test-inductor:
     runs-on: linux.8xlarge.nvidia.gpu
     steps:
+    - name: Install python
+      run: sudo yum install -y python3 python-dev python3-dev build-essential
     - name: Update pip
       run: |
         sudo yum update -y
