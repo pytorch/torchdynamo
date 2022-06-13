@@ -1,15 +1,9 @@
-import sre_compile
 import torch
 from benchmark_helper import time_with_torch_timer
-from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out
-#from torchinductor.triton_ops.matmul import matmul as triton_mm
 import torchdynamo
 import torchdynamo.config
 import torchinductor.config as config
 
-#torchdynamo.config.debug = True
-#config.debug = True
-config.triton.use_mm = False
 
 @torchdynamo.optimize("inductor", nopython=True)
 def inductor_aten_mm(a, b):
@@ -45,7 +39,6 @@ def alexnet_matmuls():
 
         config.triton.use_mm = True
         time_with_torch_timer(inductor_triton_mm, (a, b), string_id="inductor triton mm")
-        #break
       
 
 if __name__ == "__main__":
