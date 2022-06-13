@@ -159,15 +159,30 @@ class BuiltinVariable(VariableTracker):
 
     def tensor_args(self, *args, **kwargs):
         return any(
-            isinstance(i, variables.TensorVariable)
+            isinstance(
+                i, (variables.TensorVariable, variables.UnspecializedPrimitiveVariable)
+            )
             for i in itertools.chain(args, kwargs.values())
         )
+
+    def tensor_variable_class(self, *args, **kwargs):
+        if all(
+            isinstance(
+                i,
+                (variables.UnspecializedPrimitiveVariable, variables.ConstantVariable),
+            )
+            for i in itertools.chain(args, kwargs.values())
+        ):
+            return variables.UnspecializedPrimitiveVariable
+        else:
+            return variables.TensorVariable
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
+        tensor_variable_class = self.tensor_variable_class(*args, **kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
         has_constant_handler = self.can_constant_fold_through() and constant_args
         assert isinstance(args, list)
@@ -190,7 +205,7 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
-                return variables.TensorVariable.create(
+                return tensor_variable_class.create(
                     tx,
                     tx.output.create_proxy(
                         "call_function",

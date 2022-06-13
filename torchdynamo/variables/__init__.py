@@ -31,6 +31,7 @@ from .misc import WithExitFunctionVariable
 from .nn_module import NNModuleVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
+from .tensor import UnspecializedPrimitiveVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -66,6 +67,7 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
+    "UnspecializedPrimitiveVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",

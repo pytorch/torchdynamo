@@ -21,6 +21,7 @@ from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import TensorWithTFOverrideVariable
+from .variables.tensor import UnspecializedPrimitiveVariable
 
 
 @dataclasses.dataclass
@@ -93,7 +94,14 @@ class PyCodegen(object):
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
-        elif isinstance(value, (TensorVariable, TensorWithTFOverrideVariable)):
+        elif isinstance(
+            value,
+            (
+                TensorVariable,
+                TensorWithTFOverrideVariable,
+                UnspecializedPrimitiveVariable,
+            )
+        ):
             if isinstance(value, TensorWithTFOverrideVariable):
                 # unwrap back to tensor
                 value = value.tensor_variable
@@ -110,6 +118,18 @@ class PyCodegen(object):
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
+            if isinstance(value, UnspecializedPrimitiveVariable):
+                output.extend(
+                    [
+                        self.create_load_attr("numpy"),
+                        create_instruction("CALL_FUNCTION", 0),
+                        self.create_load_attr("reshape"),
+                        self._create_load_const(1),
+                        create_instruction("CALL_FUNCTION", 1),
+                        self._create_load_const(0),
+                        create_instruction("BINARY_SUBSCR"),
+                    ]
+                )
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:

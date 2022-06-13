@@ -68,6 +68,7 @@ from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+from .variables.tensor import UnspecializedPrimitiveVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -1204,6 +1205,21 @@ class InstructionTranslator(InstructionTranslatorBase):
             for k in vars
             if k in f_locals
         )
+        # wrap some python float/int as UnspecializedPrimitiveVariable which is 1-element tensor,
+        # so need to update the value to tensor.
+        cg = PyCodegen(self)
+        for k, v in list(self.symbolic_locals.items()):
+            if isinstance(v, UnspecializedPrimitiveVariable):
+                self.LOAD_GLOBAL(cg.create_load_global("torch", add=True))
+                self.LOAD_ATTR(cg.create_load_attr("tensor"))
+                self.push(self.pop())
+                self.push(None)
+                self.LOAD_FAST(cg.create_load(k))
+                self.CALL_METHOD(create_instruction("CALL_METHOD", 1))
+                tensor_var = self.pop()
+                args = dict(tensor_var.__dict__)
+                self.push(UnspecializedPrimitiveVariable(**args))
+                self.STORE_FAST(cg.create_store(k))
 
         # symbolic_locals contains the mapping from original f_locals to the
         # Variable objects. During the Variable building phase, each object also
