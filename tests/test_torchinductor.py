@@ -563,9 +563,7 @@ class CommonTemplate:
         torch.manual_seed(0)
 
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
-        self.common(
-            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10)
-        )
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_silu(self):
         def fn(a):
