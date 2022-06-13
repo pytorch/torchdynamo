@@ -1287,6 +1287,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         assert (
             reduction_type in ("sum", "amax", "amin", "any") or axis is None
         ), "TODO: max with index"
+        if reduction_type == "any":
+            x = to_dtype(x, torch.bool)
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 

@@ -47,7 +47,7 @@ class TritonOverrides(OpOverrides):
     def to_dtype(x, dtype: torch.dtype):
         triton_type_name = str(dtype).split(".")[-1]
         if triton_type_name == "bool":
-            triton_type_name = "int1"
+            return f"({x} != 0)"
         if triton_type_name in ("float16", "bfloat16"):
             triton_type_name = "float32"
         return f"{x}.to(tl.{triton_type_name})"

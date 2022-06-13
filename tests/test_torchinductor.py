@@ -831,6 +831,7 @@ class CommonTemplate:
                 aten._to_copy(a, dtype=6),
                 aten._to_copy(b + 1, dtype=6),
                 aten.to(b, torch.float64),
+                aten.to(b, torch.bool),
             )
 
         self.common(
@@ -1829,12 +1830,13 @@ class CommonTemplate:
     def test_any(self):
         def fn(x):
             return (
+                x.any(-1),
                 x.isinf().any(),
                 torch.all(x.isinf(), dim=0),
                 torch.all(torch.logical_not(x.isinf())),
             )
 
-        self.common(fn, [torch.randn(64)])
+        self.common(fn, [-torch.rand(64)])
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
