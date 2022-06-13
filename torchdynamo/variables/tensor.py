@@ -21,6 +21,7 @@ from ..utils import proxy_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
+from .lists import ShapeVariable
 from .lists import SizeVariable
 
 
@@ -228,7 +229,8 @@ class TensorVariable(VariableTracker):
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
-            result = ConstantVariable(self.size, **options)
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            result = ShapeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -335,7 +337,7 @@ class TensorVariable(VariableTracker):
             if (
                 name == "new"
                 and len(args) == 1
-                and isinstance(args[0], SizeVariable)
+                and isinstance(args[0], (SizeVariable, ShapeVariable))
                 and not config.dynamic_shapes
             ):
                 name = "new_empty"
