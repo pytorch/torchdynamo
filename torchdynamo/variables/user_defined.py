@@ -203,8 +203,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builder import VariableBuilder
         from .builder import UnspecializedPrimitiveInfo
+        from .builder import VariableBuilder
 
         if self.value is random.random:
             example_value = random.random()
