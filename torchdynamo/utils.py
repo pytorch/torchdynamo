@@ -121,8 +121,10 @@ def istensor(obj):
         obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
     )
 
+
 def is_lazy_module(mod):
     return isinstance(mod, LazyModuleMixin)
+
 
 @functools.lru_cache(4096)
 def print_once(*args):
