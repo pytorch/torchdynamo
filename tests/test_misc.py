@@ -6,6 +6,7 @@ import dis
 import enum
 import functools
 import math
+import random
 import sys
 import typing
 import unittest
@@ -1606,6 +1607,22 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res2 = fn(x, y, z)
         self.assertTrue(same(res1, res2))
+
+    def test_unspecialized_primitive_variable4(self):
+        # no recompilations on random.random
+        def fn(x):
+            y = random.random()
+            x.sum().item()  # break graph
+            return x + y
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            for i in range(10):
+                fn(x)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect

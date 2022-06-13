@@ -2,6 +2,7 @@ import collections
 import dataclasses
 import importlib
 import inspect
+import random
 import types
 from typing import Dict
 from typing import List
@@ -198,6 +199,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
         return super().call_method(tx, name, args, kwargs)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import VariableBuilder
+        from .builder import UnspecializedPrimitiveInfo
+
+        if self.value is random.random:
+            example_value = random.random()
+            return VariableBuilder(tx, self.source).wrap_unspecialized_primitive(
+                example_value, UnspecializedPrimitiveInfo(True)
+            )
+
+        return super().call_function(tx, args, kwargs)
 
     def _check_for_getattribute(self):
         try:

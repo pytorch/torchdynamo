@@ -310,7 +310,7 @@ class PyCodegen(object):
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if arg.is_unspecialized_primitive:
+            if arg.unspecialized_primitive_info is not None:
                 self.extend_output(
                     [
                         self.create_load_global("torch", add=True),
@@ -318,6 +318,12 @@ class PyCodegen(object):
                     ]
                 )
                 self.extend_output(arg.load(self))
+                if arg.unspecialized_primitive_info.from_callable:
+                    self.extend_output(
+                        [
+                            create_instruction("CALL_FUNCTION", 0),
+                        ]
+                    )
                 self.extend_output(
                     [
                         create_instruction("CALL_FUNCTION", 1),
