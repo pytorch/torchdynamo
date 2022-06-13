@@ -808,9 +808,6 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out1, out_post))
 
     def test_lazy_module(self):
-        m = LazyModule()
-        x = isinstance(m, LazyModuleMixin)
-
         input_shape = (16, 3, 6, 7, 8)
         cnt = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnt):
