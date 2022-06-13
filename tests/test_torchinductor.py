@@ -831,7 +831,7 @@ class CommonTemplate:
                 aten._to_copy(a, dtype=6),
                 aten._to_copy(b + 1, dtype=6),
                 aten.to(b, torch.float64),
-                aten.to(b, torch.bool)
+                aten.to(b, torch.bool),
             )
 
         self.common(
