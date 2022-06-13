@@ -552,4 +552,7 @@ class UnspecializedPrimitiveVariable(TensorVariable):
     e.g, int, float, np.int, np.float, etc
     """
 
-    pass
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable):
+        # Convert a `TensorVariable` instance into an `UnspecializedPrimitiveVariable` instance.
+        return cls(**dict(tensor_variable.__dict__))

@@ -263,12 +263,22 @@ class BuiltinVariable(VariableTracker):
             # convert min/max to torch ops
             if b.is_python_constant():
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
-                return variables.TorchVariable(torch.clamp).call_function(
+                result = variables.TorchVariable(torch.clamp).call_function(
                     tx, [a], kwargs
                 )
             else:
                 fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                return variables.TorchVariable(fn).call_function(tx, [a, b], {})
+                result = variables.TorchVariable(fn).call_function(tx, [a, b], {})
+
+            if (
+                self.tensor_variable_class(a, b)
+                == variables.UnspecializedPrimitiveVariable
+            ):
+                return variables.UnspecializedPrimitiveVariable.from_tensor_variable(
+                    result
+                )
+            else:
+                return result
 
     call_min = _call_min_max
     call_max = _call_min_max

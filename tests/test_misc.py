@@ -1593,6 +1593,20 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_unspecialized_primitive_variable3(self):
+        # test unspecialized primitive max/min
+        def fn(x, y, z):
+            return z + 1, max(x, y), min(x - 4, y)
+
+        x = np.int64(12)
+        y = 10
+        z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        res1 = fn(x, y, z)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x, y, z)
+        self.assertTrue(same(res1, res2))
+
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
         # should after stack value's codegen
