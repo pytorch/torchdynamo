@@ -100,7 +100,7 @@ class PyCodegen(object):
                 TensorVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPrimitiveVariable,
-            )
+            ),
         ):
             if isinstance(value, TensorWithTFOverrideVariable):
                 # unwrap back to tensor
@@ -310,7 +310,17 @@ class PyCodegen(object):
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            self.extend_output(arg.load(self))
+            if arg.is_unspecialized_primitive:
+                self.extend_output(
+                    [
+                        self.create_load_global("torch", add=True),
+                        self.create_load_attr("tensor"),
+                        arg.load(self),
+                        create_instruction("CALL_FUNCTION", 1),
+                    ]
+                )
+            else:
+                self.extend_output(arg.load(self))
 
         self.append_output(create_instruction("CALL_FUNCTION", len(graphargs)))
 

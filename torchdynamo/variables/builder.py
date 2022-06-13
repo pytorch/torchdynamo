@@ -67,6 +67,7 @@ from .user_defined import UserDefinedObjectVariable
 class GraphArg:
     source: Source
     example: Any
+    is_unspecialized_primitive: bool
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -283,15 +284,16 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif is_numpy_int_type(value) or is_numpy_float_type(value):
+            wrapped_value = torch.tensor(value)
             self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), torch.tensor(value))
+                GraphArg(self.get_source(), wrapped_value, True)
             )
             return UnspecializedPrimitiveVariable.create(
                 tx=self.tx,
                 proxy=self.tx.output.create_graph_input(
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
                 ),
-                example_value=torch.tensor(value),
+                example_value=wrapped_value,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
         elif DataClassVariable.is_matching_object(value):
@@ -327,7 +329,7 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            self.tx.output.graphargs.append(GraphArg(self.get_source(), value))
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # user code.
             with torch._C.DisableTorchFunction():

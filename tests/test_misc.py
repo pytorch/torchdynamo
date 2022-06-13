@@ -669,7 +669,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(fn(*args), correct))
             self.assertTrue(same(fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -1591,7 +1591,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             for i in range(10):
                 fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
