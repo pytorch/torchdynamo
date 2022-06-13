@@ -9,6 +9,7 @@ from typing import List
 
 import torch
 
+from torchdynamo.guards import GuardBuilder
 from torchdynamo.variables.tensor import DynamicShapeVariable
 
 from .. import config
@@ -277,9 +278,13 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
             )
         elif obj.has_unpack_var_sequence(tx):
+            guards = set()
+            if obj.source:
+                guards.add(obj.source.create_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
+                guards=guards,
             ).add_options(self, obj)
 
     call_iter = _call_iter_tuple_list

@@ -215,6 +215,15 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         if code.co_name == "<module>" and code.co_filename == "<string>":
             return None
 
+        if (
+            code.co_name == "<lambda>"
+            and code.co_filename == "<string>"
+            and not bool(frame.f_builtins)
+        ):
+            # namedtuple subclass constructor. Empty builtins cause issue with
+            # len keyword in LIST_LEN guard.
+            return None
+
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:

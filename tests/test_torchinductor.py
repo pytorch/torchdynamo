@@ -62,7 +62,7 @@ torchinductor.config.triton.autotune = False  # too slow
 
 
 def requires_decomp(fn):
-    """Decorator to disable test of a decomp is missing"""
+    """Decorator to disable test if a decomp is missing"""
 
     def wrap_test(test):
         @functools.wraps(test)
