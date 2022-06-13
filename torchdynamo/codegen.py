@@ -315,7 +315,11 @@ class PyCodegen(object):
                     [
                         self.create_load_global("torch", add=True),
                         self.create_load_attr("tensor"),
-                        arg.load(self),
+                    ]
+                )
+                self.extend_output(arg.load(self))
+                self.extend_output(
+                    [
                         create_instruction("CALL_FUNCTION", 1),
                     ]
                 )
