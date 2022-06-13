@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 
 from copy import deepcopy
-from re import L
 
 import torch
 from torch.nn import functional as F
