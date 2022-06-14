@@ -1861,7 +1861,7 @@ class CommonTemplate:
                 torch.all(torch.logical_not(x.isinf())),
             )
 
-        self.common(fn, [-torch.rand(64)])
+        self.common(fn, [torch.randn(64)])
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])

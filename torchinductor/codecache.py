@@ -242,11 +242,34 @@ def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=2):
     while z and z < size_hints[2] and conditional_product(x, y, z) < target:
         z *= 2
 
+    # TODO(jansel): if numel is small, should we scale down?
+
     cfg = {"XBLOCK": x}
     if y:
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
+    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
+
+
+def triton_config_reduction(size_hints, x, r, num_warps=4, num_stages=2):
+    from triton import Config
+
+    target = conditional_product(x, r)
+
+    # shrink sizes to size hints
+    x = min(x, size_hints[0])
+    y = min(r, size_hints[1])
+
+    # if we are below original block size, scale up where we can
+    while x < size_hints[0] and conditional_product(x, y) < target:
+        x *= 2
+    while r < size_hints[1] and conditional_product(x, y) < target:
+        r *= 2
+
+    # TODO(jansel): if numel is small, should we scale down?
+
+    cfg = {"XBLOCK": x, "RBLOCK": r}
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -288,23 +311,19 @@ def pointwise_heuristics(size_hints):
 
 def reduction_heuristics(size_hints):
     """args to @triton.heuristics()"""
-    from triton import heuristics
-    from triton import next_power_of_2
-
-    def reduction_size(args):
-        return next_power_of_2(args["rnumel"])
+    from triton import autotune
 
     if len(size_hints) == 2:
-        return heuristics(
-            {
-                "RBLOCK": reduction_size,
-                "XBLOCK": block_size_fn(
-                    next_power_of_2(4096 // size_hints[-1] or 1),
-                    size_hints[0],
-                    "xnumel",
-                ),
-                # "num_warps": lambda args: num_warps(args["rnumel"]),
-            }
+        if not config.triton.autotune:
+            return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
+        return autotune(
+            [
+                # TODO(jansel): there are random guesses
+                triton_config_reduction(size_hints, 32, 128),
+                triton_config_reduction(size_hints, 1, 4096, num_stages=1),
+                # TODO(jansel): perhaps a stages=3 config?
+            ],
+            key=["xnumel", "rnumel"],
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
