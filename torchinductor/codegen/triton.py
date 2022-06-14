@@ -353,7 +353,6 @@ class TritonKernel(Kernel):
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
-        self.disabled_reduction_store_cache = {}  # XXX not needed?
         self._load_mask = None
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
@@ -368,10 +367,12 @@ class TritonKernel(Kernel):
                 RangeTreeRoot(names[i], self.numels[i], names[i][0], i, self)
             )
         for tree in self.range_trees:
-            # reduction indexing as it goes inside the loop
+            # reduction indexing goes inside a loop
             if tree.prefix != "r":
                 tree.codegen_header(self.body)
         if self.inside_reduction and self.range_trees[-1].is_loop():
+            # workaround for this issue:
+            # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
             self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
 
     def disable_reduction(self):
@@ -380,13 +381,12 @@ class TritonKernel(Kernel):
             if not self.inside_reduction:
                 yield
                 return
+            # calling codegen_body() will flush all the pending buffers
+            # and write out a reduction loop
             self.codegen_body()
-            prior = self.cse.store_cache
-            self.cse.store_cache = self.disabled_reduction_store_cache
             self.inside_reduction = False
             yield
             self.inside_reduction = True
-            self.cse.store_cache = prior
 
         return ctx()
 
@@ -475,8 +475,6 @@ class TritonKernel(Kernel):
         self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        if name in self.disabled_reduction_store_cache:
-            return self.disabled_reduction_store_cache[name]
         var = self.args.input(name)
         index, mask = self.indexing(index)
         line = f"tl.load({var} + {index}, {mask})"
@@ -499,6 +497,8 @@ class TritonKernel(Kernel):
         index, mask = self.indexing(index, value)
         line = f"tl.store({var} + {index}, {value}, {mask})"
         self.stores.writeline(line)
+        if not self.inside_reduction:
+            self.outside_loop_vars.add(value)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         assert self.inside_reduction
@@ -540,12 +540,11 @@ class TritonKernel(Kernel):
         index, mask = self.indexing(index, result_var)
         assert "rmask" not in index
         self.inside_reduction = True
-        var = self.args.output(name)
-        self.outside_loop_vars.add(var)
-        self.cse.store_cache[name] = var
+        self.outside_loop_vars.add(result_var)
+        self.cse.store_cache[name] = result_var
         if name not in V.graph.removed_buffers:
-            line = f"tl.store({var} + {index}, {result_var}, {mask})"
-            self.suffix.writeline(line)
+            var = self.args.output(name)
+            self.suffix.writeline(f"tl.store({var} + {index}, {result_var}, {mask})")
 
     def codegen_body(self):
         """
@@ -567,7 +566,7 @@ class TritonKernel(Kernel):
             return
 
         if self.inside_reduction:
-            self.body.writeline(f"for roffset in range(0, rnumel, RBLOCK):")
+            self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
             with self.body.indent():
                 # last range tree is always reduction
                 self.range_trees[-1].codegen_header(self.body)
@@ -697,13 +696,13 @@ class TritonScheduling:
         scheduler = self.scheduler
 
         def is_group_matching(other_node):
-            other_groups = other_node.group
+            _, other_groups = other_node.group
             if groups == other_groups:
                 return True
             if len(groups) == 2 and groups[-1] != 1:
                 group, reduction_group = groups
                 if other_groups == (group * reduction_group, sympy.Integer(1)):
-                    sizes, _ = node.get_ranges()
+                    sizes, _ = other_node.get_ranges()
                     split = split_sizes(sizes, group, reduction_group)
                     return split is not None
                 return other_groups == (group, sympy.Integer(1))
@@ -750,11 +749,13 @@ class TritonScheduling:
                             node.run(*kernel.set_ranges(sizes[:split], sizes[split:]))
                             node.mark_fusable()
 
+                    # we mark reductions fusable here as they rely on the loop break below
                     for node in reduction_nodes:
                         node.mark_fusable(broadcast_after_reduce=True)
                     reduction_nodes.clear()
 
                     # Add more pointwise with fewer dimensions
+                    # disable_reduction() will close the current reduction loop
                     with kernel.disable_reduction():
                         for node in scheduler.pop_group((group, sympy.Integer(1))):
                             scheduler.maybe_remove_buffer(

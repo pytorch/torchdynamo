@@ -382,9 +382,8 @@ class CSE:
         self.iter_buffer_ids = iter_buffers or itertools.count()
 
     def invalidate(self, keep_vars: typing.Set[str]):
-        for name in list(self.store_cache.keys()):
-            assert isinstance(name, str)
-            if name not in keep_vars:
+        for name, tmp in list(self.store_cache.items()):
+            if tmp not in keep_vars:
                 del self.store_cache[name]
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
