@@ -245,14 +245,14 @@ class RangeTreeRoot(RangeTree):
     def codegen_header(self, code):
         x = self.prefix
         if self.is_loop():
-            code.writeline(
-                f"{self.name} = {x}offset + {x}base"
-            )
+            code.writeline(f"{self.name} = {x}offset + {x}base")
         else:
-            code.writelines([
-                f"{x}offset = tl.program_id({self.index}) * {x.upper()}BLOCK",
-                f"{self.name} = {x}offset + {self.ranges_code()}"
-            ])
+            code.writelines(
+                [
+                    f"{x}offset = tl.program_id({self.index}) * {x.upper()}BLOCK",
+                    f"{self.name} = {x}offset + {self.ranges_code()}",
+                ]
+            )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
@@ -521,7 +521,7 @@ class TritonKernel(Kernel):
         updated = value
         if reduction_type == "min":
             masks.append(f"({accumulator} > {value})")
-        elif reduction_type == "min":
+        elif reduction_type == "max":
             masks.append(f"({accumulator} < {value})")
         elif reduction_type == "sum":
             updated = f"{accumulator} + {value}"
