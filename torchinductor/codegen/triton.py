@@ -238,16 +238,21 @@ class RangeTreeRoot(RangeTree):
             itervars.append(node.symbol())
         return list(reversed(itervars))
 
+    def ranges_code(self):
+        size = self.kernel.reshape_size_str(self.index, self.prefix)
+        return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+
     def codegen_header(self, code):
         x = self.prefix
-        if not self.is_loop():
+        if self.is_loop():
             code.writeline(
-                f"{x}offset = tl.program_id({self.index}) * {x.upper()}BLOCK"
+                f"{self.name} = {x}offset + {x}base"
             )
-        code.writeline(
-            f"{self.name} = {x}offset + tl.reshape(tl.arange(0, {x.upper()}BLOCK), "
-            f"{self.kernel.reshape_size_str(self.index, x)})"
-        )
+        else:
+            code.writelines([
+                f"{x}offset = tl.program_id({self.index}) * {x.upper()}BLOCK",
+                f"{self.name} = {x}offset + {self.ranges_code()}"
+            ])
         code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
@@ -366,6 +371,8 @@ class TritonKernel(Kernel):
             # reduction indexing as it goes inside the loop
             if tree.prefix != "r":
                 tree.codegen_header(self.body)
+        if self.inside_reduction and self.range_trees[-1].is_loop():
+            self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
 
     def disable_reduction(self):
         @contextlib.contextmanager
@@ -750,6 +757,7 @@ class TritonScheduling:
                             )
                             node.run(*kernel.set_ranges(*node.get_ranges()))
                             node.mark_fusable()
+
                 elif len(groups) == 3:
                     tile1, tile2, _ = groups
                     # Add pointwise with compatible dimensions

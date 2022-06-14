@@ -19,6 +19,7 @@ from ..virtualized import ops
 def product(it):
     return functools.reduce(operator.mul, it, sympy.Integer(1))
 
+
 def _simplify_loops(index_vars, sizes, index_formulas):
     """
     Try to remove as many axis from loop iterations as possible, by:
