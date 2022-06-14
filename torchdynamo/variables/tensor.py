@@ -203,6 +203,26 @@ class TensorVariable(VariableTracker):
     def python_type(self):
         return self.class_type
 
+    def call_isinstance(self, tensor_type):
+        tensortype_to_dtype = {
+            torch.FloatTensor: (torch.float32, torch.float),
+            torch.DoubleTensor: (torch.float64, torch.double),
+            torch.HalfTensor: (torch.float16, torch.half),
+            torch.BFloat16Tensor: (torch.bfloat16,),
+            torch.ByteTensor: (torch.uint8,),
+            torch.CharTensor: (torch.int8,),
+            torch.LongTensor: (torch.int64, torch.long),
+            torch.IntTensor: (torch.int32, torch.int),
+            torch.ShortTensor: (torch.int16, torch.short),
+            torch.BoolTensor: (torch.bool,),
+        }
+
+        if tensor_type not in tensortype_to_dtype:
+            return self.python_type() is tensor_type
+
+        dtypes = tensortype_to_dtype[tensor_type]
+        return self.dtype in dtypes
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
