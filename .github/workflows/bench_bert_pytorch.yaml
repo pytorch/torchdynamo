@@ -62,7 +62,7 @@ jobs:
       shell: bash
       run: pip install -r requirements.txt --user
     - name: Permissions set hacks
-      run: chmod -R 777 '/usr/local/lib64/python3.7'
+      run: sudo chmod -R 777 '/usr/local/lib64/python3.7'
     - name: Setup
       shell: bash
       run: python3 setup.py develop
