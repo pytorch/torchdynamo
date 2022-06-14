@@ -314,17 +314,7 @@ def reduction_heuristics(size_hints):
     from triton import autotune
 
     if len(size_hints) == 2:
-        if not config.triton.autotune:
-            return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
-        return autotune(
-            [
-                # TODO(jansel): there are random guesses
-                triton_config_reduction(size_hints, 32, 128),
-                triton_config_reduction(size_hints, 1, 4096, num_stages=1),
-                # TODO(jansel): perhaps a stages=3 config?
-            ],
-            key=["xnumel", "rnumel"],
-        )
+        return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 

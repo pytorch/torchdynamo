@@ -2111,7 +2111,9 @@ class Convolution(ExternKernelAlloc):
         # memory layout order of output depends on x
         size_hint = V.graph.sizevars.size_hint
         x_stride = [size_hint(i) for i in x.get_stride()]
-        order = sorted(range(len(x_stride)), key=x_stride.__getitem__)
+        order = list(sorted(range(len(x_stride)), key=x_stride.__getitem__))
+        if (kernel_size[0] == 1 and kernel_size[1] == 1) or order != [3, 0, 2, 1]:
+            order = [3, 2, 1, 0]
 
         output_layout = FixedLayout(
             x.get_device(),
