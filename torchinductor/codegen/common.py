@@ -19,6 +19,66 @@ from ..virtualized import ops
 def product(it):
     return functools.reduce(operator.mul, it, sympy.Integer(1))
 
+def _simplify_loops(index_vars, sizes, index_formulas):
+    """
+    Try to remove as many axis from loop iterations as possible, by:
+        1) removing size==1 dimensions
+        2) fuse contiguous dimensions into a single loop
+    """
+    sizes = list(sizes)
+
+    strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
+    assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+
+    for i in range(len(sizes)):
+        if sizes[i] == 1:
+            # remove dim
+            sizes[i] = None
+
+    def can_merge_dims(a, b):
+        for k in range(len(strides)):
+            if strides[k][a] * sizes[a] == strides[k][b]:
+                # approximate test passed, try sound version
+                va = index_vars[a]
+                vb = index_vars[b]
+                v = sympy.Symbol("_merge_tester")
+                expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
+                expr2 = index_formulas[k].subs({va: 0, vb: v})
+                if expr1 == expr2:
+                    continue
+            return False
+        return True
+
+    changed = True
+    while changed:
+        changed = False
+        for i, j in itertools.product(
+            reversed(range(len(sizes))), reversed(range(len(sizes)))
+        ):
+            if i == j or sizes[i] is None or sizes[j] is None:
+                continue
+            if can_merge_dims(i, j):
+                changed = True
+                sizes[i] = sizes[i] * sizes[j]
+                sizes[j] = None
+
+    def reindex(index):
+        it = list(reversed(index))
+        new_index = []
+        for size in sizes:
+            if size is None:
+                new_index.append(sympy.Integer(0))
+            else:
+                new_index.append(it.pop())
+        assert not it
+        return new_index
+
+    def prune(index):
+        assert len(index) == len(sizes)
+        return [i for i, s in zip(index, sizes) if s is not None]
+
+    return [x for x in sizes if x is not None], reindex, prune
+
 
 class ExprPrinter(Printer):
     @staticmethod

@@ -54,7 +54,7 @@ class triton:
     dense_indexing = False
 
     # limit tiling dimensions
-    max_tiles = 2
+    max_tiles = 1
 
     # put each kernel in its own file
     many_files = False
