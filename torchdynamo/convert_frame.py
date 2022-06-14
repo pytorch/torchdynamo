@@ -7,6 +7,7 @@ import sys
 import traceback
 import types
 import typing
+import warnings
 from typing import Callable
 
 import torch
@@ -127,6 +128,7 @@ def wrap_convert_context(fn):
 
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
+    warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     # Check if the function was decorated with torchdynamo.optimize
     if frame.f_code in always_optimize_code_objects:
         return True
