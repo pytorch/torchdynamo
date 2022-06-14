@@ -4,6 +4,9 @@ from copy import deepcopy
 
 import torch
 from torch.nn import functional as F
+from torch.nn.modules.lazy import LazyModuleMixin
+from torch.nn.parameter import Parameter
+from torch.nn.parameter import UninitializedParameter
 
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
@@ -401,6 +404,32 @@ class DenseNetBlocks(torch.nn.Module):
         return self.layers(x)
 
 
+class MaterializedModule(torch.nn.Module):
+    """Once the below lazy module is initialized with its first input,
+    it is transformed into this module."""
+
+    param: Parameter
+
+    def __init__(self):
+        super().__init__()
+        self.register_parameter("param", None)
+
+    def forward(self, x):
+        return x
+
+
+class LazyModule(LazyModuleMixin, MaterializedModule):
+    param: UninitializedParameter
+    cls_to_become = MaterializedModule
+
+    def __init__(self):
+        super().__init__()
+        self.param = UninitializedParameter()
+
+    def initialize_parameters(self, x):
+        self.param.materialize(x.shape)
+
+
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
     requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
     return requires_grad
@@ -776,3 +805,62 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torchdynamo.testing.same(pre, opt_pre))
         self.assertTrue(torchdynamo.testing.same(out1, out_post))
+
+    def test_lazy_module(self):
+        input_shape = (16, 3, 6, 7, 8)
+
+        cnt = torchdynamo.testing.CompileCounter()
+        module = LazyModule()
+        with torchdynamo.optimize(cnt):
+
+            def test_static_module():
+                input = torch.ones(*input_shape)
+                module(input)
+
+            test_static_module()
+
+        self.assertTrue(
+            isinstance(module, MaterializedModule),
+            "Module should be transformed to an instance of MaterializedModule.",
+        )
+        self.assertEqual(module.param.shape, input_shape)
+
+        # test when mapped to UnspecializedNNModule
+        module = LazyModule()
+        with torchdynamo.optimize(cnt):
+
+            def test_unspecialized():
+                nonlocal module
+                module = LazyModule()
+                input = torch.ones(*input_shape)
+                module(input)
+
+            test_unspecialized()
+
+        self.assertTrue(
+            isinstance(module, MaterializedModule),
+            "Module should be transformed to an instance of MaterializedModule.",
+        )
+        self.assertEqual(module.param.shape, input_shape)
+
+        # test with a static module in torch.*
+        module = torch.nn.modules.LazyBatchNorm3d(
+            affine=False, track_running_stats=False
+        )
+
+        cnt = torchdynamo.testing.CompileCounter()
+
+        with torchdynamo.optimize(cnt):
+
+            def test_torch_static():
+                input = torch.ones(*input_shape)
+                module(input)  # fully materialized
+
+            test_torch_static()
+            test_torch_static()
+
+        self.assertTrue(
+            isinstance(module, torch.nn.modules.batchnorm.BatchNorm3d),
+            "Module should be transformed to an instance of BatchNorm3d.",
+        )
+        self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")

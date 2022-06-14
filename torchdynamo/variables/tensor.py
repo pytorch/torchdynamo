@@ -15,6 +15,7 @@ from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..utils import clone_tensor
+from ..utils import is_lazy_module
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
@@ -86,7 +87,12 @@ class TensorVariable(VariableTracker):
                         )
                     elif op == "call_module":
                         assert nnmodule is not None
-                        example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
+                        # In the case of a lazy module, we want to run
+                        # the pre-hooks which initialize it
+                        if is_lazy_module(nnmodule):
+                            example_value = nnmodule(*args, **kwargs)
+                        else:
+                            example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
                 except RuntimeError:
                     # Track the assertion when the pytorch execution raises
                     # assertion
