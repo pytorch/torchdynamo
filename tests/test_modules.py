@@ -808,33 +808,59 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
     def test_lazy_module(self):
         input_shape = (16, 3, 6, 7, 8)
+
         cnt = torchdynamo.testing.CompileCounter()
+        module = LazyModule()
         with torchdynamo.optimize(cnt):
 
-            def test_dynamic_module():
+            def test_static_module():
+                input = torch.ones(*input_shape)
+                module(input)
+
+            test_static_module()
+
+        self.assertTrue(
+            isinstance(module, MaterializedModule),
+            "Module should be transformed to an instance of MaterializedModule.",
+        )
+        self.assertEqual(module.param.shape, input_shape)
+
+        # test when mapped to UnspecializedNNModule
+        module = LazyModule()
+        with torchdynamo.optimize(cnt):
+
+            def test_unspecialized():
+                nonlocal module
                 module = LazyModule()
                 input = torch.ones(*input_shape)
                 module(input)
-                self.assertTrue(
-                    isinstance(module, MaterializedModule),
-                    "Module should be transformed to an instance of MaterializedModule.",
-                )
-                self.assertEqual(module.param.shape, input.shape)
 
-            test_dynamic_module()
+            test_unspecialized()
+
+        self.assertTrue(
+            isinstance(module, MaterializedModule),
+            "Module should be transformed to an instance of MaterializedModule.",
+        )
+        self.assertEqual(module.param.shape, input_shape)
 
         # test with a static module in torch.*
         module = torch.nn.modules.LazyBatchNorm3d(
             affine=False, track_running_stats=False
         )
+
+        cnt = torchdynamo.testing.CompileCounter()
+
         with torchdynamo.optimize(cnt):
 
-            def run_test():
+            def test_torch_static():
                 input = torch.ones(*input_shape)
                 module(input)  # fully materialized
-                self.assertTrue(
-                    isinstance(module, torch.nn.modules.batchnorm.BatchNorm3d),
-                    "Module should be transformed to an instance of BatchNorm3d.",
-                )
 
-            run_test()
+            test_torch_static()
+            test_torch_static()
+
+        self.assertTrue(
+            isinstance(module, torch.nn.modules.batchnorm.BatchNorm3d),
+            "Module should be transformed to an instance of BatchNorm3d.",
+        )
+        self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
