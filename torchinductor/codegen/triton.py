@@ -482,12 +482,17 @@ class TritonKernel(Kernel):
         line = f"tl.load({var} + {index}, {mask})"
         if upcast:
             line += ".to(tl.float32)"
+
         if self.inside_reduction and "rmask" not in mask:
             # can lift a common load outside of reduction loop
             tmp = self.cse.generate(self.body, line)
+        else:
+            tmp = self.cse.generate(self.loads, line)
+
+        if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(tmp)
-            return tmp
-        return self.cse.generate(self.loads, line)
+
+        return tmp
 
     def store(self, name, index, value):
         var = self.args.output(name)
