@@ -226,7 +226,6 @@ def _kernel(
 
 
 def bmm_out(a, b, out):
-    device = a.device
     # handle non-contiguous inputs if necessary
     if a.stride(0) > 1 and a.stride(1) > 1:
         a = a.contiguous()
@@ -245,10 +244,18 @@ def bmm_out(a, b, out):
         if a.dtype in [torch.float16, torch.bfloat16, torch.float32]
         else tl.int32
     )
+
     # launch kernel
-    grid = lambda META: (
-        triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-        META["SPLIT_K"],
-        B,
-    )
+    def grid(META):
+        return (
+            triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+            META["SPLIT_K"],
+            B,
+        )
+
+    # grid = lambda META: (
+    #     triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+    #     META["SPLIT_K"],
+    #     B,
+    # )
     _kernel[grid](a, b, c, M, N, K, K, 1, N, 1, N, 1, GROUP_M=8, ACC_TYPE=ACC_TYPE)
