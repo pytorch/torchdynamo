@@ -63,7 +63,7 @@ jobs:
       run: pip install -r requirements.txt
     - name: Setup
       shell: bash
-      run: python setup.py develop
+      run: python3 setup.py develop
     - run: ./torchbench.py -k BERT_pytorch
 
 concurrency:
