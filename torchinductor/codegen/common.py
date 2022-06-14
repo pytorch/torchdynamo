@@ -124,6 +124,10 @@ class IndentedBuffer:
         self._indent = initial_indent
         self.getvalue = self.contents.getvalue
 
+    def clear(self):
+        self.contents.seek(0)
+        self.contents.truncate()
+
     def __bool__(self):
         return len(self.getvalue()) > 0
 
@@ -316,6 +320,13 @@ class CSE:
         self.store_cache = store_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
 
+    def invalidate(self, keep_vars: typing.Set[str]):
+        for name in list(self.store_cache.keys()):
+            assert isinstance(name, str)
+            if name not in keep_vars:
+                del self.store_cache[name]
+        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+
     def clone(self):
         return CSE(
             self.prefix,
@@ -425,16 +436,13 @@ class Kernel(CodeGen):
                 if "tmp" in str(index):
                     return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
-                if (name, index) in store_cache:
-                    return store_cache[(name, index)]
-                if (name, self.rename_indexing(index)) in store_cache:
-                    # TODO(jansel): figure out why we need this second case
-                    return store_cache[(name, self.rename_indexing(index))]
+                if name in store_cache:
+                    return store_cache[name]
                 return self.load(name, index, upcast)
 
             @staticmethod
             def store(name, index, value):
-                self.cse.store_cache[(name, index)] = value
+                self.cse.store_cache[name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value)
 
