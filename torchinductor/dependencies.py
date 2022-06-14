@@ -64,31 +64,32 @@ class ReadWrites:
 
 
 class RecordLoadStore(V.MockHandler):
-    def __init__(self, size, var_ranges):
+    def __init__(self, var_ranges, normalize):
         super(RecordLoadStore, self).__init__()
         self._reads = set()
         self._writes = set()
         self._index_exprs = set()
-        self._size = tuple([x for x in size if x != 1])
         self._var_ranges = var_ranges
+        self._normalize = normalize
 
     def canonicalize(self, index):
         sizes = list(self._var_ranges.values())
-        if len(self._var_ranges) > 1:
-            # Try to further simplify the indexes even if simplify_loops didn't
-            # convert it to the simpliest form because of the interference from
-            # different indexing formulas.
-            index_vars = list(self._var_ranges.keys())
-            new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
-            if len(new_sizes) < len(sizes):
-                replacement = dict(zip(index_vars, reindex(prune(index_vars))))
-                index = (
-                    sympy.expand(index)
-                    .subs(replacement)
-                    .subs(dict(zip(index_vars, reversed(index_vars))))
-                )
-                sizes = new_sizes
-        return index, tuple([x for x in sizes if x != 1])
+        if not self._normalize:
+            return index, tuple([x for x in sizes if x != 1])
+
+        # Try to further simplify the indexes even if simplify_loops didn't
+        # convert it to the simpliest form because of the interference from
+        # different indexing formulas.
+        index_vars = list(self._var_ranges.keys())
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         canonicalized_index, canonicalized_size = self.canonicalize(index)
@@ -104,7 +105,8 @@ class RecordLoadStore(V.MockHandler):
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 
     def index_expr(self, index, dtype):
-        self._index_exprs.add(IndexExprDep(index, self._size))
+        canonicalized_index, canonicalized_size = self.canonicalize(index)
+        self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
         return f"index_expr({index}, {dtype})"
 
 
@@ -141,9 +143,9 @@ def index_vars_squeeze(*argsizes, prefix="d"):
     return new_sizes, args, var_ranges
 
 
-def extract_read_writes(fn, *argsizes):
+def extract_read_writes(fn, *argsizes, normalize=False):
     new_sizes, args, var_ranges = index_vars_squeeze(*argsizes)
-    rw = RecordLoadStore(new_sizes[0], var_ranges)
+    rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):
         fn(*args)
     return ReadWrites(rw._reads, rw._writes, rw._index_exprs)
