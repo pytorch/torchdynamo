@@ -67,6 +67,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
+        if dtype == torch.bool:
+            return f"({x} != 0)"
         return f"{x}.to({triton_dtype(dtype)})"
 
     @staticmethod

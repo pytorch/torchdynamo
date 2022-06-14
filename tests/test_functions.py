@@ -539,6 +539,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         z = x.new(y.size())
         assert z.size() == y.size()
 
+    @requires_static_shapes
+    @make_test
+    def test_tensor_new_with_shape(x):
+        y = torch.rand(5, 8)
+        z = x.new(y.shape)
+        assert z.size() == y.size()
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
