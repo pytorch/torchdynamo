@@ -16,7 +16,7 @@ jobs:
       run: |
         sudo yum update -y
         sudo yum -y install git python3-pip
-        sudo pip3 install --upgrade pip
+        sudo pip3 install --upgrade pip 
     - uses: actions/checkout@v2
     - uses: actions/checkout@master
       with:
@@ -41,26 +41,28 @@ jobs:
         nvcc --version
     - name: Install setuptools
       shell: bash
-      run: pip install setuptools
+      run: pip install setuptools --user
     - name: Install ninja
       shell: bash
-      run: 	pip install ninja
+      run: 	pip install ninja --user
     - name: Install PyTorch
       shell: bash
       run: |
-          python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html
+          python3 -m pip install --pre torch -f https://download.pytorch.org/whl/test/cu113/torch_test.html --user
     # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
     - name: Install pandas
       shell: bash
-      run: 	pip install pandas
+      run: 	pip install pandas --user
     - name: Install scipy
       shell: bash
-      run: 	pip install scipy
+      run: 	pip install scipy --user
     - name: Install functorch
-      run: pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html --upgrade
+      run: pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html --upgrade --user
     - name: Install other deps
       shell: bash
-      run: pip install -r requirements.txt
+      run: pip install -r requirements.txt --user
+    - name: Permissions set hacks
+      run: chmod -R 777 '/usr/local/lib64/python3.7'
     - name: Setup
       shell: bash
       run: python3 setup.py develop
