@@ -540,6 +540,24 @@ class Scheduler:
                     old_count + 1,
                 )
 
+    def remove_kernel_local_buffers(self):
+        # If all the uses of this buffer are also in self.pending_buffer_names,
+        # it means the buffer becomes kernel-local after fusion
+        for name in self.pending_buffer_names:
+            node = self.name_to_node[name]
+            is_live = any(
+                [
+                    (user.get_name() not in self.pending_buffer_names)
+                    for user in node.users
+                ]
+            )
+            if not is_live:
+                # Assign a special value instead of deleting the entry
+                # because we still rely on output_buffers's length to
+                # generate unique arg name.
+                V.kernel.args.output_buffers[name] = "REMOVED"
+                V.graph.removed_buffers.add(name)
+
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
