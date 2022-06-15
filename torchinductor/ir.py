@@ -20,8 +20,8 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
-from .codegen.common import product
 from .dependencies import extract_read_writes
+from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
@@ -123,7 +123,7 @@ class IRNode(object):
         return any(name == dep.name for dep in self.get_reads())
 
     def get_numel(self):
-        return product(self.get_size())
+        return sympy_product(self.get_size())
 
 
 @dataclasses.dataclass
@@ -279,7 +279,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
     ):
-        reduction_numel = product(reduction_ranges)
+        reduction_numel = sympy_product(reduction_ranges)
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             def fn(index):
@@ -290,7 +290,7 @@ class Reduction(Loops):
 
         if is_triton(device):
             reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
-            numel_hint = V.graph.sizevars.size_hint(product(ranges))
+            numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
             if reduction_numel_hint > 8192 and numel_hint == 1:
                 # triton doesn't support reduce to single element well, so break it up
                 split = 128
@@ -336,7 +336,7 @@ class Reduction(Loops):
         Break a large reduction up into multiple smaller reductions
         recursively
         """
-        reduction_numel = product(reduction_ranges)
+        reduction_numel = sympy_product(reduction_ranges)
 
         # TODO(jansel): convert this to dynamic shapes
         # TODO(jansel): realize the reduction so we can do dynamic indexing
@@ -685,10 +685,10 @@ class View(BaseView):
         for i in range(len(new_size)):
             if new_size[i] == -1:
                 new_size[i] = sympy.Integer(1)
-                new_size[i] = CleanDiv(product(old_size), product(new_size))
+                new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
-        V.graph.sizevars.guard_equals(product(old_size), product(new_size))
+        V.graph.sizevars.guard_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
 
     @classmethod
@@ -697,7 +697,7 @@ class View(BaseView):
             reindex = cls._dynamic_reshape_indexer(old_size, new_size)
         except (AssertionError, IndexError):
             # optimistic algorithm failed, lets do a fallback
-            flat = [product(old_size)]
+            flat = [sympy_product(old_size)]
             reindex1 = cls._dynamic_reshape_indexer(old_size, flat)
             reindex2 = cls._dynamic_reshape_indexer(flat, new_size)
             reindex = fuse_reindexing(reindex1, reindex2)
