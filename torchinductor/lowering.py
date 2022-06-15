@@ -21,6 +21,17 @@ from .virtualized import ops
 
 lowerings = {}
 aten = torch.ops.aten
+needs_realized_inputs = {
+    aten.avg_pool2d,
+    aten.bmm,
+    aten.constant_pad_nd,
+    aten.convolution,
+    aten.convolution_backward,
+    aten.max_pool2d_with_indices,
+    aten.mm,
+    aten.reflection_pad2d,
+    aten.upsample_nearest2d,
+}
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
@@ -545,6 +556,8 @@ def native_dropout(x, p, train):
 
 
 def make_fallback(kernel):
+    needs_realized_inputs.add(kernel)
+
     @register_lowering(kernel, type_promote=False)
     def handler(*args):
         result = ir.FallbackKernel.create(kernel, *args)

@@ -486,7 +486,6 @@ class Scheduler:
         if name in self.mutation_renames:
             return
         if node.can_remove_buffer(check_group=check_group):
-            print("REMOVING", name)
             V.graph.removed_buffers.add(name)
 
     def enqueue(self, node):
