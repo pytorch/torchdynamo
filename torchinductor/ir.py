@@ -2141,7 +2141,7 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        if any(k != 1 for k in kernel_size) and in_channels_stride == 1:
+        if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
             # channels last format
             order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(order) < len(output_size):
@@ -2244,7 +2244,7 @@ class StorageBox(MutableBox):
                 data=self.data,
             ).get_read_writes()
             # TODO(jansel): this heuristic is a wild guess
-            if len(read_writes.reads) > 4 or len(self.inner_fn_str()) > 1000:
+            if len(read_writes.reads) > 4 or len(self.inner_fn_str()) > 2000:
                 self.realize()
 
 
