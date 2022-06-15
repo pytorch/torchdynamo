@@ -359,6 +359,8 @@ class BuiltinVariable(VariableTracker):
         arg_type = arg.python_type()
         isinstance_type = isinstance_type.as_python_constant()
 
+        if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+            return variables.ConstantVariable(arg.call_isinstance(isinstance_type))
         # UserDefinedObject with C extensions can have torch.Tensor attributes,
         # so break graph.
         if isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
