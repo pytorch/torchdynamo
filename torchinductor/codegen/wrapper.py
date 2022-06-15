@@ -1,24 +1,23 @@
 import collections
 import dataclasses
-import functools
 import hashlib
 from itertools import count
 
 from .. import codecache
 from .. import config
 from .. import ir
+from ..utils import has_triton, sympy_product
 from ..virtualized import V
 from .common import CodeGen
 from .common import IndentedBuffer
 from .common import Kernel
-from .common import product
 from .triton import texpr
 
 pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    return (node.get_device(), node.get_dtype(), product(node.get_size()))
+    return (node.get_device(), node.get_dtype(), sympy_product(node.get_size()))
 
 
 def make_buffer_reuse(old, new):
@@ -44,16 +43,6 @@ class FreedBuffer:
             code.writeline(make_buffer_reuse(self.node, self.reused_as))
         else:
             code.writeline(f"del {name}")
-
-
-@functools.lru_cache(None)
-def has_triton():
-    try:
-        import triton
-
-        return triton is not None
-    except (ModuleNotFoundError, ImportError):
-        return False
 
 
 class WrapperCodeGen(CodeGen):

@@ -27,8 +27,8 @@ try:
     from torchinductor.compile_fx import compile_fx
     from torchinductor.ir import IndexingDiv
     from torchinductor.ir import ModularIndexing
-    from torchinductor.lowering import has_torchvision_roi_align
     from torchinductor.sizevars import SizeVarAllocator
+    from torchinductor.utils import has_torchvision_roi_align
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])

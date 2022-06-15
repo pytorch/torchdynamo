@@ -6,7 +6,7 @@ from triton import cdiv
 from triton import heuristics
 
 from torchinductor import config
-from torchinductor.triton_ops.utils import conditional_product
+from torchinductor.utils import conditional_product
 
 log = logging.getLogger(__name__)
 
