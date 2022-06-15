@@ -580,13 +580,13 @@ class TritonScheduling:
         scheduler = self.scheduler
 
         def is_group_matching(other_node):
-            other_groups = other_node.group
+            _, other_groups = other_node.group
             if groups == other_groups:
                 return True
             if len(groups) == 2 and groups[-1] != 1:
                 group, reduction_group = groups
                 if other_groups == (group * reduction_group, sympy.Integer(1)):
-                    sizes, _ = node.get_ranges()
+                    sizes, _ = other_node.get_ranges()
                     split = split_sizes(sizes, group, reduction_group)
                     return split is not None
                 return other_groups == (group, sympy.Integer(1))
