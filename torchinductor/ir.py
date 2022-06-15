@@ -1035,7 +1035,13 @@ class FlexibleLayout(Layout):
         return list(reversed(reversed_strides))
 
     @staticmethod
-    def ordered_strides(sizes, order):
+    def fill_ordered(sizes, order):
+        """
+        Create a stride based on the order the dimensions should be filled in.
+
+        In this format, channels last would be:
+            [1, 3, 2, 0]
+        """
         assert set(range(len(sizes))) == set(order)
         next_stride = sympy.Integer(1)
         strides = [None] * len(order)
@@ -1045,13 +1051,34 @@ class FlexibleLayout(Layout):
             next_stride = next_stride * sizes[i]
         return strides
 
+    @staticmethod
+    def stride_ordered(sizes, order):
+        """
+        Create a stride based on the sorted order of a permuted range.
+
+        In this format, channels last would be:
+            [3, 0, 2, 1]
+        """
+        assert set(range(len(sizes))) == set(order)
+        lookup = {pos: idx for idx, pos in enumerate(order)}
+        fill_order = [lookup[i] for i in range(len(order))]
+        return FlexibleLayout.fill_ordered(sizes, fill_order)
+
     def as_stride_order(self, order):
-        assert len(self.size) == len(order)
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.ordered_strides(self.size, order),
+            self.stride_ordered(self.size, order),
+            self.offset,
+        )
+
+    def as_fill_order(self, order):
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            self.fill_ordered(self.size, order),
             self.offset,
         )
 
@@ -1165,6 +1192,10 @@ class Buffer(IRNode):
     def freeze_layout_with_stride_order(self, order):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_stride_order(order)
+
+    def freeze_layout_with_fill_order(self, order):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_fill_order(order)
 
     def make_loader(self):
         def loader(index):
@@ -1280,7 +1311,7 @@ class ComputedBuffer(Buffer):
                 )
                 from .scheduler import pick_loop_order
 
-                self.freeze_layout_with_stride_order(
+                self.freeze_layout_with_fill_order(
                     pick_loop_order(stride_lengths, self.get_size())
                 )
 
@@ -2065,10 +2096,12 @@ class Convolution(ExternKernelAlloc):
 
         if len(x.get_size()) == 1 + len(kernel_size):
             in_channels2, *input_size = x.get_size()
+            in_channels_stride, *_ = x.get_stride()
             output_size = []
         else:
             assert len(x.get_size()) == 2 + len(kernel_size)
             batch, in_channels2, *input_size = x.get_size()
+            _, in_channels_stride, *_ = x.get_stride()
             output_size = [batch]
 
         V.graph.sizevars.guard_equals(in_channels1, in_channels2)
@@ -2108,20 +2141,20 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        # memory layout order of output depends on x
-        size_hint = V.graph.sizevars.size_hint
-        x_stride = [size_hint(i) for i in x.get_stride()]
-        order = list(sorted(range(len(x_stride)), key=x_stride.__getitem__))
-        if (kernel_size[0] == 1 and kernel_size[1] == 1) or order != [3, 0, 2, 1]:
-            order = [3, 2, 1, 0]
+        if any(k != 1 for k in kernel_size) and in_channels_stride == 1:
+            # channels last format
+            order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+            if len(order) < len(output_size):
+                # add batch dim if it exists
+                order = [len(order)] + order
+        else:
+            order = list(reversed(range(len(output_size))))
 
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            # TODO(jansel): fix channels last case
-            # FlexibleLayout.contiguous_strides(output_size),
-            FlexibleLayout.ordered_strides(output_size, order),
+            FlexibleLayout.stride_ordered(output_size, order),
         )
 
         if bias is not None:

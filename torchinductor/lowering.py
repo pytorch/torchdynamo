@@ -585,11 +585,11 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
-    return TensorBox.create(
+    result = TensorBox.create(
         ir.Convolution.create(
             x,
             weight,
-            bias,
+            None,  # bias handled below
             stride,
             padding,
             dilation,
@@ -598,6 +598,12 @@ def convolution(
             groups,
         )
     )
+    if bias is not None:
+        kernel_dims = len(weight.get_size()) - 2
+        out_chan = result.get_size()[-1 - kernel_dims]
+        bias = view(bias, [out_chan] + kernel_dims * [1])
+        result = add(result, bias)
+    return result
 
 
 @register_lowering(aten.clone)
