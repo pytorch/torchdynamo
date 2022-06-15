@@ -1,3 +1,6 @@
+import functools
+import operator
+
 import torch
 
 
@@ -29,3 +32,7 @@ def _unpack(idx, order, shape):
         _2 = _12 // shape[order[1]]
         _1 = _12 % shape[order[1]]
     return _0, _1, _2
+
+
+def conditional_product(*args):
+    return functools.reduce(operator.mul, [x for x in args if x])
