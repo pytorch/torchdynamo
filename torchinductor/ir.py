@@ -288,13 +288,12 @@ class Reduction(Loops):
 
             return Pointwise.create(device, dtype, fn, ranges)
 
-        """
         if is_triton(device):
-            # triton doesn't support large reductions well, so break them up
             reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
             numel_hint = V.graph.sizevars.size_hint(product(ranges))
-            split = cls._pick_split(numel_hint, reduction_numel_hint)
-            if split:
+            if reduction_numel_hint > 8192 and numel_hint == 1:
+                # triton doesn't support reduce to single element well, so break it up
+                split = 128
                 return cls.create_multilayer(
                     device,
                     dtype,
@@ -304,7 +303,6 @@ class Reduction(Loops):
                     reduction_type,
                     split,
                 )
-        """
 
         return TensorBox.create(
             Reduction(
@@ -322,23 +320,6 @@ class Reduction(Loops):
         return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
             reduction_type
         ]
-
-    @staticmethod
-    def _pick_split(numel, reduction_numel):
-        from triton import next_power_of_2
-
-        numel = next_power_of_2(numel)
-        reduction_numel = next_power_of_2(reduction_numel)
-        if numel == 1:
-            if reduction_numel >= 128**2:
-                return 128
-            if reduction_numel >= 64**2:
-                return 64
-        if reduction_numel >= 32 * 1024:
-            return 1024
-        if reduction_numel > 4096:
-            return 128
-        return None
 
     @classmethod
     def create_multilayer(

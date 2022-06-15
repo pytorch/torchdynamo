@@ -311,8 +311,18 @@ def pointwise_heuristics(size_hints):
 
 def reduction_heuristics(size_hints):
     """args to @triton.heuristics()"""
+    from triton import autotune
+
     if len(size_hints) == 2:
-        return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
+        if not config.triton.autotune:
+            return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
+        return autotune(
+            [
+                triton_config_reduction(size_hints, 32, 128),
+                triton_config_reduction(size_hints, 1, 1024),
+            ],
+            key=["xnumel", "rnumel"],
+        )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 

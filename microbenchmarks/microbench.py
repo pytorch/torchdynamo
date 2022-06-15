@@ -20,6 +20,7 @@ except ImportError:
     tti = None
 
 
+
 def timed(model, example_inputs, times=1):
     synchronize()
     torch.manual_seed(1337)
@@ -159,6 +160,8 @@ def main():
 
     if args.verbose:
         torchinductor.config.debug = True
+
+    torchinductor.config.triton.autotune = True
 
     rows = []
     for model in (MicroBenchmarks.sum,):
