@@ -151,7 +151,7 @@ def get_configs_io_bound():
     prune_configs_by={
         "early_config_prune": early_config_prune,
         "perf_model": estimate_matmul_time,
-        "top_k": 10,
+        "top_k": 18,
     },
 )
 @triton.jit
