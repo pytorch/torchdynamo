@@ -3,6 +3,8 @@ import dataclasses
 import hashlib
 from itertools import count
 
+from torchinductor.codegen.common import DeferredIndentedBuffer
+
 from .. import codecache
 from .. import config
 from .. import ir
@@ -117,7 +119,10 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
-            self.writeline(f"{name} = {layout.view.codegen_reference()}")
+            allocation = DeferredIndentedBuffer().writeline(
+                name, f"{name} = {layout.view.codegen_reference()}"
+            )
+            self.writeline(allocation)
             return
 
         # try to reuse a recently freed buffer
@@ -131,12 +136,14 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        self.writeline(
+        allocation = DeferredIndentedBuffer().writeline(
+            name,
             f"{name} = empty_strided("
             f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
             f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
+            f"device='{device.type}', dtype={dtype})",
         )
+        self.writeline(allocation)
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
@@ -179,7 +186,9 @@ class WrapperCodeGen(CodeGen):
             while self.lines and isinstance(self.lines[-1], FreedBuffer):
                 self.lines.pop()
             for line in self.lines:
-                if isinstance(line, FreedBuffer):
+                if isinstance(line, DeferredIndentedBuffer):
+                    line.flush(result)
+                elif isinstance(line, FreedBuffer):
                     line.codegen(result)
                 else:
                     result.writeline(line)

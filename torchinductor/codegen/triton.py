@@ -495,7 +495,7 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value)
         line = f"tl.store({var} + {index}, {value}, {mask})"
-        self.stores.writeline(line)
+        self.stores.writeline(name, line)
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
