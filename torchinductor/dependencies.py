@@ -144,7 +144,7 @@ def index_vars_squeeze(*argsizes, prefix="d"):
 
 
 def extract_read_writes(fn, *argsizes, normalize=False):
-    new_sizes, args, var_ranges = index_vars_squeeze(*argsizes)
+    _, args, var_ranges = index_vars_squeeze(*argsizes)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):
         fn(*args)

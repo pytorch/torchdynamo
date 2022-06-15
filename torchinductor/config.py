@@ -53,7 +53,7 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # limit tiling dimensions
+    # Disable tiling until we figure out how tiling and fusion work together
     max_tiles = 1
 
     # put each kernel in its own file
