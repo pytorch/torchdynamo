@@ -7,7 +7,6 @@ import sys
 import traceback
 import types
 import typing
-import warnings
 from typing import Callable
 
 import torch
@@ -20,6 +19,7 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .eval_frame import TorchPatcher
 from .eval_frame import WrapperBackend
 from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
@@ -126,9 +126,9 @@ def wrap_convert_context(fn):
     return _fn
 
 
+@TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
-    warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     # Check if the function was decorated with torchdynamo.optimize
     if frame.f_code in always_optimize_code_objects:
         return True
