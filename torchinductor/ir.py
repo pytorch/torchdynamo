@@ -1218,11 +1218,12 @@ class ComputedBuffer(Buffer):
         _, args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
-        body = LoopBody(
-            self.get_store_function(),
-            (args if self.get_reduction_type() else args[:1]),
-            var_ranges,
-        )
+        with patch.object(ConstantBuffer, "override_device", self.get_device()):
+            body = LoopBody(
+                self.get_store_function(),
+                (args if self.get_reduction_type() else args[:1]),
+                var_ranges,
+            )
         index_formulas = [*body.indexing_exprs.values()]
         memory_addrs = [*body.reads, *body.writes]
 
