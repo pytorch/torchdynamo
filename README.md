@@ -118,7 +118,7 @@ Note that the order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 
 ## Troubleshooting
-See [TROUBLESHOOTING.md].
+See [Troubleshooting](TROUBLESHOOTING.md).
 
 ## Adding Backends
 
