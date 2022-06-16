@@ -20,6 +20,7 @@ import numpy as np
 import tabulate
 import torch
 from torch import fx
+from torch.nn.modules.lazy import LazyModuleMixin
 
 import torchdynamo.config
 
@@ -122,6 +123,10 @@ def istensor(obj):
     return istype(
         obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
     )
+
+
+def is_lazy_module(mod):
+    return isinstance(mod, LazyModuleMixin)
 
 
 @functools.lru_cache(4096)
@@ -423,7 +428,7 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().numpy()}")
+                print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)

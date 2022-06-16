@@ -47,7 +47,7 @@ class TritonOverrides(OpOverrides):
     def to_dtype(x, dtype: torch.dtype):
         triton_type_name = str(dtype).split(".")[-1]
         if triton_type_name == "bool":
-            triton_type_name = "int1"
+            return f"({x} != 0)"
         if triton_type_name in ("float16", "bfloat16"):
             triton_type_name = "float32"
         return f"{x}.to(tl.{triton_type_name})"
@@ -74,7 +74,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.log({x})"
+        # workaround https://github.com/openai/triton/issues/543
+        return f"tl.log({x}.to(tl.float32))"
 
     @staticmethod
     def isinf(x):
@@ -381,9 +382,8 @@ class TritonKernel(Kernel):
 
         return " + ".join(addr), " & ".join(mask)
 
-    def simplify_indexing(self, expr: sympy.Expr):
-        expr = V.graph.sizevars.simplify_with_ranges(
-            expr,
+    def var_ranges(self):
+        return (
             dict(
                 itertools.chain.from_iterable(
                     tree.var_ranges.items() for tree in self.range_trees
@@ -391,6 +391,8 @@ class TritonKernel(Kernel):
             ),
         )
 
+    def simplify_indexing(self, expr: sympy.Expr):
+        expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         nodes = [
             self.range_tree_nodes[sym]
             for sym in expr.free_symbols
@@ -418,8 +420,8 @@ class TritonKernel(Kernel):
         self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        if (name, index) in self.disabled_reduction_stores:
-            return self.disabled_reduction_stores[(name, index)]
+        if name in self.disabled_reduction_stores:
+            return self.disabled_reduction_stores[name]
         var = self.args.input(name)
         index, mask = self.indexing(index)
         line = f"tl.load({var} + {index}, {mask})"
@@ -578,13 +580,13 @@ class TritonScheduling:
         scheduler = self.scheduler
 
         def is_group_matching(other_node):
-            other_groups = other_node.group
+            _, other_groups = other_node.group
             if groups == other_groups:
                 return True
             if len(groups) == 2 and groups[-1] != 1:
                 group, reduction_group = groups
                 if other_groups == (group * reduction_group, sympy.Integer(1)):
-                    sizes, _ = node.get_ranges()
+                    sizes, _ = other_node.get_ranges()
                     split = split_sizes(sizes, group, reduction_group)
                     return split is not None
                 return other_groups == (group, sympy.Integer(1))
@@ -600,6 +602,7 @@ class TritonScheduling:
         reschedule = []
         with scheduler.kernel(TritonKernel(*groups)) as kernel:
             for _ in scheduler.iter_fixed_point():
+                # scheduler.pop_group will keep iterating all reachable fusable nodes
                 for node in scheduler.pop_group(groups):
                     scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
                     node.run(*kernel.set_ranges(*node.get_ranges()))

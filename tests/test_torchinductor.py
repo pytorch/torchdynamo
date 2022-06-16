@@ -27,6 +27,7 @@ try:
     from torchinductor.compile_fx import compile_fx
     from torchinductor.ir import IndexingDiv
     from torchinductor.ir import ModularIndexing
+    from torchinductor.lowering import has_torchvision_roi_align
     from torchinductor.sizevars import SizeVarAllocator
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
@@ -58,6 +59,21 @@ if torch.cuda.is_available():
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 torchinductor.config.triton.autotune = False  # too slow
+
+
+def requires_decomp(fn):
+    """Decorator to disable test if a decomp is missing"""
+
+    def wrap_test(test):
+        @functools.wraps(test)
+        def maybe_test(*args, **kwargs):
+            if len(get_decompositions([fn])) == 0:
+                raise unittest.SkipTest(f"requires decomp for {fn.__name__}")
+            return test(*args, **kwargs)
+
+        return maybe_test
+
+    return wrap_test
 
 
 class TestCase(unittest.TestCase):
@@ -370,6 +386,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    def test_vertical_fusion1(self):
+        def fn(sa, ct, p):
+            # From torchbench.pyhpc_equation_of_state
+            v17 = -3.087032500374211e-7
+            v18 = -1.988366587925593e-8
+            v19 = -1.061519070296458e-11
+            v20 = 1.550932729220080e-10
+            t15 = v19 * ct
+            t19 = v17 + ct * (v18 + t15) + v20 * sa
+            t20 = 1.0 / t19
+            t128 = t19 * p
+            return t20 + t128
+
+        self.common(
+            fn,
+            (
+                torch.randn(204, 204, 26),
+                torch.randn(204, 204, 26),
+                torch.randn(26),
+            ),
+        )
+
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
@@ -542,10 +580,12 @@ class CommonTemplate:
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
 
+        # without manual_seed, there is some chance this test fails due to:
+        # https://github.com/openai/triton/issues/530
+        torch.manual_seed(0)
+
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
-        self.common(
-            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False
-        )
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_silu(self):
         def fn(a):
@@ -815,6 +855,7 @@ class CommonTemplate:
                 aten._to_copy(a, dtype=6),
                 aten._to_copy(b + 1, dtype=6),
                 aten.to(b, torch.float64),
+                aten.to(b, torch.bool),
             )
 
         self.common(
@@ -1121,8 +1162,34 @@ class CommonTemplate:
         self.assertEqual(c.stride()[2], 1)
 
     @requires_cuda()
-    @patch.object(config.triton, "use_conv", True)
+    @patch.object(config.triton, "convolution", "triton")
     def test_triton_conv(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def triton_conv(
+            x,
+            w,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        ):
+            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+            return y
+
+        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
+        dtype = torch.float32
+        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
+        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
+        bias = torch.randn((32), dtype=dtype, device=self.device)
+
+        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
+        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
+
+    @requires_cuda()
+    @patch.object(config.triton, "convolution", "autotune")
+    def test_conv_autotune(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def triton_conv(
             x,
@@ -1756,6 +1823,26 @@ class CommonTemplate:
             ),
         )
 
+    @unittest.skipIf(not has_torchvision_roi_align(), "requirs torchvision")
+    def test_roi_align(self):
+        def fn(a, b):
+            return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
+
+        self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
+
+    @requires_decomp(aten.nll_loss_forward)
+    def test_nll_loss_forward(self):
+        def fn(a, b):
+            return aten.nll_loss_forward(a, b, None, 1, -100)
+
+        self.common(
+            fn,
+            (
+                torch.randn([5, 5]),
+                torch.zeros([5], dtype=torch.int64),
+            ),
+        )
+
     def test_isinf(self):
         def fn(x):
             return x.isinf(), x.isnan()
@@ -1767,12 +1854,13 @@ class CommonTemplate:
     def test_any(self):
         def fn(x):
             return (
+                x.any(-1),
                 x.isinf().any(),
                 torch.all(x.isinf(), dim=0),
                 torch.all(torch.logical_not(x.isinf())),
             )
 
-        self.common(fn, [torch.randn(64)])
+        self.common(fn, [-torch.rand(64)])
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
@@ -1789,6 +1877,31 @@ class CommonTemplate:
             return (a, b, c, d, e, f, h)
 
         self.common(fn, [torch.randn(64) * 10])
+
+    def test_baddbmm(self):
+        def fn(a, b, c):
+            return aten.baddbmm(a, b, c)
+
+        self.common(
+            fn,
+            [
+                torch.randn(6, 1, 100),
+                torch.randn(6, 128, 64),
+                torch.randn(6, 64, 100),
+            ],
+        )
+
+    def test_expand_as(self):
+        def fn(a, b):
+            return aten.expand_as(a, b), aten.expand_as(a + 1, b + 1) + 1
+
+        self.common(
+            fn,
+            [
+                torch.randn(6, 1, 100),
+                torch.randn(6, 128, 100),
+            ],
+        )
 
 
 if HAS_CPU:

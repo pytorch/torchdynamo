@@ -255,6 +255,15 @@ class SizeVariable(TupleVariable):
         return build_torch_size
 
 
+class ShapeVariable(TupleVariable):
+    """
+    Represents tensor.shape(...) and helps differentiate between a constant
+    TupleVariable and ShapeVariable.
+    """
+
+    pass
+
+
 class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, **kwargs):
         super().__init__(items, **kwargs)

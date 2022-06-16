@@ -47,14 +47,15 @@ class triton:
     # Monkey patching to lower overheads
     hackery = False
 
-    # use triton conv as backend
-    use_conv = False
+    # choose conv backend, "aten" or "triton" or "autotune"
+    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
     # limit tiling dimensions
-    max_tiles = 2
+    # Disable tiling until we figure out how tiling and fusion work together
+    max_tiles = 1
 
     # put each kernel in its own file
     many_files = False

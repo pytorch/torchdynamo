@@ -113,7 +113,13 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
         ):
             out = PatchingInterpreter(gm).run(*args[params_len:])
         assert isinstance(out, (tuple, list)), "graph must output tuple()"
-        return tuple(x.proxy for x in out)
+
+        def unpack(x):
+            if hasattr(x, "proxy"):
+                return x.proxy
+            return x
+
+        return tuple(unpack(x) for x in out)
 
     with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
         tracer: torch.fx.Tracer = PythonKeyTracer()

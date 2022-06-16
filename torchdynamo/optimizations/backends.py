@@ -310,20 +310,20 @@ def fx2trt(subgraph, **kwargs):
         # TensorRT fails violently with an abort() on this
         return None
 
-    import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
-    from fx2trt_oss.fx.fx2trt import InputTensorSpec
-    from fx2trt_oss.fx.fx2trt import TRTInterpreter
-    from fx2trt_oss.fx.passes.lower_basic_pass import transform_setitem
-    from fx2trt_oss.fx.tools.trt_splitter import TRTSplitter
-    from fx2trt_oss.fx.tools.trt_splitter import TRTSplitterSetting
-    from fx2trt_oss.fx.trt_module import TRTModule
-    from fx2trt_oss.fx.utils import LowerPrecision
+    from torch_tensorrt.fx.fx2trt import InputTensorSpec
+    from torch_tensorrt.fx.fx2trt import TRTInterpreter
+    from torch_tensorrt.fx.passes.lower_basic_pass import transform_setitem
+    from torch_tensorrt.fx.tools.trt_splitter import TRTSplitter
+    from torch_tensorrt.fx.tools.trt_splitter import TRTSplitterSetting
+    from torch_tensorrt.fx.tracer.acc_tracer import acc_tracer
+    from torch_tensorrt.fx.trt_module import TRTModule
+    from torch_tensorrt.fx.utils import LowerPrecision
 
     from .normalize import normalize_ir
 
     try:
-        model = copy.deepcopy(subgraph.model)
-        inputs = copy.deepcopy(subgraph.example_inputs)
+        model = subgraph.model
+        inputs = subgraph.example_inputs
         # normalize
         model = normalize_ir(model, inputs)
         # pass rewrite

@@ -1616,3 +1616,33 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res2 = fn(x)
         self.assertEqual(res, res2)
+
+    def test_tensor_types(self):
+        def fn(dtype, tensor_type):
+            x = torch.empty(4, dtype=dtype)
+            assert isinstance(x, tensor_type)
+
+        with torchdynamo.optimize("eager"):
+            fn(torch.float32, torch.FloatTensor)
+            fn(torch.float64, torch.DoubleTensor)
+            fn(torch.float16, torch.HalfTensor)
+            fn(torch.bfloat16, torch.BFloat16Tensor)
+            fn(torch.uint8, torch.ByteTensor)
+            fn(torch.int8, torch.CharTensor)
+            fn(torch.int64, torch.LongTensor)
+            fn(torch.int, torch.IntTensor)
+            fn(torch.int16, torch.ShortTensor)
+            fn(torch.bool, torch.BoolTensor)
+
+    def test_nan(self):
+        def f(x, n):
+            return x * 2 + n
+
+        x = torch.randn(4)
+        n = float("nan")
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            f(x, n)
+            f(x, n)
+        self.assertEqual(cnts.frame_count, 1)

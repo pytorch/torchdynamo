@@ -46,6 +46,9 @@ from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
 
+# We are primarily interested in tf32 datatype
+torch.backends.cuda.matmul.allow_tf32 = True
+
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 for torchbench_dir in (
     "../torchbenchmark",
@@ -1018,6 +1021,9 @@ def main():
         if args.float16:
             # TODO(jansel): check if correctness issue is real
             SKIP.add("yolov3")
+        if not (args.float16 or args.float32):
+            # https://github.com/openai/triton/issues/543 causes only 98.8% similarity
+            NONDETERMINISTIC.add("pyhpc_equation_of_state")
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
@@ -1047,6 +1053,7 @@ def main():
     elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
 
+        torchinductor.config.debug = args.verbose
         if args.threads:
             torchinductor.config.cpp.threads = args.threads
 

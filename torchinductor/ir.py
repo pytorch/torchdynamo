@@ -19,6 +19,7 @@ from sympy import Integer
 
 from . import config
 from . import dependencies
+from .codegen.common import _simplify_loops
 from .codegen.common import product
 from .dependencies import extract_read_writes
 from .virtualized import V
@@ -297,6 +298,12 @@ class Reduction(Loops):
                 reduction_type,
             )
         )
+
+    @staticmethod
+    def default_value(reduction_type, dtype):
+        return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
+            reduction_type
+        ]
 
 
 def is_storage_and_layout(x):
@@ -914,7 +921,13 @@ class FlexibleLayout(Layout):
         return list(reversed(reversed_strides))
 
     @staticmethod
-    def ordered_strides(sizes, order):
+    def fill_ordered(sizes, order):
+        """
+        Create a stride based on the order the dimensions should be filled in.
+
+        In this format, channels last would be:
+            [1, 3, 2, 0]
+        """
         assert set(range(len(sizes))) == set(order)
         next_stride = sympy.Integer(1)
         strides = [None] * len(order)
@@ -924,13 +937,34 @@ class FlexibleLayout(Layout):
             next_stride = next_stride * sizes[i]
         return strides
 
+    @staticmethod
+    def stride_ordered(sizes, order):
+        """
+        Create a stride based on the sorted order of a permuted range.
+
+        In this format, channels last would be:
+            [3, 0, 2, 1]
+        """
+        assert set(range(len(sizes))) == set(order)
+        lookup = {pos: idx for idx, pos in enumerate(order)}
+        fill_order = [lookup[i] for i in range(len(order))]
+        return FlexibleLayout.fill_ordered(sizes, fill_order)
+
     def as_stride_order(self, order):
-        assert len(self.size) == len(order)
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.ordered_strides(self.size, order),
+            self.stride_ordered(self.size, order),
+            self.offset,
+        )
+
+    def as_fill_order(self, order):
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            self.fill_ordered(self.size, order),
             self.offset,
         )
 
@@ -1044,6 +1078,10 @@ class Buffer(IRNode):
     def freeze_layout_with_stride_order(self, order):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_stride_order(order)
+
+    def freeze_layout_with_fill_order(self, order):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_fill_order(order)
 
     def make_loader(self):
         def loader(index):
@@ -1159,7 +1197,7 @@ class ComputedBuffer(Buffer):
                 )
                 from .scheduler import pick_loop_order
 
-                self.freeze_layout_with_stride_order(
+                self.freeze_layout_with_fill_order(
                     pick_loop_order(stride_lengths, self.get_size())
                 )
 
@@ -1180,11 +1218,12 @@ class ComputedBuffer(Buffer):
         _, args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
-        body = LoopBody(
-            self.get_store_function(),
-            (args if self.get_reduction_type() else args[:1]),
-            var_ranges,
-        )
+        with patch.object(ConstantBuffer, "override_device", self.get_device()):
+            body = LoopBody(
+                self.get_store_function(),
+                (args if self.get_reduction_type() else args[:1]),
+                var_ranges,
+            )
         index_formulas = [*body.indexing_exprs.values()]
         memory_addrs = [*body.reads, *body.writes]
 
@@ -1203,7 +1242,7 @@ class ComputedBuffer(Buffer):
                 reduce_size.append(s)
 
         def simplify_and_reorder(x_vars, sizes):
-            sizes, reindex1, prune = self._simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
             x_vars = prune(x_vars)
             sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
@@ -1335,67 +1374,6 @@ class ComputedBuffer(Buffer):
             return (broadcast_ranges, other_ranges), call
         else:
             return (iter_ranges,), body
-
-    @classmethod
-    def _simplify_loops(cls, index_vars, sizes, index_formulas):
-        """
-        Try to remove as many axis from loop iterations as possible, by:
-            1) removing size==1 dimensions
-            2) fuse contiguous dimensions into a single loop
-        """
-        sizes = list(sizes)
-
-        strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
-        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
-
-        for i in range(len(sizes)):
-            if sizes[i] == 1:
-                # remove dim
-                sizes[i] = None
-
-        def can_merge_dims(a, b):
-            for k in range(len(strides)):
-                if strides[k][a] * sizes[a] == strides[k][b]:
-                    # approximate test passed, try sound version
-                    va = index_vars[a]
-                    vb = index_vars[b]
-                    v = sympy.Symbol("_merge_tester")
-                    expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
-                    expr2 = index_formulas[k].subs({va: 0, vb: v})
-                    if expr1 == expr2:
-                        continue
-                return False
-            return True
-
-        changed = True
-        while changed:
-            changed = False
-            for i, j in itertools.product(
-                reversed(range(len(sizes))), reversed(range(len(sizes)))
-            ):
-                if i == j or sizes[i] is None or sizes[j] is None:
-                    continue
-                if can_merge_dims(i, j):
-                    changed = True
-                    sizes[i] = sizes[i] * sizes[j]
-                    sizes[j] = None
-
-        def reindex(index):
-            it = list(reversed(index))
-            new_index = []
-            for size in sizes:
-                if size is None:
-                    new_index.append(sympy.Integer(0))
-                else:
-                    new_index.append(it.pop())
-            assert not it
-            return new_index
-
-        def prune(index):
-            assert len(index) == len(sizes)
-            return [i for i, s in zip(index, sizes) if s is not None]
-
-        return [x for x in sizes if x is not None], reindex, prune
 
     @staticmethod
     def _apply_loop_reordering(index_vars, sizes, memory_addrs):
@@ -1571,6 +1549,12 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def realize_input(cls, x):
+        if x is None:
+            return V.graph.add_tensor_constant(torch.tensor(()))
+        if isinstance(x, Constant):
+            return V.graph.add_tensor_constant(
+                torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
+            )
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
@@ -1880,15 +1864,19 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             )
             return [
-                MultiOutput(
-                    FixedLayout(
-                        example_output[i].device,
-                        example_output[i].dtype,
-                        [sympy.Integer(s) for s in example_output[i].size()],
-                        [sympy.Integer(s) for s in example_output[i].stride()],
-                    ),
-                    packed,
-                    i,
+                (
+                    MultiOutput(
+                        FixedLayout(
+                            example_output[i].device,
+                            example_output[i].dtype,
+                            [sympy.Integer(s) for s in example_output[i].size()],
+                            [sympy.Integer(s) for s in example_output[i].stride()],
+                        ),
+                        packed,
+                        i,
+                    )
+                    if example_output[i] is not None
+                    else None
                 )
                 for i in range(len(example_output))
             ]
@@ -1928,20 +1916,25 @@ class MultiOutput(ExternKernel):
 
 
 class Convolution(ExternKernelAlloc):
-    kernel = "aten.convolution"
-
-    def __init__(self, layout, inputs, constant_args=()):
-        if (
-            config.triton.use_conv
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_ops_conv"
-        super().__init__(layout, self.unwrap_storage(inputs), constant_args)
+    config_conv = config.triton.convolution
+    if config_conv == "aten":
+        kernel = "aten.convolution"
+    elif config_conv == "triton":
+        kernel = "triton_ops_conv"
+    else:
+        assert config_conv == "autotune"
+        kernel = "tuned_conv"
 
     def codegen(self, wrapper):
         if self.kernel == "triton_ops_conv":
-            wrapper.writeline(f"import torchinductor.triton_ops.conv as {self.kernel}")
+            wrapper.header.writeline(
+                f"import torchinductor.triton_ops.conv as {self.kernel}"
+            )
+        # choose from different conv kernels
+        elif self.kernel == "tuned_conv":
+            wrapper.header.writeline(
+                f"from torchinductor.codegen.autotuner import {self.kernel}"
+            )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
@@ -1990,10 +1983,12 @@ class Convolution(ExternKernelAlloc):
 
         if len(x.get_size()) == 1 + len(kernel_size):
             in_channels2, *input_size = x.get_size()
+            in_channels_stride, *_ = x.get_stride()
             output_size = []
         else:
             assert len(x.get_size()) == 2 + len(kernel_size)
             batch, in_channels2, *input_size = x.get_size()
+            _, in_channels_stride, *_ = x.get_stride()
             output_size = [batch]
 
         V.graph.sizevars.guard_equals(in_channels1, in_channels2)
@@ -2033,12 +2028,20 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
+        if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
+            # channels last format
+            order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+            if len(order) < len(output_size):
+                # add batch dim if it exists
+                order = [len(order)] + order
+        else:
+            order = list(reversed(range(len(output_size))))
+
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            # TODO(jansel): fix channels last case
-            FlexibleLayout.contiguous_strides(output_size),
+            FlexibleLayout.stride_ordered(output_size, order),
         )
 
         if bias is not None:
@@ -2128,7 +2131,7 @@ class StorageBox(MutableBox):
                 data=self.data,
             ).get_read_writes()
             # TODO(jansel): this heuristic is a wild guess
-            if len(read_writes.reads) > 1 or len(self.inner_fn_str()) > 1000:
+            if len(read_writes.reads) > 4 or len(self.inner_fn_str()) > 2000:
                 self.realize()
 
 

@@ -4,6 +4,11 @@ import triton
 import torchinductor.triton_ops
 import model
 
+# The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+torch.backends.cuda.matmul.allow_tf32 = True
+# The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+torch.backends.cudnn.allow_tf32 = True
+
 # https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/
 useCudaGraph = False
 
@@ -16,10 +21,10 @@ conv_confs = [
         line_vals=["cublas", "triton"],
         line_names=["cuBLAS", "Triton"],
         ylabel="TFLOPS",
-        plot_name=f"resnet50-conv1x1-{i}-performance",
+        plot_name=f"resnet50-conv{i}-perf",
         args={"BATCH": BATCH, "IN_H": IN_H, "IN_W": IN_W, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
               "KERNEL_H": KERNEL_H, "KERNEL_W": KERNEL_W, "stride": stride, "padding": padding},
-    ) for i, (IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding) in enumerate(model.resnet50_layers) if KERNEL_H == 1 and KERNEL_W == 1
+    ) for i, (IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding) in enumerate(model.resnet50_layers)
     for BATCH in [32]
 ]
 
@@ -49,15 +54,20 @@ def bench_op(
     OUT_W = (IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]) // stride[1]
 
     tflops = lambda ms: 2. * BATCH * OUT_H * OUT_W * IN_C * KERNEL_H * KERNEL_W * KERNEL_N / ms * 1e-9
-
     if provider == "cublas":
         fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
     if provider == "triton":
-        fn = lambda: torchinductor.triton_ops.conv1x1(
+        fn = lambda: torchinductor.triton_ops.conv(
             x, w, bias, stride, padding, dilation, False, (0, 0), groups
         )
 
+    # useCudaGraph won't change the TFLOPs,
+    # because do_bench() clear L2 cache to hide the latency of CPU launch time
     if useCudaGraph:
+        new_x = x.clone()
+        new_w = w.clone()
+        new_bias = bias.clone()
+
         # warmp up for cudagraph
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
@@ -71,7 +81,12 @@ def bench_op(
         with torch.cuda.graph(g):
             tmp = fn()
 
-        fn = lambda: g.replay()
+        def fn():
+            x.copy_(new_x)
+            w.copy_(new_w)
+            bias.copy_(new_bias)
+            return g.replay()
+
     ms, min_ms, max_ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     return tflops(ms), tflops(max_ms), tflops(min_ms)
 

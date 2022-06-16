@@ -3,6 +3,7 @@ import dataclasses
 import enum
 import functools
 import logging
+import math
 import os
 import re
 import textwrap
@@ -50,6 +51,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
+        ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
 )
@@ -315,6 +317,12 @@ class GuardBuilder:
             self.code.append(f"str({ref}) == {str(val)!r}")
             return
 
+        # Special case for nan because float("nan") == float("nan") evaluates to False
+        if istype(val, float) and math.isnan(val):
+            self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
+            self.code.append(f"__math_isnan({ref})")
+            return
+
         # Add type check to prevent equality check between tensor and non-tensor.
         if istype(val, (list, tuple)):
             self.LIST_LENGTH(guard)
@@ -327,6 +335,7 @@ class GuardBuilder:
 
         if istype(val, torch.Size):
             val = tuple(val)
+
         self.code.append(f"{ref} == {val!r}")
 
     def CONSTANT_MATCH(self, guard: Guard):

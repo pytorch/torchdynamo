@@ -1,4 +1,5 @@
 import math
+import numbers
 
 import functorch._src.decompositions
 import torch
@@ -30,6 +31,7 @@ decompositions = get_decompositions(
         aten.hardtanh,
         aten.l1_loss,
         aten.leaky_relu,
+        aten.leaky_relu_backward,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
         aten.masked_fill_,
@@ -52,6 +54,7 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.upsample_nearest2d_backward,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
@@ -182,14 +185,14 @@ def special_erf(x):
 
 @register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
 def rsub(a, b):
-    if isinstance(b, (int, float)):
+    if isinstance(b, numbers.Number):
         b = torch.tensor(b, dtype=a.dtype, device=a.device)
     return b - a
 
 
 @register_decomposition([aten.masked_fill.Scalar])
 def masked_fill(value, mask, other):
-    if isinstance(other, (int, float)):
+    if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
     value, mask, other = torch.broadcast_tensors(value, mask, other)
     return torch.where(mask, other, value)
@@ -250,3 +253,13 @@ def masked_fill_(x, mask, value):
 @register_decomposition([aten.log1p])
 def log1p(x):
     return torch.log(x + 1)
+
+
+@register_decomposition([aten.baddbmm])
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    result = torch.bmm(batch1, batch2)
+    if not isinstance(alpha, numbers.Number) or alpha != 1:
+        result = result * alpha
+    if not isinstance(beta, numbers.Number) or beta != 1:
+        self = self * beta
+    return self + result
