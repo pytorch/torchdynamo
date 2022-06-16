@@ -288,6 +288,22 @@ class Reduction(Loops):
 
             return Pointwise.create(device, dtype, fn, ranges)
 
+        if is_triton(device):
+            reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
+            numel_hint = V.graph.sizevars.size_hint(product(ranges))
+            if reduction_numel_hint > 8192 and numel_hint == 1:
+                # triton doesn't support reduce to single element well, so break it up
+                split = 128
+                return cls.create_multilayer(
+                    device,
+                    dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    split,
+                )
+
         return TensorBox.create(
             Reduction(
                 device,
@@ -304,6 +320,85 @@ class Reduction(Loops):
         return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
             reduction_type
         ]
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable,
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+        split,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        reduction_numel = product(reduction_ranges)
+
+        # TODO(jansel): convert this to dynamic shapes
+        # TODO(jansel): realize the reduction so we can do dynamic indexing
+        reduction_ranges = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in reduction_ranges
+        ]
+        reduction_numel = sympy.Integer(
+            V.graph.sizevars.guard_static_shape(reduction_numel)
+        )
+
+        if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
+            need_mask = False
+        else:
+            need_mask = True
+
+        split = sympy.Integer(split)
+        block_size = IndexingDiv(reduction_numel + (split - 1), split)
+
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+
+        def wrapper_fn(index, reduction_index):
+            (reduction_index,) = reduction_index
+            *new_index, reduction_block = index
+            indices = block_size * reduction_block + reduction_index
+
+            def body():
+                return inner_fn(new_index, reindex([indices]))
+
+            if need_mask:
+                mask = ops.lt(
+                    ops.index_expr(indices, torch.int32),
+                    ops.index_expr(reduction_numel, torch.int32),
+                )
+                return ops.masked(mask, body, cls.default_value(reduction_type, dtype))
+            else:
+                return body()
+
+        intermediate = Reduction.create(
+            device,
+            dtype,
+            wrapper_fn,
+            [*ranges, split],
+            [block_size],
+            reduction_type,
+        )
+        intermediate.realize()
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(index, reduction_index):
+            return intermediate_loader([*index, *reduction_index])
+
+        return TensorBox.create(
+            Reduction(
+                device,
+                dtype,
+                intermediate_fn,
+                ranges,
+                [split],
+                reduction_type,
+            )
+        )
 
 
 def is_storage_and_layout(x):
