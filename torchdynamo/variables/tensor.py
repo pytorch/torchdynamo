@@ -15,12 +15,14 @@ from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..utils import clone_tensor
+from ..utils import is_lazy_module
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
+from .lists import ShapeVariable
 from .lists import SizeVariable
 
 
@@ -85,7 +87,12 @@ class TensorVariable(VariableTracker):
                         )
                     elif op == "call_module":
                         assert nnmodule is not None
-                        example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
+                        # In the case of a lazy module, we want to run
+                        # the pre-hooks which initialize it
+                        if is_lazy_module(nnmodule):
+                            example_value = nnmodule(*args, **kwargs)
+                        else:
+                            example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
                 except RuntimeError:
                     # Track the assertion when the pytorch execution raises
                     # assertion
@@ -196,6 +203,26 @@ class TensorVariable(VariableTracker):
     def python_type(self):
         return self.class_type
 
+    def call_isinstance(self, tensor_type):
+        tensortype_to_dtype = {
+            torch.FloatTensor: (torch.float32, torch.float),
+            torch.DoubleTensor: (torch.float64, torch.double),
+            torch.HalfTensor: (torch.float16, torch.half),
+            torch.BFloat16Tensor: (torch.bfloat16,),
+            torch.ByteTensor: (torch.uint8,),
+            torch.CharTensor: (torch.int8,),
+            torch.LongTensor: (torch.int64, torch.long),
+            torch.IntTensor: (torch.int32, torch.int),
+            torch.ShortTensor: (torch.int16, torch.short),
+            torch.BoolTensor: (torch.bool,),
+        }
+
+        if tensor_type not in tensortype_to_dtype:
+            return self.python_type() is tensor_type
+
+        dtypes = tensortype_to_dtype[tensor_type]
+        return self.dtype in dtypes
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
@@ -228,7 +255,8 @@ class TensorVariable(VariableTracker):
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
-            result = ConstantVariable(self.size, **options)
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            result = ShapeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -335,7 +363,7 @@ class TensorVariable(VariableTracker):
             if (
                 name == "new"
                 and len(args) == 1
-                and isinstance(args[0], SizeVariable)
+                and isinstance(args[0], (SizeVariable, ShapeVariable))
                 and not config.dynamic_shapes
             ):
                 name = "new_empty"

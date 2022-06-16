@@ -17,6 +17,7 @@ from .ir import FixedLayout
 from .ir import InputBuffer
 from .ir import TensorBox
 from .lowering import lowerings
+from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
 
 log = logging.getLogger(__name__)
@@ -216,6 +217,10 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().run_node(n)
         num_users = len(set(n.users))
         if num_users > 1 and isinstance(result, TensorBox):
+            for user in n.users:
+                if user.target in needs_realized_inputs:
+                    result.realize()
+
             # TODO(jansel): introduce a store vs inline choice
             result.mark_reuse(len(n.users))
         return result

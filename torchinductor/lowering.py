@@ -21,6 +21,17 @@ from .virtualized import ops
 
 lowerings = {}
 aten = torch.ops.aten
+needs_realized_inputs = {
+    aten.avg_pool2d,
+    aten.bmm,
+    aten.constant_pad_nd,
+    aten.convolution,
+    aten.convolution_backward,
+    aten.max_pool2d_with_indices,
+    aten.mm,
+    aten.reflection_pad2d,
+    aten.upsample_nearest2d,
+}
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
@@ -545,6 +556,8 @@ def native_dropout(x, p, train):
 
 
 def make_fallback(kernel):
+    needs_realized_inputs.add(kernel)
+
     @register_lowering(kernel, type_promote=False)
     def handler(*args):
         result = ir.FallbackKernel.create(kernel, *args)
@@ -585,11 +598,11 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
-    return TensorBox.create(
+    result = TensorBox.create(
         ir.Convolution.create(
             x,
             weight,
-            bias,
+            None,  # bias handled below
             stride,
             padding,
             dilation,
@@ -598,6 +611,12 @@ def convolution(
             groups,
         )
     )
+    if bias is not None:
+        kernel_dims = len(weight.get_size()) - 2
+        out_chan = result.get_size()[-1 - kernel_dims]
+        bias = view(bias, [out_chan] + kernel_dims * [1])
+        result = add(result, bias)
+    return result
 
 
 @register_lowering(aten.clone)
@@ -1287,6 +1306,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         assert (
             reduction_type in ("sum", "amax", "amin", "any") or axis is None
         ), "TODO: max with index"
+        if reduction_type == "any":
+            x = to_dtype(x, torch.bool)
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 

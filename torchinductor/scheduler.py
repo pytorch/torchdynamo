@@ -187,8 +187,9 @@ class SchedulerNode(BaseSchedulerNode):
         ) = node.simplify_reorder_and_tile()
 
         self.group = (node.get_device(), group_fn(self._sizes))
-
-        self.set_read_writes(dependencies.extract_read_writes(self._body, *self._sizes))
+        self.set_read_writes(
+            dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
+        )
 
     def can_remove_buffer(self, check_group):
         if (
@@ -380,6 +381,9 @@ class Scheduler:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
 
+        # some new constants could have been created above
+        self.available_buffer_names.update(V.graph.constants.keys())
+
         # we handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
         # mutation_renames: tracks the current name for a given buffer
@@ -485,7 +489,6 @@ class Scheduler:
         if name in self.mutation_renames:
             return
         if node.can_remove_buffer(check_group=check_group):
-            print("REMOVING", name)
             V.graph.removed_buffers.add(name)
 
     def enqueue(self, node):
@@ -585,6 +588,7 @@ class Scheduler:
         if self.fusable_deps:
             fusable = True
             while fusable:
+                # keep poping fusable nodes as their depdencies are satisfied
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
 

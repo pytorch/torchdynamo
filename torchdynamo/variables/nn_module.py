@@ -21,6 +21,7 @@ from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import NNModuleSource
 from ..source import NotNNModuleSource
+from ..utils import is_lazy_module
 from ..utils import istype
 from ..utils import proxy_args_kwargs
 from .base import MutableLocal
@@ -150,6 +151,7 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
+        is_lazy = is_lazy_module(mod)
         if (
             isinstance(mod, torch.nn.Sequential)
             and mod.__class__.forward is torch.nn.Sequential.forward
@@ -172,6 +174,10 @@ class NNModuleVariable(VariableTracker):
                 arg = tx.pop()
             return arg
         elif is_allowed(mod.__class__):
+            # The module type will change after it is called
+            if is_lazy:
+                self.module_type = mod.cls_to_become
+
             return variables.TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -183,10 +189,16 @@ class NNModuleVariable(VariableTracker):
                 **options,
             )
         else:
-            forward = mod.__class__.forward
-            assert forward is not torch.nn.Module.forward
+            # for lazy modules, run the pre-hooks which will update the type
+            # TODO mlazos: we don't fully support all of the hooks that exist,
+            # so restrict using __call__ only to lazy modules for now
+            if is_lazy:
+                fn = mod.__class__.__call__
+            else:
+                fn = mod.__class__.forward
+
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(forward, **options),
+                variables.UserFunctionVariable(fn, **options),
                 [self] + args,
                 kwargs,
             )
@@ -375,9 +387,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return variables.UserFunctionVariable(
-            self.value_type.forward, **options
-        ).call_function(tx, [self] + list(args), kwargs)
+
+        # TODO mlazos: only support __call__ for lazy modules
+        # until we can support a larger swath of python
+        if is_lazy_module(self.value):
+            fn = self.value_type.__call__
+        else:
+            fn = self.value_type.forward
+
+        return variables.UserFunctionVariable(fn, **options).call_function(
+            tx, [self] + list(args), kwargs
+        )
 
     def call_method(
         self,

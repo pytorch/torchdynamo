@@ -386,6 +386,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    def test_vertical_fusion1(self):
+        def fn(sa, ct, p):
+            # From torchbench.pyhpc_equation_of_state
+            v17 = -3.087032500374211e-7
+            v18 = -1.988366587925593e-8
+            v19 = -1.061519070296458e-11
+            v20 = 1.550932729220080e-10
+            t15 = v19 * ct
+            t19 = v17 + ct * (v18 + t15) + v20 * sa
+            t20 = 1.0 / t19
+            t128 = t19 * p
+            return t20 + t128
+
+        self.common(
+            fn,
+            (
+                torch.randn(204, 204, 26),
+                torch.randn(204, 204, 26),
+                torch.randn(26),
+            ),
+        )
+
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
@@ -558,10 +580,12 @@ class CommonTemplate:
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
 
+        # without manual_seed, there is some chance this test fails due to:
+        # https://github.com/openai/triton/issues/530
+        torch.manual_seed(0)
+
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
-        self.common(
-            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False
-        )
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_silu(self):
         def fn(a):
@@ -831,6 +855,7 @@ class CommonTemplate:
                 aten._to_copy(a, dtype=6),
                 aten._to_copy(b + 1, dtype=6),
                 aten.to(b, torch.float64),
+                aten.to(b, torch.bool),
             )
 
         self.common(
@@ -1829,12 +1854,13 @@ class CommonTemplate:
     def test_any(self):
         def fn(x):
             return (
+                x.any(-1),
                 x.isinf().any(),
                 torch.all(x.isinf(), dim=0),
                 torch.all(torch.logical_not(x.isinf())),
             )
 
-        self.common(fn, [torch.randn(64)])
+        self.common(fn, [-torch.rand(64)])
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
