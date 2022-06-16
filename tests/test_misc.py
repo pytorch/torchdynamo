@@ -1633,3 +1633,16 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(torch.int, torch.IntTensor)
             fn(torch.int16, torch.ShortTensor)
             fn(torch.bool, torch.BoolTensor)
+
+    def test_nan(self):
+        def f(x, n):
+            return x * 2 + n
+
+        x = torch.randn(4)
+        n = float("nan")
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            f(x, n)
+            f(x, n)
+        self.assertEqual(cnts.frame_count, 1)
