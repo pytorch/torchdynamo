@@ -311,7 +311,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 print()
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
-            return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            return GuardedCode(
+                code, sorted(output.guards), frame.f_locals, frame.f_globals
+            )
         except (Unsupported, TorchRuntimeError):
             debug_print("WONT CONVERT")
             raise

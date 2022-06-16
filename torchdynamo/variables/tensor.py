@@ -9,6 +9,8 @@ import torch.fx
 import torch.random
 from torch.fx.immutable_collections import immutable_list
 
+from torchdynamo.guards import GuardBuilder
+
 from .. import config
 from .. import variables
 from ..exc import TorchRuntimeError
@@ -217,11 +219,17 @@ class TensorVariable(VariableTracker):
             torch.BoolTensor: (torch.bool,),
         }
 
-        if tensor_type not in tensortype_to_dtype:
-            return self.python_type() is tensor_type
+        def check_type(ty):
+            if ty not in tensortype_to_dtype:
+                return self.python_type() is ty
 
-        dtypes = tensortype_to_dtype[tensor_type]
-        return self.dtype in dtypes
+            dtypes = tensortype_to_dtype[ty]
+            return self.dtype in dtypes
+
+        if type(tensor_type) is tuple:
+            return any([check_type(ty) for ty in tensor_type])
+        else:
+            return check_type(tensor_type)
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -256,7 +264,12 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            result = ShapeVariable(sizes, **options)
+            # Add a guard for type matching, these guards are checked before tensor guards
+            # In some cases, a <tensor>.shape guard can be evaluated first, and break if
+            # <tensor> is another type
+            result = ShapeVariable(sizes, **options).add_guard(
+                self.create_guard(GuardBuilder.TYPE_MATCH)
+            )
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
