@@ -381,6 +381,9 @@ class Scheduler:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
 
+        # some new constants could have been created above
+        self.available_buffer_names.update(V.graph.constants.keys())
+
         # we handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
         # mutation_renames: tracks the current name for a given buffer
