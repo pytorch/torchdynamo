@@ -580,10 +580,12 @@ class CommonTemplate:
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
 
+        # without manual_seed, there is some chance this test fails due to:
+        # https://github.com/openai/triton/issues/530
+        torch.manual_seed(0)
+
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
-        self.common(
-            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False
-        )
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_silu(self):
         def fn(a):
