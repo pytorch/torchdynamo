@@ -139,7 +139,7 @@ gpu-inductor-cudagraphs-fp32: develop
 	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
 	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser
 	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts
+	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts -x densenet121
 	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs_fp32.csv
 
@@ -150,7 +150,7 @@ gpu-inductor-cudagraphs-fp16: develop
 	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
 	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts --nvfuser
 	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts
+	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts -x densenet121
 	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs_fp16.csv
 
@@ -159,7 +159,7 @@ gpu-inductor-dynamic: develop
 	python torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor-dynamic
 	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts --nvfuser
 	mv speedup_ts.csv baseline_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts
+	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts -x densenet121
 	mv speedup_ts.csv baseline_nnc.csv
 	paste -d, inductor.csv baseline_nvfuser.csv baseline_nnc.csv > inductor_gpu_dynamic.csv
 

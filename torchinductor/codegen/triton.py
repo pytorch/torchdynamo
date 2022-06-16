@@ -12,13 +12,13 @@ import torch
 from .. import codecache
 from .. import config
 from .. import ir
+from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
-from ..utils import sympy_product
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)

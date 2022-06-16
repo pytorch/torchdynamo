@@ -20,8 +20,8 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
-from .utils import sympy_product
 from .dependencies import extract_read_writes
+from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 

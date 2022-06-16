@@ -15,7 +15,8 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
-from .utils import has_torchvision_roi_align, sympy_product
+from .utils import has_torchvision_roi_align
+from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
@@ -342,7 +343,9 @@ def expand(x, sizes):
     assert isinstance(sizes, (list, tuple))
     if tuple(x.get_size()) == tuple(sizes):
         return x
-    x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes) / sympy_product(x.get_size())))
+    x.mark_reuse(
+        V.graph.sizevars.size_hint(sympy_product(sizes) / sympy_product(x.get_size()))
+    )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -380,7 +383,9 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(new_size) / sympy_product(old_size)))
+    x.mark_reuse(
+        V.graph.sizevars.size_hint(sympy_product(new_size) / sympy_product(old_size))
+    )
     x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),

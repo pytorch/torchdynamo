@@ -6,7 +6,8 @@ from itertools import count
 from .. import codecache
 from .. import config
 from .. import ir
-from ..utils import has_triton, sympy_product
+from ..utils import has_triton
+from ..utils import sympy_product
 from ..virtualized import V
 from .common import CodeGen
 from .common import IndentedBuffer
