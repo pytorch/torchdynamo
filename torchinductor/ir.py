@@ -2130,7 +2130,7 @@ class StorageBox(MutableBox):
                 data=self.data,
             ).get_read_writes()
             # TODO(jansel): this heuristic is a wild guess
-            if len(read_writes.reads) > 1 or len(self.inner_fn_str()) > 1000:
+            if len(read_writes.reads) > 4 or len(self.inner_fn_str()) > 2000:
                 self.realize()
 
 
