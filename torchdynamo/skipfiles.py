@@ -34,6 +34,9 @@ import torch
 try:
     import torch._prims
     import torch._refs
+    import torch._refs.nn
+    import torch._refs.nn.functional
+    import torch._refs.special
 
     HAS_PRIMS_REFS = True
 except ImportError:
