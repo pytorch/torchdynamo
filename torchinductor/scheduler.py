@@ -144,6 +144,39 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
     def get_priority(self):
         return 200
 
+class ExternFuseKernelSchedulerNode(ExternKernelSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
+        super().__init__(scheduler, node)
+        # Still need to get the size/ ranges of output tensor for the ExternKernel
+        self._sizes = node.xxx()
+        (
+            self._sizes,
+            self._body,
+        ) = node.simplify_reorder_and_tile()
+
+        self.group = (node.get_device(), group_fn(self._sizes))
+        self.set_read_writes(
+            dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
+        )
+
+    def can_remove_buffer(self, **kwargs):
+        return False
+
+    def run(self, codegen_extern_call):
+        # First, try to find fusable kernels
+
+        # if failed to find other kernels fusable with this node
+        # code-gen like ExternKernelSchedulerNode
+        self.allocate()
+        self.scheduler.run_count += 1
+        self.scheduler.pending_buffer_names.add(self.get_name())
+        self.scheduler.kernels.append(self.node)
+        codegen_extern_call(self.node)
+        
+
+    def get_priority(self):
+        return 100
+
 
 def pick_loop_order(stride_lengths, sizes):
     """

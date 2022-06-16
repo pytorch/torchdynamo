@@ -671,6 +671,32 @@ class TritonScheduling:
         pass
 
 
+class TritonTemplateKernel(TritonKernel):
+    def __init__(self, *groups):
+        super().__init__(*groups)
+
+    def codegen_kernel(self, name=None):
+
+        # given the exsiting triton file
+        # 
+        from torchinductor.triton_ops import xxx
+
+        kernel_rgn, = parse(xxx, )
+
+class TritonTemplateScheduling(TritonScheduling):
+    """
+    Use triton existing kernels as template, then
+    fuse with point-wise and reduction into triton kernels if possible
+    """
+    def codegen(self, *groups):
+        wrapper = V.graph.wrapper_code
+        scheduler = self.scheduler
+
+        reschedule = []
+        with scheduler.kernel(TritonTemplateKernel(*groups)) as kernel:
+            for _ in scheduler.iter_fixed_point():
+
+
 def split_sizes(sizes, prod1, prod2):
     for i in range(len(sizes)):
         if product(sizes[:i]) == prod1 and product(sizes[i:]) == prod2:
