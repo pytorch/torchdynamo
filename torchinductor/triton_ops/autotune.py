@@ -4,6 +4,7 @@ import triton
 from triton import Config
 from triton import cdiv
 from triton import heuristics
+from triton import next_power_of_2
 
 from torchinductor import config
 from torchinductor.utils import conditional_product
@@ -41,7 +42,7 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None):
     return decorator
 
 
-def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=2):
+def triton_config(size_hints, x, y=None, z=None, num_stages=1):
     """
     Construct a pointwise triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -72,10 +73,11 @@ def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=2):
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
+    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_warps=4, num_stages=2):
+def triton_config_reduction(size_hints, x, r, num_stages=2):
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -97,6 +99,7 @@ def triton_config_reduction(size_hints, x, r, num_warps=4, num_stages=2):
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 256, 1), 8))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
