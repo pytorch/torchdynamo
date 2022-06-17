@@ -72,11 +72,18 @@ class NNModuleChangeTrackerUtil:
     @staticmethod
     def setup(module, guarded_code):
         modulecls = module.__class__
+        print("Keys:", list(module.__dict__.keys()))
         for buffer in module.buffers():
-            setattr(buffer, "__dynamo_module_patched__", id(module))
+            # setattr(buffer, "__dynamo_module_patched__", id(module))
+            module_associated_guarded_ids.add(id(buffer))
+
+        for m in module.modules():
+            # setattr(m, "__dynamo_no_skip__", id(m))
+            module_associated_guarded_ids.add(id(m))
 
         for parameter in module.parameters():
-            setattr(parameter, "__dynamo_module_patched__", id(module))
+            # setattr(parameter, "__dynamo_module_patched__", id(module))
+            module_associated_guarded_ids.add(id(parameter))
 
         if getattr(modulecls, "__dynamo_module_patch", True):
             modulecls.__dynamo_module_patch = False
@@ -196,6 +203,7 @@ def strip_getattr_getitem(name):
     """
     return re.split(r"[.\[]", name)[0]
 
+module_associated_guarded_ids = set()
 
 class GuardBuilder:
     def __init__(
@@ -231,9 +239,12 @@ class GuardBuilder:
 
     def TYPE_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("TYPE_MATCH Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+        #     print("TYPE_MATCH NOT SKIPPING: ", guard.name)
 
         # ___check_type_id is same as `id(type(x)) == y`
         self.code.append(
@@ -242,9 +253,13 @@ class GuardBuilder:
 
     def ID_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("ID_MATCH Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+        #     print("ID_MATCH NOT SKIPPING: ", guard.name)
+
 
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
@@ -269,9 +284,13 @@ class GuardBuilder:
 
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("EQUALS Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+            # print("EQUALS NOT SKIPPING: ", guard.name)
+
 
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -331,9 +350,13 @@ class GuardBuilder:
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("CONSTANT Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+            # print("CONSTANT NOT SKIPPING: ", guard.name)
+
 
         val = self.get(guard.name)
         if istype(val, (bool, type(None))):
@@ -353,9 +376,13 @@ class GuardBuilder:
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("FUNC Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+            # print("FUNC NOT SKIPPING: ", guard.name)
+
 
         if guard.is_local():
             return self.ID_MATCH(guard)
@@ -365,9 +392,13 @@ class GuardBuilder:
 
     def PYMODULE_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("PYMODULE_MATCH Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+            # print("MODULE NOT SKIPPING: ", guard.name)
+
 
         return self.FUNCTION_MATCH(guard)
 
@@ -410,10 +441,13 @@ class GuardBuilder:
 
     def TENSOR_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        val = self.get(guard.name)
-        if hasattr(val, "__dynamo_module_patched__"):
+        if id(val) in module_associated_guarded_ids:
             # Protected by module invalidation, see NN_MODULE
+            print("TENSOR Skipping: ", guard.name)
             return
+        # if hasattr(val, "__dynamo_no_skip__"):
+            # print("TENSOR NOT SKIPPING: ", guard.name)
+
 
         if guard.is_nn_module():
             self.ID_MATCH(guard)
@@ -437,11 +471,14 @@ class GuardedCode:
 
         local_builder = GuardBuilder(self.id_ref, f_locals, self, renames=True)
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
+        module = False
         for guard in sorted(guards or [], key=Guard.sort_key):
+            module = guard.is_nn_module()
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder, guard.is_nn_module())
+
+        self.check_fn = self.compile_check_fn(local_builder, global_builder, module)
         self._seen_ids.clear()
 
     def compile_check_fn(self, local_builder, global_builder, module):
