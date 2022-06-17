@@ -17,7 +17,9 @@ from . import ir
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
+from .codegen.template import template_codegen
 
+TemplateKernels = [ir.Convolution]
 
 def cmp(a, b):
     return int(a > b) - int(a < b)
@@ -118,6 +120,13 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.ExternKernel, group_fn):
+        super().__init__(scheduler, node)
+        if type(node) in TemplateKernels:
+            (self._sizes, self._stride) = node.get_group_stride()
+            self.group = (node.get_device(), group_fn(self._sizes))
+            self.set_read_writes(node.get_read_writes())
+
     def can_remove_buffer(self, **kwargs):
         return False
 
@@ -125,8 +134,10 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
-        self.scheduler.kernels.append(self.node)
-        codegen_extern_call(self.node)
+        if type(self.node) not in TemplateKernels:
+            # TemplateKernelSchedulerNode will be added to scheduler in template_codegen
+            self.scheduler.kernels.append(self.node)
+        codegen_extern_call(self)
 
     def get_priority(self):
         return 100
@@ -143,34 +154,6 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
     def get_priority(self):
         return 200
-
-class ExternKernelTemplateSchedulerNode(BaseSchedulerNode):
-    def __init__(self, scheduler: "Scheduler", node: ir.ExternKernelTemplate, group_fn):
-        super().__init__(scheduler, node)
-        # Still need to get the size/ ranges of output tensor for the ExternKernel
-        (self._sizes, self._stride) = node.get_group_stride()
-
-        self.group = (node.get_device(), group_fn(self._sizes))
-        self.set_read_writes(node.get_read_writes())
-
-    def can_remove_buffer(self, chec):
-        return False
-
-    def run(self):
-        # if failed to find other kernels fusable with this node
-        # code-gen like ExternKernelSchedulerNode
-        self.allocate()
-        self.scheduler.run_count += 1
-        
-        # self.scheduler.kernels.append(self.node)
-        # codegen_extern_call(self.node)
-        
-        self.scheduler.pending_buffer_names.add(self.get_name())
-
-        
-
-    def get_priority(self):
-        return 50
 
 
 def pick_loop_order(stride_lengths, sizes):
@@ -403,11 +386,9 @@ class Scheduler:
             elif isinstance(node, ir.ComputedBuffer):
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
-            elif isinstance(node, ir.ExternKernelTemplate):
-                group_fn = self.get_backend(node.get_device()).group_fn
-                self.nodes.append(ExternKernelTemplateSchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel):
-                self.nodes.append(ExternKernelSchedulerNode(self, node))
+                group_fn = self.get_backend(node.get_device()).group_fn
+                self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
             else:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
@@ -536,7 +517,7 @@ class Scheduler:
                 self.runable_extern_kernels.append(node)
             elif isinstance(node, NopKernelSchedulerNode):
                 node.run()  # just schedule nop kernels eagerly
-            else:  # SchedulerNode and ExternKernelTemplateSchedulerNode
+            else:  # SchedulerNode
                 self.runable_nodes[node.group].append(node)
                 old_priority, old_count = self.runable_groups.get(node.group, (0, 0))
                 self.runable_groups[node.group] = (
@@ -626,13 +607,17 @@ class Scheduler:
     def flush(self):
         for backend in self.backends.values():
             backend.flush()
-
-    def codegen_extern_call(self, node: ir.ExternKernel):
-        assert isinstance(node, ir.ExternKernel)
+        
+    def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
+        assert isinstance(scheduler_node, ExternKernelSchedulerNode)
+        node = scheduler_node.node
         self.flush()
-        node.codegen(V.graph.wrapper_code)
-        self.barrier()
-        self.maybe_free_buffers()
+        if type(node) in TemplateKernels:
+            template_codegen(self, scheduler_node)
+        else:
+            node.codegen(V.graph.wrapper_code)
+            self.barrier()
+            self.maybe_free_buffers()
 
     def create_backend(self, device: torch.device):
         V.graph.device_types.add(device.type)
