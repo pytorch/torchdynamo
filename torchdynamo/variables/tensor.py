@@ -279,12 +279,9 @@ class TensorVariable(VariableTracker):
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
-        # <tensor> is later changed another type
-        try:
-            if result is not None:
-                result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
-        except NotImplementedError:
-            pass
+        # <tensor> is later changed to another type
+        if result is not None and self.source is not None:
+            result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
 
         if result is None:
             raise NotImplementedError()
