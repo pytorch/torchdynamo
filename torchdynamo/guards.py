@@ -73,6 +73,19 @@ class NNModuleChangeTrackerUtil:
     @staticmethod
     def setup(module, guarded_code):
         modulecls = module.__class__
+        print(list(module.__dict__.keys()))
+        for parameter in module.parameters():
+            print("Sub parameter:", id(parameter))
+            setattr(parameter, '__dynamo_on_module__', id(module))
+
+        for buffer in module.parameters():
+            print("Sub buffer:", id(buffer))
+            setattr(parameter, '__dynamo_on_module__', id(module))
+
+        # for buffer in module.parameters():
+        #     print("Sub buffer:", id(buffer))
+        #     setattr(parameter, '__dynamo_on_module__', id(module))
+
         if getattr(modulecls, "__dynamo_module_patch", True):
             modulecls.__dynamo_module_patch = False
 
@@ -225,16 +238,25 @@ class GuardBuilder:
         return name
 
     def TYPE_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if hasattr(val, "__dynamo_on_module__"):
+            print("Val has attr!", id(val), val.__dynamo_on_module__)
+
         if guard.is_nn_module():
             # Protected by module invalidation, see NN_MODULE
             return
 
         # ___check_type_id is same as `id(type(x)) == y`
+        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
 
     def ID_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if hasattr(val, "__dynamo_on_module__"):
+            print("Val has attr!", id(val), val.__dynamo_on_module__)
+            
         if guard.is_nn_module():
             # Protected by module invalidation, see NN_MODULE
             return
@@ -298,6 +320,7 @@ class GuardBuilder:
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
+            print("Type matching: ", guard.name, type(self.get(guard.name)))
             self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
             self.code.append(f"__math_isnan({ref})")
             return
@@ -306,10 +329,12 @@ class GuardBuilder:
         if istype(val, (list, tuple)):
             self.LIST_LENGTH(guard)
             for idx, elem in enumerate(val):
+                print("Type matching: ", guard.name, type(self.get(guard.name)))
                 self.code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
         elif not istype(val, torch.Size):
+            print("Type matching: ", guard.name, type(self.get(guard.name)))
             self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
 
         if istype(val, torch.Size):
@@ -353,12 +378,14 @@ class GuardBuilder:
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
@@ -366,6 +393,7 @@ class GuardBuilder:
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
 
@@ -408,10 +436,10 @@ class GuardedCode:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder, guard.is_nn_module())
+        self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
-    def compile_check_fn(self, local_builder, global_builder, module):
+    def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         args = [a for a in local_builder.scope.keys() if a == "___implicit0"]
@@ -465,7 +493,7 @@ class GuardedCode:
                 return lambda {args}: {code}
             """
         )
-        if module or os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
