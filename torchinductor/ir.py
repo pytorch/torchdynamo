@@ -1633,6 +1633,31 @@ class ExternKernelAlloc(ExternKernel):
     def should_allocate(self):
         return False
 
+class ExternKernelTemplate(ExternKernel):
+    # External kernel that should codegen with template + render_vars
+    def codgen(self, wrapper):
+        NotImplementedError("ExternKernelTemplate codegen not implemented")
+
+    def get_group_stride(self):
+        NotImplementedError("ExternKernelTemplate get_group_stride not implemented")
+
+
+class ExternKernelTemplateAlloc(ExternKernelTemplate):
+    def __init__(self, layout, inputs, constant_args=()):
+        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    def get_group_stride(self):
+        """
+        get output sizes and strides
+        """
+        _size = self.get_size()
+        _stride = self.get_stride()
+        # iter_ranges = _size of output tensor, reduce_range = [] because no reduction
+        return [_size, []], _stride
 
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
@@ -1915,7 +1940,7 @@ class MultiOutput(ExternKernel):
         return False
 
 
-class Convolution(ExternKernelAlloc):
+class Convolution(ExternKernelTemplateAlloc):
     config_conv = config.triton.convolution
     if config_conv == "aten":
         kernel = "aten.convolution"

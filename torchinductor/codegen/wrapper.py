@@ -53,6 +53,7 @@ class WrapperCodeGen(CodeGen):
     def __init__(self):
         super().__init__()
         self._names_iter = count()
+        self._func_names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.lines = []
@@ -100,6 +101,9 @@ class WrapperCodeGen(CodeGen):
 
     def next_kernel_name(self):
         return f"kernel{next(self._names_iter)}"
+    
+    def next_func_name(self):
+        return f"func{next(self._names_iter)}"
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()

@@ -144,38 +144,33 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
     def get_priority(self):
         return 200
 
-class ExternFuseKernelSchedulerNode(ExternKernelSchedulerNode):
-    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
+class ExternKernelTemplateSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.ExternKernelTemplate, group_fn):
         super().__init__(scheduler, node)
         # Still need to get the size/ ranges of output tensor for the ExternKernel
-        self._sizes = node.xxx()
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_reorder_and_tile()
+        (self._sizes, self._stride) = node.get_group_stride()
 
         self.group = (node.get_device(), group_fn(self._sizes))
-        self.set_read_writes(
-            dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
-        )
+        self.set_read_writes(node.get_read_writes())
 
-    def can_remove_buffer(self, **kwargs):
+    def can_remove_buffer(self, chec):
         return False
 
-    def run(self, codegen_extern_call):
-        # First, try to find fusable kernels
-
+    def run(self):
         # if failed to find other kernels fusable with this node
         # code-gen like ExternKernelSchedulerNode
         self.allocate()
         self.scheduler.run_count += 1
+        
+        # self.scheduler.kernels.append(self.node)
+        # codegen_extern_call(self.node)
+        
         self.scheduler.pending_buffer_names.add(self.get_name())
-        self.scheduler.kernels.append(self.node)
-        codegen_extern_call(self.node)
+
         
 
     def get_priority(self):
-        return 100
+        return 50
 
 
 def pick_loop_order(stride_lengths, sizes):
@@ -408,6 +403,9 @@ class Scheduler:
             elif isinstance(node, ir.ComputedBuffer):
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
+            elif isinstance(node, ir.ExternKernelTemplate):
+                group_fn = self.get_backend(node.get_device()).group_fn
+                self.nodes.append(ExternKernelTemplateSchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchedulerNode(self, node))
             else:
@@ -538,7 +536,7 @@ class Scheduler:
                 self.runable_extern_kernels.append(node)
             elif isinstance(node, NopKernelSchedulerNode):
                 node.run()  # just schedule nop kernels eagerly
-            else:
+            else:  # SchedulerNode and ExternKernelTemplateSchedulerNode
                 self.runable_nodes[node.group].append(node)
                 old_priority, old_count = self.runable_groups.get(node.group, (0, 0))
                 self.runable_groups[node.group] = (
