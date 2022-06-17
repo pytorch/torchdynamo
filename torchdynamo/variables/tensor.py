@@ -264,12 +264,7 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            # Add a guard for type matching, these guards are checked before tensor guards
-            # In some cases, a <tensor>.shape guard can be evaluated first, and break if
-            # <tensor> is another type
-            result = ShapeVariable(sizes, **options).add_guard(
-                self.create_guard(GuardBuilder.TYPE_MATCH)
-            )
+            result = ShapeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -281,6 +276,15 @@ class TensorVariable(VariableTracker):
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+
+        # Add a guard for type matching, these guards are checked before tensor guards
+        # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
+        # <tensor> is later changed another type
+        try:
+            if result is not None:
+                result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
+        except NotImplementedError:
+            pass
 
         if result is None:
             raise NotImplementedError()
