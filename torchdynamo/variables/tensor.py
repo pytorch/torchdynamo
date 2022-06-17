@@ -15,6 +15,7 @@ from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..utils import clone_tensor
+from ..utils import is_lazy_module
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
@@ -86,7 +87,12 @@ class TensorVariable(VariableTracker):
                         )
                     elif op == "call_module":
                         assert nnmodule is not None
-                        example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
+                        # In the case of a lazy module, we want to run
+                        # the pre-hooks which initialize it
+                        if is_lazy_module(nnmodule):
+                            example_value = nnmodule(*args, **kwargs)
+                        else:
+                            example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
                 except RuntimeError:
                     # Track the assertion when the pytorch execution raises
                     # assertion
@@ -196,6 +202,26 @@ class TensorVariable(VariableTracker):
 
     def python_type(self):
         return self.class_type
+
+    def call_isinstance(self, tensor_type):
+        tensortype_to_dtype = {
+            torch.FloatTensor: (torch.float32, torch.float),
+            torch.DoubleTensor: (torch.float64, torch.double),
+            torch.HalfTensor: (torch.float16, torch.half),
+            torch.BFloat16Tensor: (torch.bfloat16,),
+            torch.ByteTensor: (torch.uint8,),
+            torch.CharTensor: (torch.int8,),
+            torch.LongTensor: (torch.int64, torch.long),
+            torch.IntTensor: (torch.int32, torch.int),
+            torch.ShortTensor: (torch.int16, torch.short),
+            torch.BoolTensor: (torch.bool,),
+        }
+
+        if tensor_type not in tensortype_to_dtype:
+            return self.python_type() is tensor_type
+
+        dtypes = tensortype_to_dtype[tensor_type]
+        return self.dtype in dtypes
 
     @staticmethod
     def specialize(value: torch.Tensor):

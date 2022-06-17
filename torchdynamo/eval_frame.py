@@ -3,6 +3,7 @@ import copy
 import functools
 import logging
 import threading
+import warnings
 
 import torch
 
@@ -109,7 +110,7 @@ class OptimizeContext(_TorchDynamoContext):
             callback=callback,
             on_enter=install_generation_tagging_init,
             backend_ctx_ctor=backend_ctx_ctor,
-            patch_fn=patch_torch,
+            patch_fn=TorchPatcher.patch,
         )
 
 
@@ -271,12 +272,24 @@ def skip(fn=None):
     return fn
 
 
-@functools.lru_cache(None)
-def patch_torch():
-    # Disable TorchDynamo on some torch.* compilers generated frames
-    torch.jit.trace = disable(torch.jit.trace)
-    torch.jit.trace_module = disable(torch.jit.trace_module)
-    torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+class TorchPatcher:
+    @staticmethod
+    @functools.lru_cache(None)
+    def patch():
+        # Disable TorchDynamo on some torch.* compilers generated frames
+        torch.jit.trace = disable(torch.jit.trace)
+        torch.jit.trace_module = disable(torch.jit.trace_module)
+        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
 
-    torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
-    torch.distributions.Distribution.set_default_validate_args(False)
+        torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
+        torch.distributions.Distribution.set_default_validate_args(False)
+
+    @staticmethod
+    def suppress_torch_distributed_warnings(fn):
+        def inner_fn(*args, **kwargs):
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, module="torch.distributed"
+            )
+            return fn(*args, **kwargs)
+
+        return inner_fn
