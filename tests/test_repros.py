@@ -727,6 +727,18 @@ class TransformerEncoderLayer(nn.Module):
         return self.ff_block(x)
 
 
+class TestModule(torch.nn.Module):
+    def inner_fn(self, left, right):
+        return tuple(left) == tuple(right)
+
+    def fn(self, tensor):
+        if type(tensor) is int:
+            return False
+
+        torch.add(tensor, tensor)
+        return self.inner_fn(tensor.shape, (1, 2, 3))
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -1275,3 +1287,29 @@ class ReproTests(torchdynamo.testing.TestCase):
             return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
+
+    def test_guard_ordering_shape_fail(self):
+        # If a function which takes a tensor has an inner function which
+        # is compiled and generates a guard on its shape,
+        # they are evaluated in the wrong order. So if on a subsequent call
+        # an int is passed instead of a tensor, guard evaluation will crash
+        # with a "no attribute: shape" error
+        m = TestModule()
+        with torchdynamo.optimize("eager"):
+            m.fn(torch.ones((5, 5)))
+            m.fn(-3)
+
+    def test_tensor_isinstance_tuple(self):
+        @torchdynamo.optimize("eager")
+        def fn():
+            t = torch.ones(5, 5)
+            if not isinstance(t, (int, torch.Tensor)):
+                msg = str.format(
+                    "{0} is not an instance of {1}",
+                    type(t),
+                    (int, torch.Tensor),
+                )
+                raise ValueError(msg)
+            return True
+
+        fn()
