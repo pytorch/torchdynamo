@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import math
 from typing import Dict
 from typing import List
 
@@ -40,7 +41,7 @@ class TritonPrinter(ExprPrinter):
 texpr = TritonPrinter().doprint
 
 
-def triton_dtype(dtype):
+def triton_compute_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
         triton_type_name = "int1"
@@ -55,6 +56,8 @@ def triton_constant(value):
         return 'float("inf")'
     elif value == float("-inf"):
         return 'float("-inf")'
+    elif math.isnan(value):
+        return 'float("nan")'
     return repr(value)
 
 
@@ -65,7 +68,7 @@ class TritonOverrides(OpOverrides):
     def to_dtype(x, dtype: torch.dtype):
         if dtype == torch.bool:
             return f"({x} != 0)"
-        return f"{x}.to({triton_dtype(dtype)})"
+        return f"{x}.to({triton_compute_type(dtype)})"
 
     @staticmethod
     def constant(value, dtype):
@@ -511,7 +514,7 @@ class TritonKernel(Kernel):
         result_var = self.cse.newvar()
         accumulator = f"_{result_var}"
         self.body.writeline(
-            f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_dtype(dtype)}) + {default}"
+            f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
         )
 
         updated = value

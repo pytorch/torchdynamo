@@ -147,7 +147,6 @@ def reduction_heuristics(size_hints):
         return autotune(
             [
                 # TODO(jansel): do warps matter?
-                triton_config_reduction(size_hints, 32, 128, num_stages=3),
                 triton_config_reduction(size_hints, 32, 128, num_stages=2),
                 triton_config_reduction(size_hints, 1, 2048, num_stages=1),
             ],
