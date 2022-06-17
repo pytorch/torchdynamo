@@ -19,6 +19,7 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .eval_frame import TorchPatcher
 from .eval_frame import WrapperBackend
 from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
@@ -125,6 +126,7 @@ def wrap_convert_context(fn):
     return _fn
 
 
+@TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
     # Check if the function was decorated with torchdynamo.optimize
@@ -161,7 +163,11 @@ def has_tensor_in_frame(frame):
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
             return seen_ids[obj_id]
-        elif hasattr(obj, "__dict__") and len(getattr(obj, "__dict__")):
+        elif (
+            not is_allowed(obj)
+            and hasattr(obj, "__dict__")
+            and len(getattr(obj, "__dict__"))
+        ):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:

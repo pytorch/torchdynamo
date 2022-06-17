@@ -322,8 +322,8 @@ def fx2trt(subgraph, **kwargs):
     from .normalize import normalize_ir
 
     try:
-        model = copy.deepcopy(subgraph.model)
-        inputs = copy.deepcopy(subgraph.example_inputs)
+        model = subgraph.model
+        inputs = subgraph.example_inputs
         # normalize
         model = normalize_ir(model, inputs)
         # pass rewrite

@@ -7,7 +7,7 @@ from triton import heuristics
 from triton import next_power_of_2
 
 from torchinductor import config
-from torchinductor.utils import conditional_product
+from torchinductor.triton_ops.utils import conditional_product
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +129,6 @@ def pointwise_heuristics(size_hints):
             return apply_triton_config(triton_config(size_hints, 64, 64))
         return autotune(
             [
-                # TODO(jansel): do warps matter?
                 triton_config(size_hints, 64, 64),
                 triton_config(size_hints, 4, 256),
                 triton_config(size_hints, 256, 4),
@@ -149,8 +148,6 @@ def reduction_heuristics(size_hints):
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
         return autotune(
             [
-                # TODO(jansel): do warps matter?
-                triton_config_reduction(size_hints, 32, 128, num_stages=3),
                 triton_config_reduction(size_hints, 32, 128, num_stages=2),
                 triton_config_reduction(size_hints, 1, 2048, num_stages=1),
             ],

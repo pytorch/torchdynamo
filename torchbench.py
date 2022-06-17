@@ -102,6 +102,15 @@ REQUIRE_HIGHER_TOLERANCE = {
     "hf_Albert",
     "vgg16",
     "mobilenet_v3_large",
+    "nvidia_deeprecommender",
+    "timm_efficientdet",
+    "vision_maskrcnn",
+}
+
+# These models need >1e-3 tolerance
+REQUIRE_EVEN_HIGHER_TOLERANCE = {
+    "soft_actor_critic",
+    "tacotron2",
 }
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
@@ -1339,6 +1348,12 @@ def run_one_model(
     # Increase the tolerance for torch allclose
     if is_training and current_device == "cuda" and name in REQUIRE_HIGHER_TOLERANCE:
         tolerance = 1e-3
+    elif (
+        is_training
+        and current_device == "cuda"
+        and name in REQUIRE_EVEN_HIGHER_TOLERANCE
+    ):
+        tolerance = 8 * 1e-3
 
     with pick_grad(name, is_training):
         mode = "train" if is_training else "eval"
