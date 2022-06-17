@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import functools
 import hashlib
 from itertools import count
 
@@ -45,6 +46,16 @@ class FreedBuffer:
             code.writeline(f"del {name}")
 
 
+@functools.lru_cache(None)
+def has_triton():
+    try:
+        import triton
+
+        return triton is not None
+    except (ModuleNotFoundError, ImportError):
+        return False
+
+
 class WrapperCodeGen(CodeGen):
     """
     The outer wrapper that calls the kernels.
@@ -63,27 +74,30 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 from torch import empty_strided, as_strided
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache
-                from {codecache.__name__} import grid, pointwise_heuristics, reduction_heuristics
-
-                try:
-                    import triton
-                    import triton.language as tl
-                except ImportError:
-                    pass
 
                 aten = torch.ops.aten
+
             """
         )
 
-        if config.triton.use_mm:
+        if has_triton():
             self.header.splice(
                 """
-                try:
-                    from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out
-                except ImportError:
-                    pass
+                    import triton
+                    import triton.language as tl
+
+                    from torchinductor.triton_ops.autotune import pointwise_heuristics
+                    from torchinductor.triton_ops.autotune import reduction_heuristics
+                    from torchinductor.triton_ops.autotune import grid
+
                 """
             )
+
+            if config.triton.use_mm:
+                self.header.writeline(
+                    "from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
+                )
+
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
@@ -204,7 +218,7 @@ class WrapperCodeGen(CodeGen):
             output.splice(
                 """
                 from torchdynamo.testing import rand_strided
-                from torchinductor.microbench import print_performance
+                from microbenchmarks.microbench import print_performance
                 """,
                 strip=True,
             )
