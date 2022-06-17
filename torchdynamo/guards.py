@@ -59,24 +59,22 @@ CLOSURE_VARS = collections.OrderedDict(
 
 class NNModuleChangeTrackerUtil:
     @staticmethod
+    def invalidate_module(module):
+        if module not in module_code_map:
+            # Module is out of scope / deleted (weak ref key ref dict)
+            return
+
+        for code in module_code_map[module]:
+            print("Invalidating: ", code, "for", id(module))
+            code.valid = False
+
+        del module_code_map[module]
+
+    @staticmethod
     def setup(module, guarded_code):
         modulecls = module.__class__
-        if not hasattr(module, "_module_change_hooks"):
-            module._module_change_hooks = OrderedDict()
-
         if getattr(modulecls, "__dynamo_module_patch", True):
             modulecls.__dynamo_module_patch = False
-
-            # patch in hook registration
-            modulecls.register_on_module_change_hook = (
-                NNModuleChangeTrackerUtil._register_on_module_change_hook
-            )
-
-            # patch in hook clearing
-            modulecls.clear_hooks = NNModuleChangeTrackerUtil._clear_hooks
-
-            # patch in hook calling
-            modulecls.call_hooks = NNModuleChangeTrackerUtil._call_hooks
 
             # Note - the wrapping code below is a little redundant. TODO(voz): Refactor into a single util to be invoked per wrapped func.
             # register_param
@@ -84,7 +82,7 @@ class NNModuleChangeTrackerUtil:
 
             @functools.wraps(register_parameter_real)
             def custom_register_parameter(self, key, value):
-                self.call_hooks()
+                NNModuleChangeTrackerUtil.invalidate_module(self)
                 return register_parameter_real(self, key, value)
 
             modulecls.register_parameter = custom_register_parameter
@@ -94,7 +92,7 @@ class NNModuleChangeTrackerUtil:
 
             @functools.wraps(original_add_module)
             def custom_add_module(self, name, module):
-                self.call_hooks()
+                NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_add_module(self, name, module)
 
             modulecls.add_module = custom_add_module
@@ -104,7 +102,7 @@ class NNModuleChangeTrackerUtil:
 
             @functools.wraps(original_load_state_dict)
             def custom_load_state_dict(self, state_dict, strict):
-                self.call_hooks()
+                NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_load_state_dict(self, state_dict, strict)
 
             modulecls.load_state_dict = custom_load_state_dict
@@ -113,7 +111,7 @@ class NNModuleChangeTrackerUtil:
 
             @functools.wraps(original_setattr)
             def custom_setattr(self, key, value):
-                self.call_hooks()
+                NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_setattr(self, key, value)
 
             modulecls.__setattr__ = custom_setattr
@@ -121,25 +119,6 @@ class NNModuleChangeTrackerUtil:
         if module not in module_code_map:
             module_code_map[module] = set()
         module_code_map[module].add(guarded_code)
-
-    def _register_on_module_change_hook(
-        self, hook: Callable[..., None]
-    ) -> "hooks.RemovableHandle":
-        handle = hooks.RemovableHandle(self._module_change_hooks)
-        self._module_change_hooks[handle.id] = hook
-
-        return handle
-
-    def _call_hooks(self):
-        if not hasattr(self, "_module_change_hooks"):
-            # because of how we monkeypatch, setattr could be patched, but the instance has not yet been registered, (or may not be eligible).
-            return
-        hooks = self._module_change_hooks.values()
-        for hook in hooks:
-            hook(self)
-
-    def _clear_hooks(self):
-        self._module_change_hooks.clear()
 
 
 class GuardSource(enum.Enum):
@@ -265,7 +244,7 @@ class GuardBuilder:
         if m:
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(Guard(m.group(1), guard.source, None))
-
+        print("ID Match on: ", guard.name)
         self.code.append(
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
@@ -346,24 +325,11 @@ class GuardBuilder:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        self.ID_MATCH(guard)
-
-        def on_module_changed(module):
-            if module not in module_code_map:
-                # Module is out of scope / deleted (weak ref key ref dict)
-                return
-
-            for code in module_code_map[module]:
-                print("Invalidating: ", code)
-                code.valid = False
-
-            module.clear_hooks()
-            del module_code_map[module]
+        self.ID_MATCH(guard)            
 
         val = self.get(guard.name)
         if hasattr(val, "training"):
             NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
-            val.register_on_module_change_hook(on_module_changed)
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
@@ -391,9 +357,6 @@ class GuardBuilder:
         self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
     def DICT_KEYS(self, guard):
-        if guard.is_nn_module():
-            # Protected by module invalidation, see NN_MODULE
-            return
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
@@ -401,10 +364,6 @@ class GuardBuilder:
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
-        if guard.is_nn_module():
-            # Protected by module invalidation, see NN_MODULE
-            return
-
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
@@ -449,10 +408,10 @@ class GuardedCode:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder)
+        self.check_fn = self.compile_check_fn(local_builder, global_builder, guard.is_nn_module())
         self._seen_ids.clear()
 
-    def compile_check_fn(self, local_builder, global_builder):
+    def compile_check_fn(self, local_builder, global_builder, module):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         args = [a for a in local_builder.scope.keys() if a == "___implicit0"]
@@ -506,7 +465,7 @@ class GuardedCode:
                 return lambda {args}: {code}
             """
         )
-        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+        if module or os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
