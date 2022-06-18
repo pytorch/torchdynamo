@@ -165,7 +165,7 @@ class TensorVariable(VariableTracker):
         ):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
-        elif isinstance(example_value, numbers.Number) and proxy.node.target is "item":
+        elif isinstance(example_value, numbers.Number) and proxy.node.target == "item":
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
         else:
