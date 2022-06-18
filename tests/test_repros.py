@@ -1321,3 +1321,14 @@ class ReproTests(torchdynamo.testing.TestCase):
             return x
 
         fn(torch.randn(3))
+
+    def test_dict_list_values(self):
+        def inner_fn(args):
+            return [x[1].shape for x in args]
+
+        @torchdynamo.optimize("eager")
+        def fn(tensors):
+            return inner_fn(zip(itertools.count(), tensors["args"]))
+
+        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
+        fn({"args": [torch.ones(5, 5)]})
