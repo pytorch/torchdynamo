@@ -266,7 +266,7 @@ class GuardBuilder:
 
     def ID_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in module_associated_guarded_ids or (config.guard_nn_modules and guard.is_nn_module()):
             return
 
         # ___check_obj_id is same as `id(x) == y`
@@ -292,7 +292,7 @@ class GuardBuilder:
 
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in module_associated_guarded_ids or (config.guard_nn_modules and guard.is_nn_module()):
             return
 
         ref = self.arg_ref(guard)
@@ -462,7 +462,7 @@ class GuardedCode:
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
-    def compile_check_fn(self, local_builder, global_builder, module):
+    def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         args = [a for a in local_builder.scope.keys() if a == "___implicit0"]

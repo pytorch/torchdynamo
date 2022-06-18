@@ -918,3 +918,46 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 3)
         self.assertEqual(m.bar.attr, 3)
+
+
+    def test_invalidation_const_eq_scalar(self):
+        class FooArr(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.some_val = 15
+
+            def forward(self, x):
+                if len(x) > 3:
+                    self.some_val = -15
+                return self.some_val
+
+        m = FooArr()
+        with torchdynamo.optimize("eager"):
+            x = torch.randn(2)
+            y1 = m(x)
+            x = torch.randn(5)
+            y2 = m(x)
+
+        self.assertEqual(y1, 15)
+        self.assertEqual(y2, -15)
+
+    def test_invalidation_const_type_change(self):
+        class FooArr(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.some_val = 15
+
+            def forward(self, x):
+                if len(x) > 3:
+                    self.some_val = torch.tensor(15)
+                return self.some_val
+
+        m = FooArr()
+        with torchdynamo.optimize("eager"):
+            x = torch.randn(2)
+            y1 = m(x)
+            x = torch.randn(5)
+            y2 = m(x)
+
+        self.assertEqual(y1, 15)
+        self.assertEqual(y2, torch.tensor(15))
