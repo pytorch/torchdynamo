@@ -919,7 +919,6 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertEqual(y, 3)
         self.assertEqual(m.bar.attr, 3)
 
-
     def test_invalidation_const_eq_scalar(self):
         class FooArr(torch.nn.Module):
             def __init__(self):

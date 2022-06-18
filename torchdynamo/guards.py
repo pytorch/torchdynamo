@@ -266,7 +266,9 @@ class GuardBuilder:
 
     def ID_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids or (config.guard_nn_modules and guard.is_nn_module()):
+        if id(val) in module_associated_guarded_ids or (
+            config.guard_nn_modules and guard.is_nn_module()
+        ):
             return
 
         # ___check_obj_id is same as `id(x) == y`
@@ -292,7 +294,9 @@ class GuardBuilder:
 
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids or (config.guard_nn_modules and guard.is_nn_module()):
+        if id(val) in module_associated_guarded_ids or (
+            config.guard_nn_modules and guard.is_nn_module()
+        ):
             return
 
         ref = self.arg_ref(guard)
