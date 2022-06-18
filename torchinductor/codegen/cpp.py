@@ -59,6 +59,7 @@ def cpp_prefix():
         textwrap.dedent(
             """
             #include <algorithm>
+            #include <atomic>
             #include <cmath>
             #include <cstdlib>
             #include <limits>
@@ -219,11 +220,21 @@ class CppKernel(Kernel):
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
-        self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
+        if mode is None:
+            self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
+        elif mode == "atomic_add":
+            if config.cpp.threads == 1:
+                self.stores.writeline(f"{var}[{cexpr(index)}] += {value};")
+            else:
+                self.stores.writeline(
+                    f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
+                )
+        else:
+            raise NotImplementedError(f"store mode={mode}")
 
     def reduction(self, name, dtype, reduction_type, index, value):
         tmpvar = self.cse.generate(

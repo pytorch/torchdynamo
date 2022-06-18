@@ -334,9 +334,9 @@ class SimplifyIndexing(V.WrapperHandler):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
         return self._inner.load(name, index, upcast)
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.store(name, index, value)
+        return self._inner.store(name, index, value, mode=mode)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)

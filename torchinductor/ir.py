@@ -234,9 +234,11 @@ class Scatter(Pointwise):
         )
 
     def store_output(self, output_name, indexer, vars):
-        assert self.scatter_mode is None
         return ops.store(
-            output_name, indexer(self.output_indexer(vars)), self.inner_fn(vars)
+            output_name,
+            indexer(self.output_indexer(vars)),
+            self.inner_fn(vars),
+            mode=self.scatter_mode,
         )
 
 
@@ -2333,9 +2335,9 @@ class LoopBodyBlock:
                 index = add_index(index, "reads")
                 return self._inner.load(name, index, upcast)
 
-            def store(self, name, index, value):
+            def store(self, name, index, value, mode=None):
                 index = add_index(index, "writes")
-                return self._inner.store(name, index, value)
+                return self._inner.store(name, index, value, mode)
 
             def reduction(self, name, dtype, reduction_type, index, value):
                 index = add_index(index, "writes")

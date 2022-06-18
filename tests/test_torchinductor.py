@@ -1906,7 +1906,10 @@ class CommonTemplate:
 
     def test_index_put1(self):
         def fn(a, b, c):
-            return torch.index_put(a, [b], c), torch.index_put_(a+1, [b+1], c+1)+1
+            return (
+                torch.index_put(a, [b], c),
+                torch.index_put_(a + 1, [b + 1], c + 1) + 1,
+            )
 
         self.common(
             fn,
@@ -1915,6 +1918,21 @@ class CommonTemplate:
                 torch.randperm(601),
                 torch.randn([601, 256, 7, 7]),
             ],
+        )
+
+    def test_index_put2(self):
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c, True)
+
+        self.common(
+            fn,
+            [
+                torch.randn([100, 256, 7, 7]),
+                torch.randint(0, 100, size=[600], dtype=torch.int64),
+                torch.randn([600, 256, 7, 7]),
+            ],
+            # This is an issue here: https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
+            check_lowp=False,
         )
 
 
