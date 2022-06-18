@@ -89,34 +89,13 @@ def _disallowed_function_ids():
         torch.set_autocast_enabled,
         torch.set_autocast_gpu_dtype,
         torch.autograd.profiler.profile,
-        torch.float32,
-        torch.float,
-        torch.float64,
-        torch.double,
-        torch.float16,
-        torch.bfloat16,
-        torch.half,
-        torch.uint8,
-        torch.int8,
-        torch.int16,
-        torch.short,
-        torch.int32,
-        torch.int,
-        torch.int64,
-        torch.long,
-        torch.complex32,
-        torch.complex64,
-        torch.cfloat,
-        torch.complex128,
-        torch.cdouble,
-        torch.quint8,
-        torch.qint8,
-        torch.qint32,
-        torch.bool,
-        torch.quint4x2,
-        torch.quint2x4,
         warnings.warn,
     ]
+    # extract all dtypes from torch
+    dtypes = [
+        obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
+    ]
+    remove += dtypes
     return {id(x) for x in remove}
 
 

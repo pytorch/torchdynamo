@@ -1313,3 +1313,11 @@ class ReproTests(torchdynamo.testing.TestCase):
             return True
 
         fn()
+
+    def test_isinstance_dtype(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            isinstance(torch.bfloat16, torch.dtype)
+            return x
+
+        fn(torch.randn(3))
