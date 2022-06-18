@@ -864,3 +864,57 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_invalidation_dict_member(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_dict = {}
+
+            def forward(self, x):
+                if "x" in self.my_dict:
+                    return x + 2
+                else:
+                    return x - 2
+
+        m = Foo()
+
+        x_not_set_result = None
+        x_set_result = None
+
+        with torchdynamo.optimize("eager"):
+            x = torch.randn(10)
+            x_not_set_result = m(x)
+            m.my_dict["x"] = 1
+            x_set_result = m(x)
+
+        for i in range(len(x)):
+            self.assertTrue(x[i] > x_not_set_result[i])
+            self.assertTrue(x[i] < x_set_result[i])
+
+    def test_invalidation_array_and_obj(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = 0
+
+        class FooArr(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_list = []
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.my_list.append(None)
+                self.bar.attr += 1
+                return len(self.my_list)
+
+        m = FooArr()
+        with torchdynamo.optimize("eager"):
+            x = torch.tensor(0)
+            y = m(x)
+            y = m(x)
+            y = m(x)
+
+        self.assertEqual(y, 3)
+        self.assertEqual(m.bar.attr, 3)
