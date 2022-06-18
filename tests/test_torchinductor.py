@@ -1904,6 +1904,19 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put1(self):
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c), torch.index_put_(a+1, [b+1], c+1)+1
+
+        self.common(
+            fn,
+            [
+                torch.randn([800, 256, 7, 7]),
+                torch.randperm(601),
+                torch.randn([601, 256, 7, 7]),
+            ],
+        )
+
 
 if HAS_CPU:
 

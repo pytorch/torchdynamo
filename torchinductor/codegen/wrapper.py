@@ -1,6 +1,5 @@
 import collections
 import dataclasses
-import functools
 import hashlib
 from itertools import count
 
@@ -45,16 +44,6 @@ class FreedBuffer:
             code.writeline(make_buffer_reuse(self.node, self.reused_as))
         else:
             code.writeline(f"del {name}")
-
-
-@functools.lru_cache(None)
-def has_triton():
-    try:
-        import triton
-
-        return triton is not None
-    except (ModuleNotFoundError, ImportError):
-        return False
 
 
 class WrapperCodeGen(CodeGen):

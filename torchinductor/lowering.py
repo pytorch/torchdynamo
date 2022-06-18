@@ -949,6 +949,54 @@ def index(x, indices):
     )
 
 
+@register_lowering(aten.index_put_, type_promote=False)
+def index_put_(self, indices, values, accumulate=False):
+    values = to_dtype(values, self.get_dtype())
+    assert isinstance(self, TensorBox)
+    self.realize()
+    V.graph.realize_users_of(self.get_name())
+
+    iter_ranges = []
+    index_loaders = []
+
+    for s_size, idx, v_size in itertools.zip_longest(
+        self.get_size(), indices, values.get_size()
+    ):
+        assert s_size is not None
+        assert v_size is not None
+        if idx is not None:
+            (i_size,) = idx.get_size()
+            iter_ranges.append(V.graph.sizevars.guard_equals(i_size, v_size))
+            index_loaders.append(idx.make_loader())
+        else:
+            iter_ranges.append(V.graph.sizevars.guard_equals(s_size, v_size))
+            index_loaders.append(None)
+
+    def output_indexer(index):
+        assert len(index) == len(index_loaders)
+        index = list(index)
+        for i, loader in enumerate(index_loaders):
+            if loader is not None:
+                index[i] = ops.indirect_indexing(loader([index[i]]))
+        return index
+
+    scatter = ir.Scatter(
+        device=self.get_device(),
+        dtype=self.get_dtype(),
+        inner_fn=values.make_loader(),
+        ranges=iter_ranges,
+        output_indexer=output_indexer,
+        scatter_mode="atomic_add" if accumulate else None,
+    )
+    buffer = ir.ComputedBuffer(
+        None,
+        ir.MutationLayout(self),
+        scatter,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    return self
+
+
 @register_lowering(aten.index_select, type_promote=False)
 def index_select(x, dim, indices):
     x_loader = x.make_loader()

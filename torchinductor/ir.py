@@ -216,6 +216,31 @@ class Pointwise(Loops):
 
 
 @dataclasses.dataclass
+class Scatter(Pointwise):
+    output_indexer: Callable[[List[Expr]], Expr]
+    scatter_mode: str = None
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Scatter(
+            device,
+            self.dtype,
+            loader,
+            self.ranges,
+            self.output_indexer,
+            self.scatter_mode,
+        )
+
+    def store_output(self, output_name, indexer, vars):
+        assert self.scatter_mode is None
+        return ops.store(
+            output_name, indexer(self.output_indexer(vars)), self.inner_fn(vars)
+        )
+
+
+@dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str

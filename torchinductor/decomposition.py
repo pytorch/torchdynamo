@@ -1,3 +1,4 @@
+import logging
 import math
 import numbers
 
@@ -9,6 +10,7 @@ from torch._decomp import get_decompositions
 from torchinductor import config
 
 aten = torch.ops.aten
+log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
@@ -62,6 +64,9 @@ decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
+    for op in [ops] if callable(ops) else ops:
+        if op in decompositions:
+            log.warning(f"duplicate decomp: {ops}")
     return functorch._src.decompositions.register_decomposition(ops, decompositions)
 
 
@@ -264,3 +269,8 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.index_put])
+def index_put(self, indices, values, accumulate=False):
+    return torch.index_put_(self.clone(), indices, values, accumulate)
