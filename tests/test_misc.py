@@ -418,7 +418,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize((cnts)):
             self.assertEqual(fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 3)
 
     def test_namedtuple1(self):
         def fn(a, b):
@@ -1646,3 +1646,31 @@ class MiscTests(torchdynamo.testing.TestCase):
             f(x, n)
             f(x, n)
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_item(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = torch.max(x)
+                return z.int().item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([[10.6763, 11.7445, -2.2369]])
+            model = MyMod()
+            y = model(x)
+
+        self.assertEqual(y, 11)
+
+    def test_item_changes(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = torch.max(x)
+                return z.int().item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([[10.6763, 11.7445, -2.2369]])
+            model = MyMod()
+            y = model(x)
+            z = model(torch.tensor([[y - 5, y + 10, y + 50]]))
+
+        self.assertEqual(y, 11)
+        self.assertEqual(z, 61)
