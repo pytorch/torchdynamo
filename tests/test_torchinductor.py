@@ -143,6 +143,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     if has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.float)
+    torch.manual_seed(0)
     correct = model(*upcasted_inputs)
     # downcast the model back if needed
     if has_lowp_args:
@@ -155,6 +156,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
+        torch.manual_seed(0)
         actual = run(*example_inputs)
 
     assert type(actual) == type(correct)
@@ -1933,6 +1935,18 @@ class CommonTemplate:
             ],
             # This is an issue here: https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
             check_lowp=False,
+        )
+
+    def test_bernoulli(self):
+        def fn(a):
+            b = torch.empty_like(a)
+            return aten.bernoulli_(b), b
+
+        self.common(
+            fn,
+            [
+                torch.randn([100]),
+            ],
         )
 
 

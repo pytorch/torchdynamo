@@ -551,6 +551,14 @@ def native_dropout(x, p, train):
     return x, ones_like(x, dtype=torch.bool)
 
 
+@register_lowering(aten.bernoulli_, type_promote=False)
+def bernoulli_(x, *args):
+    x.realize()
+    V.graph.realize_users_of(x.get_name())
+    ir.BernoulliFallback(x, *args)
+    return x
+
+
 def make_fallback(kernel):
     needs_realized_inputs.add(kernel)
 
@@ -566,19 +574,20 @@ def make_fallback(kernel):
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
-make_fallback(aten._cudnn_rnn)
-make_fallback(aten.convolution_backward)
-make_fallback(aten.sort)
-make_fallback(aten.topk)
-make_fallback(aten.randperm)
-make_fallback(aten.grid_sampler_2d)
-make_fallback(aten.avg_pool2d_backward)
 make_fallback(aten._adaptive_avg_pool2d_backward)
+make_fallback(aten.avg_pool2d_backward)
+make_fallback(aten.convolution_backward)
+make_fallback(aten._cudnn_rnn)
+make_fallback(aten._cudnn_rnn_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten.grid_sampler_2d)
 make_fallback(aten.max_pool2d_with_indices_backward)
 make_fallback(aten.native_batch_norm_backward)
+make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
-make_fallback(aten._cudnn_rnn_backward)
+make_fallback(aten.sort)
+make_fallback(aten.topk)
+make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
 
 
