@@ -25,6 +25,7 @@ from .base import VariableTracker
 from .base import typestr
 from .lists import ShapeVariable
 from .lists import SizeVariable
+import re
 
 
 @contextmanager
@@ -166,8 +167,10 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
         elif isinstance(example_value, numbers.Number) and proxy.node.target == "item":
-            proxy.node.meta["example_value"] = example_value
-            return variables.ConstantVariable(example_value, **options)
+            return UnspecializedPrimitiveVariable.create(
+                tx=tx,
+                proxy=proxy,
+                example_value=torch.tensor(example_value))
         else:
             assert (
                 False

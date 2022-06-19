@@ -1674,3 +1674,18 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+
+    def test_item_changes_new_shape(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = torch.max(x)
+                return z.int().item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([[10.6763, 11.7445, -2.2369]])
+            model = MyMod()
+            y = model(x)
+            z = model(torch.tensor([[y - 5, y + 50], [y + 5, y - 50]]))
+
+        self.assertEqual(y, 11)
+        self.assertEqual(z, 61)
