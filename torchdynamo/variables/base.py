@@ -54,6 +54,9 @@ class VariableTracker:
                 guards.update(var.guards)
                 for i in var.items:
                     visit(i)
+            elif isinstance(var, variables.ConstDictVariable):
+                guards.update(var.guards)
+                visit(var.items.values())
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
