@@ -2,6 +2,7 @@ import copy
 import itertools
 import numbers
 import operator
+import re
 from contextlib import contextmanager
 from typing import Dict
 from typing import List
@@ -25,7 +26,6 @@ from .base import VariableTracker
 from .base import typestr
 from .lists import ShapeVariable
 from .lists import SizeVariable
-import re
 
 
 @contextmanager
@@ -168,9 +168,8 @@ class TensorVariable(VariableTracker):
             return variables.ConstantVariable(example_value, **options)
         elif isinstance(example_value, numbers.Number) and proxy.node.target == "item":
             return UnspecializedPrimitiveVariable.create(
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value))
+                tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
+            )
         else:
             assert (
                 False
