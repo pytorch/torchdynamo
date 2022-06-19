@@ -956,6 +956,15 @@ def index_put_(self, indices, values, accumulate=False):
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
+    if ir.is_triton(self.get_device()) and accumulate:
+        # Workaround broken tl.atomic_add
+        # https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
+        for idx in indices:
+            idx.realize()
+        values.realize()
+        ir.IndexPutFallback(self, indices, values, accumulate)
+        return self
+
     iter_ranges = []
     index_loaders = []
 

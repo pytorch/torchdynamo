@@ -1756,6 +1756,36 @@ class ExternKernelAlloc(ExternKernel):
         return False
 
 
+class IndexPutFallback(ExternKernel):
+    # TODO(jansel): delete this when this is fixed:
+    # https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
+
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        x, *indices, values = [t.codegen_reference() for t in self.inputs]
+        (accumulate,) = self.constant_args
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{', '.join(indices)}], {values}, {accumulate!r})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, x, indices, values, accumulate=False):
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage([x, *indices, values]),
+            [accumulate],
+        )
+        self.name = V.graph.register_buffer(self)
+
+
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
