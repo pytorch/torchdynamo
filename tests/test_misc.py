@@ -407,7 +407,10 @@ class MiscTests(torchdynamo.testing.TestCase):
             self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=8
         )
 
-    def test_tensor_item(self):
+    def test_tensor_item_capture(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = True
+
         def fn(a, b):
             return (a + b).sum().item()
 
@@ -419,6 +422,24 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertEqual(fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
+
+    def test_tensor_item_no_capture(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = False
+
+        def fn(a, b):
+            return (a + b).sum().item()
+
+        v1 = torch.randn((10, 10))
+        v2 = torch.randn((10, 10))
+        correct = fn(v1, v2)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize((cnts)):
+            self.assertEqual(fn(v1, v2), correct)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
 
     def test_namedtuple1(self):
         def fn(a, b):
@@ -1648,6 +1669,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
 
     def test_item(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = True
+
         class MyMod(torch.nn.Module):
             def forward(self, x):
                 z = torch.max(x)
@@ -1659,8 +1683,12 @@ class MiscTests(torchdynamo.testing.TestCase):
             y = model(x)
 
         self.assertEqual(y, 11)
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
 
     def test_item_changes(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = True
+
         class MyMod(torch.nn.Module):
             def forward(self, x):
                 z = torch.max(x)
@@ -1674,8 +1702,12 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
 
     def test_item_changes_new_shape(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = True
+
         class MyMod(torch.nn.Module):
             def forward(self, x):
                 z = torch.max(x)
@@ -1689,3 +1721,4 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs

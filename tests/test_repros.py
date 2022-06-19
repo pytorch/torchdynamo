@@ -865,7 +865,27 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
 
-    def test_maml(self):
+    def test_maml_item_capture(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = True
+        a = torch.randn(5, 1, 28, 28)
+        b = torch.zeros(5, dtype=torch.int64)
+        c = torch.randn(75, 1, 28, 28)
+        d = torch.zeros(75, dtype=torch.int64)
+        model = PartialMaml()
+        correct = model(a, b, c, d)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            for _ in range(10):
+                self.assertTrue(same(model(a, b, c, d), correct))
+
+        self.assertEqual(cnt.frame_count, ifdyn(3, 2))
+        self.assertEqual(cnt.op_count, ifdyn(36, 29))
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
+
+    def test_maml_no_item_capture(self):
+        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
+        torchdynamo.config.capture_scalar_outputs = False
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
         c = torch.randn(75, 1, 28, 28)
@@ -879,6 +899,7 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, ifdyn(5, 4))
         self.assertEqual(cnt.op_count, ifdyn(36, 29))
+        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
