@@ -2,7 +2,6 @@ import copy
 import itertools
 import numbers
 import operator
-import re
 from contextlib import contextmanager
 from typing import Dict
 from typing import List
