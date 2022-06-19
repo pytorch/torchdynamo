@@ -990,6 +990,8 @@ def main():
                 "timm_efficientdet",
             }
         )
+        if args.training:
+            SKIP.add("hf_T5")
 
     if torchdynamo.config.dynamic_shapes:
         # TODO(jansel): fix bugs in these

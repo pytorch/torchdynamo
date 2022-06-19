@@ -1949,6 +1949,37 @@ class CommonTemplate:
             ],
         )
 
+    def test_narrow(self):
+        def fn(x):
+            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+
+        self.common(fn, [torch.randn(64, 64)])
+
+    def test_as_strided(self):
+        def fn(x):
+            return (
+                aten.as_strided(x, (8, 8, 64), (8 * 64, 64, 1), 0),
+                aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2,
+            )
+
+        self.common(fn, [torch.randn(64, 64)])
+
+    def test_select_scatter(self):
+        def fn(x, a, b):
+            return (
+                aten.select_scatter(x, a, 1, 0),
+                aten.select_scatter(x, b, 0, 1),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn(8, 197, 38),
+                torch.randn(8, 38),
+                torch.randn(197, 38),
+            ],
+        )
+
 
 if HAS_CPU:
 

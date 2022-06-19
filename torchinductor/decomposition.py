@@ -16,7 +16,6 @@ decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
         aten.avg_pool2d_backward,
-        aten.bernoulli_,
         aten.clamp_max,
         aten.clamp_min,
         aten.cudnn_batch_norm,
@@ -31,18 +30,19 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardswish,
+        aten.hardswish_backward,
         aten.hardtanh,
+        aten.hardtanh_backward,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
-        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
+        aten.narrow,
         aten.native_batch_norm,
         aten.native_batch_norm_backward,
-        aten.native_dropout_backward,
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
@@ -52,13 +52,13 @@ decompositions = get_decompositions(
         aten.select_backward,
         aten.select_scatter,
         aten.sigmoid_backward,
+        aten.silu_backward,
         aten._softmax_backward_data,
         aten.stack,
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
         aten.upsample_nearest2d_backward,
-        aten.narrow,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
@@ -275,3 +275,8 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
     return torch.index_put_(self.clone(), indices, values, accumulate)
+
+
+@register_decomposition([aten.narrow])
+def narrow(self, dim, start, length):
+    return aten.slice(self, dim, start, start + length)

@@ -23,6 +23,7 @@ from .virtualized import ops
 lowerings = {}
 aten = torch.ops.aten
 needs_realized_inputs = {
+    aten.as_strided,
     aten.avg_pool2d,
     aten.bmm,
     aten.constant_pad_nd,
@@ -417,6 +418,22 @@ def slice_(x, dim, start, end, step=1):
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
+@register_lowering(aten.as_strided)
+def as_strided(x, size, stride, storage_offset=None):
+    x.realize()
+    if not ir.is_storage_and_layout(x):
+        raise NotImplementedError(f"unrealized as_strided({x}, ...)")
+    storage, old_layout = ir.as_storage_and_layout(x)
+    new_layout = ir.FixedLayout(
+        old_layout.device,
+        old_layout.dtype,
+        [sympy.expand(s) for s in size],
+        [sympy.expand(s) for s in stride],
+        sympy.expand(storage_offset or 0),
+    )
+    return TensorBox(ir.ReinterpretView(storage, new_layout))
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
@@ -583,6 +600,7 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d)
 make_fallback(aten.max_pool2d_with_indices_backward)
 make_fallback(aten.native_batch_norm_backward)
+make_fallback(aten.native_dropout_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
 make_fallback(aten.sort)
@@ -697,6 +715,31 @@ def triu(x, diagonal=0):
     return Pointwise.create(
         device=x.get_device(),
         dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(x.get_size()),
+    )
+
+
+@register_lowering(aten.select_scatter)
+def select_scatter(x, src, dim: int, index: int):
+    x_loader = x.make_loader()
+    dim = _validate_dim(x, dim, 0)
+    src = expand(unsqueeze(src, dim), x.get_size())
+    src_loader = src.make_loader()
+
+    def inner_fn(idx):
+        return ops.where(
+            ops.eq(
+                ops.index_expr(idx[dim], torch.int32),
+                ops.constant(index, torch.int32),
+            ),
+            src_loader(idx),
+            x_loader(idx),
+        )
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
         inner_fn=inner_fn,
         ranges=list(x.get_size()),
     )
@@ -1140,7 +1183,7 @@ def constant_pad_2d(x, padding, fill_value):
 
 
 @register_lowering(aten.constant_pad_nd)
-def constant_pad_nd(x, padding, fill_value):
+def constant_pad_nd(x, padding, fill_value=0):
     assert len(padding) == 4
     return constant_pad_2d(x, padding, fill_value)
 
