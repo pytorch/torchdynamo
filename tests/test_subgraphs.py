@@ -366,10 +366,8 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
-        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
-        torchdynamo.config.capture_scalar_outputs = True
-
         def fn(a, b):
             x = a + b - 1.5
             x = x.sum()
@@ -378,12 +376,9 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 1, 6)
-        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
 
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
-        capture_scalar_outputs = torchdynamo.config.capture_scalar_outputs
-        torchdynamo.config.capture_scalar_outputs = False
-
         def fn(a, b):
             x = a + b - 1.5
             x = x.sum()
@@ -392,7 +387,6 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return x
 
         self._common(fn, 2, 5)
-        torchdynamo.config.capture_scalar_outputs = capture_scalar_outputs
 
     def test_resume_paths_join(self):
         def fn(x, c1, c2, c3):
