@@ -10,6 +10,8 @@ import torch.fx
 import torch.random
 from torch.fx.immutable_collections import immutable_list
 
+from torchdynamo.guards import GuardBuilder
+
 from .. import config
 from .. import variables
 from ..exc import TorchRuntimeError
@@ -226,11 +228,17 @@ class TensorVariable(VariableTracker):
             torch.BoolTensor: (torch.bool,),
         }
 
-        if tensor_type not in tensortype_to_dtype:
-            return self.python_type() is tensor_type
+        def check_type(ty):
+            if ty not in tensortype_to_dtype:
+                return self.python_type() is ty
 
-        dtypes = tensortype_to_dtype[tensor_type]
-        return self.dtype in dtypes
+            dtypes = tensortype_to_dtype[ty]
+            return self.dtype in dtypes
+
+        if type(tensor_type) is tuple:
+            return any([check_type(ty) for ty in tensor_type])
+        else:
+            return check_type(tensor_type)
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -277,6 +285,12 @@ class TensorVariable(VariableTracker):
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+
+        # Add a guard for type matching, these guards are checked before tensor guards
+        # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
+        # <tensor> is later changed to another type
+        if result is not None and self.source is not None:
+            result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
 
         if result is None:
             raise NotImplementedError()
