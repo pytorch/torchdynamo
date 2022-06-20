@@ -153,10 +153,11 @@ def compile_fx_inner(
 
 
 def no_compile(
-        gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
 ):
     return gm.forward
+
 
 def compile_fx_training(
     model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]

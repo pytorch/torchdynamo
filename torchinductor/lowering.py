@@ -591,6 +591,7 @@ def make_fallback(kernel):
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
+# TODO(jansel): we should implement decomps for these
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.avg_pool2d_backward)
 make_fallback(aten.convolution_backward)
@@ -603,6 +604,7 @@ make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_dropout_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
+make_fallback(aten.slice_scatter)
 make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
