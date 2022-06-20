@@ -366,6 +366,18 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_no_graph_break_on_item(self):
+        def fn(a, b):
+            x = a + b - 1.5
+            x = x.sum()
+            x.item()
+            x = x / (a + b)
+            return x
+
+        self._common(fn, 1, 6)
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
         def fn(a, b):
             x = a + b - 1.5
@@ -408,7 +420,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = a + b
             with torch.no_grad():
                 x = x + 1
-                x.sum().item()  # graph break
+                x.sum().tolist()  # graph break
                 x = x + 2
             x = x + 3
             return x
@@ -424,9 +436,9 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = a + b
             with torch.no_grad():
                 x = x + 1
-                x.sum().item()  # graph break
+                x.sum().tolist()  # graph break
                 x = x + 2
-                x.sum().item()  # graph break
+                x.sum().tolist()  # graph break
                 x = x + 3
             x = x + 4
             return x
@@ -440,13 +452,13 @@ class SubGraphTests(torchdynamo.testing.TestCase):
                 with torch.no_grad():
                     x = x + 1
                     with torch.enable_grad():
-                        x.sum().item()  # graph break
-                        x = x + 2
+                        x.sum().tolist()  # graph break
+                        x = x[0] + 2
                     x = x + 3
             x = x + 4
             return x
 
-        self._common(fn, 2, 14)
+        self._common(fn, 2, 15)
 
     def test_resume_tuple_iterator(self):
         def fn(a, b):
