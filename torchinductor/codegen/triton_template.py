@@ -146,19 +146,23 @@ def template_codegen(scheduler, node):
             # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
             node.run(*kernel.set_ranges(*node.get_ranges()))
             node.mark_fusable()
+            # enqueue any nodes that became runable after this node is run
+            # otherwise, relu after conv is in blocked_nodes that could not be in
+            # runable_groups to be fused to conv
+            scheduler.barrier()
 
         # TODO: reduction
 
-    kernel_name = wrapper.next_kernel_name()
-    # code gen kernel
-    wrapper.header.splice(kernel.codegen_kernel(kernel_name))
-    # map const args/ shape/ strides to kernel args
-    kernel.map_args()
-    # gen precompute tensor (like delta_x_ptr) if needed
-    kernel.precompute(wrapper, kernel_name)
-    # code gen call to kernel
-    kernel.call_kernel(wrapper, kernel_name)
+        kernel_name = wrapper.next_kernel_name()
+        # code gen kernel
+        wrapper.header.splice(kernel.codegen_kernel(kernel_name))
+        # map const args/ shape/ strides to kernel args
+        kernel.map_args()
+        # gen precompute tensor (like delta_x_ptr) if needed
+        kernel.precompute(wrapper, kernel_name)
+        # code gen call to kernel
+        kernel.call_kernel(wrapper, kernel_name)
 
-    scheduler.enqueue(reschedule)  # TODO: consider reschedule
-    scheduler.barrier()
-    scheduler.maybe_free_buffers()
+        scheduler.enqueue(reschedule)  # TODO: consider reschedule
+        scheduler.barrier() # enqueue any nodes that became runable after this node is run
+        scheduler.maybe_free_buffers()
