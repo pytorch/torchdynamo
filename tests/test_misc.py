@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
 from torchdynamo import bytecode_transformation
@@ -1708,3 +1709,31 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+
+class TestTracer(JitTestCase):
+    def test_jit_save(self):
+        def fn():
+            class Foo(torch.nn.Module):
+                def __init__(self):
+                    super(Foo, self).__init__()
+                    self.a = 3
+
+                @torch.jit.export
+                def __getstate__(self):
+                    return (3, self.training)
+
+                @torch.jit.export
+                def __setstate__(self, state):
+                    self.a = state[0]
+                    self.training = state[1]
+
+                def forward(self, x):
+                    return x + self.a
+
+            f = Foo()
+
+            return torch.jit.trace(f, (torch.rand(3, 4),))
+
+        eager = fn()
+        with torchdynamo.optimize("eager"):
+            dynamo = fn()
