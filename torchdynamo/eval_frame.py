@@ -71,6 +71,7 @@ class _TorchDynamoContext:
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
+
         from torchdynamo.guards import NNModuleChangeTrackerUtil
 
         NNModuleChangeTrackerUtil.de_register_patches_on_torch_nn_module()
