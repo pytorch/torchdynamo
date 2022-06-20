@@ -801,8 +801,11 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes1), correct1))
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes2), correct2))
 
-        self.assertEqual(cnt.frame_count, ifdyn(1, 4))
-        self.assertEqual(cnt.op_count, 10)
+        # repeat_interleave is a dynamic shape operator we do not execute/
+        # In the future, we could reduce the frame_count down to 1
+        # by guarding on the exact values of `Tensor repeats` arg
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, ifdyn(5, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1008,7 +1011,8 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         cnt = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnt):
-            test_fn()
+            out = test_fn()
+        self.assertTrue(isinstance(out, torch.nn.Parameter))
 
     def test_Size(self):
         def test_fn():

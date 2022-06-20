@@ -17,6 +17,8 @@ from typing import Iterable
 from typing import List
 from unittest.mock import patch
 
+from torch._subclasses.fake_tensor import FakeTensorMode
+
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
@@ -1127,6 +1129,10 @@ class InstructionTranslatorBase(object):
             lookup_line=False,
         )
 
+    @property
+    def fake_mode(self):
+        return self._fake_mode
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1159,6 +1165,7 @@ class InstructionTranslatorBase(object):
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
+        self._fake_mode = FakeTensorMode(inner=None)
         self.checkpoint = None
 
         if sys.version_info >= (3, 10):
@@ -1405,6 +1412,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
+
+    @property
+    def fake_mode(self):
+        return self.parent.fake_mode
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:

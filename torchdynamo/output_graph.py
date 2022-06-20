@@ -81,6 +81,10 @@ class OutputGraph(fx.Tracer):
     def output(self):
         return self
 
+    @property
+    def fake_mode(self):
+        return self.root_tx.fake_mode
+
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
         graph_nodes = set(self.graph.nodes)
@@ -377,7 +381,14 @@ class OutputGraph(fx.Tracer):
     def cleanup(self):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
+
+        # Clear cache for conversion of real -> fake tensors
+        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
+
+        # Note: generated fx graph will hold a reference to the nn_module,
+        # So depending on the backend they may not be released
+        self.nn_modules = None
 
         # Cleanup graphargs
         for graph_arg in self.graphargs:
