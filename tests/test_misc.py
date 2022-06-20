@@ -1710,6 +1710,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+
 class TestTracer(JitTestCase):
     def test_jit_save(self):
         def fn():
