@@ -177,7 +177,7 @@ class TensorVariable(VariableTracker):
         device=None,
         ndim=None,
         size=None,
-        item = None,
+        item=None,
         stride=None,
         requires_grad=None,
         is_quantized=None,

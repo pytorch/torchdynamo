@@ -55,22 +55,24 @@ CLOSURE_VARS = collections.OrderedDict(
 
 
 class NNModuleChangeTrackerUtil:
-    # TODO(voz): Do we need a deregister? Perhaps for when we exit the dynamo context?
-    @staticmethod
-    def register_patches_on_torch_nn_module():
+    original_register_parameter = None
+    original_add_module = None
+    original_load_state_dict = None
+    original_setattr = None
+
+    @classmethod
+    def register_patches_on_torch_nn_module(cls):
         torch_nn_module_cls = torch.nn.Module
         if getattr(torch_nn_module_cls, "__dynamo_module_patch", True):
+            # register_parameter
             torch_nn_module_cls.__dynamo_module_patch = False
 
-            # Note - the wrapping code below is a little redundant.
-            # TODO(voz): Refactor into a single util to be invoked per wrapped func.
-            # register_param
-            register_parameter_real = torch_nn_module_cls.register_parameter
+            original_register_parameter = torch_nn_module_cls.register_parameter
 
-            @functools.wraps(register_parameter_real)
+            @functools.wraps(original_register_parameter)
             def custom_register_parameter(self, key, value):
                 NNModuleChangeTrackerUtil.invalidate_module(self)
-                return register_parameter_real(self, key, value)
+                return original_register_parameter(self, key, value)
 
             torch_nn_module_cls.register_parameter = custom_register_parameter
 
@@ -94,6 +96,7 @@ class NNModuleChangeTrackerUtil:
 
             torch_nn_module_cls.load_state_dict = custom_load_state_dict
 
+            # __setattr__
             original_setattr = torch_nn_module_cls.__setattr__
 
             @functools.wraps(original_setattr)
@@ -102,7 +105,24 @@ class NNModuleChangeTrackerUtil:
                 return original_setattr(self, key, value)
 
             torch_nn_module_cls.__setattr__ = custom_setattr
+            cls.original_register_parameter = original_register_parameter
+            cls.original_add_module = original_add_module
+            cls.original_load_state_dict = original_load_state_dict
+            cls.original_setattr = original_setattr
 
+    @classmethod
+    def de_register_patches_on_torch_nn_module(cls):
+        torch_nn_module_cls = torch.nn.Module
+        if hasattr(
+            torch_nn_module_cls, "_NNModuleChangeTrackerUtil__dynamo_module_patch"
+        ):
+            torch_nn_module_cls.__setattr__ = cls.original_setattr
+            torch_nn_module_cls.load_state_dict = cls.original_load_state_dict
+            torch_nn_module_cls.add_module = cls.original_add_module
+            torch_nn_module_cls.register_parameter = cls.original_register_parameter
+            delattr(
+                torch_nn_module_cls, "_NNModuleChangeTrackerUtil__dynamo_module_patch"
+            )
 
     @staticmethod
     def invalidate_module(module):
@@ -208,7 +228,6 @@ class GuardBuilder:
         self.module_associated_guarded_ids = set()
         # map from module ids to the ids of objects tracked for invalidation
         self.module_to_guard_ids = ExactWeakKeyDictionary()  # {nn.Module: Set[id]}
-
 
     def get(self, name: str):
         return eval(name, self.scope, CLOSURE_VARS)
@@ -410,7 +429,6 @@ class GuardBuilder:
             self.tensor_check_names.append(self.arg_ref(guard))
             self.tensor_check_examples.append(self.get(guard.name))
 
-
     def register_module_for_invalidation(self, module, guarded_code):
         NNModuleChangeTrackerUtil.register_patches_on_torch_nn_module()
         module_id = id(module)
@@ -431,7 +449,6 @@ class GuardBuilder:
             parameter_id = id(parameter)
             self.module_associated_guarded_ids.add(parameter_id)
             self.module_to_guard_ids[module].add(parameter_id)
-        
 
         if module not in module_code_map:
             module_code_map[module] = set()
