@@ -61,6 +61,55 @@ CLOSURE_VARS = collections.OrderedDict(
 
 
 class NNModuleChangeTrackerUtil:
+    # TODO(voz): Do we need a deregister? Perhaps for when we exit the dynamo context?
+    @staticmethod
+    def register_patches_on_torch_nn_module():
+        torch_nn_module_cls = torch.nn.Module
+        if getattr(torch_nn_module_cls, "__dynamo_module_patch", True):
+            torch_nn_module_cls.__dynamo_module_patch = False
+
+            # Note - the wrapping code below is a little redundant.
+            # TODO(voz): Refactor into a single util to be invoked per wrapped func.
+            # register_param
+            register_parameter_real = torch_nn_module_cls.register_parameter
+
+            @functools.wraps(register_parameter_real)
+            def custom_register_parameter(self, key, value):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return register_parameter_real(self, key, value)
+
+            torch_nn_module_cls.register_parameter = custom_register_parameter
+
+            # add_module
+            original_add_module = torch_nn_module_cls.add_module
+
+            @functools.wraps(original_add_module)
+            def custom_add_module(self, name, module):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_add_module(self, name, module)
+
+            torch_nn_module_cls.add_module = custom_add_module
+
+            # load_state_dict
+            original_load_state_dict = torch_nn_module_cls.load_state_dict
+
+            @functools.wraps(original_load_state_dict)
+            def custom_load_state_dict(self, state_dict, strict):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_load_state_dict(self, state_dict, strict)
+
+            torch_nn_module_cls.load_state_dict = custom_load_state_dict
+
+            original_setattr = torch_nn_module_cls.__setattr__
+
+            @functools.wraps(original_setattr)
+            def custom_setattr(self, key, value):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_setattr(self, key, value)
+
+            torch_nn_module_cls.__setattr__ = custom_setattr
+
+
     @staticmethod
     def invalidate_module(module):
         if module not in module_code_map:
@@ -77,14 +126,15 @@ class NNModuleChangeTrackerUtil:
             return
 
         for object_id in module_to_guard_ids[module]:
-            module_associated_guarded_ids.remove(object_id)
+            if object_id in module_associated_guarded_ids:
+                module_associated_guarded_ids.remove(object_id)
 
         del module_to_guard_ids[module]
 
     @staticmethod
     def setup(module, guarded_code):
+        NNModuleChangeTrackerUtil.register_patches_on_torch_nn_module()
         module_id = id(module)
-        modulecls = module.__class__
         if module_id not in module_to_guard_ids:
             module_to_guard_ids[module] = set()
 
@@ -102,50 +152,7 @@ class NNModuleChangeTrackerUtil:
             parameter_id = id(parameter)
             module_associated_guarded_ids.add(parameter_id)
             module_to_guard_ids[module].add(parameter_id)
-
-        if getattr(modulecls, "__dynamo_module_patch", True):
-            modulecls.__dynamo_module_patch = False
-
-            # Note - the wrapping code below is a little redundant.
-            # TODO(voz): Refactor into a single util to be invoked per wrapped func.
-            # register_param
-            register_parameter_real = modulecls.register_parameter
-
-            @functools.wraps(register_parameter_real)
-            def custom_register_parameter(self, key, value):
-                NNModuleChangeTrackerUtil.invalidate_module(self)
-                return register_parameter_real(self, key, value)
-
-            modulecls.register_parameter = custom_register_parameter
-
-            # add_module
-            original_add_module = modulecls.add_module
-
-            @functools.wraps(original_add_module)
-            def custom_add_module(self, name, module):
-                NNModuleChangeTrackerUtil.invalidate_module(self)
-                return original_add_module(self, name, module)
-
-            modulecls.add_module = custom_add_module
-
-            # load_state_dict
-            original_load_state_dict = modulecls.load_state_dict
-
-            @functools.wraps(original_load_state_dict)
-            def custom_load_state_dict(self, state_dict, strict):
-                NNModuleChangeTrackerUtil.invalidate_module(self)
-                return original_load_state_dict(self, state_dict, strict)
-
-            modulecls.load_state_dict = custom_load_state_dict
-
-            original_setattr = modulecls.__setattr__
-
-            @functools.wraps(original_setattr)
-            def custom_setattr(self, key, value):
-                NNModuleChangeTrackerUtil.invalidate_module(self)
-                return original_setattr(self, key, value)
-
-            modulecls.__setattr__ = custom_setattr
+        
 
         if module not in module_code_map:
             module_code_map[module] = set()
@@ -276,7 +283,6 @@ class GuardBuilder:
         if m:
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(Guard(m.group(1), guard.source, None))
-        print("ID Match on: ", guard.name)
         self.code.append(
             f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         )
@@ -336,7 +342,6 @@ class GuardBuilder:
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
-            print("Type matching: ", guard.name, type(self.get(guard.name)))
             self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
             self.code.append(f"__math_isnan({ref})")
             return
@@ -345,12 +350,10 @@ class GuardBuilder:
         if istype(val, (list, tuple)):
             self.LIST_LENGTH(guard)
             for idx, elem in enumerate(val):
-                print("Type matching: ", guard.name, type(self.get(guard.name)))
                 self.code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
         elif not istype(val, torch.Size):
-            print("Type matching: ", guard.name, type(self.get(guard.name)))
             self.code.append(f"___check_type_id({ref}, {self.id_ref(type(val))})")
 
         if istype(val, torch.Size):
@@ -406,14 +409,12 @@ class GuardBuilder:
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
@@ -421,7 +422,6 @@ class GuardBuilder:
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(f"___check_type_id({ref}, {self.id_ref(type(value))})")
         self.code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
 
