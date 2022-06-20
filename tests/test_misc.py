@@ -22,6 +22,7 @@ from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
+from unittest.mock import patch
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -1413,6 +1414,12 @@ class MiscTests(torchdynamo.testing.TestCase):
         with self.assertRaises(RuntimeError):
             with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
                 f(x)
+
+        with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                out = f(x)
+
+        self.assertTrue(same(out, f(x)))
 
     def test_inline_list_mutation(self):
         def f1(x):
