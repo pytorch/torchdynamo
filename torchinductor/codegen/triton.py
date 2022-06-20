@@ -12,13 +12,13 @@ import torch
 from .. import codecache
 from .. import config
 from .. import ir
+from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
-from .common import product
 
 
 class TritonPrinter(ExprPrinter):
@@ -688,7 +688,7 @@ class TritonScheduling:
         self.scheduler = scheduler
 
     def group_fn(self, sizes):
-        return tuple(V.graph.sizevars.simplify(product(s)) for s in sizes)
+        return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     def codegen(self, *groups):
         wrapper = V.graph.wrapper_code
@@ -799,6 +799,6 @@ class TritonScheduling:
 
 def split_sizes(sizes, prod1, prod2):
     for i in range(len(sizes)):
-        if product(sizes[:i]) == prod1 and product(sizes[i:]) == prod2:
+        if sympy_product(sizes[:i]) == prod1 and sympy_product(sizes[i:]) == prod2:
             return i
     return None
