@@ -91,6 +91,11 @@ def _disallowed_function_ids():
         torch.autograd.profiler.profile,
         warnings.warn,
     ]
+    # extract all dtypes from torch
+    dtypes = [
+        obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
+    ]
+    remove += dtypes
     return {id(x) for x in remove}
 
 

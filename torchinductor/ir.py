@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import textwrap
+from collections import OrderedDict
 from functools import partial
 from typing import Any
 from typing import Callable
@@ -20,8 +21,8 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
-from .codegen.common import product
 from .dependencies import extract_read_writes
+from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
@@ -123,7 +124,7 @@ class IRNode(object):
         return any(name == dep.name for dep in self.get_reads())
 
     def get_numel(self):
-        return product(self.get_size())
+        return sympy_product(self.get_size())
 
 
 @dataclasses.dataclass
@@ -279,7 +280,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
     ):
-        reduction_numel = product(reduction_ranges)
+        reduction_numel = sympy_product(reduction_ranges)
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             def fn(index):
@@ -287,6 +288,22 @@ class Reduction(Loops):
                 return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dtype, fn, ranges)
+
+        if is_triton(device):
+            reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
+            numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+            if reduction_numel_hint > 8192 and numel_hint == 1:
+                # triton doesn't support reduce to single element well, so break it up
+                split = 128
+                return cls.create_multilayer(
+                    device,
+                    dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    split,
+                )
 
         return TensorBox.create(
             Reduction(
@@ -304,6 +321,85 @@ class Reduction(Loops):
         return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
             reduction_type
         ]
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable,
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+        split,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        reduction_numel = sympy_product(reduction_ranges)
+
+        # TODO(jansel): convert this to dynamic shapes
+        # TODO(jansel): realize the reduction so we can do dynamic indexing
+        reduction_ranges = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in reduction_ranges
+        ]
+        reduction_numel = sympy.Integer(
+            V.graph.sizevars.guard_static_shape(reduction_numel)
+        )
+
+        if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
+            need_mask = False
+        else:
+            need_mask = True
+
+        split = sympy.Integer(split)
+        block_size = IndexingDiv(reduction_numel + (split - 1), split)
+
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+
+        def wrapper_fn(index, reduction_index):
+            (reduction_index,) = reduction_index
+            *new_index, reduction_block = index
+            indices = block_size * reduction_block + reduction_index
+
+            def body():
+                return inner_fn(new_index, reindex([indices]))
+
+            if need_mask:
+                mask = ops.lt(
+                    ops.index_expr(indices, torch.int32),
+                    ops.index_expr(reduction_numel, torch.int32),
+                )
+                return ops.masked(mask, body, cls.default_value(reduction_type, dtype))
+            else:
+                return body()
+
+        intermediate = Reduction.create(
+            device,
+            dtype,
+            wrapper_fn,
+            [*ranges, split],
+            [block_size],
+            reduction_type,
+        )
+        intermediate.realize()
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(index, reduction_index):
+            return intermediate_loader([*index, *reduction_index])
+
+        return TensorBox.create(
+            Reduction(
+                device,
+                dtype,
+                intermediate_fn,
+                ranges,
+                [split],
+                reduction_type,
+            )
+        )
 
 
 def is_storage_and_layout(x):
@@ -590,10 +686,10 @@ class View(BaseView):
         for i in range(len(new_size)):
             if new_size[i] == -1:
                 new_size[i] = sympy.Integer(1)
-                new_size[i] = CleanDiv(product(old_size), product(new_size))
+                new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
-        V.graph.sizevars.guard_equals(product(old_size), product(new_size))
+        V.graph.sizevars.guard_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
 
     @classmethod
@@ -602,7 +698,7 @@ class View(BaseView):
             reindex = cls._dynamic_reshape_indexer(old_size, new_size)
         except (AssertionError, IndexError):
             # optimistic algorithm failed, lets do a fallback
-            flat = [product(old_size)]
+            flat = [sympy_product(old_size)]
             reindex1 = cls._dynamic_reshape_indexer(old_size, flat)
             reindex2 = cls._dynamic_reshape_indexer(flat, new_size)
             reindex = fuse_reindexing(reindex1, reindex2)
@@ -1596,6 +1692,15 @@ class ExternKernel(InputsKernel):
             wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
             wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
 
+    def get_group_stride(self):
+        """
+        get output sizes and strides, for template_codegen
+        """
+        _size = self.get_size()
+        _stride = self.get_stride()
+        # iter_ranges = _size of output tensor, reduce_range = [] because no reduction
+        return [_size, []], _stride
+
 
 @dataclasses.dataclass
 class ExternKernelOut(ExternKernel):
@@ -2056,6 +2161,95 @@ class Convolution(ExternKernelAlloc):
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
+
+    def map_args(self):
+        # x, w, bias
+        in_args = [x.codegen_reference() for x in self.inputs]
+        # stride, padding, dilation, transposed, output_padding, groups
+        const_args = self.constant_args
+        if len(in_args) < 3:
+            # otherwise, bias=None is the first constant_args
+            const_args = const_args[1:]
+        # stride of inputs and outputs
+        stride_x = f"{in_args[0]}.stride()"
+        stride_w = f"{in_args[1]}.stride()"
+        stride_y = f"{self.get_name()}.stride()"
+
+        args_dict = OrderedDict(
+            [
+                ("x", f"{in_args[0]}"),
+                ("w", f"{in_args[1]}"),
+                ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
+                ("y", f"{self.get_name()}"),
+                ("stride_xn", stride_x + "[0]"),
+                ("stride_xc", stride_x + "[1]"),
+                ("stride_xh", stride_x + "[2]"),
+                ("stride_xw", stride_x + "[3]"),
+                ("stride_wn", stride_w + "[0]"),
+                ("stride_wc", stride_w + "[1]"),
+                ("stride_wh", stride_w + "[2]"),
+                ("stride_ww", stride_w + "[3]"),
+                ("stride_yn", stride_y + "[0]"),
+                ("stride_yc", stride_y + "[1]"),
+                ("stride_yh", stride_y + "[2]"),
+                ("stride_yw", stride_y + "[3]"),
+                (
+                    "stride_biasn",
+                    f"{in_args[2]}.stride()[0]" if len(in_args) >= 3 else "None",
+                ),
+                ("delta_x_ptr", "None"),
+                ("BATCH", f"{in_args[0]}.shape[0]"),
+                ("IN_C", f"{in_args[0]}.shape[1]"),
+                ("IN_H", f"{in_args[0]}.shape[2]"),
+                ("IN_W", f"{in_args[0]}.shape[3]"),
+                ("KERNEL_N", f"{in_args[1]}.shape[0]"),
+                ("KERNEL_H", f"{in_args[1]}.shape[2]"),
+                ("KERNEL_W", f"{in_args[1]}.shape[3]"),
+                ("OUT_H", f"{self.get_name()}.shape[2]"),
+                ("OUT_W", f"{self.get_name()}.shape[3]"),
+                ("stride_h", f"{const_args[0][0]}"),
+                ("stride_w", f"{const_args[0][1]}"),
+                ("padding_h", f"{const_args[1][0]}"),
+                ("padding_w", f"{const_args[1][1]}"),
+                ("dilation_h", f"{const_args[2][0]}"),
+                ("dilation_w", f"{const_args[2][1]}"),
+                # ("transposed", f"{const_args[3]}"),
+                ("output_padding_h", f"{const_args[4][0]}"),
+                ("output_padding_w", f"{const_args[4][1]}"),
+                ("groups", f"{const_args[5]}"),
+            ]
+        )
+
+        # accumulator type
+        ACC_TYPE = (
+            "tl.float32"
+            if self.inputs[0].get_dtype()
+            in [torch.float16, torch.bfloat16, torch.float32]
+            else "tl.int32"
+        )
+        CONV1X1_NHWC = (
+            "True"
+            if self.inputs[0].get_stride()[1] == 1
+            and self.inputs[1].shape[2] == 1
+            and self.inputs[1].shape[3] == 1
+            else "False"
+        )
+        # dict for tl.constexpr
+        const_dict = OrderedDict(
+            [
+                ("ACC_TYPE", ACC_TYPE),
+                ("CONV1X1_NHWC", CONV1X1_NHWC),
+            ]
+        )
+
+        # dict for non-kernel args (e.g. delta_x_ptr)
+        other_dict = OrderedDict(
+            [
+                ("device", f'"{self.inputs[0].get_device()}"'),
+            ]
+        )
+
+        return args_dict, const_dict, other_dict
 
 
 @dataclasses.dataclass

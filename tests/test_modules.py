@@ -10,6 +10,7 @@ from torch.nn.parameter import UninitializedParameter
 
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
+from torchdynamo.mutation_guard import GenerationTracker
 
 from . import test_functions
 
@@ -682,18 +683,18 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             pass
 
         m1 = torch.nn.Linear(10, 10)
-        prev_generation = m1.generation
+        prev_generation = GenerationTracker.get_generation_value(m1)
         cur_generation = prev_generation + 1
 
         with torchdynamo.optimize_assert(cnt):
             m2 = torch.nn.Linear(10, 10)
 
-        self.assertEqual(m1.generation, prev_generation)
-        self.assertEqual(m2.generation, cur_generation)
+        self.assertEqual(GenerationTracker.get_generation_value(m1), prev_generation)
+        self.assertEqual(GenerationTracker.get_generation_value(m2), cur_generation)
         # check that newly constructed instances
         # also have the same generation (even if copied from an old instance)
         m3 = deepcopy(m1)
-        self.assertEqual(m3.generation, cur_generation)
+        self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
     def test_simple_torch_function(self):
         def foo(x):
