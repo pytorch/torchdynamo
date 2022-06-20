@@ -1,26 +1,25 @@
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment
+from jinja2 import FileSystemLoader
 
-from .. import config
 from .. import ir
 from ..virtualized import V
 from .common import IndentedBuffer
 from .triton import TritonKernel
 
+template_dict = {ir.Convolution: "triton_conv"}
 
-template_dict = {
-    ir.Convolution: "triton_conv"
-}
+
 class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
         super(TritonTemplateKernel, self).__init__(*groups)
         self.node = node
         template_name = template_dict[type(node)]
         env = Environment(
-            loader = FileSystemLoader("torchinductor/codegen"),
-            trim_blocks = True,
-            lstrip_blocks = True,
+            loader=FileSystemLoader("torchinductor/codegen"),
+            trim_blocks=True,
+            lstrip_blocks=True,
         )
-        self.template = env.get_template(template_name+".j2")
+        self.template = env.get_template(template_name + ".j2")
         self.pointwise_compute = None
 
     def codegen_body(self, name, extra_argdefs):
@@ -58,7 +57,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def map_args(self):
         """
-        map the constant args or 
+        map the constant args or
         kernel[grid](..., IN_C, IN_H, IN_W, strides,...)
         """
         self.args_dict, self.const_dict, self.other_dict = self.node.map_args()
@@ -85,15 +84,15 @@ class TritonTemplateKernel(TritonKernel):
                 stride_xw = self.args_dict["stride_xw"]
                 device = self.other_dict["device"]
                 wrapper.writeline(
-                    "delta_x = _conv._delta_x_ptr(" \
-                        f"{IN_C}, {KERNEL_H}, {KERNEL_W}, " \
-                        f"{dilation_h}, {dilation_w}, "\
-                        f"{stride_wc}, {stride_wh}, {stride_ww}, "\
-                        f"{stride_xc}, {stride_xh}, {stride_xw}, {device})"
+                    "delta_x = _conv._delta_x_ptr("
+                    f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
+                    f"{dilation_h}, {dilation_w}, "
+                    f"{stride_wc}, {stride_wh}, {stride_ww}, "
+                    f"{stride_xc}, {stride_xh}, {stride_xw}, {device})"
                 )
             # else, delta_x_ptr is None
         return
-    
+
     def gen_grid(self):
         code = IndentedBuffer()
         if isinstance(self.node, ir.Convolution):
@@ -115,16 +114,19 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, wrapper, name: str):
         # gen code to call kernel
-        # e.g. 
+        # e.g.
         # def grid(META):
         #     return (...)
         # kernel1[grid](arg0, arg1, ...)
         extra_arg_defs, extra_call_args = self.args.python_argdefs()
         extra_args = ", ".join(extra_call_args)
         self_args = ", ".join({**self.args_dict, **self.const_dict}.values())
-        args = self_args + (", " + extra_args if extra_args and len(extra_args) > 0 else "")
+        args = self_args + (
+            ", " + extra_args if extra_args and len(extra_args) > 0 else ""
+        )
         wrapper.writeline(self.gen_grid())
         wrapper.writeline(f"{name}[grid]({args})")
+
 
 def template_codegen(scheduler, node):
     """

@@ -14,12 +14,13 @@ import torch
 from . import config
 from . import dependencies
 from . import ir
+from .codegen.template import template_codegen
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
-from .codegen.template import template_codegen
 
 TemplateKernels = [ir.Convolution]
+
 
 def cmp(a, b):
     return int(a > b) - int(a < b)
@@ -610,7 +611,7 @@ class Scheduler:
     def flush(self):
         for backend in self.backends.values():
             backend.flush()
-        
+
     def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
         node = scheduler_node.node

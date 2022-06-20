@@ -113,9 +113,6 @@ class WrapperCodeGen(CodeGen):
         self.freed = set()
         self.reuse_pool = collections.defaultdict(list)
 
-    def next_kernel_name(self):
-        return f"kernel{next(self._names_iter)}"
-    
     def next_func_name(self):
         return f"func{next(self._names_iter)}"
 
