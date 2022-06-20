@@ -9,7 +9,6 @@ import re
 import textwrap
 import types
 import weakref
-from collections import OrderedDict
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -19,8 +18,6 @@ from typing import Set
 
 import numpy as np
 import torch
-import torch.utils.hooks as hooks
-from torch.nn import Parameter
 
 from . import config
 from . import mutation_guard
@@ -42,6 +39,12 @@ log = logging.getLogger(__name__)
 
 # map from modules to guarded code
 module_code_map = ExactWeakKeyDictionary()  # {nn.Module: Set[GuardedCode]}
+
+# A set of the ids of all objects tracked for invalidation
+module_associated_guarded_ids = set()
+
+# map from module ids to the ids of objects tracked for invalidation
+module_to_guard_ids = ExactWeakKeyDictionary()  # {nn.Module: Set[id]}
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -65,14 +68,31 @@ class NNModuleChangeTrackerUtil:
             return
 
         for code in module_code_map[module]:
+<<<<<<< HEAD
             print("Invalidating: ", code, "for", id(module))
+=======
+>>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
             code.valid = False
 
         del module_code_map[module]
 
+<<<<<<< HEAD
+=======
+        if module not in module_to_guard_ids:
+            # Module is out of scope / deleted (weak ref key ref dict)
+            return
+
+        for object_id in module_to_guard_ids[module]:
+            module_associated_guarded_ids.remove(object_id)
+
+        del module_to_guard_ids[module]
+
+>>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
     @staticmethod
     def setup(module, guarded_code):
+        module_id = id(module)
         modulecls = module.__class__
+<<<<<<< HEAD
         print(list(module.__dict__.keys()))
         for parameter in module.parameters():
             print("Sub parameter:", id(parameter))
@@ -85,11 +105,31 @@ class NNModuleChangeTrackerUtil:
         # for buffer in module.parameters():
         #     print("Sub buffer:", id(buffer))
         #     setattr(parameter, '__dynamo_on_module__', id(module))
+=======
+        if module_id not in module_to_guard_ids:
+            module_to_guard_ids[module] = set()
+
+        for buffer in module.buffers():
+            buffer_id = id(buffer)
+            module_associated_guarded_ids.add(buffer_id)
+            module_to_guard_ids[module].add(buffer_id)
+
+        for mod in module.modules():
+            mod_id = id(mod)
+            module_associated_guarded_ids.add(mod_id)
+            module_to_guard_ids[module].add(mod_id)
+
+        for parameter in module.parameters():
+            parameter_id = id(parameter)
+            module_associated_guarded_ids.add(parameter_id)
+            module_to_guard_ids[module].add(parameter_id)
+>>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
 
         if getattr(modulecls, "__dynamo_module_patch", True):
             modulecls.__dynamo_module_patch = False
 
-            # Note - the wrapping code below is a little redundant. TODO(voz): Refactor into a single util to be invoked per wrapped func.
+            # Note - the wrapping code below is a little redundant.
+            # TODO(voz): Refactor into a single util to be invoked per wrapped func.
             # register_param
             register_parameter_real = modulecls.register_parameter
 
@@ -239,26 +279,18 @@ class GuardBuilder:
 
     def TYPE_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_on_module__"):
-            print("Val has attr!", id(val), val.__dynamo_on_module__)
-
-        if guard.is_nn_module():
-            # Protected by module invalidation, see NN_MODULE
+        if id(val) in module_associated_guarded_ids:
             return
 
-        # ___check_type_id is same as `id(type(x)) == y`
-        print("Type matching: ", guard.name, type(self.get(guard.name)))
         self.code.append(
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
 
     def ID_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if hasattr(val, "__dynamo_on_module__"):
-            print("Val has attr!", id(val), val.__dynamo_on_module__)
-            
-        if guard.is_nn_module():
-            # Protected by module invalidation, see NN_MODULE
+        if id(val) in module_associated_guarded_ids or (
+            config.guard_nn_modules and guard.is_nn_module()
+        ):
             return
 
         # ___check_obj_id is same as `id(x) == y`
@@ -283,6 +315,12 @@ class GuardBuilder:
             self.code.append(f"not hasattr({ref}, {attr!r})")
 
     def EQUALS_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if id(val) in module_associated_guarded_ids or (
+            config.guard_nn_modules and guard.is_nn_module()
+        ):
+            return
+
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert istype(
@@ -344,13 +382,21 @@ class GuardBuilder:
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
+        if id(val) in module_associated_guarded_ids:
+            return
+
+        val = self.get(guard.name)
         if istype(val, (bool, type(None))):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+<<<<<<< HEAD
         self.ID_MATCH(guard)            
+=======
+        self.ID_MATCH(guard)
+>>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
 
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -360,6 +406,10 @@ class GuardBuilder:
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
+        val = self.get(guard.name)
+        if id(val) in module_associated_guarded_ids:
+            return
+
         if guard.is_local():
             return self.ID_MATCH(guard)
 
@@ -367,6 +417,10 @@ class GuardBuilder:
         return self.FUNCTION_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if id(val) in module_associated_guarded_ids:
+            return
+
         return self.FUNCTION_MATCH(guard)
 
     def LIST_LENGTH(self, guard):
@@ -410,6 +464,10 @@ class GuardBuilder:
             self.code.append("not ___is_grad_enabled()")
 
     def TENSOR_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if id(val) in module_associated_guarded_ids:
+            return
+
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
@@ -436,6 +494,7 @@ class GuardedCode:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
+
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 

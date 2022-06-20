@@ -312,7 +312,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
 
-            if "self" in frame.f_locals and istype(frame.f_locals["self"], torch.nn.ModuleList):
+            if "self" in frame.f_locals and istype(
+                frame.f_locals["self"], torch.nn.ModuleList
+            ):
                 # Protected by module invalidation, see NN_MODULE
                 output.guards = []
 
