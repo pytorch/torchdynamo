@@ -2,14 +2,20 @@ import logging
 import operator
 import os
 from itertools import chain
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any
+from typing import Callable
+from typing import Dict
+from typing import Optional
+from typing import Tuple
 
 import torch
-from torch.fx import GraphModule, Node
+from torch.fx import GraphModule
+from torch.fx import Node
 from torch.nn.utils import _stateless
 
 from ..allowed_functions import torch_get_name
-from ..utils import clone_inputs, istype
+from ..utils import clone_inputs
+from ..utils import istype
 from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
@@ -43,7 +49,13 @@ def debug_node(n: Node):
     return f"{n.op} {target} {n.args} {n.kwargs}"
 
 
-def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decompositions={}, PythonTensorOverrideClass=None, post_trace_hook=None):
+def python_key_normalize(
+    gm: torch.fx.GraphModule,
+    example_inputs,
+    decompositions={},
+    PythonTensorOverrideClass=None,
+    post_trace_hook=None,
+):
     """
     Use AOT autograd for normalizing IR in inference mode.  This is useful
     for debugging and gives us a common IR for both eval and train modes.
@@ -53,11 +65,12 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
     from functorch._src.named_members_polyfill import _named_buffers
     from functorch._src.named_members_polyfill import _named_parameters
     from torch.fx import Tracer
+
     PythonTensorClass = PythonTensorOverrideClass
     if not PythonTensorClass:
         from functorch._src.python_key import PythonTensor
-        PythonTensorClass = PythonTensor
 
+        PythonTensorClass = PythonTensor
 
     from functorch._src.python_key import pythonkey_decompose
 
@@ -126,7 +139,11 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
             super().__init__()
 
         def call_module(
-            self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
+            self,
+            m: torch.nn.Module,
+            forward: Callable[..., Any],
+            args: Tuple[Any, ...],
+            kwargs: Dict[str, Any],
         ) -> Any:
             return forward(*args, **kwargs)
 
@@ -135,8 +152,10 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
                         if n not in parameter_proxy_cache:
-                            proxy = self.create_proxy('get_attr', n, (), {})
-                            parameter_proxy_cache[n] = PythonTensorClass(attr_val, proxy)
+                            proxy = self.create_proxy("get_attr", n, (), {})
+                            parameter_proxy_cache[n] = PythonTensorClass(
+                                attr_val, proxy
+                            )
                         return parameter_proxy_cache[n]
                 return attr_val
             return attr_val
@@ -148,28 +167,25 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
             if isinstance(a, torch.nn.Parameter):
                 for n, p in self.root.named_parameters():
                     if a is p:
-                        return self.create_node('get_attr', n, (), {})
+                        return self.create_node("get_attr", n, (), {})
                 qualname: Optional[str] = None
 
                 if not qualname:
                     i = 0
                     while True:
-                        qualname = f'_param_constant{i}'
+                        qualname = f"_param_constant{i}"
                         if not hasattr(self.root, qualname):
                             break
                         i += 1
                     setattr(self.root, qualname, a)
 
-                return self.create_node('get_attr', qualname, (), {})
+                return self.create_node("get_attr", qualname, (), {})
             return super().create_arg(a)
-
 
     with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
         tracer: torch.fx.Tracer = PythonKeyTracer()
         graph = tracer.trace(fake_signature(fn_for_tracing, nargs))
         traced = GraphModule(tracer.root, graph, "python_key_traced")
-
-
 
     traced.recompile()
     # record_graph_stats(traced)
