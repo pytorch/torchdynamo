@@ -1734,6 +1734,6 @@ class TestTracer(JitTestCase):
 
             return torch.jit.trace(f, (torch.rand(3, 4),))
 
-        eager = fn()
+        fn()
         with torchdynamo.optimize("eager"):
-            dynamo = fn()
+            fn()
