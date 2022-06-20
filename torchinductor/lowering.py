@@ -572,7 +572,7 @@ def native_dropout(x, p, train):
 def bernoulli_(x, *args):
     x.realize()
     V.graph.realize_users_of(x.get_name())
-    ir.BernoulliFallback(x, *args)
+    ir.InplaceBernoulliFallback(x, *args)
     return x
 
 
@@ -775,20 +775,22 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             mask.append(
                 ops.ge(
                     idx_dim,
-                    ops.index_expr(start, torch.int32),
+                    ops.index_expr(sympy.expand(start), torch.int32),
                 )
             )
         if end != dim_size:
             mask.append(
                 ops.lt(
                     idx_dim,
-                    ops.index_expr(end, torch.int32),
+                    ops.index_expr(sympy.expand(end), torch.int32),
                 )
             )
         if step != 1:
             mask.append(
                 ops.eq(
-                    ops.index_expr(ir.ModularIndexing(idx[dim] - start, 1, step), torch.int32),
+                    ops.index_expr(
+                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int32
+                    ),
                     ops.constant(0, torch.int32),
                 )
             )

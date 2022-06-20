@@ -6,8 +6,6 @@ import torchdynamo
 import torchdynamo.config
 import torchdynamo.testing
 
-torchdynamo.config.debug = False
-
 
 class RecompileUxTests(torchdynamo.testing.TestCase):
     # TODO(whc) dynamo actualy recompiles one more time than the cache limit
@@ -20,6 +18,9 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             unittest.mock.patch.object(
                 torchdynamo.config, "cache_size_limit", cls.cache_limit
             )
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(torchdynamo.config, "debug", False)
         )
 
     def test_loop_torture(self):

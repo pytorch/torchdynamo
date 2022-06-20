@@ -1758,8 +1758,7 @@ class ExternKernelAlloc(ExternKernel):
 
 class IndexPutFallback(ExternKernel):
     # TODO(jansel): delete this when this is fixed:
-    # https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
-
+    # https://github.com/openai/triton/issues/558
     kernel = "aten.index_put_"
 
     def codegen(self, wrapper):
@@ -1786,7 +1785,11 @@ class IndexPutFallback(ExternKernel):
         self.name = V.graph.register_buffer(self)
 
 
-class BernoulliFallback(ExternKernel):
+class InplaceBernoulliFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
     kernel = "aten.bernoulli_"
 
     def codegen(self, wrapper):

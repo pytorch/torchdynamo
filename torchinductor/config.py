@@ -17,7 +17,7 @@ static_weight_shapes = True
 approximations = False
 
 # put correctness assertions in generated code
-size_asserts = False
+size_asserts = True
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -53,6 +53,7 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
+    # limit tiling dimensions
     # Disable tiling until we figure out how tiling and fusion work together
     max_tiles = 1
 

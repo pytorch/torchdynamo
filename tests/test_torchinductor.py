@@ -630,8 +630,7 @@ class CommonTemplate:
 
     def test_softmax(self):
         def fn(a, b):
-            # return (torch.softmax(a + b, -1), torch.softmax(a, 0), torch.softmax(b, 1))
-            return torch.softmax(a + b, -1)
+            return (torch.softmax(a + b, -1), torch.softmax(a, 0), torch.softmax(b, 1))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
@@ -1863,7 +1862,7 @@ class CommonTemplate:
                 torch.all(torch.logical_not(x.isinf())),
             )
 
-        self.common(fn, [torch.randn(64)])
+        self.common(fn, [-torch.rand(64)])
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
@@ -1933,7 +1932,7 @@ class CommonTemplate:
                 torch.randint(0, 100, size=[600], dtype=torch.int64),
                 torch.randn([600, 256, 7, 7]),
             ],
-            # This is an issue here: https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
+            # workaround for https://github.com/openai/triton/issues/558
             check_lowp=False,
         )
 
@@ -1982,7 +1981,10 @@ class CommonTemplate:
 
     def test_slice_scatter(self):
         def fn(x, a):
-            return (aten.slice_scatter(x, a, 2, 10, -10), aten.slice_scatter(x, a[:,:,:40], 2, 10, -10, 2),)
+            return (
+                aten.slice_scatter(x, a, 2, 10, -10),
+                aten.slice_scatter(x, a[:, :, :40], 2, 10, -10, 2),
+            )
 
         self.common(
             fn,
