@@ -1,5 +1,6 @@
 import copy
 import itertools
+import numbers
 import operator
 from contextlib import contextmanager
 from typing import Dict
@@ -166,6 +167,14 @@ class TensorVariable(VariableTracker):
         ):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
+        elif (
+            isinstance(example_value, numbers.Number)
+            and proxy.node.target == "item"
+            and config.capture_scalar_outputs
+        ):
+            return UnspecializedPrimitiveVariable.create(
+                tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
+            )
         else:
             assert (
                 False
@@ -347,10 +356,21 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("item", "tolist", "numpy", "backward"):
+        elif name in ("tolist", "numpy", "backward"):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
+        elif name == "item":
+            if config.capture_scalar_outputs:
+                return self.__class__.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_method", "item", (self.as_proxy(),), {}
+                    ),
+                    **options,
+                )
+            else:
+                unimplemented(f"Tensor.{name}")
         elif name == "__len__":
             if self.size:
                 assert not config.dynamic_shapes

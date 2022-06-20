@@ -9,6 +9,7 @@ from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -877,7 +878,24 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
 
-    def test_maml(self):
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_maml_item_capture(self):
+        a = torch.randn(5, 1, 28, 28)
+        b = torch.zeros(5, dtype=torch.int64)
+        c = torch.randn(75, 1, 28, 28)
+        d = torch.zeros(75, dtype=torch.int64)
+        model = PartialMaml()
+        correct = model(a, b, c, d)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            for _ in range(10):
+                self.assertTrue(same(model(a, b, c, d), correct))
+
+        self.assertEqual(cnt.frame_count, ifdyn(3, 2))
+        self.assertEqual(cnt.op_count, ifdyn(36, 29))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
+    def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
         c = torch.randn(75, 1, 28, 28)

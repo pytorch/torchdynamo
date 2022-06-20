@@ -1982,7 +1982,7 @@ class CommonTemplate:
 
     def test_slice_scatter(self):
         def fn(x, a):
-            return (aten.slice_scatter(x, a, 2, 10, -10),)
+            return (aten.slice_scatter(x, a, 2, 10, -10), aten.slice_scatter(x, a[:,:,:40], 2, 10, -10, 2),)
 
         self.common(
             fn,

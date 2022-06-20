@@ -22,7 +22,6 @@ from .common import Kernel
 from .common import OpOverrides
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 
 class TritonPrinter(ExprPrinter):

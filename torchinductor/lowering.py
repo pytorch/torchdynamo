@@ -604,7 +604,6 @@ make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_dropout_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
-make_fallback(aten.slice_scatter)
 make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
@@ -736,6 +735,69 @@ def select_scatter(x, src, dim: int, index: int):
                 ops.constant(index, torch.int32),
             ),
             src_loader(idx),
+            x_loader(idx),
+        )
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=list(x.get_size()),
+    )
+
+
+@register_lowering(aten.slice_scatter)
+def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
+    x_loader = x.make_loader()
+    dim = _validate_dim(x, dim, 0)
+    dim_size = x.get_size()[dim]
+    if start is not None and start < 0:
+        start = start + dim_size
+    if end is not None and end < 0:
+        end = end + dim_size
+    if start is None:
+        start = 0
+    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+        end = dim_size
+
+    src_size = list(x.get_size())
+    src_size[dim] = ir.IndexingDiv(sympy.expand(end - start), sympy.expand(step))
+    src = expand(src, src_size)
+    src_loader = src.make_loader()
+
+    def inner_fn(idx):
+        idx_dim = ops.index_expr(idx[dim], torch.int32)
+        src_idx = list(idx)
+        src_idx[dim] = ir.IndexingDiv(idx[dim] - start, step)
+
+        mask = []
+        if start != 0:
+            mask.append(
+                ops.ge(
+                    idx_dim,
+                    ops.index_expr(start, torch.int32),
+                )
+            )
+        if end != dim_size:
+            mask.append(
+                ops.lt(
+                    idx_dim,
+                    ops.index_expr(end, torch.int32),
+                )
+            )
+        if step != 1:
+            mask.append(
+                ops.eq(
+                    ops.index_expr(ir.ModularIndexing(idx[dim] - start, 1, step), torch.int32),
+                    ops.constant(0, torch.int32),
+                )
+            )
+        assert mask
+        mask = functools.reduce(ops.and_, mask)
+        src_val = ops.masked(mask, lambda: src_loader(src_idx), 0.0)
+        return ops.where(
+            mask,
+            src_val,
             x_loader(idx),
         )
 

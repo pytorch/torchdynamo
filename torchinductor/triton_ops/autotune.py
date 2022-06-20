@@ -7,7 +7,7 @@ from triton import heuristics
 from triton import next_power_of_2
 
 from torchinductor import config
-from torchinductor.triton_ops.utils import conditional_product
+from torchinductor.utils import conditional_product
 
 log = logging.getLogger(__name__)
 
