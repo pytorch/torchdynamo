@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import dataclasses
 import functools
 import itertools
@@ -2165,70 +2166,78 @@ class Convolution(ExternKernelAlloc):
         # x, w, bias
         in_args = [x.codegen_reference() for x in self.inputs]
         # stride, padding, dilation, transposed, output_padding, groups
-        const_args = (map(repr, self.constant_args))
+        const_args = self.constant_args
+        if len(in_args) < 3:
+            # otherwise, bias=None is the first constant_args
+            const_args = const_args[1:]
         # stride of inputs and outputs
-        stride_x = f"{in_args[0]}.stride"
-        stride_w = f"{in_args[1]}.stride"
-        stride_y = f"{self.get_name()}.stride"        
+        stride_x = f"{in_args[0]}.stride()"
+        stride_w = f"{in_args[1]}.stride()"
+        stride_y = f"{self.get_name()}.stride()"        
 
-        map_dict = {
-            "stride_xn": stride_x+"[0]",
-            "stride_xc": stride_x+"[1]",
-            "stride_xh": stride_x+"[2]",
-            "stride_ww": stride_w+"[3]",
-            "stride_wn": stride_w+"[0]",
-            "stride_wc": stride_w+"[1]",
-            "stride_wh": stride_w+"[2]",
-            "stride_ww": stride_w+"[3]",
-            "stride_yn": stride_y+"[0]",
-            "stride_yc": stride_y+"[1]",
-            "stride_yh": stride_y+"[2]",
-            "stride_yw": stride_x+"[3]",
-            "stride_biasn": f"{in_args[2]}.stride[0]" if len(in_args) >= 3 else None,
-            "BATCH": f"{in_args[0]}.shape[0]",
-            "IN_C": f"{in_args[0]}.shape[1]",
-            "IN_H": f"{in_args[0]}.shape[2]",
-            "IN_W": f"{in_args[0]}.shape[3]",
-            "KERNEL_N": f"{in_args[1]}.shape[0]",
-            "KERNEL_H": f"{in_args[1]}.shape[2]",
-            "KERNEL_W": f"{in_args[1]}.shape[3]",
-            "OUT_H": f"{self.get_name()}.shape[2]",
-            "OUT_W": f"{self.get_name()}.shape[3]",
-            "stride_h": f"{const_args}[0][0]",
-            "stride_w": f"{const_args}[0][1]",
-            "padding_h": f"{const_args}[1][0]",
-            "padding_w": f"{const_args}[1][1]",
-            "dilation_h": f"{const_args}[2][0]",
-            "dilation_w": f"{const_args}[2][1]",
-            # "transposed": f"{const_args}[3]",
-            "output_padding_h": f"{const_args}[4][0]",
-            "output_padding_w": f"{const_args}[4][1]",
-            "groups": f"{const_args}[5]",
-        }
+        args_dict = OrderedDict([
+            ("x", f"{in_args[0]}"),
+            ("w", f"{in_args[1]}"),
+            ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
+            ("y", f"{self.get_name()}"),
+            ("stride_xn", stride_x+"[0]"),
+            ("stride_xc", stride_x+"[1]"),
+            ("stride_xh", stride_x+"[2]"),
+            ("stride_xw", stride_x+"[3]"),
+            ("stride_wn", stride_w+"[0]"),
+            ("stride_wc", stride_w+"[1]"),
+            ("stride_wh", stride_w+"[2]"),
+            ("stride_ww", stride_w+"[3]"),
+            ("stride_yn", stride_y+"[0]"),
+            ("stride_yc", stride_y+"[1]"),
+            ("stride_yh", stride_y+"[2]"),
+            ("stride_yw", stride_y+"[3]"),
+            ("stride_biasn", f"{in_args[2]}.stride()[0]" if len(in_args) >= 3 else "None"),
+            ("delta_x_ptr", "None"),
+            ("BATCH", f"{in_args[0]}.shape[0]"),
+            ("IN_C", f"{in_args[0]}.shape[1]"),
+            ("IN_H", f"{in_args[0]}.shape[2]"),
+            ("IN_W", f"{in_args[0]}.shape[3]"),
+            ("KERNEL_N", f"{in_args[1]}.shape[0]"),
+            ("KERNEL_H", f"{in_args[1]}.shape[2]"),
+            ("KERNEL_W", f"{in_args[1]}.shape[3]"),
+            ("OUT_H", f"{self.get_name()}.shape[2]"),
+            ("OUT_W", f"{self.get_name()}.shape[3]"),
+            ("stride_h", f"{const_args[0][0]}"),
+            ("stride_w", f"{const_args[0][1]}"),
+            ("padding_h", f"{const_args[1][0]}"),
+            ("padding_w", f"{const_args[1][1]}"),
+            ("dilation_h", f"{const_args[2][0]}"),
+            ("dilation_w", f"{const_args[2][1]}"),
+            #( "transposed", f"{const_args[3]}"),
+            ("output_padding_h", f"{const_args[4][0]}"),
+            ("output_padding_w", f"{const_args[4][1]}"),
+            ("groups", f"{const_args[5]}"),
+        ])
 
         # accumulator type
         ACC_TYPE = (
             "tl.float32"
-            if in_args[0].get_dtype() in [torch.float16, torch.bfloat16, torch.float32]
+            if self.inputs[0].get_dtype() in [torch.float16, torch.bfloat16, torch.float32]
             else "tl.int32"
         )
         CONV1X1_NHWC = (
             "True"
-            if in_args[0].get_stride()[1] == 1 and in_args[1].shape[2] == 1 and in_args[1].shape[3] == 1
+            if self.inputs[0].get_stride()[1] == 1 and self.inputs[1].shape[2] == 1 and self.inputs[1].shape[3] == 1
             else "False"
         )
         # dict for tl.constexpr
-        const_dict = {
-            "ACC_TYPE": ACC_TYPE,
-            "CONV1X1_NHWC": CONV1X1_NHWC,
-        }
+        const_dict = OrderedDict([
+            ("ACC_TYPE", ACC_TYPE),
+            ("CONV1X1_NHWC", CONV1X1_NHWC),
+        ])
 
         # dict for non-kernel args (e.g. delta_x_ptr)
-        other_dict = {
-            "device": in_args[0].get_device,
-        }
+        other_dict = OrderedDict([
+            ("device", f'\"{self.inputs[0].get_device()}\"'),
+        ])
 
-        return map_dict, const_dict, other_dict
+        return args_dict, const_dict, other_dict
 
 @dataclasses.dataclass
 class MutableBox(IRNode):

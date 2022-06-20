@@ -59,7 +59,7 @@ from torchinductor.triton_ops.conv_perf_model import estimate_conv_time
     },
 )
 @triton.jit
-def _kernel(
+def {{kernel_name}}(
     x,
     w,
     bias,
@@ -111,8 +111,6 @@ def _kernel(
     BLOCK_N: tl.constexpr,
     # reduction tiling parameter for matmul
     BLOCK_K: tl.constexpr,
-    # Super-blocking for better L2 peformance
-    GROUP_H: tl.constexpr,
 ):
     """
     each program instance computes a [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] block of y

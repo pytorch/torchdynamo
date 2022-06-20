@@ -23,13 +23,14 @@ class TritonTemplateKernel(TritonKernel):
         self.template = env.get_template(template_name+".j2")
         self.pointwise_compute = None
 
-    def codegen_body(self, extra_argdefs):
+    def codegen_body(self, name, extra_argdefs):
         """
         get render_variables that to be put into the template
         to generate the final code
         """
         # TODO: codegen_body
         render_dict = {}
+        render_dict["kernel_name"] = name
         render_dict["extra_args"] = extra_argdefs
         render_dict["pointwise_computation"] = self.pointwise_compute
         self.body = self.template.render(render_dict) + "\n"
@@ -38,25 +39,11 @@ class TritonTemplateKernel(TritonKernel):
 
         code = IndentedBuffer()
 
-        argdefs, _ = self.args.python_argdefs()
+        # self.args is the args for pointwise or reduction that will be fused
+        # with the current TritonTemplateKernel
+        extra_argdefs, _ = self.args.python_argdefs()
 
-        # if config.dynamic_shapes:
-        #     maybe_const = ""
-        # else:
-        #     maybe_const = ": tl.constexpr"
-
-        # for tree in self.range_trees:
-        #     if isinstance(tree.kernel, TritonKernel) \
-        #         and (tree.prefix != "r" or self.inside_reduction):
-        #         # skip current TritonTemplateKernel, no extra argdefs is needed
-        #         argdefs.append(f"{tree.prefix}numel{maybe_const}")
-
-        # for tree in self.range_trees:
-        #     if isinstance(tree.kernel, TritonKernel) \
-        #         and (tree.prefix != "r" or self.inside_reduction):
-        #         argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
-
-        self.codegen_body(argdefs)
+        self.codegen_body(name, extra_argdefs)
         code.splice(self.body)
 
         if name is not None:
@@ -69,52 +56,75 @@ class TritonTemplateKernel(TritonKernel):
 
         return wrapper.getvalue()
 
-    def map_args(self, wrapper, kernel_name):
+    def map_args(self):
         """
         map the constant args or 
         kernel[grid](..., IN_C, IN_H, IN_W, strides,...)
         """
-        map_dict, const_dict, other_dict = self.node.map_args()
-        code = IndentedBuffer()
-        # TODO: self.args = map_dict, const_dict
-        return
+        self.args_dict, self.const_dict, self.other_dict = self.node.map_args()
 
     def precompute(self, wrapper, kernel_name):
         """
         some triton kernels needs host precompute tensor
         for example, triton_conv needs precompte delta_x_ptr
         """
-        if  isinstance(self.node, ir.Convolution):
-            wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
-            wrapper.writeline(
-                f"{kernel_name}_delta_x = _conv._delta_x_ptr(IN_C, KERNEL_H, KERNEL_W, dilation[0], dilation[1], stride_w[wc], stride_w[wh], stride_w[ww], stride_x[xc], stride_x[xh], stride_x[xw], device,)"
-            )
+        if isinstance(self.node, ir.Convolution):
+            if self.const_dict["CONV1X1_NHWC"] == "False":
+                self.args_dict["delta_x_ptr"] = "delta_x"
+                wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
+                IN_C = self.args_dict["IN_C"]
+                KERNEL_H = self.args_dict["KERNEL_H"]
+                KERNEL_W = self.args_dict["KERNEL_W"]
+                dilation_h = self.args_dict["dilation_h"]
+                dilation_w = self.args_dict["dilation_w"]
+                stride_wc = self.args_dict["stride_wc"]
+                stride_wh = self.args_dict["stride_wh"]
+                stride_ww = self.args_dict["stride_ww"]
+                stride_xc = self.args_dict["stride_xc"]
+                stride_xh = self.args_dict["stride_xh"]
+                stride_xw = self.args_dict["stride_xw"]
+                device = self.other_dict["device"]
+                wrapper.writeline(
+                    "delta_x = _conv._delta_x_ptr(" \
+                        f"{IN_C}, {KERNEL_H}, {KERNEL_W}, " \
+                        f"{dilation_h}, {dilation_w}, "\
+                        f"{stride_wc}, {stride_wh}, {stride_ww}, "\
+                        f"{stride_xc}, {stride_xh}, {stride_xw}, {device})"
+                )
+            # else, delta_x_ptr is None
         return
     
     def gen_grid(self):
         code = IndentedBuffer()
-        with code.indent():
-            code.splice(
-                f"""
-                def grid(META):
-                    return (
-                        triton.cdiv(BATCH * OUT_H * OUT_W, META["BLOCK_M"]),
-                        triton.cdiv(KERNEL_N, META["BLOCK_N"]),
-                    )
-                """
-            )
+        if isinstance(self.node, ir.Convolution):
+            BATCH = self.args_dict["BATCH"]
+            OUT_H = self.args_dict["OUT_H"]
+            OUT_W = self.args_dict["OUT_W"]
+            KERNEL_N = self.args_dict["KERNEL_N"]
+            with code.indent():
+                code.splice(
+                    f"""
+                    def grid(META):
+                        return (
+                            triton.cdiv({BATCH} * {OUT_H} * {OUT_W}, META["BLOCK_M"]),
+                            triton.cdiv({KERNEL_N}, META["BLOCK_N"]),
+                        )
+                    """
+                )
         return code.getvalue()
 
-    def call_kernel(self, code, name: str):
+    def call_kernel(self, wrapper, name: str):
         # gen code to call kernel
         # e.g. 
         # def grid(META):
         #     return (...)
         # kernel1[grid](arg0, arg1, ...)
-        _, call_args = self.args.python_argdefs()
-        call_args = ", ".join(call_args)
-        code.writeline(self.gen_grid())
-        code.writeline(f"{name}[grid]({call_args})")
+        extra_arg_defs, extra_call_args = self.args.python_argdefs()
+        extra_args = ", ".join(extra_call_args)
+        self_args = ", ".join({**self.args_dict, **self.const_dict}.values())
+        args = self_args + (", " + extra_args if extra_args and len(extra_args) > 0 else "")
+        wrapper.writeline(self.gen_grid())
+        wrapper.writeline(f"{name}[grid]({args})")
 
 def template_codegen(scheduler, node):
     """
@@ -139,7 +149,7 @@ def template_codegen(scheduler, node):
     # code gen kernel
     wrapper.header.splice(kernel.codegen_kernel(kernel_name))
     # map const args/ shape/ strides to kernel args
-    kernel.map_args(wrapper, kernel_name)
+    kernel.map_args()
     # gen precompute tensor (like delta_x_ptr) if needed
     kernel.precompute(wrapper, kernel_name)
     # code gen call to kernel
