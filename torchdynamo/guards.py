@@ -68,16 +68,10 @@ class NNModuleChangeTrackerUtil:
             return
 
         for code in module_code_map[module]:
-<<<<<<< HEAD
-            print("Invalidating: ", code, "for", id(module))
-=======
->>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
             code.valid = False
 
         del module_code_map[module]
 
-<<<<<<< HEAD
-=======
         if module not in module_to_guard_ids:
             # Module is out of scope / deleted (weak ref key ref dict)
             return
@@ -87,25 +81,10 @@ class NNModuleChangeTrackerUtil:
 
         del module_to_guard_ids[module]
 
->>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
     @staticmethod
     def setup(module, guarded_code):
         module_id = id(module)
         modulecls = module.__class__
-<<<<<<< HEAD
-        print(list(module.__dict__.keys()))
-        for parameter in module.parameters():
-            print("Sub parameter:", id(parameter))
-            setattr(parameter, '__dynamo_on_module__', id(module))
-
-        for buffer in module.parameters():
-            print("Sub buffer:", id(buffer))
-            setattr(parameter, '__dynamo_on_module__', id(module))
-
-        # for buffer in module.parameters():
-        #     print("Sub buffer:", id(buffer))
-        #     setattr(parameter, '__dynamo_on_module__', id(module))
-=======
         if module_id not in module_to_guard_ids:
             module_to_guard_ids[module] = set()
 
@@ -123,7 +102,6 @@ class NNModuleChangeTrackerUtil:
             parameter_id = id(parameter)
             module_associated_guarded_ids.add(parameter_id)
             module_to_guard_ids[module].add(parameter_id)
->>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
 
         if getattr(modulecls, "__dynamo_module_patch", True):
             modulecls.__dynamo_module_patch = False
@@ -392,11 +370,7 @@ class GuardBuilder:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-<<<<<<< HEAD
-        self.ID_MATCH(guard)            
-=======
         self.ID_MATCH(guard)
->>>>>>> 0c775f20fe5ef078ef5d0af459b527e1a84f0d85
 
         val = self.get(guard.name)
         if hasattr(val, "training"):
