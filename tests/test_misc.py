@@ -22,7 +22,6 @@ from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
-from unittest.mock import patch
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
