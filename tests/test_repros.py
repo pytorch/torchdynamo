@@ -892,7 +892,7 @@ class ReproTests(torchdynamo.testing.TestCase):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
         self.assertEqual(cnt.frame_count, ifdyn(3, 2))
-        self.assertEqual(cnt.op_count, ifdyn(36, 29))
+        self.assertEqual(cnt.op_count, ifdyn(36, 24))
 
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
@@ -907,8 +907,8 @@ class ReproTests(torchdynamo.testing.TestCase):
             for _ in range(10):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(5, 4))
-        self.assertEqual(cnt.op_count, ifdyn(36, 29))
+        self.assertEqual(cnt.frame_count, ifdyn(5, 2))
+        self.assertEqual(cnt.op_count, ifdyn(36, 24))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
