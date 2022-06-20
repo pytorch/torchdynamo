@@ -421,7 +421,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize((cnts)):
             self.assertEqual(fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 3)
 
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):
