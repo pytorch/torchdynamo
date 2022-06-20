@@ -126,7 +126,7 @@ class BaseSchedulerNode:
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ExternKernel, group_fn):
         super().__init__(scheduler, node)
-        if type(node) in TemplateKernels:
+        if type(node) in TemplateKernels and node.get_device == "cuda":
             (self._sizes, self._stride) = node.get_group_stride()
             self.group = (node.get_device(), group_fn(self._sizes))
             self.set_read_writes(node.get_read_writes())
@@ -391,7 +391,9 @@ class Scheduler:
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel):
-                group_fn = self.get_backend(node.get_device()).group_fn
+                group_fn = None
+                if type(node) in TemplateKernels:
+                    group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
             else:
                 assert False, node
@@ -616,7 +618,7 @@ class Scheduler:
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
         node = scheduler_node.node
         self.flush()
-        if type(node) in TemplateKernels:
+        if type(node) in TemplateKernels and node.get_device() == "cuda":
             template_codegen(self, scheduler_node)
         else:
             node.codegen(V.graph.wrapper_code)
