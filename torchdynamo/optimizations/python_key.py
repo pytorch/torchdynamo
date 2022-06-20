@@ -132,7 +132,13 @@ def python_key_normalize(
             out = PatchingInterpreter(gm).run(*args[params_len:])
 
         assert isinstance(out, (tuple, list)), "graph must output tuple()"
-        return tuple(x.proxy for x in out)
+
+        def unpack(x):
+            if hasattr(x, "proxy"):
+                return x.proxy
+            return x
+
+        return tuple(unpack(x) for x in out)
 
     class PythonKeyTracer(Tracer):
         def __init__(self):
