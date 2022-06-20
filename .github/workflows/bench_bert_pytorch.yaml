@@ -36,6 +36,7 @@ jobs:
       run: |
         echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
         echo /usr/local/bin >> $GITHUB_PATH
+        sudo ln -s /usr/local/bin/pip /bin/pip
     - name: nvcc check
       run: |
         nvcc --version
