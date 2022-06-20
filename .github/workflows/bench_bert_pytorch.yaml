@@ -63,7 +63,7 @@ jobs:
     - name: Setup
       shell: bash
       run: sudo python3 setup.py develop
-    - run: sudo ./torchbench.py -k BERT_pytorch
+    - run: sudo python3 torchbench.py -k BERT_pytorch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
