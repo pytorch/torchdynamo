@@ -14,7 +14,7 @@ import torch
 from . import config
 from . import dependencies
 from . import ir
-from .codegen.template import template_codegen
+from .codegen.triton_template import template_codegen
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
@@ -24,6 +24,10 @@ TemplateKernels = [ir.Convolution]
 
 def cmp(a, b):
     return int(a > b) - int(a < b)
+
+
+def should_use_template(node: ir.ExternKernel):
+    return type(node) in TemplateKernels and ir.is_triton(node.get_device())
 
 
 class OutputNode:
@@ -126,7 +130,7 @@ class BaseSchedulerNode:
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ExternKernel, group_fn):
         super().__init__(scheduler, node)
-        if type(node) in TemplateKernels and node.get_device == "cuda":
+        if should_use_template(node):
             (self._sizes, self._stride) = node.get_group_stride()
             self.group = (node.get_device(), group_fn(self._sizes))
             self.set_read_writes(node.get_read_writes())
@@ -618,7 +622,7 @@ class Scheduler:
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
         node = scheduler_node.node
         self.flush()
-        if type(node) in TemplateKernels and node.get_device() == "cuda":
+        if should_use_template(node):
             template_codegen(self, scheduler_node)
         else:
             node.codegen(V.graph.wrapper_code)

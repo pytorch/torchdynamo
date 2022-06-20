@@ -1,3 +1,5 @@
+import os
+
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
 
@@ -15,7 +17,7 @@ class TritonTemplateKernel(TritonKernel):
         self.node = node
         template_name = template_dict[type(node)]
         env = Environment(
-            loader=FileSystemLoader("torchinductor/codegen"),
+            loader=FileSystemLoader(os.path.dirname(__file__)),
             trim_blocks=True,
             lstrip_blocks=True,
         )
