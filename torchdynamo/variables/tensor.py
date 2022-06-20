@@ -1,5 +1,6 @@
 import copy
 import itertools
+import numbers
 import operator
 from contextlib import contextmanager
 from typing import Dict
@@ -8,6 +9,8 @@ from typing import List
 import torch.fx
 import torch.random
 from torch.fx.immutable_collections import immutable_list
+
+from torchdynamo.guards import GuardBuilder
 
 from .. import config
 from .. import variables
@@ -164,6 +167,14 @@ class TensorVariable(VariableTracker):
         ):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
+        elif (
+            isinstance(example_value, numbers.Number)
+            and proxy.node.target == "item"
+            and config.capture_scalar_outputs
+        ):
+            return UnspecializedPrimitiveVariable.create(
+                tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
+            )
         else:
             assert (
                 False
@@ -217,11 +228,17 @@ class TensorVariable(VariableTracker):
             torch.BoolTensor: (torch.bool,),
         }
 
-        if tensor_type not in tensortype_to_dtype:
-            return self.python_type() is tensor_type
+        def check_type(ty):
+            if ty not in tensortype_to_dtype:
+                return self.python_type() is ty
 
-        dtypes = tensortype_to_dtype[tensor_type]
-        return self.dtype in dtypes
+            dtypes = tensortype_to_dtype[ty]
+            return self.dtype in dtypes
+
+        if type(tensor_type) is tuple:
+            return any([check_type(ty) for ty in tensor_type])
+        else:
+            return check_type(tensor_type)
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -268,6 +285,12 @@ class TensorVariable(VariableTracker):
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+
+        # Add a guard for type matching, these guards are checked before tensor guards
+        # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
+        # <tensor> is later changed to another type
+        if result is not None and self.source is not None:
+            result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
 
         if result is None:
             raise NotImplementedError()
@@ -333,10 +356,21 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("item", "tolist", "numpy", "backward"):
+        elif name in ("tolist", "numpy", "backward"):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
+        elif name == "item":
+            if config.capture_scalar_outputs:
+                return self.__class__.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_method", "item", (self.as_proxy(),), {}
+                    ),
+                    **options,
+                )
+            else:
+                unimplemented(f"Tensor.{name}")
         elif name == "__len__":
             if self.size:
                 assert not config.dynamic_shapes

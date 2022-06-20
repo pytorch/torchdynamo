@@ -9,9 +9,11 @@ import math
 import sys
 import typing
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
+from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
 from torchdynamo import bytecode_transformation
@@ -407,7 +409,22 @@ class MiscTests(torchdynamo.testing.TestCase):
             self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=8
         )
 
-    def test_tensor_item(self):
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_item_capture(self):
+        def fn(a, b):
+            return (a + b).sum().item()
+
+        v1 = torch.randn((10, 10))
+        v2 = torch.randn((10, 10))
+        correct = fn(v1, v2)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize((cnts)):
+            self.assertEqual(fn(v1, v2), correct)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
+    def test_tensor_item_no_capture(self):
         def fn(a, b):
             return (a + b).sum().item()
 
@@ -1633,3 +1650,91 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(torch.int, torch.IntTensor)
             fn(torch.int16, torch.ShortTensor)
             fn(torch.bool, torch.BoolTensor)
+
+    def test_nan(self):
+        def f(x, n):
+            return x * 2 + n
+
+        x = torch.randn(4)
+        n = float("nan")
+
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            f(x, n)
+            f(x, n)
+        self.assertEqual(cnts.frame_count, 1)
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_item(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = torch.max(x)
+                return z.int().item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([[10.6763, 11.7445, -2.2369]])
+            model = MyMod()
+            y = model(x)
+
+        self.assertEqual(y, 11)
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_item_changes(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = torch.max(x)
+                return z.int().item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([[10.6763, 11.7445, -2.2369]])
+            model = MyMod()
+            y = model(x)
+            z = model(torch.tensor([[y - 5, y + 10, y + 50]]))
+
+        self.assertEqual(y, 11)
+        self.assertEqual(z, 61)
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_item_changes_new_shape(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = torch.max(x)
+                return z.int().item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([[10.6763, 11.7445, -2.2369]])
+            model = MyMod()
+            y = model(x)
+            z = model(torch.tensor([[y - 5, y + 50], [y + 5, y - 50]]))
+
+        self.assertEqual(y, 11)
+        self.assertEqual(z, 61)
+
+
+class TestTracer(JitTestCase):
+    def test_jit_save(self):
+        def fn():
+            class Foo(torch.nn.Module):
+                def __init__(self):
+                    super(Foo, self).__init__()
+                    self.a = 3
+
+                @torch.jit.export
+                def __getstate__(self):
+                    return (3, self.training)
+
+                @torch.jit.export
+                def __setstate__(self, state):
+                    self.a = state[0]
+                    self.training = state[1]
+
+                def forward(self, x):
+                    return x + self.a
+
+            f = Foo()
+
+            return torch.jit.trace(f, (torch.rand(3, 4),))
+
+        fn()
+        with torchdynamo.optimize("eager"):
+            fn()

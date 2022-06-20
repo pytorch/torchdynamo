@@ -11,6 +11,7 @@ import torch
 
 from .. import codecache
 from .. import config
+from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
@@ -19,7 +20,6 @@ from .common import IndentedBuffer
 from .common import Kernel
 from .common import KernelArgs
 from .common import OpOverrides
-from .common import product
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -257,7 +257,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
-        return V.graph.sizevars.size_hint(product(self.call_ranges))
+        return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads

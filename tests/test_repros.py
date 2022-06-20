@@ -9,6 +9,7 @@ from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -727,6 +728,18 @@ class TransformerEncoderLayer(nn.Module):
         return self.ff_block(x)
 
 
+class TestModule(torch.nn.Module):
+    def inner_fn(self, left, right):
+        return tuple(left) == tuple(right)
+
+    def fn(self, tensor):
+        if type(tensor) is int:
+            return False
+
+        torch.add(tensor, tensor)
+        return self.inner_fn(tensor.shape, (1, 2, 3))
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -865,7 +878,24 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
 
-    def test_maml(self):
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_maml_item_capture(self):
+        a = torch.randn(5, 1, 28, 28)
+        b = torch.zeros(5, dtype=torch.int64)
+        c = torch.randn(75, 1, 28, 28)
+        d = torch.zeros(75, dtype=torch.int64)
+        model = PartialMaml()
+        correct = model(a, b, c, d)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            for _ in range(10):
+                self.assertTrue(same(model(a, b, c, d), correct))
+
+        self.assertEqual(cnt.frame_count, ifdyn(3, 2))
+        self.assertEqual(cnt.op_count, ifdyn(36, 29))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
+    def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
         c = torch.randn(75, 1, 28, 28)
@@ -1275,3 +1305,48 @@ class ReproTests(torchdynamo.testing.TestCase):
             return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
+
+    def test_guard_ordering_shape_fail(self):
+        # If a function which takes a tensor has an inner function which
+        # is compiled and generates a guard on its shape,
+        # they are evaluated in the wrong order. So if on a subsequent call
+        # an int is passed instead of a tensor, guard evaluation will crash
+        # with a "no attribute: shape" error
+        m = TestModule()
+        with torchdynamo.optimize("eager"):
+            m.fn(torch.ones((5, 5)))
+            m.fn(-3)
+
+    def test_tensor_isinstance_tuple(self):
+        @torchdynamo.optimize("eager")
+        def fn():
+            t = torch.ones(5, 5)
+            if not isinstance(t, (int, torch.Tensor)):
+                msg = str.format(
+                    "{0} is not an instance of {1}",
+                    type(t),
+                    (int, torch.Tensor),
+                )
+                raise ValueError(msg)
+            return True
+
+        fn()
+
+    def test_isinstance_dtype(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            isinstance(torch.bfloat16, torch.dtype)
+            return x
+
+        fn(torch.randn(3))
+
+    def test_dict_list_values(self):
+        def inner_fn(args):
+            return [x[1].shape for x in args]
+
+        @torchdynamo.optimize("eager")
+        def fn(tensors):
+            return inner_fn(zip(itertools.count(), tensors["args"]))
+
+        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
+        fn({"args": [torch.ones(5, 5)]})

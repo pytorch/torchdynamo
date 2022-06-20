@@ -1,8 +1,6 @@
 import collections
 import contextlib
-import functools
 import itertools
-import operator
 import re
 import textwrap
 import typing
@@ -12,12 +10,9 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
-
-
-def product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
 
 
 def _simplify_loops(index_vars, sizes, index_formulas):
@@ -185,6 +180,10 @@ class IndentedBuffer:
         self._indent = initial_indent
         self.getvalue = self.contents.getvalue
 
+    def clear(self):
+        self.contents.seek(0)
+        self.contents.truncate()
+
     def __bool__(self):
         return len(self.getvalue()) > 0
 
@@ -245,10 +244,6 @@ class BracesBuffer(IndentedBuffer):
 class InplacedBuffer(typing.NamedTuple):
     inner_name: str
     other_names: typing.List[str]
-
-
-def unique(it):
-    return {id(x): x for x in it}.values()
 
 
 class KernelArgs:
@@ -376,6 +371,12 @@ class CSE:
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
+
+    def invalidate(self, keep_vars: typing.Set[str]):
+        for name, tmp in list(self.store_cache.items()):
+            if tmp not in keep_vars:
+                del self.store_cache[name]
+        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
         return CSE(
