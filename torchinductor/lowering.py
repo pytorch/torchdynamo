@@ -898,6 +898,46 @@ register_lowering(aten.new_zeros)(new_constant(0))
 register_lowering(aten.new_ones)(new_constant(1))
 
 
+@register_lowering(aten.empty_strided)
+def empty_strided(
+    size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
+):
+    assert isinstance(size, (list, type))
+    assert isinstance(stride, (list, type))
+    assert not pin_memory
+    assert not layout or layout == torch.strided
+    dtype = decode_dtype(dtype) or torch.get_default_dtype()
+    device = device or torch.tensor(0.0).device
+    pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
+    if tuple(ir.FlexibleLayout.contiguous_strides(size)) == tuple(stride):
+        # fast path, no need to realize it
+        return pointwise
+    print(size, stride)
+    pointwise.realize()
+    buffer = pointwise.data.data
+    assert isinstance(buffer, ir.ComputedBuffer)
+    buffer.layout = ir.FixedLayout(
+        device=device,
+        dtype=dtype,
+        size=[sympy.expand(s) for s in size],
+        stride=[sympy.expand(s) for s in stride],
+    )
+    return pointwise
+
+
+@register_lowering(aten.new_empty_strided)
+def new_empty_strided(
+    x, size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
+):
+    if dtype is None:
+        dtype = x.get_dtype()
+    if device is None:
+        device = x.get_device()
+    return empty_strided(
+        size, stride, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 @register_lowering(torch.full)
 def full(size, fill_value, **kwargs):
     return tensor_constructor(fill_value)(size, **kwargs)
@@ -1641,6 +1681,8 @@ register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.__and__, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.__or__, type_promote=False, override_dtype=torch.bool)
 
 
 def register_inplace(aten_op, outplace_op):

@@ -5,7 +5,7 @@ debug = False
 dce = False
 
 # assume there will be no backwards
-forward_only = True
+forward_only = False
 
 # assume input tensors are dynamic
 dynamic_shapes = True
@@ -17,7 +17,7 @@ static_weight_shapes = True
 approximations = False
 
 # put correctness assertions in generated code
-size_asserts = True
+size_asserts = False
 
 # enable loop reordering based on input orders
 pick_loop_orders = True

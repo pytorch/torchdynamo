@@ -152,6 +152,12 @@ def compile_fx_inner(
         raise
 
 
+def no_compile(
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+):
+    return gm.forward
+
 def compile_fx_training(
     model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
 ):
@@ -161,5 +167,6 @@ def compile_fx_training(
         model,
         example_inputs,
         fw_compiler=compile_fx_inner,
+        bw_compiler=no_compile,
         decompositions=decompositions,
     )

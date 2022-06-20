@@ -1980,6 +1980,36 @@ class CommonTemplate:
             ],
         )
 
+    def test_new_empty_strided(self):
+        def fn(a):
+            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
+
+        self.common(fn, [torch.randn(55)])
+
+    def test_slice_scatter(self):
+        """
+        target: aten.slice_scatter
+        args[0]: TensorBox(StorageBox(
+        ConstantBuffer(name='constant0', layout=FixedLayout('cuda', torch.float32, size=[4, 64, 95696], stride=[6124544, 95696, 1]))
+        ))
+        args[1]: TensorBox(StorageBox(
+        MultiOutput(name='buf8', layout=FixedLayout('cuda', torch.float32, size=[4, 64, 92844], stride=[5942016, 92844, 1]), inputs=[FallbackKernel(name='buf7', layout=<torchinductor.ir.MultiOutputLayout object at 0x7f4a7349df40>, inputs=[ConcatKernel(name='buf6', layout=FixedLayout('cuda', torch.float32, size=[s6, 128, s20], stride=[128*s20, s20, 1]), inputs=[ComputedBuffer(name='buf4', layout=AliasedLayout('cuda', torch.float32, size=[s6, 64, s20], stride=[128*s20, s20, 1]), data=Pointwise(
+        'cuda',
+        torch.float32,
+        sigmoid(load(convolution_22, i0*s12*s20 + i1*s20 + i2 + 64*s20, False)) * load(buf1, 5941888*i0 + 92842*i1 + i2, False),
+        ranges=[s6, 64, s20]
+        )), ComputedBuffer(name='buf5', layout=AliasedLayout('cuda', torch.float32, size=[s6, 64, s20], stride=[128*s20, s20, 1]), data=Pointwise(
+        'cuda',
+        torch.float32,
+        constant(1.0, torch.float32) - sigmoid(load(convolution_22, i0*s12*s20 + i1*s20 + i2 + 64*s20, False)) * sigmoid(load(convolution_22, i0*s12*s20 + i1*s20 + i2 + 64*s20, False)) * load(convolution_22, i0*s12*s20 + i1*s20 + i2, False) * load(buf1, 5941888*i0 + 92842*i1 + i2, False),
+        ranges=[s6, 64, s20]
+        ))]), InputBuffer(name='add_6', layout=FixedLayout('cuda', torch.float32, size=[s6, s7, s8], stride=[s7*s8, s8, 1])), InputBuffer(name='primals_22', layout=FixedLayout('cuda', torch.float32, size=[s12, s7, s5], stride=[s5*s7, s5, 1]))], constant_args=(128, 1, 0, 1, False, 0, 1, True, True, True), output_view=None)], constant_args=(), output_view=None)
+        ))
+        args[2]: 2
+        args[3]: 1426
+        args[4]: -1426
+        """
+
 
 if HAS_CPU:
 

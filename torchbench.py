@@ -74,6 +74,7 @@ SKIP_TRAIN = {
     # not designed for training
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
+    "pyhpc_turbulent_kinetic_energy",
     # Unusual training setup
     "opacus_cifar10",
     "maml",
