@@ -40,12 +40,6 @@ log = logging.getLogger(__name__)
 # map from modules to guarded code
 module_code_map = ExactWeakKeyDictionary()  # {nn.Module: Set[GuardedCode]}
 
-# A set of the ids of all objects tracked for invalidation
-module_associated_guarded_ids = set()
-
-# map from module ids to the ids of objects tracked for invalidation
-module_to_guard_ids = ExactWeakKeyDictionary()  # {nn.Module: Set[id]}
-
 CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
@@ -120,43 +114,6 @@ class NNModuleChangeTrackerUtil:
             code.valid = False
 
         del module_code_map[module]
-
-        if module not in module_to_guard_ids:
-            # Module is out of scope / deleted (weak ref key ref dict)
-            return
-
-        for object_id in module_to_guard_ids[module]:
-            if object_id in module_associated_guarded_ids:
-                module_associated_guarded_ids.remove(object_id)
-
-        del module_to_guard_ids[module]
-
-    @staticmethod
-    def setup(module, guarded_code):
-        NNModuleChangeTrackerUtil.register_patches_on_torch_nn_module()
-        module_id = id(module)
-        if module_id not in module_to_guard_ids:
-            module_to_guard_ids[module] = set()
-
-        for buffer in module.buffers():
-            buffer_id = id(buffer)
-            module_associated_guarded_ids.add(buffer_id)
-            module_to_guard_ids[module].add(buffer_id)
-
-        for mod in module.modules():
-            mod_id = id(mod)
-            module_associated_guarded_ids.add(mod_id)
-            module_to_guard_ids[module].add(mod_id)
-
-        for parameter in module.parameters():
-            parameter_id = id(parameter)
-            module_associated_guarded_ids.add(parameter_id)
-            module_to_guard_ids[module].add(parameter_id)
-        
-
-        if module not in module_code_map:
-            module_code_map[module] = set()
-        module_code_map[module].add(guarded_code)
 
 
 class GuardSource(enum.Enum):
@@ -247,6 +204,11 @@ class GuardBuilder:
         self.tensor_check_names = []
         self.tensor_check_examples = []
         self.guarded_code = guarded_code
+        # A set of the ids of all objects tracked for invalidation
+        self.module_associated_guarded_ids = set()
+        # map from module ids to the ids of objects tracked for invalidation
+        self.module_to_guard_ids = ExactWeakKeyDictionary()  # {nn.Module: Set[id]}
+
 
     def get(self, name: str):
         return eval(name, self.scope, CLOSURE_VARS)
@@ -264,7 +226,7 @@ class GuardBuilder:
 
     def TYPE_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in self.module_associated_guarded_ids:
             return
 
         self.code.append(
@@ -273,7 +235,7 @@ class GuardBuilder:
 
     def ID_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids or (
+        if id(val) in self.module_associated_guarded_ids or (
             config.guard_nn_modules and guard.is_nn_module()
         ):
             return
@@ -300,7 +262,7 @@ class GuardBuilder:
 
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids or (
+        if id(val) in self.module_associated_guarded_ids or (
             config.guard_nn_modules and guard.is_nn_module()
         ):
             return
@@ -363,7 +325,7 @@ class GuardBuilder:
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in self.module_associated_guarded_ids:
             return
 
         val = self.get(guard.name)
@@ -377,14 +339,14 @@ class GuardBuilder:
 
         val = self.get(guard.name)
         if hasattr(val, "training"):
-            NNModuleChangeTrackerUtil.setup(val, self.guarded_code)
+            self.register_module_for_invalidation(val, self.guarded_code)
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in self.module_associated_guarded_ids:
             return
 
         if guard.is_local():
@@ -395,7 +357,7 @@ class GuardBuilder:
 
     def PYMODULE_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in self.module_associated_guarded_ids:
             return
 
         return self.FUNCTION_MATCH(guard)
@@ -439,7 +401,7 @@ class GuardBuilder:
 
     def TENSOR_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in module_associated_guarded_ids:
+        if id(val) in self.module_associated_guarded_ids:
             return
 
         if guard.is_nn_module():
@@ -447,6 +409,33 @@ class GuardBuilder:
         else:
             self.tensor_check_names.append(self.arg_ref(guard))
             self.tensor_check_examples.append(self.get(guard.name))
+
+
+    def register_module_for_invalidation(self, module, guarded_code):
+        NNModuleChangeTrackerUtil.register_patches_on_torch_nn_module()
+        module_id = id(module)
+        if module_id not in self.module_to_guard_ids:
+            self.module_to_guard_ids[module] = set()
+
+        for buffer in module.buffers():
+            buffer_id = id(buffer)
+            self.module_associated_guarded_ids.add(buffer_id)
+            self.module_to_guard_ids[module].add(buffer_id)
+
+        for mod in module.modules():
+            mod_id = id(mod)
+            self.module_associated_guarded_ids.add(mod_id)
+            self.module_to_guard_ids[module].add(mod_id)
+
+        for parameter in module.parameters():
+            parameter_id = id(parameter)
+            self.module_associated_guarded_ids.add(parameter_id)
+            self.module_to_guard_ids[module].add(parameter_id)
+        
+
+        if module not in module_code_map:
+            module_code_map[module] = set()
+        module_code_map[module].add(guarded_code)
 
 
 class GuardedCode:
