@@ -1116,6 +1116,10 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
+    def test_version_ci(self):
+        # temporary test to check that the ci torch version is set correctly
+        self.assertTrue(hasattr(torch, "_subclasses"))
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_rand(self):
         cnts = torchdynamo.testing.CompileCounter()

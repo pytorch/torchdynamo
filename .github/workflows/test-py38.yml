@@ -15,6 +15,7 @@ jobs:
       with:
         python-version: '3.8'
         cache: 'pip'
+    - run: pip install --pre torch==1.13.0.dev20220620  --extra-index-url https://download.pytorch.org/whl/nightly/cpu/
     - run: make setup
     - run: make test
 
