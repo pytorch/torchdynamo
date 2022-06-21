@@ -6,8 +6,6 @@ from torchdynamo.testing import same
 
 from . import test_global_declaration
 
-torchdynamo.config.debug = True
-
 
 class Pair(object):
     def __init__(self, x, y):

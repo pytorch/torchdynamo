@@ -19,7 +19,7 @@ from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
-TemplateKernels = [ir.Convolution]
+template_kernels = [ir.Convolution]
 
 
 def cmp(a, b):
@@ -27,7 +27,12 @@ def cmp(a, b):
 
 
 def should_use_template(node: ir.ExternKernel):
-    return type(node) in TemplateKernels and ir.is_triton(node.get_device())
+    return (
+        type(node) in template_kernels
+        and ir.is_triton(node.get_device())
+        # TODO(jansel): extend this to other kernels
+        and config.triton.convolution != "aten"
+    )
 
 
 class OutputNode:
@@ -142,7 +147,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
-        if type(self.node) not in TemplateKernels:
+        if not should_use_template(self.node):
             # TemplateKernelSchedulerNode will be added to scheduler in template_codegen
             self.scheduler.kernels.append(self.node)
         codegen_extern_call(self)
@@ -534,6 +539,24 @@ class Scheduler:
                     max(old_priority, node.get_priority()),
                     old_count + 1,
                 )
+
+    def remove_kernel_local_buffers(self):
+        # If all the uses of this buffer are also in self.pending_buffer_names,
+        # it means the buffer becomes kernel-local after fusion
+        for name in self.pending_buffer_names:
+            node = self.name_to_node[name]
+            is_live = any(
+                [
+                    (user.get_name() not in self.pending_buffer_names)
+                    for user in node.users
+                ]
+            )
+            if not is_live:
+                # Assign a special value instead of deleting the entry
+                # because we still rely on output_buffers's length to
+                # generate unique arg name.
+                V.kernel.args.output_buffers[name] = "REMOVED"
+                V.graph.removed_buffers.add(name)
 
     def barrier(self):
         """
