@@ -19,7 +19,7 @@ from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
-TemplateKernels = [ir.Convolution]
+template_kernels = [ir.Convolution]
 
 
 def cmp(a, b):
@@ -27,7 +27,12 @@ def cmp(a, b):
 
 
 def should_use_template(node: ir.ExternKernel):
-    return type(node) in TemplateKernels and ir.is_triton(node.get_device())
+    return (
+        type(node) in template_kernels
+        and ir.is_triton(node.get_device())
+        # TODO(jansel): extend this to other kernels
+        and config.triton.convolution != "aten"
+    )
 
 
 class OutputNode:
@@ -142,7 +147,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
-        if type(self.node) not in TemplateKernels:
+        if should_use_template(self.node):
             # TemplateKernelSchedulerNode will be added to scheduler in template_codegen
             self.scheduler.kernels.append(self.node)
         codegen_extern_call(self)
