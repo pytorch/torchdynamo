@@ -236,7 +236,7 @@ class CppKernel(Kernel):
                 self.stores.writeline(
                     name,
                     "static_assert(std::atomic_ref<"
-                    + f"std::remove_reference<decltype(*{var})>::type"
+                    + f"std::remove_pointer_t<decltype({var})>"
                     + ">::is_always_lock_free);",
                 )
                 line = f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
