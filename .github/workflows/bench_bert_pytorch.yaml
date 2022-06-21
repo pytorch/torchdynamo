@@ -53,8 +53,6 @@ jobs:
         which nvcc
     - name: Headers
       run: sudo yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
-    - name: SMI
-      run: nvidia-smi
     - name: Install setuptools
       shell: bash
       run: sudo pip install setuptools
