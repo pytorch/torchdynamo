@@ -138,7 +138,6 @@ class ConstDictVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         from . import ConstantVariable
-        from . import TupleVariable
 
         options = VariableTracker.propagate([self])
         val = self.items
