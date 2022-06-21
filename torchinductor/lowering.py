@@ -8,7 +8,6 @@ import torch.fx
 
 from . import config
 from . import ir
-from .codegen.common import product
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -16,6 +15,8 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
+from .utils import has_torchvision_roi_align
+from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
@@ -56,15 +57,6 @@ DTYPE_ID_LOOKUP = {
     # _(c10::quint4x2, QUInt4x2) /* 16 */
     # _(c10::quint2x4, QUInt2x4) /* 17 */
 }
-
-
-def has_torchvision_roi_align():
-    try:
-        from torchvision.ops import roi_align  # noqa
-
-        return roi_align is not None
-    except (ImportError, ModuleNotFoundError):
-        return False
 
 
 def decode_dtype(dtype: int):
@@ -351,7 +343,9 @@ def expand(x, sizes):
     assert isinstance(sizes, (list, tuple))
     if tuple(x.get_size()) == tuple(sizes):
         return x
-    x.mark_reuse(V.graph.sizevars.size_hint(product(sizes) / product(x.get_size())))
+    x.mark_reuse(
+        V.graph.sizevars.size_hint(sympy_product(sizes) / sympy_product(x.get_size()))
+    )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -389,7 +383,9 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    x.mark_reuse(V.graph.sizevars.size_hint(product(new_size) / product(old_size)))
+    x.mark_reuse(
+        V.graph.sizevars.size_hint(sympy_product(new_size) / sympy_product(old_size))
+    )
     x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),
@@ -1368,7 +1364,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     sum_result = sum_(x, axis, keepdim)
-    denom = product(size[i] for i in axis)
+    denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     return div(sum_result, denom)
@@ -1381,7 +1377,7 @@ def var_(x, axis, correction=1, keepdim=False):
     diffs = square(sub(x, mean(x, axis, keepdim=True)))
     sum_result = sum_(diffs, axis, keepdim)
 
-    denom = product(size[i] for i in axis)
+    denom = sympy_product(size[i] for i in axis)
     if correction:
         denom = denom - correction
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())

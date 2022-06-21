@@ -1,8 +1,6 @@
 import collections
 import contextlib
-import functools
 import itertools
-import operator
 import re
 import textwrap
 import typing
@@ -12,12 +10,9 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
-
-
-def product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
 
 
 def _simplify_loops(index_vars, sizes, index_formulas):
@@ -249,10 +244,6 @@ class BracesBuffer(IndentedBuffer):
 class InplacedBuffer(typing.NamedTuple):
     inner_name: str
     other_names: typing.List[str]
-
-
-def unique(it):
-    return {id(x): x for x in it}.values()
 
 
 class KernelArgs:
