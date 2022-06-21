@@ -74,6 +74,7 @@ SKIP_TRAIN = {
     # not designed for training
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
+    "pyhpc_turbulent_kinetic_energy",
     # Unusual training setup
     "opacus_cifar10",
     "maml",
@@ -983,6 +984,8 @@ def main():
                 "timm_efficientdet",
             }
         )
+        if args.training:
+            SKIP.add("hf_T5")
 
     if torchdynamo.config.dynamic_shapes:
         # TODO(jansel): fix bugs in these
