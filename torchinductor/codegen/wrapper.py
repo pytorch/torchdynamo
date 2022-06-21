@@ -3,8 +3,6 @@ import dataclasses
 import hashlib
 from itertools import count
 
-from torchinductor.codegen.common import DeferredIndentedBuffer
-
 from .. import codecache
 from .. import config
 from .. import ir
@@ -12,6 +10,7 @@ from ..utils import has_triton
 from ..utils import sympy_product
 from ..virtualized import V
 from .common import CodeGen
+from .common import DeferredLine
 from .common import IndentedBuffer
 from .common import Kernel
 from .triton import texpr
@@ -119,7 +118,7 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
-            allocation = DeferredIndentedBuffer().writeline(
+            allocation = DeferredLine(
                 name, f"{name} = {layout.view.codegen_reference()}"
             )
             self.writeline(allocation)
@@ -136,7 +135,7 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        allocation = DeferredIndentedBuffer().writeline(
+        allocation = DeferredLine(
             name,
             f"{name} = empty_strided("
             f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
@@ -186,9 +185,7 @@ class WrapperCodeGen(CodeGen):
             while self.lines and isinstance(self.lines[-1], FreedBuffer):
                 self.lines.pop()
             for line in self.lines:
-                if isinstance(line, DeferredIndentedBuffer):
-                    line.flush(result)
-                elif isinstance(line, FreedBuffer):
+                if isinstance(line, FreedBuffer):
                     line.codegen(result)
                 else:
                     result.writeline(line)

@@ -213,7 +213,7 @@ class CppKernel(Kernel):
         self.itervars = None
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        self.reduction_suffix = IndentedBuffer()
+        self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
@@ -254,11 +254,11 @@ class CppKernel(Kernel):
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
         self.stores.writeline(
-            name, f"{reduction_combine(reduction_type, tmpvar, value)};"
+            None, f"{reduction_combine(reduction_type, tmpvar, value)};"
         )
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
+            self.reduction_suffix.writeline(name, f"{var}[{cexpr(index)}] = {tmpvar};")
         self.cse.store_cache[name] = tmpvar
 
     def set_ranges(self, lengths, reduction_lengths):

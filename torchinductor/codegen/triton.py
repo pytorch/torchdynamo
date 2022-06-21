@@ -16,6 +16,7 @@ from .. import ir
 from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
+from .common import DeferredLine
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
@@ -551,7 +552,9 @@ class TritonKernel(Kernel):
         self.cse.store_cache[name] = result_var
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            self.suffix.writeline(f"tl.store({var} + {index}, {result_var}, {mask})")
+            self.suffix.writeline(
+                DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
+            )
 
     def codegen_body(self):
         """
