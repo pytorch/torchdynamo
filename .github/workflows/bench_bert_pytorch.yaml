@@ -41,6 +41,8 @@ jobs:
       run: |
         nvcc --version
         which nvcc
+    - name: SMI
+      run: nvidia-smi
     - name: Install setuptools
       shell: bash
       run: sudo pip install setuptools
