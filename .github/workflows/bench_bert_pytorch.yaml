@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  test-inductor:
+  test-cuda-inductor-BERT_pytorch:
     runs-on: linux.8xlarge.nvidia.gpu
     steps:
     - name: Install python
@@ -66,7 +66,7 @@ jobs:
     - name: Setup
       shell: bash
       run: sudo python3 setup.py develop
-    - run: sudo python3 torchbench.py -k BERT_pytorch
+    - run: sudo python3 torchbench.py -dcuda --inductor -k BERT_pytorch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
