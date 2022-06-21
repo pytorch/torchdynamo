@@ -207,6 +207,7 @@ class BuiltinVariable(VariableTracker):
             return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
+
         if handler:
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
