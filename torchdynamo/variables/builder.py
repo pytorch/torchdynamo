@@ -8,6 +8,7 @@ import types
 from abc import ABCMeta
 from typing import Any
 from typing import List
+import numpy as np
 
 import torch
 
@@ -23,6 +24,7 @@ from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
+from ..source import LocalSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
@@ -64,15 +66,10 @@ from .user_defined import UserDefinedObjectVariable
 
 
 @dataclasses.dataclass
-class UnspecializedPrimitiveInfo:
-    from_callable: bool
-
-
-@dataclasses.dataclass
 class GraphArg:
     source: Source
     example: Any
-    unspecialized_primitive_info: None
+    is_unspecialized: bool
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -288,10 +285,8 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif is_numpy_int_type(value) or is_numpy_float_type(value):
-            return self.wrap_unspecialized_primitive(
-                value, UnspecializedPrimitiveInfo(False)
-            )
+        elif isinstance(value, (int, float, np.number)):
+            return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)
@@ -325,7 +320,7 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, None))
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # user code.
             with torch._C.DisableTorchFunction():
@@ -348,18 +343,24 @@ class VariableBuilder:
                 )
             return tensor_variable
 
-    def wrap_unspecialized_primitive(self, value, unspecialized_primitive_info):
+    def wrap_unspecialized_primitive(self, value):
         wrapped_value = torch.tensor(value)
         self.tx.output.graphargs.append(
-            GraphArg(self.get_source(), wrapped_value, unspecialized_primitive_info)
+            GraphArg(self.get_source(), wrapped_value, True)
         )
+        if isinstance(self.get_source(), LocalSource):
+            guards_options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
+        else:
+            guards_options = {}
+
         return UnspecializedPrimitiveVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             ),
             example_value=wrapped_value,
-            guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            is_numpy_primitive=isinstance(value, np.number),
+            **guards_options,
         )
 
 

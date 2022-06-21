@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import random
 import re
 import sys
 import types
@@ -32,6 +33,11 @@ class GraphOutputEntry:
     def merge(self, other: VariableTracker):
         # merge in any extra guards
         self.variable = self.variable.add_options(other)
+
+
+@torchdynamo.eval_frame.disable
+def _generate_random_values(cnt):
+    return tuple(random.random() for _ in range(cnt))
 
 
 class PyCodegen(object):
@@ -119,17 +125,25 @@ class PyCodegen(object):
             )
             output.append(create_instruction("BINARY_SUBSCR"))
             if isinstance(value, UnspecializedPrimitiveVariable):
-                output.extend(
-                    [
-                        self.create_load_attr("numpy"),
-                        create_instruction("CALL_FUNCTION", 0),
-                        self.create_load_attr("reshape"),
-                        self._create_load_const(1),
-                        create_instruction("CALL_FUNCTION", 1),
-                        self._create_load_const(0),
-                        create_instruction("BINARY_SUBSCR"),
-                    ]
-                )
+                if value.is_numpy_primitive:
+                    output.extend(
+                        [
+                            self.create_load_attr("numpy"),
+                            create_instruction("CALL_FUNCTION", 0),
+                            self.create_load_attr("reshape"),
+                            self._create_load_const(1),
+                            create_instruction("CALL_FUNCTION", 1),
+                            self._create_load_const(0),
+                            create_instruction("BINARY_SUBSCR"),
+                        ]
+                    )
+                else:
+                    output.extend(
+                        [
+                            self.create_load_attr("item"),
+                            create_instruction("CALL_FUNCTION", 0),
+                        ]
+                    )
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:
@@ -189,11 +203,13 @@ class PyCodegen(object):
     def get_instructions(self):
         return self._output
 
-    def create_load(self, name):
+    def create_load(self, name, add=False):
         if name in self.cell_and_freevars():
             return create_instruction(
                 "LOAD_DEREF", self.cell_and_freevars().index(name), name
             )
+        if add:
+            self.tx.output.update_co_varnames(name)
         assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction(
             "LOAD_FAST", self.code_options["co_varnames"].index(name), name
@@ -205,11 +221,13 @@ class PyCodegen(object):
             "LOAD_CLOSURE", self.cell_and_freevars().index(name), name
         )
 
-    def create_store(self, name):
+    def create_store(self, name, add=False):
         if name in self.cell_and_freevars():
             return create_instruction(
                 "STORE_DEREF", self.cell_and_freevars().index(name), name
             )
+        if add:
+            self.tx.output.update_co_varnames(name)
         assert name in self.code_options["co_varnames"]
         return create_instruction(
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
@@ -309,8 +327,23 @@ class PyCodegen(object):
         self.extend_output(self.load_function_name(fn_name))
 
         graphargs = self.tx.output.graphargs
+
+        if any(arg.is_unspecialized for arg in graphargs):
+            if self.tx.random_call_count > 0:
+                self.tx.output.install_global(
+                    "_generate_random_values", _generate_random_values
+                )
+                self.extend_output(
+                    [
+                        self.create_load_global("_generate_random_values", add=True),
+                        self.create_load_const(self.tx.random_call_count),
+                        create_instruction("CALL_FUNCTION", 1),
+                        self.create_store("_torchdynamo_random_values", add=True),
+                    ]
+                )
+
         for arg in graphargs:
-            if arg.unspecialized_primitive_info is not None:
+            if arg.is_unspecialized:
                 self.extend_output(
                     [
                         self.create_load_global("torch", add=True),
@@ -318,12 +351,6 @@ class PyCodegen(object):
                     ]
                 )
                 self.extend_output(arg.load(self))
-                if arg.unspecialized_primitive_info.from_callable:
-                    self.extend_output(
-                        [
-                            create_instruction("CALL_FUNCTION", 0),
-                        ]
-                    )
                 self.extend_output(
                     [
                         create_instruction("CALL_FUNCTION", 1),

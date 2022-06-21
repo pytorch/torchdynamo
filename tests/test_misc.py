@@ -1611,18 +1611,25 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_unspecialized_primitive_variable4(self):
         # no recompilations on random.random
         def fn(x):
-            y = random.random()
-            x.sum().item()  # break graph
-            return x + y
+            y1 = random.random()
+            y2 = random.random()
+            return x + y1, y1, y2
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-
+        random.seed(1)
+        res1 = fn(x)
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(x)
             for i in range(10):
                 fn(x)
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 2)
+
+        print(res1)
+        print(res2)
+        self.assertTrue(same(res1, res2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect

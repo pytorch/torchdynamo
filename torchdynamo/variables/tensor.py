@@ -5,6 +5,7 @@ import operator
 from contextlib import contextmanager
 from typing import Dict
 from typing import List
+import numpy as np
 
 import torch.fx
 import torch.random
@@ -552,7 +553,8 @@ class UnspecializedPrimitiveVariable(TensorVariable):
     e.g, int, float, np.int, np.float, etc
     """
 
-    @classmethod
-    def from_tensor_variable(cls, tensor_variable):
-        # Convert a `TensorVariable` instance into an `UnspecializedPrimitiveVariable` instance.
-        return cls(**dict(tensor_variable.__dict__))
+    def __init__(self, proxy, **kwargs):
+        assert "is_numpy_primitive" in kwargs
+        is_numpy_primitive = kwargs.pop("is_numpy_primitive")
+        super(UnspecializedPrimitiveVariable, self).__init__(proxy, **kwargs)
+        self.is_numpy_primitive = is_numpy_primitive

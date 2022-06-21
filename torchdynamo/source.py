@@ -62,6 +62,24 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass
+class RandomValueSource(Source):
+    random_call_index: int
+
+    def reconstruct(self, codegen):
+        return [
+            codegen.create_load("_torchdynamo_random_values", add=True),
+            codegen.create_load_const(self.random_call_index),
+            create_instruction("BINARY_SUBSCR"),
+        ]
+
+    def guard_source(self):
+        return GuardSource.LOCAL
+
+    def name(self):
+        return rename_implicit(f"random_value_{self.random_call_index}")
+
+
+@dataclasses.dataclass
 class GlobalSource(Source):
     global_name: str
 

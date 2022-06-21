@@ -6,6 +6,7 @@ import gc
 import inspect
 import itertools
 import logging
+import math
 import operator
 import re
 import sys
@@ -429,8 +430,10 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
-    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
+    elif isinstance(a, (str, int, type(None), bool, torch.device)):
         return a == b
+    elif isinstance(a, float):
+        return math.isclose(a, b, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(a) or is_numpy_float_type(a):
         return (type(a) is type(b)) and (a == b)
     elif type(a).__name__ in (

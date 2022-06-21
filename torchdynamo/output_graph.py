@@ -159,6 +159,13 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
+    def update_co_varnames(self, name):
+        """Ensure self.code_options.co_varnames contains name"""
+        if name not in self.code_options["co_varnames"]:
+            self.code_options["co_varnames"] = tuple(
+                self.code_options["co_varnames"]
+            ) + (name,)
+
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)

@@ -203,13 +203,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builder import UnspecializedPrimitiveInfo
         from .builder import VariableBuilder
 
         if self.value is random.random:
-            example_value = random.random()
-            return VariableBuilder(tx, self.source).wrap_unspecialized_primitive(
-                example_value, UnspecializedPrimitiveInfo(True)
+            from torchdynamo.source import RandomValueSource
+
+            example_value = 0.5
+            source = RandomValueSource(random_call_index=tx.random_call_count)
+            tx.random_call_count += 1
+            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
+                example_value,
             )
 
         return super().call_function(tx, args, kwargs)

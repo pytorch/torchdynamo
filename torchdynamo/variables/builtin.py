@@ -2,6 +2,7 @@ import functools
 import inspect
 import itertools
 import math
+import numpy
 import operator
 import types
 from typing import Dict
@@ -165,7 +166,10 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
-    def tensor_variable_class(self, *args, **kwargs):
+    def wrap_as_unspecialized_if_needed(self, tensor_variable, *args, **kwargs):
+        """
+        Wrap a `TensorVariable` as an `UnspecializedPrimitiveVariable` if needed.
+        """
         if all(
             isinstance(
                 i,
@@ -173,16 +177,23 @@ class BuiltinVariable(VariableTracker):
             )
             for i in itertools.chain(args, kwargs.values())
         ):
-            return variables.UnspecializedPrimitiveVariable
+            is_numpy_primitive = any(
+                pdv.is_numpy_primitive
+                if isinstance(pdv, variables.UnspecializedPrimitiveVariable)
+                else isinstance(pdv.as_python_constant(), numpy.number)
+                for pdv in itertools.chain(args, kwargs.values())
+            )
+            return variables.UnspecializedPrimitiveVariable(
+                **dict(tensor_variable.__dict__), is_numpy_primitive=is_numpy_primitive
+            )
         else:
-            return variables.TensorVariable
+            return tensor_variable
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
-        tensor_variable_class = self.tensor_variable_class(*args, **kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
         has_constant_handler = self.can_constant_fold_through() and constant_args
         assert isinstance(args, list)
@@ -205,7 +216,7 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
-                return tensor_variable_class.create(
+                result_tensor = variables.TensorVariable.create(
                     tx,
                     tx.output.create_proxy(
                         "call_function",
@@ -214,6 +225,10 @@ class BuiltinVariable(VariableTracker):
                     ),
                     **options,
                 )
+                return self.wrap_as_unspecialized_if_needed(
+                    result_tensor, *args, **kwargs
+                )
+
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
 
@@ -270,15 +285,9 @@ class BuiltinVariable(VariableTracker):
                 fn = {max: torch.maximum, min: torch.minimum}[self.fn]
                 result = variables.TorchVariable(fn).call_function(tx, [a, b], {})
 
-            if (
-                self.tensor_variable_class(a, b)
-                == variables.UnspecializedPrimitiveVariable
-            ):
-                return variables.UnspecializedPrimitiveVariable.from_tensor_variable(
-                    result
-                )
-            else:
-                return result
+            return self.wrap_as_unspecialized_if_needed(result, a, b)
+        else:
+            unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
     call_max = _call_min_max
