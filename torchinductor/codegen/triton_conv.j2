@@ -197,12 +197,6 @@ def {{kernel_name}}(
         # ------ load w ------
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
-{{ pointwise_code | indent(4, true) }}
-    {# 
-    z = tl.load(z_ptrs, mask=mask_z)
-    acc += z
-    #}
-
     # add bias if is not None
     if bias is not None:
         off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -242,6 +236,19 @@ def {{kernel_name}}(
     )
 
     tl.store(y_ptrs, acc, mask=mask_y)
+{% if pointwise_code|length %}
+{{ pointwise_code | indent(4, true) }}
+    {# 
+    z = tl.load(z_ptrs, mask=mask_z)
+    acc += z
+    #}
+{% else %}
+    {#
+    if pointwise_code is empty, we need to code-gen
+    the final store explicitly
+    tl.store(y_ptrs, acc, mask=mask_y)
+    #}
+    # tl.store(y_ptrs, acc, mask=mask_y)
+{% endif %}
 
     return
-

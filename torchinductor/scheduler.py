@@ -408,7 +408,10 @@ class Scheduler:
             elif isinstance(node, ir.ExternKernel):
                 group_fn = None
                 if should_use_template(node):
-                    group_fn = self.get_backend(node.get_device()).group_fn
+                    if isinstance(node, ir.Convolution):
+                        group_fn = self.get_backend(node.get_device()).group_fn_NHW_C
+                    else:
+                        group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
             else:
                 assert False, node
