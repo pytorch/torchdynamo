@@ -138,6 +138,17 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
+    def mark_fusable(self, broadcast_after_reduce=False):
+        self.scheduler.fusable_deps.update(self.read_writes.writes)
+        if broadcast_after_reduce and self.is_reduction():
+            self.scheduler.fusable_deps.update(
+                w.broadcast_extend_sizes(self._sizes[-1])
+                for w in self.read_writes.writes
+            )
+
+    def get_ranges(self):
+        return self._sizes
+
     def run(self, codegen_extern_call):
         self.allocate()
         self.scheduler.run_count += 1
@@ -584,7 +595,9 @@ class Scheduler:
     def iter_runable_groups(self):
         while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
-                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
+                extern_scheduler_node = self.runable_extern_kernels.popleft()
+                self.current_device = extern_scheduler_node.node.get_device()
+                extern_scheduler_node.run(self.codegen_extern_call)
             else:
                 group, priority = self.runable_groups.most_common(1)[0]
                 del self.runable_groups[group]

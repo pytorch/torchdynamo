@@ -64,9 +64,6 @@ def {{kernel_name}}(
     w,
     bias,
     y,
-    {% for i in extra_args %}
-    {{i}},
-    {% endfor %}
     # stride of tensor
     stride_xn,
     stride_xc,
@@ -111,6 +108,10 @@ def {{kernel_name}}(
     BLOCK_N: tl.constexpr,
     # reduction tiling parameter for matmul
     BLOCK_K: tl.constexpr,
+    # fusable kernels args
+    {% for i in extra_argdefs %}
+    {{i}},
+    {% endfor %}
 ):
     """
     each program instance computes a [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] block of y
@@ -196,7 +197,7 @@ def {{kernel_name}}(
         # ------ load w ------
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
-    {{ pointwise_computation }}
+{{ pointwise_code | indent(4, true) }}
     {# 
     z = tl.load(z_ptrs, mask=mask_z)
     acc += z
