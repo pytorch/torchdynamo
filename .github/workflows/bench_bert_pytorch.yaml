@@ -8,7 +8,7 @@ on:
 
 jobs:
   test-cuda-inductor-BERT_pytorch:
-    runs-on: linux.4xlarge.nvidia.gpu
+    runs-on: linux.4xlarge.nvidia.gpu.ephemeral
     steps:
     - name: Install python
       run: sudo yum install -y python3 python-devel python3-devel build-essential
