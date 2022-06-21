@@ -146,12 +146,14 @@ class TritonTemplateKernel(TritonKernel):
         #     return (...)
         # kernel1[grid](arg0, arg1, ...)
         extra_args = ", ".join(self.extra_call_args)
-        self_args = ", ".join({**self.args_dict, **self.const_dict}.values())
+        self_args = ", ".join(self.args_dict.values())
+        self_const_kwargs = ", ".join(f"{k}={v}" for k,v in self.const_dict.items())
         args = self_args + (
             ", " + extra_args if extra_args and len(extra_args) > 0 else ""
         )
+        args_kwargs = args + ", " + self_const_kwargs
         wrapper.writeline(self.gen_grid())
-        wrapper.writeline(f"{name}[grid]({args})")
+        wrapper.writeline(f"{name}[grid]({args_kwargs})")
 
 
 def template_codegen(scheduler, node):

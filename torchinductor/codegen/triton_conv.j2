@@ -100,6 +100,10 @@ def {{kernel_name}}(
     output_padding_h,
     output_padding_w,
     groups,
+    # fusable kernels args
+    {% for i in extra_argdefs %}
+    {{i}},
+    {% endfor %}
     # Metaparameters
     ACC_TYPE: tl.constexpr,
     CONV1X1_NHWC: tl.constexpr,
@@ -108,10 +112,6 @@ def {{kernel_name}}(
     BLOCK_N: tl.constexpr,
     # reduction tiling parameter for matmul
     BLOCK_K: tl.constexpr,
-    # fusable kernels args
-    {% for i in extra_argdefs %}
-    {{i}},
-    {% endfor %}
 ):
     """
     each program instance computes a [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] block of y
