@@ -8,7 +8,7 @@ on:
 
 jobs:
   test-cuda-inductor-BERT_pytorch:
-    runs-on: linux.4xlarge.nvidia.gpu.ephemeral
+    runs-on: linux.4xlarge.nvidia.gpu
     steps:
     - name: lspci
       run: lspci | grep -i nvidia
