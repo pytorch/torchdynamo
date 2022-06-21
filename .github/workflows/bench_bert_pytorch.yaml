@@ -39,10 +39,12 @@ jobs:
         sudo ln -s /usr/local/bin/pip /bin/pip
     - name: nvcc check
       run: |
-        nvcc --version
-        which nvcc
+        sudo nvcc --version
+        sudo which nvcc
+    - name: Headers
+      run: sudo yum install -y "kernel-devel-uname-r == $(uname -r)"
     - name: SMI
-      run: nvidia-smi
+      run: sudo nvidia-smi
     - name: Install setuptools
       shell: bash
       run: sudo pip install setuptools
