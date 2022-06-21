@@ -20,6 +20,7 @@ from ..source import AttrSource
 from ..utils import clone_tensor
 from ..utils import is_lazy_module
 from ..utils import istype
+from ..utils import namedtuple_fields
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import MutableLocal
@@ -156,6 +157,10 @@ class TensorVariable(VariableTracker):
                     example_value.__class__.__module__ == "torch.return_types"
                     or hasattr(example_value, "_fields")
                 ), "namedtuple?"
+                fields = namedtuple_fields(example_value.__class__)
+                for idx, field in enumerate(fields):
+                    if field in tx.symbolic_locals:
+                        tx.symbolic_locals[field] = unpacked[idx]
                 return variables.NamedTupleVariable(
                     unpacked, example_value.__class__, **options
                 )

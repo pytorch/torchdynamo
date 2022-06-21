@@ -1369,3 +1369,22 @@ class ReproTests(torchdynamo.testing.TestCase):
             y = model(x)
 
         self.assertEqual(y, 10)
+
+    def test_sort_out(self):
+
+        dtype = torch.float32
+        device = "cpu"
+
+        def fn():
+            tensor = torch.randn((3, 5), dtype=dtype, device=device)[:, 0]
+            values = torch.tensor(0, dtype=dtype, device=device)
+            indices = torch.tensor(0, dtype=torch.long, device=device)
+            torch.sort(tensor, out=(values, indices))
+            self.assertEqual(values.stride(), (1,))
+            self.assertEqual(indices.stride(), (1,))
+
+        fn()
+        torchdynamo.config.debug = True
+        torchdynamo.config.trace = True
+        with torchdynamo.optimize("eager"):
+            fn()
