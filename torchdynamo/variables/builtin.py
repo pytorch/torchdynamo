@@ -160,32 +160,36 @@ class BuiltinVariable(VariableTracker):
 
     def tensor_args(self, *args, **kwargs):
         return any(
-            isinstance(
-                i, (variables.TensorVariable, variables.UnspecializedPrimitiveVariable)
-            )
+            isinstance(i, variables.TensorVariable)
             for i in itertools.chain(args, kwargs.values())
         )
 
     def wrap_as_unspecialized_if_needed(self, tensor_variable, *args, **kwargs):
         """
-        Wrap a `TensorVariable` as an `UnspecializedPrimitiveVariable` if needed.
+        Wrap a `TensorVariable` as an `UnspecializedNumpyVariable` or `UnspecializedPythonVariable` if needed.
         """
         if all(
             isinstance(
                 i,
-                (variables.UnspecializedPrimitiveVariable, variables.ConstantVariable),
+                (
+                    variables.UnspecializedNumpyVariable,
+                    variables.UnspecializedPythonVariable,
+                    variables.ConstantVariable,
+                ),
             )
             for i in itertools.chain(args, kwargs.values())
         ):
-            is_numpy_primitive = any(
-                pdv.is_numpy_primitive
-                if isinstance(pdv, variables.UnspecializedPrimitiveVariable)
-                else isinstance(pdv.as_python_constant(), numpy.number)
-                for pdv in itertools.chain(args, kwargs.values())
-            )
-            return variables.UnspecializedPrimitiveVariable(
-                **dict(tensor_variable.__dict__), is_numpy_primitive=is_numpy_primitive
-            )
+            if any(
+                isinstance(x, variables.UnspecializedNumpyVariable)
+                for x in itertools.chain(args, kwargs.values())
+            ):
+                return variables.UnspecializedNumpyVariable.from_tensor_variable(
+                    tensor_variable
+                )
+            else:
+                return variables.UnspecializedPythonVariable.from_tensor_variable(
+                    tensor_variable
+                )
         else:
             return tensor_variable
 
@@ -216,7 +220,7 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
-                result_tensor = variables.TensorVariable.create(
+                result = variables.TensorVariable.create(
                     tx,
                     tx.output.create_proxy(
                         "call_function",
@@ -225,9 +229,7 @@ class BuiltinVariable(VariableTracker):
                     ),
                     **options,
                 )
-                return self.wrap_as_unspecialized_if_needed(
-                    result_tensor, *args, **kwargs
-                )
+                return self.wrap_as_unspecialized_if_needed(result, *args, **kwargs)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")

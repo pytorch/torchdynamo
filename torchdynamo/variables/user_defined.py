@@ -15,6 +15,7 @@ from ..guards import Guard
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..source import ODictGetItemSource
+from ..source import RandomValueSource
 from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
 from .base import MutableLocal
@@ -206,13 +207,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .builder import VariableBuilder
 
         if self.value is random.random:
-            from torchdynamo.source import RandomValueSource
-
             example_value = 0.5
             source = RandomValueSource(random_call_index=tx.random_call_count)
             tx.random_call_count += 1
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
-                example_value,
+                example_value
             )
 
         return super().call_function(tx, args, kwargs)

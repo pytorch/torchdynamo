@@ -22,7 +22,8 @@ from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import TensorWithTFOverrideVariable
-from .variables.tensor import UnspecializedPrimitiveVariable
+from .variables.tensor import UnspecializedNumpyVariable
+from .variables.tensor import UnspecializedPythonVariable
 
 
 @dataclasses.dataclass
@@ -105,7 +106,8 @@ class PyCodegen(object):
             (
                 TensorVariable,
                 TensorWithTFOverrideVariable,
-                UnspecializedPrimitiveVariable,
+                UnspecializedNumpyVariable,
+                UnspecializedPythonVariable,
             ),
         ):
             if isinstance(value, TensorWithTFOverrideVariable):
@@ -124,26 +126,25 @@ class PyCodegen(object):
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
-            if isinstance(value, UnspecializedPrimitiveVariable):
-                if value.is_numpy_primitive:
-                    output.extend(
-                        [
-                            self.create_load_attr("numpy"),
-                            create_instruction("CALL_FUNCTION", 0),
-                            self.create_load_attr("reshape"),
-                            self._create_load_const(1),
-                            create_instruction("CALL_FUNCTION", 1),
-                            self._create_load_const(0),
-                            create_instruction("BINARY_SUBSCR"),
-                        ]
-                    )
-                else:
-                    output.extend(
-                        [
-                            self.create_load_attr("item"),
-                            create_instruction("CALL_FUNCTION", 0),
-                        ]
-                    )
+            if isinstance(value, UnspecializedNumpyVariable):
+                output.extend(
+                    [
+                        self.create_load_attr("numpy"),
+                        create_instruction("CALL_FUNCTION", 0),
+                        self.create_load_attr("reshape"),
+                        self._create_load_const(1),
+                        create_instruction("CALL_FUNCTION", 1),
+                        self._create_load_const(0),
+                        create_instruction("BINARY_SUBSCR"),
+                    ]
+                )
+            elif isinstance(value, UnspecializedPythonVariable):
+                output.extend(
+                    [
+                        self.create_load_attr("item"),
+                        create_instruction("CALL_FUNCTION", 0),
+                    ]
+                )
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:
@@ -328,19 +329,19 @@ class PyCodegen(object):
 
         graphargs = self.tx.output.graphargs
 
-        if any(arg.is_unspecialized for arg in graphargs):
-            if self.tx.random_call_count > 0:
-                self.tx.output.install_global(
-                    "_generate_random_values", _generate_random_values
-                )
-                self.extend_output(
-                    [
-                        self.create_load_global("_generate_random_values", add=True),
-                        self.create_load_const(self.tx.random_call_count),
-                        create_instruction("CALL_FUNCTION", 1),
-                        self.create_store("_torchdynamo_random_values", add=True),
-                    ]
-                )
+        # to handle random.random call
+        if self.tx.random_call_count > 0:
+            self.tx.output.install_global(
+                "_generate_random_values", _generate_random_values
+            )
+            self.extend_output(
+                [
+                    self.create_load_global("_generate_random_values", add=True),
+                    self.create_load_const(self.tx.random_call_count),
+                    create_instruction("CALL_FUNCTION", 1),
+                    self.create_store("_torchdynamo_random_values", add=True),
+                ]
+            )
 
         for arg in graphargs:
             if arg.is_unspecialized:

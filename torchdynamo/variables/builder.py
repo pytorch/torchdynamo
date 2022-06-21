@@ -59,7 +59,8 @@ from .misc import TypingVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
-from .tensor import UnspecializedPrimitiveVariable
+from .tensor import UnspecializedNumpyVariable
+from .tensor import UnspecializedPythonVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -353,15 +354,24 @@ class VariableBuilder:
         else:
             guards_options = {}
 
-        return UnspecializedPrimitiveVariable.create(
-            tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
-            ),
-            example_value=wrapped_value,
-            is_numpy_primitive=isinstance(value, np.number),
-            **guards_options,
+        proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
         )
+
+        if isinstance(value, np.number):
+            return UnspecializedNumpyVariable.create(
+                tx=self.tx,
+                proxy=proxy,
+                example_value=wrapped_value,
+                **guards_options,
+            )
+        else:
+            return UnspecializedPythonVariable.create(
+                tx=self.tx,
+                proxy=proxy,
+                example_value=wrapped_value,
+                **guards_options,
+            )
 
 
 def _dataclasses_fields_lambda(obj):

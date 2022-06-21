@@ -32,7 +32,8 @@ from .utils import count_calls
 from .utils import counters
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
-from .variables.tensor import UnspecializedPrimitiveVariable
+from .variables.tensor import UnspecializedNumpyVariable
+from .variables.tensor import UnspecializedPythonVariable
 
 
 class FakeRootModule(torch.nn.Module):
@@ -244,7 +245,10 @@ class OutputGraph(fx.Tracer):
         if (
             stack_values
             and all(
-                not isinstance(v, UnspecializedPrimitiveVariable) for v in stack_values
+                not isinstance(
+                    v, (UnspecializedNumpyVariable, UnspecializedPythonVariable)
+                )
+                for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)

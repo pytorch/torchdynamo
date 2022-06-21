@@ -547,14 +547,23 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class UnspecializedPrimitiveVariable(TensorVariable):
+class UnspecializedNumpyVariable(TensorVariable):
     """
-    This is a 1-element tensor represents unspecialized primitive type,
-    e.g, int, float, np.int, np.float, etc
+    This is a 1-element tensor represents unspecialized numpy float/int.
     """
 
-    def __init__(self, proxy, **kwargs):
-        assert "is_numpy_primitive" in kwargs
-        is_numpy_primitive = kwargs.pop("is_numpy_primitive")
-        super(UnspecializedPrimitiveVariable, self).__init__(proxy, **kwargs)
-        self.is_numpy_primitive = is_numpy_primitive
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable):
+        # Convert a `TensorVariable` instance into an `UnspecializedNumpyVariable` instance.
+        return UnspecializedNumpyVariable(**dict(tensor_variable.__dict__))
+
+
+class UnspecializedPythonVariable(TensorVariable):
+    """
+    This is a 1-element tensor represents unspecialized python float/int.
+    """
+
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable):
+        # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
+        return UnspecializedPythonVariable(**dict(tensor_variable.__dict__))
