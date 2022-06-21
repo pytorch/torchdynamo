@@ -147,7 +147,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
-        if should_use_template(self.node):
+        if not should_use_template(self.node):
             # TemplateKernelSchedulerNode will be added to scheduler in template_codegen
             self.scheduler.kernels.append(self.node)
         codegen_extern_call(self)
