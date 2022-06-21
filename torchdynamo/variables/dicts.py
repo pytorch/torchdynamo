@@ -136,6 +136,15 @@ class ConstDictVariable(VariableTracker):
         """a copy of self with different items"""
         return self.clone(items=items, **options)
 
+    def unpack_var_sequence(self, tx):
+        from . import ConstantVariable
+        from . import TupleVariable
+
+        options = VariableTracker.propagate([self])
+        val = self.items
+        result = [ConstantVariable(k, **options) for k in val.keys()]
+        return result
+
 
 class DataClassVariable(ConstDictVariable):
     """
