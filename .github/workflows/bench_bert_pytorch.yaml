@@ -10,6 +10,8 @@ jobs:
   test-cuda-inductor-BERT_pytorch:
     runs-on: linux.4xlarge.nvidia.gpu
     steps:
+    - name: Development Tools
+      run: sudo yum group install "Development Tools"
     - name: lspci
       run: lspci | grep -i nvidia
     - name: info
