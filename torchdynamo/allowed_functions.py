@@ -99,7 +99,7 @@ def _disallowed_function_ids():
     storage = [
         obj
         for obj in torch.__dict__.values()
-        if isinstance(obj, torch.storage._LegacyStorageMeta)
+        if isinstance(obj, type(torch.FloatStorage))
     ]
     remove += storage
     return {id(x) for x in remove}
