@@ -43,6 +43,9 @@ jobs:
     - name: Install setuptools
       shell: bash
       run: sudo pip install setuptools
+    - name: Install psutil
+      shell: bash
+      run: sudo pip install psutil
     - name: Install ninja
       shell: bash
       run: 	sudo pip install ninja
