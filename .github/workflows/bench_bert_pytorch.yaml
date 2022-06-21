@@ -39,8 +39,8 @@ jobs:
         sudo ln -s /usr/local/bin/pip /bin/pip
     - name: nvcc check
       run: |
-        sudo nvcc --version
-        sudo which nvcc
+        nvcc --version
+        which nvcc
     - name: Headers
       run: sudo yum install -y "kernel-devel-uname-r == $(uname -r)"
     - name: SMI
