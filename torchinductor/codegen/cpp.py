@@ -15,6 +15,7 @@ from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
+from .common import DeferredIndentedBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
@@ -62,6 +63,7 @@ def cpp_prefix():
             #include <atomic>
             #include <cmath>
             #include <cstdlib>
+            #include <iostream>
             #include <limits>
             #define SLEEF_ENABLE_OMP_SIMD
             //#include <sleef.h>
@@ -225,16 +227,22 @@ class CppKernel(Kernel):
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
-            self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
+            line = f"{var}[{cexpr(index)}] = {value};"
         elif mode == "atomic_add":
             if config.cpp.threads == 1:
-                self.stores.writeline(f"{var}[{cexpr(index)}] += {value};")
+                line = f"{var}[{cexpr(index)}] += {value};"
             else:
+                # Note atomic_ref requires C++20 and certain processor features
                 self.stores.writeline(
-                    f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
+                    name,
+                    "static_assert(std::atomic_ref<"
+                    + f"std::remove_reference<decltype(*{var})>::type"
+                    + ">::is_always_lock_free);",
                 )
+                line = f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
         else:
             raise NotImplementedError(f"store mode={mode}")
+        self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         tmpvar = self.cse.generate(
@@ -245,7 +253,9 @@ class CppKernel(Kernel):
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
-        self.stores.writeline(f"{reduction_combine(reduction_type, tmpvar, value)};")
+        self.stores.writeline(
+            name, f"{reduction_combine(reduction_type, tmpvar, value)};"
+        )
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
@@ -362,7 +372,7 @@ class CppKernel(Kernel):
         prior = (self.loads, self.compute, self.stores, self.cse)
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
+        self.stores = DeferredIndentedBuffer()
         self.cse = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)

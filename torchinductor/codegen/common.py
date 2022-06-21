@@ -209,6 +209,8 @@ class IndentedBuffer:
         return ctx()
 
     def splice(self, other_code, strip=False):
+        if isinstance(other_code, DeferredIndentedBuffer):
+            other_code.flush()
         if isinstance(other_code, IndentedBuffer):
             other_code = other_code.getvalue()
         other_code = textwrap.dedent(other_code)
@@ -218,6 +220,26 @@ class IndentedBuffer:
             return
         assert other_code.endswith("\n")
         self.contents.write(textwrap.indent(other_code, self.prefix()))
+
+
+class DeferredIndentedBuffer(IndentedBuffer):
+    def __init__(self, initial_indent=0):
+        super(DeferredIndentedBuffer, self).__init__(initial_indent)
+        self.deferred_lines = []
+
+    def writeline(self, name, line):
+        assert "buf" in name
+        self.deferred_lines.append((name, line))
+        return self
+
+    def flush(self, output: IndentedBuffer = None):
+        # Only write out buffers that are still alive
+        for (name, line) in self.deferred_lines:
+            if name not in V.graph.removed_buffers:
+                super().writeline(line)
+                if output:
+                    output.writeline(line)
+        self.deferred_lines.clear()
 
 
 class BracesBuffer(IndentedBuffer):
@@ -317,7 +339,7 @@ class KernelArgs:
             arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
             call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers:
+            if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
@@ -336,7 +358,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers:
+            if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -427,7 +449,7 @@ class Kernel(CodeGen):
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
+        self.stores = DeferredIndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
 
     @contextlib.contextmanager
@@ -507,6 +529,10 @@ class Kernel(CodeGen):
         self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        V.graph.scheduler.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):

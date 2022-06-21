@@ -503,7 +503,7 @@ class TritonKernel(Kernel):
             line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(line)
+        self.stores.writeline(name, line)
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
