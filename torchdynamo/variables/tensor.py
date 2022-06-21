@@ -10,8 +10,8 @@ from typing import List
 
 import torch.fx
 import torch.random
-from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+from torch._subclasses import FakeTensor
+from torch._subclasses import UnsupportedFakeTensorException
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map

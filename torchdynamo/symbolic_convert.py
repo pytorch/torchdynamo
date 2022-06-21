@@ -17,7 +17,7 @@ from typing import Iterable
 from typing import List
 from unittest.mock import patch
 
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses import FakeTensorMode
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
