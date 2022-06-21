@@ -50,12 +50,6 @@ runner_types:
     os: linux
     max_available: 10
     disk_size: 150
-    is_ephemeral: false
-  linux.4xlarge.nvidia.gpu.ephemeral:
-    instance_type: g3.4xlarge
-    os: linux
-    max_available: 10
-    disk_size: 150
     is_ephemeral: true
   linux.16xlarge.nvidia.gpu:
     instance_type: g3.16xlarge
