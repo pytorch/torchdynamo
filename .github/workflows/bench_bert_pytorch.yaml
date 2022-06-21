@@ -8,8 +8,16 @@ on:
 
 jobs:
   test-cuda-inductor-BERT_pytorch:
-    runs-on: linux.4xlarge.nvidia.gpu
+    runs-on: linux.4xlarge.nvidia.gpu.ephemeral
     steps:
+    - name: lspci
+      run: lspci | grep -i nvidia
+    - name: info
+      run: |
+        uname -m
+        cat /etc/*release
+        gcc --version
+        uname -r
     - name: Install python
       run: sudo yum install -y python3 python-devel python3-devel build-essential
     - name: Update pip
@@ -25,7 +33,7 @@ jobs:
     - name: Install CUDA 11.3
       shell: bash
       run: |
-        sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm  || true
         sudo yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
         sudo yum clean expire-cache
         sudo yum install -y nvidia-driver-latest-dkms
@@ -42,7 +50,7 @@ jobs:
         nvcc --version
         which nvcc
     - name: Headers
-      run: sudo yum install -y "kernel-devel-uname-r == $(uname -r)"
+      run: sudo yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
     - name: SMI
       run: nvidia-smi
     - name: Install setuptools
