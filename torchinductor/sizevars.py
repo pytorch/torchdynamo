@@ -176,6 +176,18 @@ class SizeVarAllocator(object):
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
 
+    def maybe_guard_multiple_of(self, numerator, denominator):
+        """if denominator divides numerator, return True and guard on that fact"""
+        if sympy.gcd(numerator, denominator) == denominator:
+            # can prove it symbolically
+            return True
+        if self.size_hint(numerator) % self.size_hint(denominator) == 0:
+            from .ir import ModularIndexing
+
+            self.guard_equals(ModularIndexing(numerator, 1, denominator), 0)
+            return True
+        return False
+
     def guard_static_shape(self, left):
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))

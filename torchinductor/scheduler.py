@@ -511,13 +511,6 @@ class Scheduler:
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
-    def maybe_remove_buffer(self, node: SchedulerNode, check_group: Callable):
-        name = node.get_name()
-        if name in self.mutation_renames:
-            return
-        if node.can_remove_buffer(check_group=check_group):
-            V.graph.removed_buffers.add(name)
-
     def enqueue(self, node):
         if isinstance(node, (tuple, list)):
             for n in node:
