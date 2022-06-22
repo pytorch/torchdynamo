@@ -1714,6 +1714,16 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    def test_large_reduction_list(self):
+        dtype = torch.float32
+        device = "cpu"
+
+        def check_sum_all(tensor: torch.Tensor) -> None:
+            pylist = tensor.reshape(-1).tolist()
+            self.assertEqual(tensor.sum(), sum(pylist))
+
+        check_sum_all(torch.randn(200000, dtype=dtype, device=device))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
