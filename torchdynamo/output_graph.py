@@ -78,6 +78,7 @@ class OutputGraph(fx.Tracer):
         self.root_tx = root_tx
         self.cleanups = []
         self.should_exit = False
+        self.random_values_var = None
 
     @property
     def output(self):
@@ -235,6 +236,9 @@ class OutputGraph(fx.Tracer):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
+        if len(tx.random_calls) > 0:
+            self.random_values_var = self.new_var("random_values")
+
         if (
             stack_values
             and all(
@@ -254,13 +258,7 @@ class OutputGraph(fx.Tracer):
             )
         else:
             graph_output_var = self.new_var("graph_out")
-            if len(tx.random_calls) > 0:
-                _random_values_var = self.new_var("random_values")
-            else:
-                _random_values_var = None
-            pass1 = PyCodegen(
-                tx, root, graph_output_var, random_values_var=_random_values_var
-            )
+            pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -271,7 +269,6 @@ class OutputGraph(fx.Tracer):
                 root,
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
-                random_values_var=_random_values_var,
             )
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)

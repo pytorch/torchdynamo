@@ -54,7 +54,6 @@ class PyCodegen(object):
         root: torch.nn.Module = None,
         graph_output_var: str = None,
         tempvars=None,
-        random_values_var=None,
     ):
         self.root = root
         self.top_of_stack = None
@@ -67,7 +66,6 @@ class PyCodegen(object):
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
-        self.random_values_var = random_values_var
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
@@ -333,7 +331,7 @@ class PyCodegen(object):
                 [
                     self.create_load_global("_generate_random_values", add=True),
                     create_instruction("CALL_FUNCTION", 0),
-                    self.create_store(self.random_values_var),
+                    self.create_store(self.tx.output.random_values_var),
                 ]
             )
 
