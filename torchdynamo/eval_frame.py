@@ -285,7 +285,7 @@ class TorchPatcher:
         torch.fx.symbolic_trace = disable(torch.fx.symbolic_trace)
 
         torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
-        torch.distributions.Distribution.set_default_validate_args(False)
+        # torch.distributions.Distribution.set_default_validate_args(False)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
