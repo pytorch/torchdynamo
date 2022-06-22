@@ -126,7 +126,7 @@ class TritonTemplateKernel(TritonKernel):
             # else, delta_x_ptr is None
         return
 
-    def gen_grid(self):
+    def gen_grid(self, name):
         code = IndentedBuffer()
         if isinstance(self.node, ir.Convolution):
             BATCH = self.args_dict["BATCH"]
@@ -136,7 +136,7 @@ class TritonTemplateKernel(TritonKernel):
             with code.indent():
                 code.splice(
                     f"""
-                    def grid(META):
+                    def grid_{name}(META):
                         return (
                             triton.cdiv({BATCH} * {OUT_H} * {OUT_W}, META["BLOCK_M"]),
                             triton.cdiv({KERNEL_N}, META["BLOCK_N"]),
@@ -158,8 +158,8 @@ class TritonTemplateKernel(TritonKernel):
             ", " + extra_args if extra_args and len(extra_args) > 0 else ""
         )
         args_kwargs = args + ", " + self_const_kwargs
-        wrapper.writeline(self.gen_grid())
-        wrapper.writeline(f"{name}[grid]({args_kwargs})")
+        wrapper.writeline(self.gen_grid(name))
+        wrapper.writeline(f"{name}[grid_{name}]({args_kwargs})")
 
 
 def template_codegen(scheduler, node):
