@@ -71,8 +71,10 @@ class SuperVariable(VariableTracker):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, **options
             ).call_function(tx, args, kwargs)
+        elif isinstance(inner_fn, types.WrapperDescriptorType):
+            return LambdaVariable(identity, **options)
         else:
-            unimplemented(f"non-function or method super: {inner_fn}")
+            unimplemented(f"non-function or method super: {inner_fn}, {inner_fn.__class__}")
 
 
 class UnknownVariable(VariableTracker):
