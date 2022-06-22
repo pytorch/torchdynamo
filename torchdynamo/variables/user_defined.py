@@ -1,6 +1,6 @@
-import functools
 import collections
 import dataclasses
+import functools
 import importlib
 import inspect
 import random

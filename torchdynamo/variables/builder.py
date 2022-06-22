@@ -8,8 +8,8 @@ import types
 from abc import ABCMeta
 from typing import Any
 from typing import List
-import numpy as np
 
+import numpy as np
 import torch
 
 import torchdynamo
