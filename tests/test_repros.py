@@ -29,6 +29,12 @@ except ImportError:
     HAS_REFS = False
 
 
+from . import test_functions
+from . import test_misc
+from . import test_modules
+from . import test_repros
+
+
 def ifdyn(count1, count2):
     if torchdynamo.config.dynamic_shapes:
         return count1
@@ -455,6 +461,9 @@ class FakeMamlInner(torch.nn.Module):
 class PartialMaml(torch.nn.Module):
     # Highly simplified version of maml.meta.Meta.finetuning
     def __init__(self):
+        # Hack for ensuring import consistency, since functorch has logic on import
+        import functorch
+
         super(PartialMaml, self).__init__()
         self.net = FakeMamlInner()
         self.update_step_test = 10
@@ -892,8 +901,7 @@ class ReproTests(torchdynamo.testing.TestCase):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
         self.assertEqual(cnt.frame_count, ifdyn(3, 2))
-        # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (36, 35, 29, 28, 24))
+        self.assertEqual(cnt.op_count, ifdyn(29, 24))
 
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
@@ -909,8 +917,7 @@ class ReproTests(torchdynamo.testing.TestCase):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
         self.assertEqual(cnt.frame_count, ifdyn(5, 2))
-        # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (36, 35, 29, 28, 24))
+        self.assertEqual(cnt.op_count, ifdyn(29, 24))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
