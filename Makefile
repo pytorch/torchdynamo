@@ -44,7 +44,7 @@ setup:
 setup_nightly:
 	pip install ninja
 	pip install Jinja2
-	pip install --pre torch==1.13.0.dev20220620+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install --pre torch==1.13.0.dev20220621+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
 	pip install -r requirements.txt
 	python setup.py develop
