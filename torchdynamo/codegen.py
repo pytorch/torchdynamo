@@ -36,9 +36,12 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-@torchdynamo.eval_frame.disable
-def _generate_random_values(cnt):
-    return tuple(random.random() for _ in range(cnt))
+def _get_generate_random_values_fn(random_calls):
+    @torchdynamo.eval_frame.disable
+    def _generate_random_values():
+        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+
+    return _generate_random_values
 
 
 class PyCodegen(object):
@@ -329,17 +332,17 @@ class PyCodegen(object):
 
         graphargs = self.tx.output.graphargs
 
-        # to handle random.random call
-        if self.tx.random_call_count > 0:
+        # to handle random calls
+        if len(self.tx.random_calls) > 0:
             self.tx.output.install_global(
-                "_generate_random_values", _generate_random_values
+                "_generate_random_values",
+                _get_generate_random_values_fn(self.tx.random_calls),
             )
             self.extend_output(
                 [
                     self.create_load_global("_generate_random_values", add=True),
-                    self.create_load_const(self.tx.random_call_count),
-                    create_instruction("CALL_FUNCTION", 1),
-                    self.create_store("_torchdynamo_random_values", add=True),
+                    create_instruction("CALL_FUNCTION", 0),
+                    self.create_store("___random_values", add=True),
                 ]
             )
 

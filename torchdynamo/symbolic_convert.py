@@ -1160,7 +1160,7 @@ class InstructionTranslatorBase(object):
         self.f_code: types.CodeType = f_code
 
         self.checkpoint = None
-        self.random_call_count = 0
+        self.random_calls: List[tuple] = []
 
         if sys.version_info >= (3, 10):
             from .resume_execution import CO_ASYNC_GENERATOR

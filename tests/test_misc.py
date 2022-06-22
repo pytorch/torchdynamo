@@ -1609,11 +1609,12 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(res1, res2))
 
     def test_unspecialized_primitive_variable4(self):
-        # no recompilations on random.random
+        # test random functions
         def fn(x):
-            y1 = random.random()
-            y2 = random.random()
-            return x + y1, y1, y2
+            r1 = random.random()
+            y = x + random.uniform(10, 20)
+            r2 = random.randint(2, 18)
+            return y + r1 - r2
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         random.seed(1)
@@ -1622,14 +1623,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             random.seed(1)
             res2 = fn(x)
-            for i in range(10):
-                fn(x)
-
-        print(res1)
-        print(res2)
         self.assertTrue(same(res1, res2))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect

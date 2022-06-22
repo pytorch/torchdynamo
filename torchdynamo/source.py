@@ -67,7 +67,7 @@ class RandomValueSource(Source):
 
     def reconstruct(self, codegen):
         return [
-            codegen.create_load("_torchdynamo_random_values", add=True),
+            codegen.create_load("___random_values", add=True),
             codegen.create_load_const(self.random_call_index),
             create_instruction("BINARY_SUBSCR"),
         ]

@@ -1,3 +1,4 @@
+import functools
 import collections
 import dataclasses
 import importlib
@@ -133,6 +134,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def _supported_random_functions():
+        fns = {
+            random.random,
+            random.randint,
+            random.randrange,
+            random.uniform,
+        }
+        return fns
+
     def call_method(
         self,
         tx,
@@ -206,10 +218,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from .builder import VariableBuilder
 
-        if self.value is random.random:
+        if (
+            self.value in self._supported_random_functions()
+            and all(k.is_python_constant() for k in args)
+            and all(v.is_python_constant() for v in kwargs.values())
+        ):
             example_value = 0.5
-            source = RandomValueSource(random_call_index=tx.random_call_count)
-            tx.random_call_count += 1
+            source = RandomValueSource(random_call_index=len(tx.random_calls))
+            tx.random_calls.append(
+                (
+                    self.value,
+                    [x.as_python_constant() for x in args],
+                    {k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            )
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
