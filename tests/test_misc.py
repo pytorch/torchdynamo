@@ -18,6 +18,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
 from torchdynamo import bytecode_transformation
+from torchdynamo.exc import FakeTensorError
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
@@ -1411,18 +1412,18 @@ class MiscTests(torchdynamo.testing.TestCase):
 
     def test_unsupported_fake_tensor(self):
         def f(x):
-            return (x + x).conj()
+            return torch.quantize_per_tensor(
+                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
+            )
 
-        x = torch.randn(2, 2, dtype=torch.cfloat)
+        x = torch.randn(2, 2)
         with self.assertRaises(RuntimeError):
             with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
                 f(x)
 
         with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
             with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
-                out = f(x)
-
-        self.assertTrue(same(out, f(x)))
+                f(x)
 
     def test_inline_list_mutation(self):
         def f1(x):

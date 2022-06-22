@@ -20,6 +20,7 @@ from torchdynamo.guards import GuardBuilder
 
 from .. import config
 from .. import variables
+from ..exc import FakeTensorError
 from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
@@ -83,10 +84,10 @@ class TensorVariable(VariableTracker):
             return nnmodule(*args, **kwargs)
         assert False, op
 
-    @staticmethod
-    def wrap_to_fake_tensor(e, fake_mode):
+    @classmethod
+    def wrap_to_fake_tensor(cls, e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return fake_mode.from_tensor(e)
+            return cls.wrap_fake_exception(lambda: fake_mode.from_tensor(e))
         else:
             return e
 
@@ -95,7 +96,7 @@ class TensorVariable(VariableTracker):
         try:
             return fn()
         except UnsupportedFakeTensorException as e:
-            raise Exception(
+            raise FakeTensorError(
                 f"Unsupported: {e.reason} with fake tensor propagation. "
                 "Run with config.fake_tensor_propagation=False"
             ) from e
@@ -120,10 +121,8 @@ class TensorVariable(VariableTracker):
                 op = proxy.node.op
                 args, kwargs = cls.propagate_args_kwargs(proxy.node)
                 if config.fake_tensor_propagation:
-                    args = cls.wrap_fake_exception(lambda: tree_map(fake_wrapper, args))
-                    kwargs = cls.wrap_fake_exception(
-                        lambda: tree_map(fake_wrapper, kwargs)
-                    )
+                    args = tree_map(fake_wrapper, args)
+                    kwargs = tree_map(fake_wrapper, kwargs)
                     if op == "call_module" and not is_lazy_module(nnmodule):
                         with torch._subclasses.fake_tensor.FakeCopyMode(tx.fake_mode):
                             nnmodule = cls.wrap_fake_exception(
@@ -145,7 +144,9 @@ class TensorVariable(VariableTracker):
                     example_value = nnmodule(*args, **kwargs)
                 try:
                     with context():
-                        example_value = cls.run_proxy(proxy, args, kwargs, nnmodule)
+                        example_value = cls.wrap_fake_exception(
+                            lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
+                        )
                 except RuntimeError as e:
                     raise TorchRuntimeError from e
             else:
