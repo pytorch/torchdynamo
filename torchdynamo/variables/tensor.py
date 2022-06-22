@@ -173,9 +173,14 @@ class TensorVariable(VariableTracker):
             and proxy.node.target == "item"
             and config.capture_scalar_outputs
         ):
-            return UnspecializedPrimitiveVariable.create(
-                tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
-            )
+            if isinstance(example_value, np.number):
+                return UnspecializedNumpyVariable.create(
+                    tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
+                )
+            else:
+                return UnspecializedPythonVariable.create(
+                    tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
+                )
         else:
             assert (
                 False

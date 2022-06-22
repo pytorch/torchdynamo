@@ -129,6 +129,7 @@ class PyCodegen(object):
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
+
             if isinstance(value, UnspecializedNumpyVariable):
                 output.extend(
                     [
@@ -139,13 +140,6 @@ class PyCodegen(object):
                         create_instruction("CALL_FUNCTION", 1),
                         self._create_load_const(0),
                         create_instruction("BINARY_SUBSCR"),
-                    ]
-                )
-            elif isinstance(value, UnspecializedPythonVariable):
-                output.extend(
-                    [
-                        self.create_load_attr("item"),
-                        create_instruction("CALL_FUNCTION", 0),
                     ]
                 )
         elif isinstance(value, NNModuleVariable):
