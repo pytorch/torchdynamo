@@ -15,6 +15,7 @@ from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
+from .common import DeferredIndentedBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
@@ -210,7 +211,7 @@ class CppKernel(Kernel):
         self.itervars = None
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        self.reduction_suffix = IndentedBuffer()
+        self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
@@ -220,10 +221,9 @@ class CppKernel(Kernel):
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
 
     def store(self, name, index, value):
-        assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
-        self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
+        self.stores.writeline(name, f"{var}[{cexpr(index)}] = {value};")
 
     def reduction(self, name, dtype, reduction_type, index, value):
         tmpvar = self.cse.generate(
@@ -234,10 +234,12 @@ class CppKernel(Kernel):
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
-        self.stores.writeline(f"{reduction_combine(reduction_type, tmpvar, value)};")
+        self.stores.writeline(
+            None, f"{reduction_combine(reduction_type, tmpvar, value)};"
+        )
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
+            self.reduction_suffix.writeline(name, f"{var}[{cexpr(index)}] = {tmpvar};")
         self.cse.store_cache[name] = tmpvar
 
     def set_ranges(self, lengths, reduction_lengths):
@@ -351,7 +353,7 @@ class CppKernel(Kernel):
         prior = (self.loads, self.compute, self.stores, self.cse)
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
+        self.stores = DeferredIndentedBuffer()
         self.cse = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)
