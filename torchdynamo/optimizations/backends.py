@@ -349,7 +349,7 @@ def fx2trt(subgraph, **kwargs):
             )
             return None
 
-        if kwargs["fp16_mode"]:
+        if "fp16_mode" in kwargs and kwargs["fp16_mode"]:
             precision = LowerPrecision.FP16
         else:
             precision = LowerPrecision.FP32
