@@ -72,9 +72,6 @@ class RandomValueSource(Source):
             create_instruction("BINARY_SUBSCR"),
         ]
 
-    def guard_source(self):
-        return GuardSource.LOCAL
-
     def name(self):
         return rename_implicit(f"random_value_{self.random_call_index}")
 

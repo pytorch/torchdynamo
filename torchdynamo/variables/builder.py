@@ -24,7 +24,7 @@ from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
-from ..source import LocalSource
+from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
@@ -349,7 +349,7 @@ class VariableBuilder:
         self.tx.output.graphargs.append(
             GraphArg(self.get_source(), wrapped_value, True)
         )
-        if isinstance(self.get_source(), LocalSource):
+        if not isinstance(self.get_source(), RandomValueSource):
             guards_options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
         else:
             guards_options = {}
