@@ -22,6 +22,7 @@ from .virtualized import ops
 
 lowerings = {}
 aten = torch.ops.aten
+prims = torch.ops.prims
 needs_realized_inputs = {
     aten.avg_pool2d,
     aten.bmm,
@@ -117,7 +118,10 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
 
         return decomp_fn(*args, **kwargs)
 
-    lowerings[aten_fn] = wrapped
+    if isinstance(aten_fn, (list, tuple)):
+        lowerings.update({fn: wrapped for fn in aten_fn})
+    else:
+        lowerings[aten_fn] = wrapped
     return wrapped
 
 
@@ -199,7 +203,7 @@ def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=
     return inner
 
 
-@register_lowering(torch.ops.prims.convert_element_type, type_promote=False)
+@register_lowering(prims.convert_element_type, type_promote=False)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
         return x
@@ -278,6 +282,9 @@ def register_pointwise(
         override_bool=override_bool,
     )
     fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
+
+    if hasattr(prims, name):
+        register_lowering(getattr(prims, name), type_promote=False)(fn)
     return fn
 
 
@@ -347,6 +354,20 @@ def expand(x, sizes):
         V.graph.sizevars.size_hint(sympy_product(sizes) / sympy_product(x.get_size()))
     )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
+
+
+@register_lowering(prims.broadcast_in_dim)
+def broadcast_in_dim(a, shape, broadcast_dimensions):
+    s = list(shape)
+    for broadcast_dimension in broadcast_dimensions:
+        s[broadcast_dimension] = -1
+
+    v = a
+    for idx, x in enumerate(s):
+        if x != -1:
+            v = unsqueeze(v, idx)
+
+    return expand(v, shape)
 
 
 @register_lowering(aten.expand_as)
@@ -1370,7 +1391,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return div(sum_result, denom)
 
 
-@register_lowering(aten.var)
+@register_lowering([aten.var, prims.var])
 def var_(x, axis, correction=1, keepdim=False):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
@@ -1489,7 +1510,7 @@ def copy_(dst, src, non_blocking=False):
     return mutate_to(dst, src)
 
 
-sum_ = register_lowering(aten.sum)(make_reduction("sum"))
+sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
