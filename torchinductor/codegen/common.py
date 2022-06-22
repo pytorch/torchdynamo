@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import itertools
+import math
 import re
 import textwrap
 import typing
@@ -176,24 +177,37 @@ class IndentedBuffer:
     tabwidth = 4
 
     def __init__(self, initial_indent=0):
-        self.contents = StringIO()
+        self._lines = []
         self._indent = initial_indent
-        self.getvalue = self.contents.getvalue
+
+    def getvalue(self):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLine):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            buf.write(line)
+            buf.write("\n")
+        return buf.getvalue()
 
     def clear(self):
-        self.contents.seek(0)
-        self.contents.truncate()
+        self._lines.clear()
 
     def __bool__(self):
-        return len(self.getvalue()) > 0
+        return bool(self._lines)
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        self.contents.write(self.prefix())
-        self.contents.write(line)
-        self.contents.write("\n")
+        if isinstance(line, DeferredLine):
+            self._lines.append(line.with_prefix(self.prefix()))
+        elif line.strip():
+            self._lines.append(f"{self.prefix()}{line}")
+        else:
+            self._lines.append("")
 
     def writelines(self, lines):
         for line in lines:
@@ -210,14 +224,64 @@ class IndentedBuffer:
 
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):
-            other_code = other_code.getvalue()
-        other_code = textwrap.dedent(other_code)
-        if strip:
-            other_code = other_code.lstrip()
-        if not other_code:
-            return
-        assert other_code.endswith("\n")
-        self.contents.write(textwrap.indent(other_code, self.prefix()))
+            dedent = float("inf")
+            for line in other_code._lines:
+                if line:
+                    dedent = min(dedent, len(line) - len(line.lstrip()))
+            if math.isinf(dedent):
+                dedent = 0
+            for line in other_code._lines:
+                IndentedBuffer.writeline(self, line[dedent:])
+        else:
+            other_code = textwrap.dedent(other_code)
+            if strip:
+                other_code = other_code.lstrip()
+            if not other_code:
+                return
+            other_code = other_code.rstrip()
+            for line in other_code.split("\n"):
+                self.writeline(line)
+
+
+class DeferredLine:
+    """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
+
+    def __init__(self, name, line):
+        if not line.strip():
+            line = ""
+        self.name = name
+        self.line = line
+
+    def __call__(self):
+        if self.name not in V.graph.removed_buffers:
+            return self.line
+        return None
+
+    def with_prefix(self, prefix):
+        return DeferredLine(self.name, f"{prefix}{self.line}")
+
+    def lstrip(self):
+        return DeferredLine(self.name, self.line.lstrip())
+
+    def __getitem__(self, index):
+        return DeferredLine(self.name, self.line[index])
+
+    def __bool__(self):
+        return bool(self.line)
+
+    def __len__(self):
+        return len(self.line)
+
+
+class DeferredIndentedBuffer(IndentedBuffer):
+    def __init__(self, initial_indent=0):
+        super(DeferredIndentedBuffer, self).__init__(initial_indent)
+
+    def writeline(self, name, line):
+        if name is None:
+            return super().writeline(line)
+        assert "buf" in name
+        return super().writeline(DeferredLine(name, line))
 
 
 class BracesBuffer(IndentedBuffer):
@@ -317,7 +381,7 @@ class KernelArgs:
             arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
             call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers:
+            if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
@@ -336,7 +400,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers:
+            if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -427,7 +491,7 @@ class Kernel(CodeGen):
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
+        self.stores = DeferredIndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
 
     @contextlib.contextmanager
@@ -507,6 +571,10 @@ class Kernel(CodeGen):
         self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        V.graph.scheduler.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
