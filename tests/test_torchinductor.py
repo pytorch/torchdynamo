@@ -1891,6 +1891,15 @@ class CommonTemplate:
             ],
         )
 
+    @patch.object(config.triton, "max_tiles", 2)
+    def test_fuse_tiled(self):
+        def fn(a, b, c):
+            return a + b, c + 1
+
+        self.common(
+            fn, [torch.randn(128, 1), torch.randn(1, 128), torch.randn(128, 128)]
+        )
+
     def test_expand_as(self):
         def fn(a, b):
             return aten.expand_as(a, b), aten.expand_as(a + 1, b + 1) + 1
