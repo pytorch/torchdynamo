@@ -29,7 +29,6 @@ from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
 from ..utils import is_namedtuple
-from ..utils import is_numpy_float_type
 from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype

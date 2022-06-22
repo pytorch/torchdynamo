@@ -1,6 +1,5 @@
 import collections
 import dataclasses
-import random
 import re
 import sys
 import types
