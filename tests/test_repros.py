@@ -1342,6 +1342,16 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         fn(torch.randn(3))
 
+    def test_isinstance_storage(self):
+        @torchdynamo.optimize("eager")
+        def fn(x):
+            f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
+            bools = torch.BoolStorage.from_buffer(f, "big")
+            self.assertTrue(isinstance(bools, torch.BoolStorage))
+            return x
+
+        fn(torch.randn(3))
+
     def test_dict_list_values(self):
         def inner_fn(args):
             return [x[1].shape for x in args]
