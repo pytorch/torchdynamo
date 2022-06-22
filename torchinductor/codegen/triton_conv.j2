@@ -235,8 +235,7 @@ def {{kernel_name}}(
         & (off_y_k < KERNEL_N)[None, :]
     )
 
-    tl.store(y_ptrs, acc, mask=mask_y)
-{% if pointwise_code|length %}
+{% if pointwise_code | length %}
 {{ pointwise_code | indent(4, true) }}
     {# 
     z = tl.load(z_ptrs, mask=mask_z)
@@ -248,7 +247,7 @@ def {{kernel_name}}(
     the final store explicitly
     tl.store(y_ptrs, acc, mask=mask_y)
     #}
-    # tl.store(y_ptrs, acc, mask=mask_y)
+    tl.store(y_ptrs, acc, mask=mask_y)
 {% endif %}
 
     return

@@ -31,14 +31,16 @@ class TritonTemplateKernel(TritonKernel):
         for k, v in self.inout_dict.items():
             self.args.output_buffers[v] = k
         if isinstance(self.node, ir.Convolution):
-            self.cse.store_cache[self.inout_dict["x"]] = "acc"
+            self.cse.store_cache[self.inout_dict["y"]] = "acc"
 
     def assign_block_numel(self):
         code = IndentedBuffer()
         if isinstance(self.node, ir.Convolution):
             code.writeline("XBLOCK: tl.constexpr = BLOCK_M")
             code.writeline("YBLOCK: tl.constexpr = BLOCK_N")
-            code.writeline("xnumel = BATCH * OUT_H * OUT_W")
+            code.writeline(
+                "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_h)"
+            )
             code.writeline("ynumel = KERNEL_N")
 
         return code
