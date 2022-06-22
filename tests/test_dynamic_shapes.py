@@ -41,5 +41,5 @@ def make_dynamic_cls(cls):
 
 DynamicShapesFunctionTests = make_dynamic_cls(test_functions.FunctionTests)
 DynamicShapesMiscTests = make_dynamic_cls(test_misc.MiscTests)
-DynamicShapesReproTests = make_dynamic_cls(test_repros.ReproTests)
+# DynamicShapesReproTests = make_dynamic_cls(test_repros.ReproTests)
 DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
