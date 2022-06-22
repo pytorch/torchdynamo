@@ -6,6 +6,7 @@ from typing import List
 import torch._C
 import torch.nn
 
+from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import ProfileRecordFunctionVariable
 
 from .. import config
@@ -187,13 +188,35 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1
             return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
         else:
-            return TensorVariable.create(
+            tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function", self.value, *proxy_args_kwargs(args, kwargs)
                 ),
                 **options,
             )
+
+            if "out" in kwargs:
+                # out variants of torch operators like torch.sort and
+                # torch.sigmoid mutate the tensors in the out field. Track such
+                # tensors and rewrite the symbolic locals.
+                if isinstance(tensor_variable, TupleVariable):
+                    assert isinstance(kwargs["out"], TupleVariable)
+                    output_tensor_names = [
+                        tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
+                    ]
+                    for idx, name in enumerate(output_tensor_names):
+                        assert name in tx.symbolic_locals
+                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                elif isinstance(tensor_variable, TensorVariable):
+                    assert isinstance(kwargs["out"], TensorVariable)
+                    name = tx.find_symbolic_locals_name(kwargs["out"])
+                    assert name in tx.symbolic_locals
+                    tx.symbolic_locals[name] = tensor_variable
+                else:
+                    unimplemented(f"out variant of {type(kwargs['out'])}")
+
+            return tensor_variable
 
     def is_dynamic_shapes(self, args, kwargs):
         """Check for dynamic shapes when shape specialization is enabled"""

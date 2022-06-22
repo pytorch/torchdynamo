@@ -1377,14 +1377,27 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         def fn():
             tensor = torch.randn((3, 5), dtype=dtype, device=device)[:, 0]
-            values = torch.tensor(0, dtype=dtype, device=device)
-            indices = torch.tensor(0, dtype=torch.long, device=device)
-            torch.sort(tensor, out=(values, indices))
-            self.assertEqual(values.stride(), (1,))
-            self.assertEqual(indices.stride(), (1,))
+            values1 = torch.tensor(0, dtype=dtype, device=device)
+            indices1 = torch.tensor(0, dtype=torch.long, device=device)
+            torch.sort(tensor, out=(values1, indices1))
+            self.assertEqual(values1.stride(), (1,))
+            self.assertEqual(indices1.stride(), (1,))
 
         fn()
-        torchdynamo.config.debug = True
-        torchdynamo.config.trace = True
+        with torchdynamo.optimize("eager"):
+            fn()
+
+    def test_sigmoid_out(self):
+
+        dtype = torch.float32
+        device = "cpu"
+
+        def fn():
+            inp = torch.randn((3, 5), dtype=dtype, device=device)
+            out1 = torch.tensor(0, dtype=dtype, device=device)
+            torch.sigmoid(inp, out=out1)
+            self.assertEqual(out1.numel(), 15)
+
+        fn()
         with torchdynamo.optimize("eager"):
             fn()
