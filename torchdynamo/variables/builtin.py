@@ -2,7 +2,6 @@ import functools
 import inspect
 import itertools
 import math
-import numpy
 import operator
 import types
 from typing import Dict

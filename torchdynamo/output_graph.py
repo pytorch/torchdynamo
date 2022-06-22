@@ -160,13 +160,6 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def update_co_varnames(self, name):
-        """Ensure self.code_options.co_varnames contains name"""
-        if name not in self.code_options["co_varnames"]:
-            self.code_options["co_varnames"] = tuple(
-                self.code_options["co_varnames"]
-            ) + (name,)
-
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
@@ -261,7 +254,13 @@ class OutputGraph(fx.Tracer):
             )
         else:
             graph_output_var = self.new_var("graph_out")
-            pass1 = PyCodegen(tx, root, graph_output_var)
+            if len(tx.random_calls) > 0:
+                _random_values_var = self.new_var("random_values")
+            else:
+                _random_values_var = None
+            pass1 = PyCodegen(
+                tx, root, graph_output_var, random_values_var=_random_values_var
+            )
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -272,6 +271,7 @@ class OutputGraph(fx.Tracer):
                 root,
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+                random_values_var=_random_values_var,
             )
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
