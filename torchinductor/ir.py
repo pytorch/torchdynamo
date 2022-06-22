@@ -2175,38 +2175,42 @@ class Convolution(ExternKernelAlloc):
         stride_w = f"{in_args[1]}.stride()"
         stride_y = f"{self.get_name()}.stride()"
 
-        args_dict = OrderedDict(
+        inout_dict = OrderedDict(
             [
                 ("x", f"{in_args[0]}"),
                 ("w", f"{in_args[1]}"),
                 ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
                 ("y", f"{self.get_name()}"),
-                ("stride_xn", stride_x + "[0]"),
-                ("stride_xc", stride_x + "[1]"),
-                ("stride_xh", stride_x + "[2]"),
-                ("stride_xw", stride_x + "[3]"),
-                ("stride_wn", stride_w + "[0]"),
-                ("stride_wc", stride_w + "[1]"),
-                ("stride_wh", stride_w + "[2]"),
-                ("stride_ww", stride_w + "[3]"),
-                ("stride_yn", stride_y + "[0]"),
-                ("stride_yc", stride_y + "[1]"),
-                ("stride_yh", stride_y + "[2]"),
-                ("stride_yw", stride_y + "[3]"),
+            ]
+        )
+        args_dict = OrderedDict(
+            [
+                ("stride_xn", f"{self.inputs[0].get_stride()[0]}"),
+                ("stride_xc", f"{self.inputs[0].get_stride()[1]}"),
+                ("stride_xh", f"{self.inputs[0].get_stride()[2]}"),
+                ("stride_xw", f"{self.inputs[0].get_stride()[3]}"),
+                ("stride_wn", f"{self.inputs[1].get_stride()[0]}"),
+                ("stride_wc", f"{self.inputs[1].get_stride()[1]}"),
+                ("stride_wh", f"{self.inputs[1].get_stride()[2]}"),
+                ("stride_ww", f"{self.inputs[1].get_stride()[3]}"),
+                ("stride_yn", f"{self.get_stride()[0]}"),
+                ("stride_yc", f"{self.get_stride()[1]}"),
+                ("stride_yh", f"{self.get_stride()[2]}"),
+                ("stride_yw", f"{self.get_stride()[3]}"),
                 (
                     "stride_biasn",
-                    f"{in_args[2]}.stride()[0]" if len(in_args) >= 3 else "None",
+                    f"{self.inputs[0].get_stride()[0]}" if len(in_args) >= 3 else "None",
                 ),
                 ("delta_x_ptr", "None"),
-                ("BATCH", f"{in_args[0]}.shape[0]"),
-                ("IN_C", f"{in_args[0]}.shape[1]"),
-                ("IN_H", f"{in_args[0]}.shape[2]"),
-                ("IN_W", f"{in_args[0]}.shape[3]"),
-                ("KERNEL_N", f"{in_args[1]}.shape[0]"),
-                ("KERNEL_H", f"{in_args[1]}.shape[2]"),
-                ("KERNEL_W", f"{in_args[1]}.shape[3]"),
-                ("OUT_H", f"{self.get_name()}.shape[2]"),
-                ("OUT_W", f"{self.get_name()}.shape[3]"),
+                ("BATCH", f"{self.inputs[0].get_size()[0]}"),
+                ("IN_C", f"{self.inputs[0].get_size()[1]}"),
+                ("IN_H", f"{self.inputs[0].get_size()[2]}"),
+                ("IN_W", f"{self.inputs[0].get_size()[3]}"),
+                ("KERNEL_N", f"{self.inputs[1].get_size()[0]}"),
+                ("KERNEL_H", f"{self.inputs[1].get_size()[2]}"),
+                ("KERNEL_W", f"{self.inputs[1].get_size()[3]}"),
+                ("OUT_H", f"{self.get_size()[2]}"),
+                ("OUT_W", f"{self.get_size()[3]}"),
                 ("stride_h", f"{const_args[0][0]}"),
                 ("stride_w", f"{const_args[0][1]}"),
                 ("padding_h", f"{const_args[1][0]}"),
@@ -2230,8 +2234,8 @@ class Convolution(ExternKernelAlloc):
         CONV1X1_NHWC = (
             "True"
             if self.inputs[0].get_stride()[1] == 1
-            and self.inputs[1].shape[2] == 1
-            and self.inputs[1].shape[3] == 1
+            and self.inputs[1].get_size()[2] == 1
+            and self.inputs[1].get_size()[3] == 1
             else "False"
         )
         # dict for tl.constexpr
@@ -2249,7 +2253,7 @@ class Convolution(ExternKernelAlloc):
             ]
         )
 
-        return args_dict, const_dict, other_dict
+        return inout_dict, args_dict, const_dict, other_dict
 
 
 @dataclasses.dataclass
