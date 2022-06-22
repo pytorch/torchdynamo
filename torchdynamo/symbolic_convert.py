@@ -1235,6 +1235,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                         GuardBuilder.LIST_LENGTH,
                         GuardBuilder.DICT_KEYS,
                         GuardBuilder.ODICT_KEYS,
+                        GuardBuilder.TUPLE_ITERATOR_LEN,
                     )
                 ]
                 self.output.guards.update(index_guards)
