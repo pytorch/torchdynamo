@@ -63,7 +63,6 @@ def bench(layer_params, layer_id, p):
     IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer_params
     dilation, groups = (1,1), 1
     dtype=torch.float32
-    provider = "torchinductor"
 
     OUT_H = (IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]) // stride[0]
     OUT_W = (IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]) // stride[1]
@@ -77,8 +76,9 @@ def bench(layer_params, layer_id, p):
 
     y = conv_torchinductor(x, w, bias)
     y_correct = conv(x, w, bias)
-    # print("y", y[0,:,0,0])
-    # print("y_correct", y[0,:,0,0])
+    assert(same(y, y_correct, cos_similarity=True))
+    y = conv_fusion_torchinductor(x, w, bias)
+    y_correct = conv_fusion(x, w, bias)
     assert(same(y, y_correct, cos_similarity=True))
 
     fn_conv = lambda: conv(x, w, bias)

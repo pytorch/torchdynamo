@@ -2263,10 +2263,6 @@ class Convolution(ExternKernelAlloc):
         if len(in_args) < 3:
             # otherwise, bias=None is the first constant_args
             const_args = const_args[1:]
-        # stride of inputs and outputs
-        stride_x = f"{in_args[0]}.stride()"
-        stride_w = f"{in_args[1]}.stride()"
-        stride_y = f"{self.get_name()}.stride()"
 
         inout_dict = OrderedDict(
             [

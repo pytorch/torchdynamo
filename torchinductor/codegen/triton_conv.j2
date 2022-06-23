@@ -235,7 +235,7 @@ def {{kernel_name}}(
         & (off_y_k < KERNEL_N)[None, :]
     )
 
-{% if pointwise_code | length %}
+{% if pointwise_code %}
 {{ pointwise_code | indent(4, true) }}
     {# 
     z = tl.load(z_ptrs, mask=mask_z)
