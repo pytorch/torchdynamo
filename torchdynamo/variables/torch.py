@@ -254,33 +254,11 @@ class TorchVariable(VariableTracker):
 
         non functional loss call: input, target, optional_output
         """
-        # TODO(voz): This feels tantalizingly close to something we could just codegen?
-        weight = (
-            args[0] if args else kwargs.get("weight", variables.ConstantVariable(None))
-        )
-        size_average = (
-            args[1]
-            if args
-            else kwargs.get("size_average", variables.ConstantVariable(None))
-        )
-        ignore_index = (
-            args[2]
-            if args
-            else kwargs.get("ignore_index", variables.ConstantVariable(None))
-        )
-        reduce_arg = (
-            args[3] if args else kwargs.get("reduce", variables.ConstantVariable(None))
-        )
-        reduction = (
-            args[4]
-            if args
-            else kwargs.get("reduction", variables.ConstantVariable(None))
-        )
-        label_smoothing = (
-            args[5]
-            if args
-            else kwargs.get("label_smoothing", variables.ConstantVariable(None))
-        )
+        def normalize_args(weight=ConstantVariable(None), size_average=ConstantVariable(None), ignore_index=ConstantVariable(-100), reduce=ConstantVariable(None), reduction=ConstantVariable('mean'), label_smoothing=ConstantVariable(0.0)):
+            return weight, size_average, ignore_index, reduce, reduction, label_smoothing
+   
+        weight, size_average, ignore_index, reduce_arg, reduction, label_smoothing = normalize_args(*args, **kwargs) 
+    
 
         def fake_cross_entropy_loss(input, target):
             return variables.TensorVariable.create(
