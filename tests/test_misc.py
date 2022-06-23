@@ -1724,7 +1724,6 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
-
     def test_override_get_attribute(self):
         class MyMod(torch.nn.Module):
             bar = torch.tensor([[10.6763, 11.7445, -2.2369]]) * 2
@@ -1744,23 +1743,21 @@ class MiscTests(torchdynamo.testing.TestCase):
 
                 return bar
 
-
         with torchdynamo.optimize("eager", nopython=True):
             x = torch.tensor([[10.6763, 11.7445, -2.2369]])
             model = MyMod()
             y = model(-1)
-        
-        self.assertTrue(torch.allclose(y, torch.tensor([[10.6763, 11.7445, -2.2369]]) * 2))
-        
+
+        self.assertTrue(
+            torch.allclose(y, torch.tensor([[10.6763, 11.7445, -2.2369]]) * 2)
+        )
+
         with torchdynamo.optimize("eager", nopython=True):
             x = torch.tensor([[10.6763, 11.7445, -2.2369]])
             model = MyMod()
             y = model(6)
 
-            
-        self.assertTrue(torch.allclose(y, torch.tensor([[ 64.0578,  70.4670, -13.4214]])))
-
-
+        self.assertTrue(torch.allclose(y, torch.tensor([[64.0578, 70.4670, -13.4214]])))
 
 
 class TestTracer(JitTestCase):
