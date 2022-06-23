@@ -1,3 +1,4 @@
+from enum import auto
 import torch
 import triton
 import triton.language as tl
@@ -9,50 +10,14 @@ def init_to_zero(name):
     return lambda nargs: nargs[name].zero_()
 
 
-def get_configs_io_bound():
-    configs = []
-    for num_stages in [2, 3, 4, 5, 6]:
-        for block_m in [16, 32]:
-            for block_k in [32, 64]:
-                for block_n in [32, 64, 128, 256]:
-                    num_warps = 2 if block_n <= 64 else 4
-                    configs.append(
-                        triton.Config(
-                            {
-                                "BLOCK_M": block_m,
-                                "BLOCK_N": block_n,
-                                "BLOCK_K": block_k,
-                                "SPLIT_K": 1,
-                            },
-                            num_stages=num_stages,
-                            num_warps=num_warps,
-                        )
-                    )
-                    # split_k
-                    for split_k in [2, 4, 8, 16]:
-                        configs.append(
-                            triton.Config(
-                                {
-                                    "BLOCK_M": block_m,
-                                    "BLOCK_N": block_n,
-                                    "BLOCK_K": block_k,
-                                    "SPLIT_K": split_k,
-                                },
-                                num_stages=num_stages,
-                                num_warps=num_warps,
-                                pre_hook=init_to_zero("C"),
-                            )
-                        )
-    return configs
-
-
 @triton.heuristics(
     {
         "EVEN_K": lambda args: args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0,
     }
 )
 @triton.autotune(
-    configs=[
+    configs=
+    [
         # basic configs for compute-bound matmuls
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32, "SPLIT_K": 1},
@@ -99,32 +64,63 @@ def get_configs_io_bound():
             num_stages=5,
             num_warps=2,
         ),
-        # good for int8
+
+        # additional configs
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 128, "SPLIT_K": 1},
+            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64, "SPLIT_K": 1},
             num_stages=3,
             num_warps=8,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 128, "SPLIT_K": 1},
+            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
             num_stages=3,
             num_warps=8,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128, "SPLIT_K": 1},
+            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
             num_stages=4,
             num_warps=4,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
+            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=2,
             num_warps=4,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=2,
             num_warps=4,
         ),
+
+        # additional configs for K = 64
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=8,
+        ),
+        triton.Config(
+            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=4,
+        ),
+
+
+
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
             num_stages=4,
@@ -145,14 +141,40 @@ def get_configs_io_bound():
             num_stages=5,
             num_warps=2,
         ),
-    ]
-    + get_configs_io_bound(),
+
+
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=4,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},
+            num_stages=1,
+            num_warps=2,
+        ),
+    ],
+    # + get_configs_io_bound(),
+
     key=["M", "N", "K"],
-    prune_configs_by={
-        "early_config_prune": early_config_prune,
-        "perf_model": estimate_matmul_time,
-        "top_k": 18,
-    },
+
+    #
+    # key=["M", "N", "K"],
+    # prune_configs_by={
+    #     "early_config_prune": early_config_prune,
+    #     "perf_model": estimate_matmul_time,
+    #     "top_k": 18,
+    # },
 )
 @triton.jit
 def _kernel(
@@ -177,7 +199,6 @@ def _kernel(
     ACC_TYPE: tl.constexpr,
 ):
     # matrix multiplication
-
     pid = tl.program_id(0)
     pid_z = tl.program_id(1)
     bid = tl.program_id(2)
@@ -212,6 +233,7 @@ def _kernel(
         A += BLOCK_K * SPLIT_K * stride_ak
         B += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to(C.dtype.element_ty)
+
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -237,7 +259,6 @@ def bmm_out(a, b, out):
     _, _, N = b.shape
     # allocates output
     c = out
-    # c = torch.empty((B, M, N), device=device, dtype=a.dtype)
     # accumulator types
     ACC_TYPE = (
         tl.float32
@@ -258,4 +279,8 @@ def bmm_out(a, b, out):
     #     META["SPLIT_K"],
     #     B,
     # )
+
+    autotuner = _kernel[grid].kernel
     _kernel[grid](a, b, c, M, N, K, K, 1, N, 1, N, 1, GROUP_M=8, ACC_TYPE=ACC_TYPE)
+    # print(autotuner.best_config)
+    # print(autotuner.configs_timings)

@@ -4,7 +4,6 @@ import torchdynamo
 import torchdynamo.config
 import torchinductor.config as config
 
-
 @torchdynamo.optimize("inductor", nopython=True)
 def inductor_aten_bmm(a, b):
     return torch.bmm(a, b)
@@ -25,12 +24,10 @@ def test_total_time(shapes):
         b = torch.randn(b_shape, device='cuda', dtype=a.dtype)
 
         config.triton.use_bmm = False
-        inductor_aten_bmm(a, b)
+        c1 = inductor_aten_bmm(a, b)
 
         config.triton.use_bmm = True
-        c = inductor_triton_bmm(a, b)
-        print(c)
-        print(torch_bmm(a, b))
+        c2 = inductor_triton_bmm(a, b)
 
         torch_ms = time_with_torch_timer(torch_bmm, (a, b)).mean * 1000
 
