@@ -248,9 +248,11 @@ class TorchVariable(VariableTracker):
 
     def _call_cross_entropy_loss(self, tx, args, kwargs, options):
         """
-                functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean', label_smoothing=0.0
+        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
 
-        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean', label_smoothing=0.0
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
 
         non functional loss call: input, target, optional_output
         """
