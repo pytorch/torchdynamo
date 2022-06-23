@@ -45,8 +45,7 @@ class TritonTemplateKernel(TritonKernel):
 
         return code
 
-
-    def codegen_body(self, name):
+    def codegen_body(self, name, fuse):
         """
         put render_variables into the template
         to generate the final code
@@ -70,14 +69,15 @@ class TritonTemplateKernel(TritonKernel):
         render_dict = {}
         render_dict["kernel_name"] = name
         render_dict["extra_argdefs"] = self.extra_argdefs
-        render_dict["pointwise_code"] = self.pointwise_code.getvalue()
+        render_dict["pointwise_code"] = \
+            self.pointwise_code.getvalue() if fuse else None
         self.body = self.template.render(render_dict) + "\n"
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(self, name=None, fuse=False):
 
         code = IndentedBuffer()
 
-        self.codegen_body(name)
+        self.codegen_body(name, fuse)
         code.splice(self.body)
 
         if name is not None:
@@ -175,6 +175,7 @@ def template_codegen(scheduler, node):
     deivce, group = node.group
 
     reschedule = []
+    fuse = False
     with scheduler.kernel(TritonTemplateKernel(node.node, *group)) as kernel:
         # map const args/ shape/ strides to kernel args
         kernel.map_args()
@@ -202,6 +203,7 @@ def template_codegen(scheduler, node):
                 try:
                     node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     node.mark_fusable()
+                    fuse=True
                 except CantSplit:
                     reschedule.append(node)
         else:
@@ -214,7 +216,7 @@ def template_codegen(scheduler, node):
 
         kernel_name = wrapper.next_kernel_name()
         # code gen kernel
-        wrapper.header.splice(kernel.codegen_kernel(kernel_name))
+        wrapper.header.splice(kernel.codegen_kernel(kernel_name, fuse))
         # gen precompute tensor (like delta_x_ptr) if needed
         kernel.precompute(wrapper, kernel_name)
         # code gen call to kernel
