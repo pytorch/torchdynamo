@@ -254,6 +254,7 @@ class TorchVariable(VariableTracker):
 
         non functional loss call: input, target, optional_output
         """
+        from . import ConstantVariable
 
         def normalize_args(
             weight=ConstantVariable(None),
