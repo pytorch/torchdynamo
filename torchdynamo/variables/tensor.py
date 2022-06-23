@@ -28,6 +28,7 @@ from .base import typestr
 from .lists import ShapeVariable
 from .lists import SizeVariable
 
+
 @contextmanager
 def preserve_rng_state():
     rng = torch.clone(torch.random.get_rng_state())
@@ -174,10 +175,10 @@ class TensorVariable(VariableTracker):
             return UnspecializedPrimitiveVariable.create(
                 tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
             )
-        elif (
-            example_value is not None and isinstance(example_value, torch.finfo)
-        ):
-            from torchdynamo.variables import UserDefinedClassVariable, UserDefinedObjectVariable
+        elif example_value is not None and isinstance(example_value, torch.finfo):
+            from torchdynamo.variables import UserDefinedClassVariable
+            from torchdynamo.variables import UserDefinedObjectVariable
+
             return variables.ConstantVariable(example_value)
             # return UserDefinedObjectVariable(example_value, torch.finfo)
         else:
@@ -524,7 +525,8 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         The caller is responsible for wrapping the return value, if needed.
         """
-        from torchdynamo.variables import UserDefinedClassVariable, UserDefinedObjectVariable
+        from torchdynamo.variables import UserDefinedClassVariable
+        from torchdynamo.variables import UserDefinedObjectVariable
         from torchdynamo.variables.builder import TupleVariable
         from torchdynamo.variables.builder import VariableBuilder
 

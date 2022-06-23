@@ -17,8 +17,11 @@ log = logging.getLogger(__name__)
 class AOTAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
+    last_gm = None
+
     @classmethod
     def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
+        last_gm = gm
         if count_calls(gm.graph) < 2:
             return gm.forward  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()

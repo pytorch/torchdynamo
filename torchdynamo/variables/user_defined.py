@@ -8,6 +8,8 @@ from typing import List
 
 import torch.nn
 
+from torchdynamo import config
+
 from .. import variables
 from ..exc import unimplemented
 from ..guards import Guard
@@ -18,7 +20,7 @@ from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
-from torchdynamo import config
+
 
 class UserDefinedVariable(VariableTracker):
     pass
@@ -198,7 +200,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
         return super().call_method(tx, name, args, kwargs)
-            
 
     def _check_for_getattribute(self):
         try:
