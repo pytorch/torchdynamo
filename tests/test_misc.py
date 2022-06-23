@@ -1714,6 +1714,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+
     def test_cross_entropy_loss_fancy_ctor(self):
         output = None
         rand_5 = torch.randn(5)
@@ -1750,6 +1751,17 @@ class MiscTests(torchdynamo.testing.TestCase):
         output = loss(input, target)
 
         self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_large_reduction_list(self):
+        dtype = torch.float32
+        device = "cpu"
+
+        def check_sum_all(tensor: torch.Tensor) -> None:
+            pylist = tensor.reshape(-1).tolist()
+            self.assertTrue(same(tensor.sum(), torch.tensor(sum(pylist))))
+
+        check_sum_all(torch.randn(200000, dtype=dtype, device=device))
+
 
 
 class TestTracer(JitTestCase):
