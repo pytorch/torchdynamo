@@ -107,6 +107,8 @@ class TorchVariable(VariableTracker):
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.Softmax:
                 return self._call_softmax(tx, args, kwargs, options)
+            if self.value is torch.nn.CrossEntropyLoss:
+                return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
         elif (
@@ -243,6 +245,20 @@ class TorchVariable(VariableTracker):
             )
 
         return variables.LambdaVariable(fake_softmax, **options)
+
+    def _call_cross_entropy_loss(self, tx, args, kwargs, options):
+        def fake_cel(input, target):
+            return variables.TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.nn.functional.cross_entropy,
+                    *proxy_args_kwargs([input, target], {}),
+                ),
+                **VariableTracker.propagate([self, input, target]),
+            )
+
+        return variables.LambdaVariable(fake_cel, **options)
 
     def _call_ntuple(self, tx, args, kwargs, options):
         """inline behavior of torch.nn.modules.utils._ntuple"""

@@ -231,7 +231,8 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             return None
 
         if is_generator(code):
-            unimplemented("generator")
+            # unimplemented("generator")
+            return None
         if cache_size >= config.cache_size_limit:
 
             def format_func_info(code):
