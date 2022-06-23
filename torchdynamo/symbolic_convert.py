@@ -1127,6 +1127,12 @@ class InstructionTranslatorBase(object):
             lookup_line=False,
         )
 
+    def find_symbolic_locals_name(self, tensor_variable):
+        for key, value in self.symbolic_locals.items():
+            if value is tensor_variable:
+                return key
+        return None
+
     def __init__(
         self,
         output: OutputGraph,
