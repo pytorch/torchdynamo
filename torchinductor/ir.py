@@ -1497,6 +1497,98 @@ class ComputedBuffer(Buffer):
         sizes = [sizes[i] for i in order]
         return sizes, inverse_reorder(order)
 
+    @staticmethod
+    def _apply_loop_reordering_channel_last(index_vars, sizes):
+        """
+        apply channel-last loop order
+        """
+        # nchw -> nhwc
+        if len(sizes) == 4:
+            order = [0, 2, 3, 1]
+            sizes = [sizes[i] for i in order]
+            index_vars = [index_vars[i] for i in order]
+            return sizes, inverse_reorder(order), index_vars
+        else:
+            return sizes, inverse_reorder(range(len(sizes))), index_vars
+
+    def reorder_channel_last(self):
+
+        _, args, var_ranges = dependencies.index_vars_squeeze(
+            self.data.get_size(), self.data.get_reduction_size(), prefix="q"
+        )
+        with patch.object(ConstantBuffer, "override_device", self.get_device()):
+            body = LoopBody(
+                self.get_store_function(),
+                (args if self.get_reduction_type() else args[:1]),
+                var_ranges,
+            )
+        index_formulas = [*body.indexing_exprs.values()]
+        memory_addrs = [*body.reads, *body.writes]
+
+        index_vars = []
+        reduce_vars = []
+        index_size = []
+        reduce_size = []
+        for v, s in var_ranges.items():
+            if v in args[0]:
+                assert not reduce_vars
+                index_vars.append(v)
+                index_size.append(s)
+            else:
+                assert v in args[1]
+                reduce_vars.append(v)
+                reduce_size.append(s)
+
+        def simplify_and_reorder_channel_last(x_vars, sizes):
+            # first reorder, then simply loops (otherwise dimension may be < 4)
+            sizes, reindex1, x_vars = self._apply_loop_reordering_channel_last(x_vars, sizes)
+            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            x_vars = prune(x_vars)
+            reindex = fuse_reindexing(reindex1, reindex2)
+            return sizes, reindex
+        
+        iter_ranges, iter_reindex = simplify_and_reorder_channel_last(index_vars, index_size)
+        reduce_ranges, reduce_reindex = simplify_and_reorder_channel_last(reduce_vars, reduce_size)
+
+        # retrace the loop body with simplification and reordering applied
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_ranges, reduce_ranges, prefix="z"
+        )
+        body = LoopBody(
+            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+        )
+
+        # TODO(jansel): support tiling with modular indexing
+        has_modular_indexing = any(
+            ("ModularIndexing" in str(expr) or "IndexingDiv" in str(expr))
+            for expr in body.indexing_exprs.values()
+        )
+
+        if (
+            is_triton(self.get_device())
+            and not self.get_reduction_type()
+            and iter_ranges
+            and not has_modular_indexing
+            and config.triton.max_tiles > 1
+        ):
+            # TODO(jansel): should we include store strides here or just loads?
+            strides = [
+                V.graph.sizevars.stride_hints(expr, iter_vars)
+                for expr in body.reads
+                # TODO(jansel): how should we tile indirect loads?
+                if "indirect" not in str(expr)
+            ]
+            tiled_ranges = self._tile_contiguous(iter_ranges, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), body
+
+            # alternate tiling heuristic
+            tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
+            if len(tiled_ranges) > 1:
+                return (*tiled_ranges, reduce_ranges), call
+
+        return (iter_ranges, reduce_ranges), body
+
     def get_reduction_size(self):
         return self.data.get_reduction_size()
 

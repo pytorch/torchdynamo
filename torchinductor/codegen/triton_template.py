@@ -9,7 +9,7 @@ from .. import ir
 from ..virtualized import V
 from .common import IndentedBuffer
 from .triton import TritonKernel
-from .triton import split_sizes
+from .triton import CantSplit
 
 template_dict = {ir.Convolution: "triton_conv"}
 
@@ -58,7 +58,8 @@ class TritonTemplateKernel(TritonKernel):
         # add extra args if it is different from 
         # current TritonTemplateKernel args
         for (argdef, call_arg) in zip(argdefs, call_args):
-            if call_arg not in self.inout_dict.values():
+            if call_arg not in self.inout_dict.values() \
+                and call_arg not in self.args_dict.values():
                 self.extra_argdefs.append(argdef)
                 self.extra_call_args.append(call_arg)
 
@@ -192,15 +193,16 @@ def template_codegen(scheduler, node):
             for node in scheduler.pop_group(
                 (tile1 * tile2, sympy.Integer(1)),
             ):
-                # get node tiled ranges
-                sizes, _ = node.get_ranges()
-                split = split_sizes(sizes, tile1, tile2) # split is None
-                # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
-                node.run(
-                    *kernel.set_ranges(sizes[:split], sizes[split:], [])
-                )
-                # node.run(*kernel.set_ranges(tile1, tile2, []))
-                node.mark_fusable()
+                # TODO: reorder node loop ordering to channel last
+                # so that it could be fused with convolution and
+                # have correct results of split_and_set_ranges()
+                # if not channel_last
+                node.reorder_channel_last()
+                try:
+                    node.run(*kernel.split_and_set_ranges(node.get_ranges()))
+                    node.mark_fusable()
+                except CantSplit:
+                    reschedule.append(node)
         else:
             for node in scheduler.pop_group(group):
                 # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
