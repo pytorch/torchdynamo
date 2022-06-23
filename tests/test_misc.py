@@ -1116,6 +1116,10 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
+    def test_version_ci(self):
+        # temporary test to check that the ci torch version is set correctly
+        self.assertTrue(hasattr(torch, "_subclasses"))
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_rand(self):
         cnts = torchdynamo.testing.CompileCounter()
@@ -1709,6 +1713,16 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+
+    def test_large_reduction_list(self):
+        dtype = torch.float32
+        device = "cpu"
+
+        def check_sum_all(tensor: torch.Tensor) -> None:
+            pylist = tensor.reshape(-1).tolist()
+            self.assertTrue(same(tensor.sum(), torch.tensor(sum(pylist))))
+
+        check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
 
 class TestTracer(JitTestCase):
