@@ -247,18 +247,77 @@ class TorchVariable(VariableTracker):
         return variables.LambdaVariable(fake_softmax, **options)
 
     def _call_cross_entropy_loss(self, tx, args, kwargs, options):
-        def fake_cel(input, target):
+        """
+                functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean', label_smoothing=0.0
+
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean', label_smoothing=0.0
+
+        non functional loss call: input, target, optional_output
+        """
+        # TODO(voz): This feels tantalizingly close to something we could just codegen?
+        weight = (
+            args[0] if args else kwargs.get("weight", variables.ConstantVariable(None))
+        )
+        size_average = (
+            args[1]
+            if args
+            else kwargs.get("size_average", variables.ConstantVariable(None))
+        )
+        ignore_index = (
+            args[2]
+            if args
+            else kwargs.get("ignore_index", variables.ConstantVariable(None))
+        )
+        reduce_arg = (
+            args[3] if args else kwargs.get("reduce", variables.ConstantVariable(None))
+        )
+        reduction = (
+            args[4]
+            if args
+            else kwargs.get("reduction", variables.ConstantVariable(None))
+        )
+        label_smoothing = (
+            args[5]
+            if args
+            else kwargs.get("label_smoothing", variables.ConstantVariable(None))
+        )
+
+        def fake_cross_entropy_loss(input, target):
             return variables.TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     torch.nn.functional.cross_entropy,
-                    *proxy_args_kwargs([input, target], {}),
+                    *proxy_args_kwargs(
+                        [
+                            input,
+                            target,
+                            weight,
+                            size_average,
+                            ignore_index,
+                            reduce_arg,
+                            reduction,
+                            label_smoothing,
+                        ],
+                        {},
+                    ),
                 ),
-                **VariableTracker.propagate([self, input, target]),
+                **VariableTracker.propagate(
+                    [
+                        self,
+                        weight,
+                        size_average,
+                        ignore_index,
+                        reduce_arg,
+                        reduction,
+                        label_smoothing,
+                        input,
+                        target,
+                    ]
+                ),
             )
 
-        return variables.LambdaVariable(fake_cel, **options)
+        return variables.LambdaVariable(fake_cross_entropy_loss, **options)
 
     def _call_ntuple(self, tx, args, kwargs, options):
         """inline behavior of torch.nn.modules.utils._ntuple"""

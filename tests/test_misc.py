@@ -1714,6 +1714,43 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    def test_cross_entropy_loss_fancy_ctor(self):
+        output = None
+        rand_5 = torch.randn(5)
+        rand_3_5 = torch.randn(3, 5)
+        target = torch.empty(3, dtype=torch.long).random_(5)
+
+        with torchdynamo.optimize("eager", nopython=True):
+            loss = torch.nn.CrossEntropyLoss(
+                weight=rand_5, reduce=False, label_smoothing=0.5
+            )
+            input = rand_3_5
+            dynamo_output = loss(input, target)
+
+        loss = torch.nn.CrossEntropyLoss(
+            weight=rand_5, reduce=False, label_smoothing=0.5
+        )
+        input = rand_3_5
+        output = loss(input, target)
+
+        self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_cross_entropy_loss_simple_ctor(self):
+        output = None
+        rand_3_5 = torch.randn(3, 5)
+        target = torch.empty(3, dtype=torch.long).random_(5)
+
+        with torchdynamo.optimize("eager", nopython=True):
+            loss = torch.nn.CrossEntropyLoss()
+            input = rand_3_5
+            dynamo_output = loss(input, target)
+
+        loss = torch.nn.CrossEntropyLoss()
+        input = rand_3_5
+        output = loss(input, target)
+
+        self.assertTrue(torch.allclose(dynamo_output, output))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
