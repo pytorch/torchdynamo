@@ -1720,7 +1720,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
-            self.assertEqual(tensor.sum(), sum(pylist))
+            self.assertTrue(same(tensor.sum(), torch.tensor(sum(pylist))))
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
