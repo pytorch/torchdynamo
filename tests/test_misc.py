@@ -160,7 +160,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i)
-        with torchdynamo.optimize(lambda gm: gm.forward):
+        with torchdynamo.optimize("eager"):
             r2 = fn(i)
         self.assertTrue(same(r1, r2))
 
@@ -171,7 +171,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i, [])
-        with torchdynamo.optimize(lambda gm: gm.forward):
+        with torchdynamo.optimize("eager"):
             r2 = fn(i, [])
             r3 = fn(i, tuple())
         self.assertTrue(same(r1, r2))
@@ -1723,6 +1723,20 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(tensor.sum(), torch.tensor(sum(pylist))))
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
+
+    @patch.object(torchdynamo.config, "raise_on_backend_error", True)
+    def test_raise_on_backend_error(self):
+        def my_compiler(gm, _):
+            raise RuntimeError("duck!")
+
+        @torchdynamo.optimize(my_compiler)
+        def fn(a, b):
+            return a + b / (a - b)
+
+        self.assertRaises(
+            torchdynamo.exc.BackendCompilerFailed,
+            lambda: fn(torch.randn(10), torch.randn(10)),
+        )
 
 
 class TestTracer(JitTestCase):

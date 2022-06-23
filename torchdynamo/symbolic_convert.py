@@ -308,10 +308,11 @@ class InstructionTranslatorBase(object):
             ):
                 pass
         except (
-            exc.Unsupported,
+            exc.BackendCompilerFailed,
             exc.RestartAnalysis,
-            exc.TorchRuntimeError,
             exc.SkipFrame,
+            exc.TorchRuntimeError,
+            exc.Unsupported,
         ):
             raise
         except Exception as e:
