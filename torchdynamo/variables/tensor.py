@@ -10,8 +10,10 @@ from typing import List
 
 import torch.fx
 import torch.random
-from torch._subclasses import FakeTensor
-from torch._subclasses import UnsupportedFakeTensorException
+from ..utils import fake_tensors_available
+if fake_tensors_available:
+    from torch._subclasses import FakeTensor
+    from torch._subclasses import UnsupportedFakeTensorException
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map
@@ -115,12 +117,13 @@ class TensorVariable(VariableTracker):
         fake_wrapper = functools.partial(
             cls.wrap_to_fake_tensor, fake_mode=tx.fake_mode
         )
+        use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
 
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
                 args, kwargs = cls.propagate_args_kwargs(proxy.node)
-                if config.fake_tensor_propagation:
+                if use_fake_tensors:
                     args = tree_map(fake_wrapper, args)
                     kwargs = tree_map(fake_wrapper, kwargs)
                     if op == "call_module" and not is_lazy_module(nnmodule):
@@ -150,15 +153,15 @@ class TensorVariable(VariableTracker):
                 except RuntimeError as e:
                     raise TorchRuntimeError from e
             else:
-                if config.fake_tensor_propagation:
+                if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
 
         if isinstance(example_value, torch.Tensor):
-            if not isinstance(example_value, FakeTensor):
+            if not use_fake_tensors:
                 example_value = clone_tensor(example_value)
             proxy.node.meta["example_value"] = example_value
             specialized_props = cls.specialize(example_value)
-            if isinstance(example_value, FakeTensor):
+            if use_fake_tensors and isinstance(example_value, FakeTensor):
                 specialized_props["class_type"] = (
                     torch.nn.Parameter
                     if isinstance(example_value, torch.nn.Parameter)

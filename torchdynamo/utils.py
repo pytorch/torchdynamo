@@ -396,6 +396,15 @@ def rename_implicit(v):
     return v
 
 
+# FakeTensors were introduced after pytorch 1.12, so gate their use
+# to allow pytorch 1.12 to work
+fake_tensors_available = True
+try:
+    from torch._subclasses import FakeTensorMode
+except ImportError:
+    fake_tensors_available = False
+
+
 def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):

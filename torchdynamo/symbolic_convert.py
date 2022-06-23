@@ -10,6 +10,7 @@ import operator
 import sys
 import traceback
 import types
+import torch
 import typing
 from typing import Any
 from typing import Dict
@@ -17,7 +18,8 @@ from typing import Iterable
 from typing import List
 from unittest.mock import patch
 
-from torch._subclasses import FakeTensorMode
+
+from .utils import fake_tensors_available
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
@@ -1165,7 +1167,9 @@ class InstructionTranslatorBase(object):
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
-        self._fake_mode = FakeTensorMode(inner=None)
+        if fake_tensors_available:
+            self._fake_mode = torch._subclasses.FakeTensorMode(inner=None)
+
         self.checkpoint = None
 
         if sys.version_info >= (3, 10):

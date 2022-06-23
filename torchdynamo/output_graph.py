@@ -30,6 +30,7 @@ from .source import Source
 from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
+from .utils import fake_tensors_available
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 
@@ -383,7 +384,8 @@ class OutputGraph(fx.Tracer):
         # some of the tensor objects to be held alive for longer than necessary.
 
         # Clear cache for conversion of real -> fake tensors
-        self.root_tx.fake_mode.fake_tensor_converter = None
+        if fake_tensors_available:
+            self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
