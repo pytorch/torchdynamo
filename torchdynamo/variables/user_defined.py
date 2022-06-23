@@ -230,11 +230,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx, name):
         from . import ConstantVariable
         from .builder import VariableBuilder
+        from torchdynamo import config
 
         options = VariableTracker.propagate(self)
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
-        self._check_for_getattribute()
+        
+        if not config.allow_custom_getattr_and_getattribute:
+            self._check_for_getattribute()
+
         getattr_fn = self._check_for_getattr()
 
         try:

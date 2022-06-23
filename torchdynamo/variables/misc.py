@@ -71,6 +71,10 @@ class SuperVariable(VariableTracker):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, **options
             ).call_function(tx, args, kwargs)
+        elif isinstance(inner_fn, types.WrapperDescriptorType):
+            return LambdaVariable(identity, **options)
+        
+            # print(f"Super Wrapper called: {identity}, {args}, {kwargs}, {self.objvar}, {self.typevar}, {inner_fn}, {inner_fn.__name__}, {inner_fn.__code__}")
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
