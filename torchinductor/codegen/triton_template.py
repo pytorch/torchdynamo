@@ -193,11 +193,12 @@ def template_codegen(scheduler, node):
             for node in scheduler.pop_group(
                 (tile1 * tile2, sympy.Integer(1)),
             ):
-                # TODO: reorder node loop ordering to channel last
+                # if not channel_last layout (data.get_size()[1] != 1),
+                # reorder node loop ordering to channel last
                 # so that it could be fused with convolution and
                 # have correct results of split_and_set_ranges()
-                # if not channel_last
-                node.reorder_channel_last()
+                if len(node.node.data.get_size()) == 4 and node.node.data.get_size()[1] != 1:
+                    node.reorder_channel_last()
                 try:
                     node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     node.mark_fusable()

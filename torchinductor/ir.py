@@ -21,6 +21,7 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
+from .codegen.common import _simplify_loops_channel_last
 from .dependencies import extract_read_writes
 from .utils import sympy_product
 from .virtualized import V
@@ -1542,7 +1543,7 @@ class ComputedBuffer(Buffer):
         def simplify_and_reorder_channel_last(x_vars, sizes):
             # first reorder, then simply loops (otherwise dimension may be < 4)
             sizes, reindex1, x_vars = self._apply_loop_reordering_channel_last(x_vars, sizes)
-            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex2, prune = _simplify_loops_channel_last(x_vars, sizes, index_formulas)
             x_vars = prune(x_vars)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
