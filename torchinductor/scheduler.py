@@ -233,6 +233,13 @@ class SchedulerNode(BaseSchedulerNode):
         ) = node.reorder_channel_last()
 
 
+    def re_simplify_reorder_and_tile(self):
+        node = self.node
+        (
+            self._sizes,
+            self._body,
+        ) = node.simplify_reorder_and_tile()
+
     def can_remove_buffer(self, check_group):
         if (
             self.is_reduction()
