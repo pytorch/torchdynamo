@@ -88,4 +88,4 @@ allowed_functions_module_string_ignorelist = {
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
 
-allow_custom_getattr_and_getattribute = True
+allow_custom_getattribute = True

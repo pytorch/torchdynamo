@@ -237,7 +237,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
 
-        if not config.allow_custom_getattr_and_getattribute:
+        if not config.allow_custom_getattribute:
             self._check_for_getattribute()
 
         getattr_fn = self._check_for_getattr()

@@ -1724,6 +1724,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
+    @patch.object(torchdynamo.config, "allow_custom_getattribute", True)
     def test_override_get_attribute(self):
         class MyMod(torch.nn.Module):
             bar = torch.tensor([[10.6763, 11.7445, -2.2369]]) * 2
