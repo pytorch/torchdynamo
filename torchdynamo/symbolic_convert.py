@@ -1129,7 +1129,7 @@ class InstructionTranslatorBase(object):
 
     def find_symbolic_locals_name(self, tensor_variable):
         for key, value in self.symbolic_locals.items():
-            if value == tensor_variable:
+            if value is tensor_variable:
                 return key
         return None
 
