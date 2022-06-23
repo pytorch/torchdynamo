@@ -201,7 +201,7 @@ class UserMethodVariable(UserFunctionVariable):
 
     def num_parameters(self):
         return super(UserMethodVariable, self).num_parameters() - 1
-    
+
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def __init__(
