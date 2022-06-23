@@ -1,10 +1,9 @@
-from enum import auto
-
 import torch
 import triton
 import triton.language as tl
-from triton.ops.matmul_perf_model import early_config_prune
-from triton.ops.matmul_perf_model import estimate_matmul_time
+
+# from triton.ops.matmul_perf_model import early_config_prune
+# from triton.ops.matmul_perf_model import estimate_matmul_time
 
 
 def init_to_zero(name):
@@ -271,7 +270,7 @@ def bmm_out(a, b, out):
     #     B,
     # )
 
-    autotuner = _kernel[grid].kernel
+    # autotuner = _kernel[grid].kernel
     _kernel[grid](a, b, c, M, N, K, K, 1, N, 1, N, 1, GROUP_M=8, ACC_TYPE=ACC_TYPE)
     # print(autotuner.best_config)
     # print(autotuner.configs_timings)
