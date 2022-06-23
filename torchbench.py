@@ -128,6 +128,12 @@ VERY_SLOW_BENCHMARKS = {
     "hf_BigBird",  # 3339s
     "hf_Longformer",  # 3062s
     "hf_T5",  # 930s
+    "ctr_mbl_feed_30x_dense_over",  # 1850s
+    "ctr_mbl_feed_30x_over",  # 1800s
+    "dhen_5x_dense_over",
+    "dhen_5x_over",
+    "inline_cvr_7x_dense_over",
+    "inline_cvr_7x_over",
 }
 
 # These benchmarks took >60s on an i9-11900K CPU
