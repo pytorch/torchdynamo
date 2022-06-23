@@ -178,12 +178,9 @@ class TensorVariable(VariableTracker):
             example_value is not None and isinstance(example_value, torch.finfo)
         ):
             from torchdynamo.variables import UserDefinedClassVariable, UserDefinedObjectVariable
-            print("Example value:", example_value)
             return variables.ConstantVariable(example_value)
             # return UserDefinedObjectVariable(example_value, torch.finfo)
         else:
-            print("isit?", isinstance(proxy.node.target, torch.finfo))
-            print("isit?", proxy.node.target.__class__)
             assert (
                 False
             ), f"torch.* op returned non-Tensor val: {typestr(example_value)} op: {proxy.node.op} target: {proxy.node.target}"

@@ -198,16 +198,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
         return super().call_method(tx, name, args, kwargs)
-
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        # Warning, bullshit hacks below
-        if isinstance(self.value, torch.finfo):
-            print("Called function on me", args)
-        else:
-            print("fooo poo doo")
             
 
     def _check_for_getattribute(self):
