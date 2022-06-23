@@ -92,7 +92,7 @@ class WrapperCodeGen(CodeGen):
                 self.header.writeline(
                     "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
-            
+
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )

@@ -1,4 +1,5 @@
 from enum import auto
+
 import torch
 import triton
 import triton.language as tl
@@ -16,8 +17,7 @@ def init_to_zero(name):
     }
 )
 @triton.autotune(
-    configs=
-    [
+    configs=[
         # basic configs for compute-bound matmuls
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32, "SPLIT_K": 1},
@@ -64,7 +64,6 @@ def init_to_zero(name):
             num_stages=5,
             num_warps=2,
         ),
-
         # additional configs
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64, "SPLIT_K": 1},
@@ -91,7 +90,6 @@ def init_to_zero(name):
             num_stages=2,
             num_warps=4,
         ),
-
         # additional configs for K = 64
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 64, "SPLIT_K": 1},
@@ -118,9 +116,6 @@ def init_to_zero(name):
             num_stages=1,
             num_warps=4,
         ),
-
-
-
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
             num_stages=4,
@@ -141,8 +136,6 @@ def init_to_zero(name):
             num_stages=5,
             num_warps=2,
         ),
-
-
         triton.Config(
             {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
             num_stages=1,
@@ -165,9 +158,7 @@ def init_to_zero(name):
         ),
     ],
     # + get_configs_io_bound(),
-
     key=["M", "N", "K"],
-
     #
     # key=["M", "N", "K"],
     # prune_configs_by={
