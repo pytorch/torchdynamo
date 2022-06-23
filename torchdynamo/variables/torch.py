@@ -254,11 +254,32 @@ class TorchVariable(VariableTracker):
 
         non functional loss call: input, target, optional_output
         """
-        def normalize_args(weight=ConstantVariable(None), size_average=ConstantVariable(None), ignore_index=ConstantVariable(-100), reduce=ConstantVariable(None), reduction=ConstantVariable('mean'), label_smoothing=ConstantVariable(0.0)):
-            return weight, size_average, ignore_index, reduce, reduction, label_smoothing
-   
-        weight, size_average, ignore_index, reduce_arg, reduction, label_smoothing = normalize_args(*args, **kwargs) 
-    
+
+        def normalize_args(
+            weight=ConstantVariable(None),
+            size_average=ConstantVariable(None),
+            ignore_index=ConstantVariable(-100),
+            reduce=ConstantVariable(None),
+            reduction=ConstantVariable("mean"),
+            label_smoothing=ConstantVariable(0.0),
+        ):
+            return (
+                weight,
+                size_average,
+                ignore_index,
+                reduce,
+                reduction,
+                label_smoothing,
+            )
+
+        (
+            weight,
+            size_average,
+            ignore_index,
+            reduce_arg,
+            reduction,
+            label_smoothing,
+        ) = normalize_args(*args, **kwargs)
 
         def fake_cross_entropy_loss(input, target):
             return variables.TensorVariable.create(
