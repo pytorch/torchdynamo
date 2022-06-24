@@ -1,0 +1,86 @@
+name: Torchbench - cuda - inductor - BERT_pytorch
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-cuda-inductor-BERT_pytorch:
+    runs-on: linux.4xlarge.nvidia.gpu
+    steps:
+    - name: Development Tools
+      run: sudo yum group install -y "Development Tools"
+    - name: lspci
+      run: lspci | grep -i nvidia
+    - name: info
+      run: |
+        uname -m
+        cat /etc/*release
+        gcc --version
+        uname -r
+    - name: Install python
+      run: sudo yum install -y python3 python-devel python3-devel build-essential
+    - name: Update pip
+      run: |
+        sudo yum update -y
+        sudo yum -y install git python3-pip
+        sudo pip3 install --upgrade pip 
+    - uses: actions/checkout@v2
+    - uses: actions/checkout@master
+      with:
+        repository: pytorch/benchmark
+        path: ci_torchbenchmark
+    - name: Install CUDA 11.3
+      shell: bash
+      run: |
+        sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm  || true
+        sudo yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
+        sudo yum clean expire-cache
+        sudo yum install -y nvidia-driver-latest-dkms
+        sudo yum install -y cuda-11-3
+        sudo yum install -y cuda-drivers
+        sudo yum install -y libcudnn8-devel
+    - name: setup Path
+      run: |
+        sudo echo /usr/local/cuda-11.3/bin >> $GITHUB_PATH
+        sudo echo /usr/local/bin >> $GITHUB_PATH
+        sudo ln -s /usr/local/bin/pip /bin/pip
+    - name: nvcc check
+      run: |
+        nvcc --version
+        which nvcc
+    - name: Headers
+      run: sudo yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
+    - name: Install setuptools
+      shell: bash
+      run: sudo pip install setuptools
+    - name: Install psutil
+      shell: bash
+      run: sudo pip install psutil
+    - name: Install ninja
+      shell: bash
+      run: 	sudo pip install ninja
+    - name: Install PyTorch
+      shell: bash
+      run: |
+          pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html --upgrade
+    # Note: this is here for iteration, we will add a `make torchbench_deps` for deps that torchbench has outside of dynamo
+    - name: Install pandas
+      shell: bash
+      run: 	sudo pip install pandas
+    - name: Install scipy
+      shell: bash
+      run: 	sudo pip install scipy
+    - name: Install other deps
+      shell: bash
+      run: sudo pip install -r requirements.txt
+    - name: Setup
+      shell: bash
+      run: sudo python3 setup.py develop
+    - run: sudo python3 torchbench.py -dcuda --inductor -k BERT_pytorch
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
