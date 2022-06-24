@@ -185,6 +185,10 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",
+    # as_strided issue
+    "hf_Longformer",
+    # out of memory
+    "timm_efficientdet",
 }
 
 current_name = ""
@@ -1059,7 +1063,9 @@ def main():
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        NONDETERMINISTIC.update({"demucs", "pyhpc_equation_of_state"})
+        NONDETERMINISTIC.update(
+            {"demucs", "pyhpc_equation_of_state", "timm_efficientdet"}
+        )
 
     if args.no_skip:
         SKIP.clear()

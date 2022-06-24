@@ -2009,15 +2009,6 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(55)])
 
-    @patch.object(config.triton, "max_tiles", 2)
-    def test_fuse_tiled(self):
-        def fn(a, b, c):
-            return a + b, c + 1
-
-        self.common(
-            fn, [torch.randn(128, 1), torch.randn(1, 128), torch.randn(128, 128)]
-        )
-
 
 if HAS_CPU:
 

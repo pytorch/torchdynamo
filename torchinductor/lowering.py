@@ -621,11 +621,12 @@ if has_torchvision_roi_align():
 
 # TODO(jansel): we should implement decomps for these
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.avg_pool2d_backward)
-make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten.avg_pool2d_backward)
+make_fallback(aten.convolution_backward)
+make_fallback(aten.cumsum)
 make_fallback(aten.grid_sampler_2d)
 make_fallback(aten.max_pool2d_with_indices_backward)
 make_fallback(aten.native_batch_norm_backward)
