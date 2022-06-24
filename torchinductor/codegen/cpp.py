@@ -391,7 +391,6 @@ class CppScheduling:
 
             # first any pointwise sharing same loops
             for node in scheduler.pop_group((group + reduction_group, ())):
-                scheduler.maybe_remove_buffer(node, check_group1)
                 node.run(vars, reduction_vars)
                 node.mark_fusable()
 
@@ -408,7 +407,6 @@ class CppScheduling:
                 # we can fuse in some extra pointwise into the suffix
                 with kernel.write_to_suffix():
                     for node in scheduler.pop_group((group, ())):
-                        scheduler.maybe_remove_buffer(node, check_group2)
                         node.run(vars, ())
                         node.mark_fusable()
 

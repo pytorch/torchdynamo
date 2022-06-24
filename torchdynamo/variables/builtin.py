@@ -397,6 +397,20 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(items).add_options(self, fn, seq)
 
     def call_sum(self, tx, seq, **kwargs):
+        # Special case for sum on tuple of floats and ints
+        if (
+            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
+            and all(
+                [
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, (int, float))
+                    for x in seq.items
+                ]
+            )
+            and not kwargs
+        ):
+            new_list = [x.value for x in seq.items]
+            return variables.ConstantVariable(sum(new_list))
         if seq.has_unpack_var_sequence(tx):
             start = kwargs.pop(
                 "start", variables.ConstantVariable(0)
