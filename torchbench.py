@@ -855,6 +855,11 @@ def main():
         action="store_true",
         help="Use same settings as --inductor for baseline comparisons",
     )
+    parser.add_argument(
+        "--raise-on-backend-error",
+        action="store_true",
+        help="Fail a benchmark if backend throws an exception",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -1026,6 +1031,8 @@ def main():
 
     if args.verbose:
         torchdynamo.config.debug = True
+
+    torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
 
     if args.training:
         model_iter_fn = forward_and_backward_pass
