@@ -1,0 +1,103 @@
+from microbenchmarks import model as model
+import torch
+import torchdynamo
+import torchinductor.config
+import triton
+from torchdynamo.testing import same
+from prettytable import PrettyTable
+
+# torchinductor.config.debug = True
+torchinductor.config.triton.dense_indexing = True
+torchinductor.config.triton.convolution = "triton"
+torch.manual_seed(0)
+
+class Func(object):
+    # conv+bias
+    @torchdynamo.optimize("inductor")
+    def conv_add_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
+
+    # conv+bias
+    def conv_add(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv)
+    @torchdynamo.optimize("inductor")
+    def conv_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv)
+    def conv_relu(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv+bias)
+    @torchdynamo.optimize("inductor")
+    def conv_add_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv+bias)
+    def conv_add_relu(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
+
+    # bn(conv)
+    @torchdynamo.optimize("inductor")
+    def conv_bn_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+        return y
+
+    # bn(conv)
+    def conv_bn_relu(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+        return y
+
+    # relu(bn(conv))
+    @torchdynamo.optimize("inductor")
+    def conv_bn_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+        return torch.relu(y)
+
+    # relu(bn(conv))
+    def conv_bn_relu(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+        return torch.relu(y)
+
+def test(layer_params, fusion_type="add"):
+    BATCH = 32
+    IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer_params
+    dilation, groups = (1,1), 1
+    dtype=torch.float32
+
+    torch.manual_seed(0)
+    # allocate inputs, nchw
+    x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
+    w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
+                    dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
+    # bias = torch.randn((1, KERNEL_N, 1, 1), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
+    bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+
+    conv_fusion_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
+    conv_fusion = getattr(Func, f"conv_{fusion_type}")
+    y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
+    # print("y", y[0,:,0,0])
+    # print("y_correct", y[0,:,0,0])
+    assert(same(y, y_correct, cos_similarity=True))
+
+fusion_types = ["add", "relu"]#, "add_relu", "bn", "bn_relu"]
+for fusion_type in fusion_types:
+    for id, layer in enumerate(model.resnet50_layers):
+        test(layer, fusion_type)
+
+# a = torch.randn((10,10), dtype=torch.float32, device="cuda")
+# b = torch.randn((10,10), dtype=torch.float32, device="cuda")
+# _, _ = fn_torchinductor(a, b)

@@ -12,28 +12,29 @@ torch.manual_seed(0)
 useCudaGraph = True
 
 @torchdynamo.optimize("inductor")
-def conv_fusion_torchinductor(x, w, bias):
-    y =  torch.conv2d(x, w)
+def conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups):
+    y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
     # y += bias
     return torch.relu(y)
 
-def conv_fusion(x, w, bias):
-    y =  torch.conv2d(x, w)
+def conv_fusion(x, w, bias, stride, padding, dilation, groups):
+    y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
     # y += bias
     return torch.relu(y)
 
 @torchdynamo.optimize("inductor")
-def conv_torchinductor(x, w, bias):
-    return torch.conv2d(x, w)
+def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
+    return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
 
-def conv(x, w, bias):
-    return torch.conv2d(x, w)
+def conv(x, w, bias, stride, padding, dilation, groups):
+    return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
 
 
 def cuda_graph(fn, x, w, bias):
     new_x = x.clone()
     new_w = w.clone()
-    new_bias = bias.clone()
+    if bias is not None:
+        new_bias = bias.clone()
 
     # warmp up for cudagraph
     s = torch.cuda.Stream()
@@ -51,7 +52,8 @@ def cuda_graph(fn, x, w, bias):
     def fn():
         x.copy_(new_x)
         w.copy_(new_w)
-        bias.copy_(new_bias)
+        if bias is not None:
+            bias.copy_(new_bias)
         return g.replay()
 
     return fn
@@ -72,24 +74,25 @@ def bench(layer_params, layer_id, p):
     x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
     w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
                     dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
-    bias = torch.randn((1, KERNEL_N, 1, 1), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
+    # bias = torch.randn((KERNEL_N,), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
+    bias = None
 
-    y = conv_torchinductor(x, w, bias)
-    y_correct = conv(x, w, bias)
+    y = conv_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    y_correct = conv(x, w, bias, stride, padding, dilation, groups)
     assert(same(y, y_correct, cos_similarity=True))
-    y = conv_fusion_torchinductor(x, w, bias)
-    y_correct = conv_fusion(x, w, bias)
+    y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
     assert(same(y, y_correct, cos_similarity=True))
 
-    fn_conv = lambda: conv(x, w, bias)
-    fn_conv_fusion = lambda: conv_fusion(x, w, bias)
+    fn_conv = lambda: conv(x, w, bias, stride, padding, dilation, groups)
+    fn_conv_fusion = lambda: conv_fusion(x, w, bias, stride, padding, dilation, groups)
     if useCudaGraph:
         fn_conv = cuda_graph(fn_conv, x, w, bias)
         fn_conv_fusion = cuda_graph(fn_conv_fusion, x, w, bias)
         
 
-    fn_conv_torchinductor = lambda: conv_torchinductor(x, w, bias)
-    fn_conv_fusion_torchinductor = lambda: conv_fusion_torchinductor(x, w, bias)
+    fn_conv_torchinductor = lambda: conv_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    fn_conv_fusion_torchinductor = lambda: conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
 
     torch_conv_ms, _, _ = triton.testing.do_bench(fn_conv)
     torch_conv_fusion_ms, _, _ = triton.testing.do_bench(fn_conv_fusion)
