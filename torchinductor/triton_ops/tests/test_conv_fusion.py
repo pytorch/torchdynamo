@@ -77,6 +77,7 @@ def test(layer_params, fusion_type="add"):
     dilation, groups = (1,1), 1
     dtype=torch.float32
 
+    torch.manual_seed(0)
     # allocate inputs, nchw
     x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
     w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
