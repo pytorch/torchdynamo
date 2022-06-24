@@ -186,8 +186,13 @@ class BuiltinVariable(VariableTracker):
                     tensor_variable
                 )
             else:
+                need_unwrap = any(
+                    x.need_unwrap
+                    for x in itertools.chain(args, kwargs.values())
+                    if isinstance(x, variables.UnspecializedPythonVariable)
+                )
                 return variables.UnspecializedPythonVariable.from_tensor_variable(
-                    tensor_variable
+                    tensor_variable, need_unwrap
                 )
         else:
             return tensor_variable

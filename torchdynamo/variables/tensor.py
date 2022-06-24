@@ -173,14 +173,13 @@ class TensorVariable(VariableTracker):
             and proxy.node.target == "item"
             and config.capture_scalar_outputs
         ):
-            if isinstance(example_value, np.number):
-                return UnspecializedNumpyVariable.create(
-                    tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
-                )
-            else:
-                return UnspecializedPythonVariable.create(
-                    tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
-                )
+            return UnspecializedPythonVariable.create(
+                tx=tx,
+                proxy=proxy,
+                example_value=torch.tensor(example_value),
+                need_unwrap=False,
+                **options,
+            )
         else:
             assert (
                 False
@@ -568,7 +567,14 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        need_unwrap = kwargs.pop("need_unwrap", True)
+        super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
+        self.need_unwrap = need_unwrap
+
     @classmethod
-    def from_tensor_variable(cls, tensor_variable):
+    def from_tensor_variable(cls, tensor_variable, need_unwrap=True):
         # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
-        return UnspecializedPythonVariable(**dict(tensor_variable.__dict__))
+        return UnspecializedPythonVariable(
+            **dict(tensor_variable.__dict__), need_unwrap=need_unwrap
+        )

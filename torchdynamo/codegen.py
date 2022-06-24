@@ -141,6 +141,13 @@ class PyCodegen(object):
                         create_instruction("BINARY_SUBSCR"),
                     ]
                 )
+            if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
+                output.extend(
+                    [
+                        self.create_load_attr("item"),
+                        create_instruction("CALL_FUNCTION", 0),
+                    ]
+                )
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:
