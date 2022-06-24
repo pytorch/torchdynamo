@@ -248,6 +248,7 @@ class GuardBuilder:
         if id(val) in self.module_associated_guarded_ids:
             return
 
+        # ___check_type_id is same as `id(type(x)) == y`
         self.code.append(
             f"___check_type_id({self.arg_ref(guard)}, {self.id_ref(type(self.get(guard.name)))})"
         )
