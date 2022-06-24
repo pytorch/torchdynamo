@@ -1863,6 +1863,15 @@ class MatrixMultiply(ExternKernelOut):
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"
 
+    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+        super().__init__(layout, inputs, constant_args, output_view)
+        if (
+            config.triton.use_bmm
+            and len(inputs) > 0
+            and inputs[0].get_device().type == "cuda"
+        ):
+            self.kernel = "triton_bmm_out"
+
     @classmethod
     def create(cls, a, b):
         b1, m, k1 = a.get_size()
