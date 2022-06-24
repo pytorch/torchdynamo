@@ -8,26 +8,97 @@ from prettytable import PrettyTable
 
 # torchinductor.config.debug = True
 torchinductor.config.triton.convolution = "triton"
+torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 useCudaGraph = True
 
-@torchdynamo.optimize("inductor")
-def conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups):
-    y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    # y += bias
-    return torch.relu(y)
+class Func(object):
+    # conv
+    @torchdynamo.optimize("inductor")
+    def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return torch.relu(y)
 
-def conv_fusion(x, w, bias, stride, padding, dilation, groups):
-    y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    # y += bias
-    return torch.relu(y)
+    # conv
+    def conv(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return torch.relu(y)
+    
+    # conv+bias
+    @torchdynamo.optimize("inductor")
+    def conv_add_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
 
-@torchdynamo.optimize("inductor")
-def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
-    return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+    # conv+bias
+    def conv_add(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
 
-def conv(x, w, bias, stride, padding, dilation, groups):
-    return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+    # relu(conv)
+    @torchdynamo.optimize("inductor")
+    def conv_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv)
+    def conv_relu(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv+bias)
+    @torchdynamo.optimize("inductor")
+    def conv_add_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
+
+    # relu(conv+bias)
+    def conv_add_relu(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        return y
+
+    # bn(conv)
+    @torchdynamo.optimize("inductor")
+    def conv_bn_torchinductor(x, w, bias, stride, padding, dilation, groups, running_mean, running_var):
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=running_mean, running_var=running_var,
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
+        return y
+
+    # bn(conv)
+    def conv_bn(x, w, bias, stride, padding, dilation, groups, running_mean, running_var):
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=running_mean, running_var=running_var,
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
+        return y
+
+    # relu(bn(conv))
+    @torchdynamo.optimize("inductor")
+    def conv_bn_relu_torchinductor(x, w, bias, stride, padding, dilation, groups, running_mean, running_var):
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=running_mean, running_var=running_var,
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
+        return torch.relu(y)
+
+    # relu(bn(conv))
+    def conv_bn_relu(x, w, bias, stride, padding, dilation, groups, running_mean, running_var):
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=running_mean, running_var=running_var,
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
+        return torch.relu(y)
+
 
 
 def cuda_graph(fn, x, w, bias):
@@ -59,8 +130,7 @@ def cuda_graph(fn, x, w, bias):
     return fn
 
 
-
-def bench(layer_params, layer_id, p):
+def bench(layer_params, layer_id, p, fusion_types=[""]):
     BATCH = 32
     IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer_params
     dilation, groups = (1,1), 1
@@ -75,38 +145,54 @@ def bench(layer_params, layer_id, p):
     w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
                     dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
     # bias = torch.randn((KERNEL_N,), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
-    bias = None
+    # bias = None
 
-    y = conv_torchinductor(x, w, bias, stride, padding, dilation, groups)
-    y_correct = conv(x, w, bias, stride, padding, dilation, groups)
-    assert(same(y, y_correct, cos_similarity=True))
-    y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
-    y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
-    assert(same(y, y_correct, cos_similarity=True))
+    row = [layer_id]
+    for fusion_type in fusion_types:
 
-    fn_conv = lambda: conv(x, w, bias, stride, padding, dilation, groups)
-    fn_conv_fusion = lambda: conv_fusion(x, w, bias, stride, padding, dilation, groups)
-    if useCudaGraph:
-        fn_conv = cuda_graph(fn_conv, x, w, bias)
-        fn_conv_fusion = cuda_graph(fn_conv_fusion, x, w, bias)
+        if fusion_type == "":
+            conv_torchinductor = getattr(Func, f"conv_torchinductor")
+            conv = getattr(Func, f"conv")
+        else:
+            conv_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
+            conv = getattr(Func, f"conv_{fusion_type}")
+
+        if "add" in fusion_type:
+            bias = torch.randn((KERNEL_N,), dtype=dtype, device='cuda')
+        else:
+            bias = None
         
+        args = (x, w, bias, stride, padding, dilation, groups)
+        
+        if "bn" in fusion_type:
+            running_mean = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+            running_var = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+            args += (running_mean, running_var,)
+        
+        fn_conv = lambda: conv(*args)
+        fn_conv_torchinductor = lambda: conv_torchinductor(*args)
+        if useCudaGraph:
+            fn_conv = cuda_graph(fn_conv, x, w, bias)
+            
+        torch_conv_ms, _, _ = triton.testing.do_bench(fn_conv)
+        triton_conv_ms, _, _ = triton.testing.do_bench(fn_conv_torchinductor)
+        row.extend([tflops(torch_conv_ms), tflops(triton_conv_ms)])
 
-    fn_conv_torchinductor = lambda: conv_torchinductor(x, w, bias, stride, padding, dilation, groups)
-    fn_conv_fusion_torchinductor = lambda: conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    p.add_row(row)
 
-    torch_conv_ms, _, _ = triton.testing.do_bench(fn_conv)
-    torch_conv_fusion_ms, _, _ = triton.testing.do_bench(fn_conv_fusion)
-    triton_conv_ms, _, _ = triton.testing.do_bench(fn_conv_torchinductor)
-    triton_conv_fusion_ms, _, _ = triton.testing.do_bench(fn_conv_fusion_torchinductor)
-
-    p.add_row([layer_id, tflops(torch_conv_ms), tflops(triton_conv_ms), tflops(torch_conv_fusion_ms), tflops(triton_conv_fusion_ms)])
-
-
-
+fusion_types = ["", "add", "relu", "add_relu", "bn", "bn_relu"]
 p = PrettyTable()
-p.field_names = ["layer", "torch conv", "triton conv", "torch conv+relu", "triton conv+relu"]
+field_names = ["layer"]
+for fusion_type in fusion_types:
+    if fusion_type == "":
+        field_names.append(f"torch conv")
+        field_names.append(f"triton conv")
+    else:
+        field_names.append(f"torch conv+{fusion_type}")
+        field_names.append(f"triton conv+{fusion_type}")
+p.field_names = field_names
 p.float_format = ".3"
 for id, layer in enumerate(model.resnet50_layers):
-    bench(layer, id, p)
+    bench(layer, id, p, fusion_types)
 
 print(p)
