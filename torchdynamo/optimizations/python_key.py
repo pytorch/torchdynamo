@@ -56,6 +56,7 @@ def strip_overloads(gm):
             node.target = node.target.overloadpacket
     gm.recompile()
 
+
 def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decompositions={}):
     """
     Use AOT autograd for normalizing IR in inference mode.  This is useful
@@ -137,12 +138,11 @@ def python_key_normalize(gm: torch.fx.GraphModule, example_inputs, decomposition
         tracer: torch.fx.Tracer = PythonKeyTracer()
         graph = tracer.trace(fake_signature(fn_for_tracing, nargs))
         traced = GraphModule(tracer.root, graph, "python_key_traced")
-        # https://github.com/pytorch/pytorch/pull/80013 switched over 
+        # https://github.com/pytorch/pytorch/pull/80013 switched over
         # tracing to trace op overloads, however op lowerings are currently
         # registered to the overload packet. TODO: switch over to registering
         # to overloads after branch cut for 1.12
         strip_overloads(traced)
-
 
     traced.recompile()
     # record_graph_stats(traced)
