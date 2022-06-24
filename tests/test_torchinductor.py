@@ -934,6 +934,8 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    # waiting on https://github.com/pytorch/pytorch/pull/80193
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -1055,6 +1057,8 @@ class CommonTemplate:
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
+    # waiting on https://github.com/pytorch/pytorch/pull/80193   
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -1538,6 +1542,8 @@ class CommonTemplate:
             ),
         )
 
+    # waiting on https://github.com/pytorch/pytorch/pull/80193
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
