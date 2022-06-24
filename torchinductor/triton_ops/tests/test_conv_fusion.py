@@ -2,9 +2,7 @@ from microbenchmarks import model as model
 import torch
 import torchdynamo
 import torchinductor.config
-import triton
 from torchdynamo.testing import same
-from prettytable import PrettyTable
 
 # torchinductor.config.debug = True
 torchinductor.config.triton.dense_indexing = True
@@ -47,28 +45,44 @@ class Func(object):
 
     # bn(conv)
     @torchdynamo.optimize("inductor")
-    def conv_bn_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
-        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+    def conv_bn_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=torch.zeros_like(bias), running_var=torch.zeros_like(bias),
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
         return y
 
     # bn(conv)
-    def conv_bn_relu(x, w, bias, stride, padding, dilation, groups):
-        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+    def conv_bn(x, w, bias, stride, padding, dilation, groups):
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=torch.zeros_like(bias), running_var=torch.zeros_like(bias),
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
         return y
 
     # relu(bn(conv))
     @torchdynamo.optimize("inductor")
     def conv_bn_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
-        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=torch.zeros_like(bias), running_var=torch.zeros_like(bias),
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
         return torch.relu(y)
 
     # relu(bn(conv))
     def conv_bn_relu(x, w, bias, stride, padding, dilation, groups):
-        y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        y = torch.batch_norm(y, weight=w, running_mean=1e-2, running_var=1e-3)
+        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.batch_norm(
+            y, weight=bias, bias=None,
+            running_mean=torch.zeros_like(bias), running_var=torch.zeros_like(bias),
+            training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
+        )
         return torch.relu(y)
 
 def test(layer_params, fusion_type="add"):
@@ -93,11 +107,9 @@ def test(layer_params, fusion_type="add"):
     # print("y_correct", y[0,:,0,0])
     assert(same(y, y_correct, cos_similarity=True))
 
-fusion_types = ["add", "relu"]#, "add_relu", "bn", "bn_relu"]
+fusion_types = ["add", "relu", "add_relu", "bn", "bn_relu"]
 for fusion_type in fusion_types:
+    print(f"testing correctness of conv+{fusion_type}")
     for id, layer in enumerate(model.resnet50_layers):
         test(layer, fusion_type)
-
-# a = torch.randn((10,10), dtype=torch.float32, device="cuda")
-# b = torch.randn((10,10), dtype=torch.float32, device="cuda")
-# _, _ = fn_torchinductor(a, b)
+    print("passed")
