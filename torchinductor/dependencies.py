@@ -25,6 +25,11 @@ class MemoryDep(typing.NamedTuple):
             return MemoryDep(renames[self.name], self.index, self.size)
         return self
 
+    def replace(self, replaces):
+        if self in replaces.keys():
+            return replaces[self]
+        return self
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -33,6 +38,11 @@ class StarDep(typing.NamedTuple):
     def rename(self, renames):
         if self.name in renames:
             return StarDep(renames[self.name])
+        return self
+    
+    def replace(self, replaces):
+        if self in replaces.keys():
+            return replaces[self]
         return self
 
 
@@ -62,6 +72,12 @@ class ReadWrites:
             self.index_exprs,
         )
 
+    def replace(self, replaces: typing.Dict[typing.NamedTuple, typing.NamedTuple]):
+        return ReadWrites(
+            {dep.replace(replaces) for dep in self.reads},
+            {dep.replace(replaces) for dep in self.writes},
+            self.index_exprs,
+        )
 
 class RecordLoadStore(V.MockHandler):
     def __init__(self, var_ranges, normalize):
