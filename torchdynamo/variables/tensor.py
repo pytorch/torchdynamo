@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from typing import Dict
 from typing import List
 
-import numpy as np
 import torch.fx
 import torch.random
 from torch.fx.immutable_collections import immutable_list
