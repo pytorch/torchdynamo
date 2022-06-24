@@ -21,6 +21,7 @@ from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
+from .exc import BackendCompilerFailed
 from .exc import unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -322,14 +323,14 @@ class OutputGraph(fx.Tracer):
         try:
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
             assert callable(compiled_fn), "compiler_fn did not return callable"
-        except Exception:
+        except Exception as e:
             sys.stderr.write("-" * 40 + "\n")
             sys.stderr.write("TORCHDYNAMO: backend compiler failed\n")
             traceback.print_exc()
             sys.stderr.write("-" * 40 + "\n")
             compiled_fn = gm.forward
             if config.raise_on_backend_error:
-                raise
+                raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):

@@ -23,6 +23,7 @@ from .eval_frame import TorchPatcher
 from .eval_frame import WrapperBackend
 from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
+from .exc import BackendCompilerFailed
 from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
 from .exc import Unsupported
@@ -313,7 +314,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             CleanupManager.instance[code] = output.cleanups
 
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
-        except (Unsupported, TorchRuntimeError):
+        except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
             debug_print("WONT CONVERT")
             raise
         except Exception:
@@ -340,6 +341,8 @@ def convert_frame(compiler_fn: typing.Callable):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
+        except BackendCompilerFailed:
+            raise
         except Exception:
             pass
         return None
