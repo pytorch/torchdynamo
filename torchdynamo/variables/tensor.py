@@ -51,7 +51,6 @@ class TensorVariable(VariableTracker):
         "device",
         "ndim",
         "size",
-        "item",
         "stride",
         "requires_grad",
         "is_quantized",
@@ -97,10 +96,10 @@ class TensorVariable(VariableTracker):
                             example_value = nnmodule(*args, **kwargs)
                         else:
                             example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
-                except RuntimeError:
+                except RuntimeError as e:
                     # Track the assertion when the pytorch execution raises
                     # assertion
-                    raise TorchRuntimeError
+                    raise TorchRuntimeError() from e
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = clone_tensor(example_value)
@@ -188,7 +187,6 @@ class TensorVariable(VariableTracker):
         device=None,
         ndim=None,
         size=None,
-        item=None,
         stride=None,
         requires_grad=None,
         is_quantized=None,
@@ -203,7 +201,6 @@ class TensorVariable(VariableTracker):
         self.device = device
         self.ndim = ndim
         self.size = size
-        self.item = item
         self.stride = stride
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
@@ -258,11 +255,6 @@ class TensorVariable(VariableTracker):
             props["size"] = tuple(value.size())
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = value.is_contiguous()
-
-            if value.numel() == 1:
-                # only one element tensors can be converted to Python scalars
-                props["item"] = value.item()
-
         return props
 
     def var_getattr(self, tx, name):
@@ -344,8 +336,6 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(self.is_contiguous, **options)
         elif name == "is_complex" and self.is_complex is not None:
             constant_result = ConstantVariable(self.is_complex, **options)
-        elif name == "item" and self.item is not None:
-            constant_result = ConstantVariable(self.item, **options)
         else:
             constant_result = None
 
