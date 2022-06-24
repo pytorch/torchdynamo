@@ -11,6 +11,7 @@ import torchdynamo
 
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
+from .bytecode_transformation import unique_id
 from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
@@ -35,12 +36,11 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-def _get_generate_random_values_fn(random_calls):
-    @torchdynamo.eval_frame.disable
-    def _generate_random_values():
+def _get_gen_rand_values_fn(random_calls):
+    def _gen_rand_values():
         return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
 
-    return _generate_random_values
+    return _gen_rand_values
 
 
 class PyCodegen(object):
@@ -330,13 +330,12 @@ class PyCodegen(object):
 
         # to handle random calls
         if len(self.tx.random_calls) > 0:
-            self.tx.output.install_global(
-                "_generate_random_values",
-                _get_generate_random_values_fn(self.tx.random_calls),
-            )
+            rand_fn_name = unique_id("__gen_rand_values")
+            rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(self.tx.random_calls))
+            self.tx.output.install_global(rand_fn_name, rand_fn)
+            self.extend_output(self.load_function_name(rand_fn_name))
             self.extend_output(
                 [
-                    self.create_load_global("_generate_random_values", add=True),
                     create_instruction("CALL_FUNCTION", 0),
                     self.create_store(self.tx.output.random_values_var),
                 ]

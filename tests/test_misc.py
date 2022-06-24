@@ -1614,7 +1614,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             r1 = random.random()
             y = x + random.uniform(10, 20)
             r2 = random.randint(2, 18)
-            return y + r1 - r2
+            return y + r1, r2
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         random.seed(1)
