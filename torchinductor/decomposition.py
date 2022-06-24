@@ -1,13 +1,19 @@
+import logging
 import math
 import numbers
+from enum import Enum
+from typing import Optional
+from typing import Tuple
 
 import functorch._src.decompositions
 import torch
 from functorch._src.aot_autograd import aot_autograd_decompositions
+from torch import Tensor
 from torch._decomp import get_decompositions
 
 from torchinductor import config
 
+log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 decompositions = get_decompositions(
@@ -43,7 +49,6 @@ decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
-        aten.nll_loss_forward,
         aten.norm,
         aten.reflection_pad2d_backward,
         aten.select_backward,
@@ -263,3 +268,79 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+class Reduction(Enum):
+    NONE = 0
+    MEAN = 1
+    SUM = 2
+
+
+@register_decomposition(aten.nll_loss_forward)
+def nll_loss_forward(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+) -> Tuple[Tensor, Tensor]:
+    """
+    This is copied from:
+    https://github.com/pytorch/pytorch/pull/78491
+
+    We should remove it when that PR lands.
+    """
+
+    # self can be [N, C] or [C]
+    # target can be [N] or []
+
+    n_dims = self.dim()
+    channel_dim = 1
+    if n_dims < 2:
+        channel_dim = 0
+
+    if weight is not None:
+        # Here is a specific case with reduction mean and non-batched tensors
+        # https://github.com/pytorch/pytorch/issues/61309
+        # In this case weight is cancelled: w * x[t] / w -> x[t]
+        if not (reduction == Reduction.MEAN.value and n_dims < 2):
+            w = weight.unsqueeze(0) if n_dims > 1 else weight
+            self = self * w
+
+    target_ = target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
+
+    ignore_index_mask = None
+    if ignore_index >= 0:
+        ignore_index_mask = target != ignore_index
+        result = result * ignore_index_mask
+
+    if reduction == Reduction.NONE.value and n_dims > 1:
+        total_weight = self.new_full((), 0.0)
+        return result, total_weight
+
+    if weight is not None:
+        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
+        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
+        if ignore_index_mask is not None:
+            wsum = wsum * ignore_index_mask
+        total_weight = wsum.sum()
+    elif ignore_index_mask is not None:
+        total_weight = ignore_index_mask.sum().to(self)
+    else:
+        total_weight = self.new_full((), 1.0 * result.numel())
+
+    if result.dim() > 0:
+        if reduction == Reduction.SUM.value:
+            result = result.sum()
+        elif reduction == Reduction.MEAN.value:
+            if weight is None:
+                result = (
+                    result.sum() / total_weight if ignore_index >= 0 else result.mean()
+                )
+            else:
+                result = result.sum() / total_weight
+
+    return result, total_weight
