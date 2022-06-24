@@ -908,7 +908,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             for _ in range(10):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(5, 2))
+        self.assertEqual(cnt.frame_count, ifdyn(5, 4))
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (36, 35, 29, 28, 24))
 

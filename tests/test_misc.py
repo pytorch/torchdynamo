@@ -29,13 +29,6 @@ def my_custom_function(x):
     return x + 1
 
 
-def ifdyn(count1, count2):
-    if torchdynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
-
-
 class MiscTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -428,7 +421,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize((cnts)):
             self.assertEqual(fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, ifdyn(3, 2))
+        self.assertEqual(cnts.op_count, 3)
 
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):

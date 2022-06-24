@@ -244,8 +244,7 @@ class GuardBuilder:
         return name
 
     def TYPE_MATCH(self, guard: Guard):
-        val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids:
+        if self.guard_is_module_associated(guard):
             return
 
         # ___check_type_id is same as `id(type(x)) == y`
@@ -255,9 +254,7 @@ class GuardBuilder:
 
     def ID_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids or (
-            config.guard_nn_modules and guard.is_nn_module()
-        ):
+        if self.guard_is_module_associated(guard):
             return
 
         # ___check_obj_id is same as `id(x) == y`
@@ -282,9 +279,7 @@ class GuardBuilder:
 
     def EQUALS_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids or (
-            config.guard_nn_modules and guard.is_nn_module()
-        ):
+        if self.guard_is_module_associated(guard):
             return
 
         ref = self.arg_ref(guard)
@@ -344,8 +339,7 @@ class GuardBuilder:
         self.code.append(f"{ref} == {val!r}")
 
     def CONSTANT_MATCH(self, guard: Guard):
-        val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids:
+        if self.guard_is_module_associated(guard):
             return
 
         val = self.get(guard.name)
@@ -365,8 +359,7 @@ class GuardBuilder:
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids:
+        if self.guard_is_module_associated(guard):
             return
 
         if guard.is_local():
@@ -376,8 +369,7 @@ class GuardBuilder:
         return self.FUNCTION_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
-        val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids:
+        if self.guard_is_module_associated(guard):
             return
 
         return self.FUNCTION_MATCH(guard)
@@ -420,8 +412,7 @@ class GuardBuilder:
             self.code.append("not ___is_grad_enabled()")
 
     def TENSOR_MATCH(self, guard: Guard):
-        val = self.get(guard.name)
-        if id(val) in self.module_associated_guarded_ids:
+        if self.guard_is_module_associated(guard):
             return
 
         if guard.is_nn_module():
@@ -454,6 +445,13 @@ class GuardBuilder:
         if module not in module_code_map:
             module_code_map[module] = set()
         module_code_map[module].add(guarded_code)
+
+    def guard_is_module_associated(self, guard):
+        if config.guard_nn_modules and guard.is_nn_module():
+            val = self.get(guard.name)
+            if id(val) in self.module_associated_guarded_ids:
+                return True
+        return False
 
 
 class GuardedCode:

@@ -375,7 +375,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = x / (a + b)
             return x
 
-        self._common(fn, 1, 5)
+        self._common(fn, 1, 6)
 
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
@@ -386,7 +386,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = x / (a + b)
             return x
 
-        self._common(fn, 1, 5)
+        self._common(fn, 2, 5)
 
     def test_resume_paths_join(self):
         def fn(x, c1, c2, c3):
