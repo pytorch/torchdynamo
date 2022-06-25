@@ -7,6 +7,7 @@ import types
 from typing import Dict
 from typing import List
 
+import numpy as np
 import torch
 
 from torchdynamo.guards import GuardBuilder
