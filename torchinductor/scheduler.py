@@ -142,24 +142,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
-    def update_dep_type(self):
-        # update node dep from StarDep to MemoryDep
-        rename_dict = {}
-        for write in self.read_writes.writes:
-            if isinstance(write, StarDep):
-                dep_name = write.name
-                mem_deps = []
-                for user in self.users:
-                    for read in user.node.read_writes.reads:
-                        if isinstance(read, MemoryDep) and read.name == dep_name:
-                            mem_deps.append(read)
-                mem_deps = set(mem_deps)
-                # if users mem_deps layout/sizes are different,
-                # should not update StarDep to MemoryDep
-                if len(mem_deps) == 1:
-                    rename_dict[write] = mem_deps.pop()
-        self.set_read_writes(self.read_writes.replace(rename_dict))
-
 
     def mark_fusable(self, broadcast_after_reduce=False):
         self.scheduler.fusable_deps.update(self.read_writes.writes)
