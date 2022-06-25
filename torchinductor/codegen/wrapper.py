@@ -88,6 +88,11 @@ class WrapperCodeGen(CodeGen):
                     "from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
                 )
 
+            if config.triton.use_bmm:
+                self.header.writeline(
+                    "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
+                )
+
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )

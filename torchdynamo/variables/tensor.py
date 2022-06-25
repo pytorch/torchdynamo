@@ -96,10 +96,10 @@ class TensorVariable(VariableTracker):
                             example_value = nnmodule(*args, **kwargs)
                         else:
                             example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
-                except RuntimeError:
+                except RuntimeError as e:
                     # Track the assertion when the pytorch execution raises
                     # assertion
-                    raise TorchRuntimeError
+                    raise TorchRuntimeError() from e
 
         if isinstance(example_value, torch.Tensor):
             proxy.node.meta["example_value"] = clone_tensor(example_value)

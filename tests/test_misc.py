@@ -160,7 +160,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i)
-        with torchdynamo.optimize(lambda gm: gm.forward):
+        with torchdynamo.optimize("eager"):
             r2 = fn(i)
         self.assertTrue(same(r1, r2))
 
@@ -171,7 +171,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i, [])
-        with torchdynamo.optimize(lambda gm: gm.forward):
+        with torchdynamo.optimize("eager"):
             r2 = fn(i, [])
             r3 = fn(i, tuple())
         self.assertTrue(same(r1, r2))
@@ -1713,6 +1713,67 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+
+    def test_cross_entropy_loss_fancy_ctor(self):
+        output = None
+        rand_5 = torch.randn(5)
+        rand_3_5 = torch.randn(3, 5)
+        target = torch.empty(3, dtype=torch.long).random_(5)
+
+        with torchdynamo.optimize("eager", nopython=True):
+            loss = torch.nn.CrossEntropyLoss(
+                weight=rand_5, reduce=False, label_smoothing=0.5
+            )
+            input = rand_3_5
+            dynamo_output = loss(input, target)
+
+        loss = torch.nn.CrossEntropyLoss(
+            weight=rand_5, reduce=False, label_smoothing=0.5
+        )
+        input = rand_3_5
+        output = loss(input, target)
+
+        self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_cross_entropy_loss_simple_ctor(self):
+        output = None
+        rand_3_5 = torch.randn(3, 5)
+        target = torch.empty(3, dtype=torch.long).random_(5)
+
+        with torchdynamo.optimize("eager", nopython=True):
+            loss = torch.nn.CrossEntropyLoss()
+            input = rand_3_5
+            dynamo_output = loss(input, target)
+
+        loss = torch.nn.CrossEntropyLoss()
+        input = rand_3_5
+        output = loss(input, target)
+
+        self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_large_reduction_list(self):
+        dtype = torch.float32
+        device = "cpu"
+
+        def check_sum_all(tensor: torch.Tensor) -> None:
+            pylist = tensor.reshape(-1).tolist()
+            self.assertTrue(same(tensor.sum(), torch.tensor(sum(pylist))))
+
+        check_sum_all(torch.randn(200000, dtype=dtype, device=device))
+
+    @patch.object(torchdynamo.config, "raise_on_backend_error", True)
+    def test_raise_on_backend_error(self):
+        def my_compiler(gm, _):
+            raise RuntimeError("duck!")
+
+        @torchdynamo.optimize(my_compiler)
+        def fn(a, b):
+            return a + b / (a - b)
+
+        self.assertRaises(
+            torchdynamo.exc.BackendCompilerFailed,
+            lambda: fn(torch.randn(10), torch.randn(10)),
+        )
 
 
 class TestTracer(JitTestCase):
