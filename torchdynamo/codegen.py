@@ -15,6 +15,8 @@ from .bytecode_transformation import unique_id
 from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
+from .utils import is_numpy_float_type
+from .utils import is_numpy_int_type
 from .utils import is_safe_constant
 from .utils import istype
 from .utils import rot_n_helper
@@ -130,15 +132,17 @@ class PyCodegen(object):
             output.append(create_instruction("BINARY_SUBSCR"))
 
             if isinstance(value, UnspecializedNumpyVariable):
+                unspec_var = self.tx.output.new_var("unspec")
                 output.extend(
                     [
-                        self.create_load_attr("numpy"),
+                        self.create_load_attr("item"),
                         create_instruction("CALL_FUNCTION", 0),
-                        self.create_load_attr("reshape"),
-                        self._create_load_const(1),
+                        self.create_store(unspec_var),
+                        self.create_load_global("type", add=True),
+                        self.create_load_const(value.raw_value),
                         create_instruction("CALL_FUNCTION", 1),
-                        self._create_load_const(0),
-                        create_instruction("BINARY_SUBSCR"),
+                        self.create_load(unspec_var),
+                        create_instruction("CALL_FUNCTION", 1),
                     ]
                 )
             if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
@@ -242,7 +246,11 @@ class PyCodegen(object):
         )
 
     def create_load_const(self, value):
-        assert is_safe_constant(value), f"unsafe constant {value}"
+        assert (
+            is_safe_constant(value)
+            or is_numpy_int_type(value)
+            or is_numpy_float_type(value)
+        ), f"unsafe constant {value}"
         return self._create_load_const(value)
 
     @staticmethod

@@ -362,6 +362,7 @@ class VariableBuilder:
                 tx=self.tx,
                 proxy=proxy,
                 example_value=wrapped_value,
+                raw_value=value,
                 **guards_options,
             )
         else:
@@ -369,6 +370,7 @@ class VariableBuilder:
                 tx=self.tx,
                 proxy=proxy,
                 example_value=wrapped_value,
+                raw_value=value,
                 **guards_options,
             )
 

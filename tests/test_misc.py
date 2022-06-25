@@ -1568,7 +1568,7 @@ class MiscTests(torchdynamo.testing.TestCase):
                 "z": z,
                 "a": np_y.sum(),
                 "b": xy,
-                "c": np_x[0][0] / 68,
+                "c": np_y[0][0] / 68,
                 "d": np_x.sum(),
             }, x + np_y.sum() + z
 
