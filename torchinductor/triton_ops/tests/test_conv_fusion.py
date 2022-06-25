@@ -110,6 +110,6 @@ def test(layer_params, fusion_type="add"):
 fusion_types = ["add", "relu", "add_relu", "bn", "bn_relu"]
 for fusion_type in fusion_types:
     print(f"testing correctness of conv+{fusion_type}")
-    for id, layer in enumerate(model.resnet50_layers):
+    for id, layer in enumerate(model.resnet50_layers[:1]):
         test(layer, fusion_type)
     print("passed")

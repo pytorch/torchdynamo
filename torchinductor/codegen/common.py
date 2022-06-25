@@ -113,7 +113,13 @@ def _simplify_loops_channel_last(index_vars, sizes, index_formulas):
         for i, j in itertools.product(
             reversed(range(len(sizes))), reversed(range(len(sizes)))
         ):
-            if i == j or i == len(sizes) - 1 or j == len(sizes) - 1 or sizes[i] is None or sizes[j] is None:
+            if (
+                i == j
+                or i == len(sizes) - 1
+                or j == len(sizes) - 1
+                or sizes[i] is None
+                or sizes[j] is None
+            ):
                 continue
             if can_merge_dims(i, j):
                 changed = True

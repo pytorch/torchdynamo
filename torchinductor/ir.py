@@ -1524,7 +1524,7 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
         index_formulas = [*body.indexing_exprs.values()]
-        memory_addrs = [*body.reads, *body.writes]
+        # memory_addrs = [*body.reads, *body.writes]
 
         index_vars = []
         reduce_vars = []
@@ -1542,14 +1542,22 @@ class ComputedBuffer(Buffer):
 
         def simplify_and_reorder_channel_last(x_vars, sizes):
             # first reorder, then simply loops (otherwise dimension may be < 4)
-            sizes, reindex1, x_vars = self._apply_loop_reordering_channel_last(x_vars, sizes)
-            sizes, reindex2, prune = _simplify_loops_channel_last(x_vars, sizes, index_formulas)
+            sizes, reindex1, x_vars = self._apply_loop_reordering_channel_last(
+                x_vars, sizes
+            )
+            sizes, reindex2, prune = _simplify_loops_channel_last(
+                x_vars, sizes, index_formulas
+            )
             x_vars = prune(x_vars)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
-        
-        iter_ranges, iter_reindex = simplify_and_reorder_channel_last(index_vars, index_size)
-        reduce_ranges, reduce_reindex = simplify_and_reorder_channel_last(reduce_vars, reduce_size)
+
+        iter_ranges, iter_reindex = simplify_and_reorder_channel_last(
+            index_vars, index_size
+        )
+        reduce_ranges, reduce_reindex = simplify_and_reorder_channel_last(
+            reduce_vars, reduce_size
+        )
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
@@ -2288,7 +2296,9 @@ class Convolution(ExternKernelAlloc):
                 ("stride_yw", f"{self.get_stride()[3]}"),
                 (
                     "stride_biasn",
-                    f"{self.inputs[0].get_stride()[0]}" if len(in_args) >= 3 else "None",
+                    f"{self.inputs[0].get_stride()[0]}"
+                    if len(in_args) >= 3
+                    else "None",
                 ),
                 ("delta_x_ptr", "None"),
                 ("BATCH", f"{self.inputs[0].get_size()[0]}"),

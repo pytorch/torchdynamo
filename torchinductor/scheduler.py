@@ -14,7 +14,7 @@ from . import config
 from . import dependencies
 from . import ir
 from .codegen.triton_template import template_codegen
-from .dependencies import MemoryDep, StarDep
+from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
@@ -142,7 +142,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
-
     def mark_fusable(self, broadcast_after_reduce=False):
         self.scheduler.fusable_deps.update(self.read_writes.writes)
         if broadcast_after_reduce and self.is_reduction():
@@ -232,7 +231,6 @@ class SchedulerNode(BaseSchedulerNode):
             self._sizes,
             self._body,
         ) = node.reorder_channel_last()
-
 
     def re_simplify_reorder_and_tile(self):
         node = self.node
@@ -584,7 +582,6 @@ class Scheduler:
         V.kernel.args.output_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 
-
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
@@ -634,9 +631,7 @@ class Scheduler:
     def iter_runable_groups(self):
         while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
-                extern_scheduler_node = self.runable_extern_kernels.popleft()
-                self.current_device = extern_scheduler_node.node.get_device()
-                extern_scheduler_node.run(self.codegen_extern_call)
+                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
             else:
                 group, priority = self.runable_groups.most_common(1)[0]
                 del self.runable_groups[group]

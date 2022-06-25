@@ -769,9 +769,12 @@ class TritonScheduling:
         group = ()
         for s in sizes:
             if len(s) == 4:
-                group += (V.graph.sizevars.simplify(sympy_product([s[0],s[2],s[3]])), s[1], )
+                group += (
+                    V.graph.sizevars.simplify(sympy_product([s[0], s[2], s[3]])),
+                    s[1],
+                )
             else:
-                group += (V.graph.sizevars.simplify(sympy_product(s)), )
+                group += (V.graph.sizevars.simplify(sympy_product(s)),)
         return group
 
     def codegen(self, *groups):

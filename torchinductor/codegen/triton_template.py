@@ -1,6 +1,6 @@
 import os
-import sympy
 
+import sympy
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
 from jinja2 import StrictUndefined
@@ -8,8 +8,8 @@ from jinja2 import StrictUndefined
 from .. import ir
 from ..virtualized import V
 from .common import IndentedBuffer
-from .triton import TritonKernel
 from .triton import CantSplit
+from .triton import TritonKernel
 
 template_dict = {ir.Convolution: "triton_conv"}
 
@@ -45,7 +45,9 @@ class TritonTemplateKernel(TritonKernel):
 
         return code
 
-    def codegen_body(self, name, fuse, could_remove_kernel_buf, kernel_buf_replace_name):
+    def codegen_body(
+        self, name, fuse, could_remove_kernel_buf, kernel_buf_replace_name
+    ):
         """
         put render_variables into the template
         to generate the final code
@@ -54,15 +56,16 @@ class TritonTemplateKernel(TritonKernel):
         self.extra_argdefs = []
         self.extra_call_args = []
         argdefs, call_args = self.args.python_argdefs()
-        # add extra args if it is different from 
+        # add extra args if it is different from
         # current TritonTemplateKernel args
         for (argdef, call_arg) in zip(argdefs, call_args):
-            if call_arg not in self.inout_dict.values() \
-                and call_arg not in self.args_dict.values():
+            if (
+                call_arg not in self.inout_dict.values()
+                and call_arg not in self.args_dict.values()
+            ):
                 self.extra_argdefs.append(argdef)
                 self.extra_call_args.append(call_arg)
 
-        
         if could_remove_kernel_buf:
             if isinstance(self.node, ir.Convolution):
                 self.inout_dict.pop("y")
@@ -80,9 +83,10 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["kernel_name"] = name
         render_dict["template_inout_argdefs"] = self.template_inout_argdefs
         render_dict["extra_argdefs"] = self.extra_argdefs
-        render_dict["pointwise_code"] = \
-            self.pointwise_code.getvalue() if fuse else None
-        render_dict["out_def"] = "y" if kernel_buf_replace_name is None else kernel_buf_replace_def
+        render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
+        render_dict["out_def"] = (
+            "y" if kernel_buf_replace_name is None else kernel_buf_replace_def
+        )
         self.body = self.template.render(render_dict) + "\n"
 
     def codegen_kernel(
@@ -113,8 +117,12 @@ class TritonTemplateKernel(TritonKernel):
         map the constant args or
         kernel[grid](..., IN_C, IN_H, IN_W, strides,...)
         """
-        self.inout_dict, self.args_dict, self.const_dict, self.other_dict \
-            = self.node.map_args()
+        (
+            self.inout_dict,
+            self.args_dict,
+            self.const_dict,
+            self.other_dict,
+        ) = self.node.map_args()
 
     def precompute(self, wrapper, kernel_name):
         """
@@ -174,7 +182,7 @@ class TritonTemplateKernel(TritonKernel):
         # kernel1[grid](arg0, arg1, ...)
         extra_args = ", ".join(self.extra_call_args)
         self_args = ", ".join({**self.inout_dict, **self.args_dict}.values())
-        self_const_kwargs = ", ".join(f"{k}={v}" for k,v in self.const_dict.items())
+        self_const_kwargs = ", ".join(f"{k}={v}" for k, v in self.const_dict.items())
         args = self_args + (
             ", " + extra_args if extra_args and len(extra_args) > 0 else ""
         )
@@ -220,19 +228,25 @@ def template_codegen(scheduler, scheduler_node):
                 # reorder node loop ordering to channel last
                 # so that it could be fused with convolution and
                 # have correct results of split_and_set_ranges()
-                if len(node.node.data.get_size()) == 4 and node.node.data.get_size()[1] != 1:
+                if (
+                    len(node.node.data.get_size()) == 4
+                    and node.node.data.get_size()[1] != 1
+                ):
                     node.reorder_channel_last()
                 try:
                     node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     node.mark_fusable()
-                    fuse=True
+                    fuse = True
                     fusable_nodes.append(node)
                     # if node.output buffer has the same stride/size as kernel output buffer
                     # replace kernel output buffer name as node.output buffer
                     could_remove_kernel_buf = True
                 except CantSplit:
                     reschedule.append(node)
-                    if len(node.node.data.get_size()) == 4 and node.node.data.get_size()[1] != 1:
+                    if (
+                        len(node.node.data.get_size()) == 4
+                        and node.node.data.get_size()[1] != 1
+                    ):
                         node.re_simplify_reorder_and_tile()
         else:
             for node in scheduler.pop_group(group):
@@ -241,11 +255,11 @@ def template_codegen(scheduler, scheduler_node):
                 node.mark_fusable()
 
         # TODO: reduction
-        
+
         kernel_buf_replace_name = None
         if fuse and could_remove_kernel_buf:
             writes = scheduler_node.read_writes.writes
-            assert(len(writes) == 1)
+            assert len(writes) == 1
             # if all users of buf0 are in fusable groups
             # safe to remove buf0
             for user in scheduler_node.users:
@@ -269,5 +283,5 @@ def template_codegen(scheduler, scheduler_node):
         kernel.call_kernel(wrapper, kernel_name)
 
         scheduler.enqueue(reschedule)  # TODO: consider reschedule
-        scheduler.barrier() # enqueue any nodes that became runable after this node is run
+        scheduler.barrier()  # enqueue any nodes that became runable after this node is run
         scheduler.maybe_free_buffers()
