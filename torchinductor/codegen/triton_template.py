@@ -194,6 +194,7 @@ def template_codegen(scheduler, scheduler_node):
 
     reschedule = []
     fuse = False
+    could_remove_kernel_buf = False
     fusable_nodes = []
     with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *group)) as kernel:
         # map const args/ shape/ strides to kernel args
