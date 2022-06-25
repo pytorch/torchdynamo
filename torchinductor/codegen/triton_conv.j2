@@ -60,10 +60,9 @@ from torchinductor.triton_ops.conv_perf_model import estimate_conv_time
 )
 @triton.jit
 def {{kernel_name}}(
-    x,
-    w,
-    bias,
-    y,
+    {% for i in template_inout_argdefs %}
+    {{i}},
+    {% endfor %}
     # stride of tensor
     stride_xn,
     stride_xc,
@@ -206,7 +205,7 @@ def {{kernel_name}}(
         acc += _bias[None, :]
 
 
-    acc = acc.to(y.dtype.element_ty)
+    acc = acc.to({{out_def}}.dtype.element_ty)
 
     # rematerialize -- this saves some registers
     # offset for output y
@@ -220,7 +219,7 @@ def {{kernel_name}}(
 
     # y ptrs in the block of [BLOCK_M, BLOCK_N]
     y_ptrs = (
-        y
+        {{out_def}}
         + off_y_n[:, None] * stride_yn
         + off_y_h[:, None] * stride_yh
         + off_y_w[:, None] * stride_yw

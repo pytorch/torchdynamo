@@ -598,6 +598,11 @@ class Scheduler:
                 V.kernel.args.output_buffers[name] = "REMOVED"
                 V.graph.removed_buffers.add(name)
 
+    def remove_buffer(self, name):
+        V.kernel.args.output_buffers[name] = "REMOVED"
+        V.graph.removed_buffers.add(name)
+
+
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
