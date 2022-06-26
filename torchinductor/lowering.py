@@ -999,7 +999,6 @@ def empty_strided(
     if tuple(ir.FlexibleLayout.contiguous_strides(size)) == tuple(stride):
         # fast path, no need to realize it
         return pointwise
-    print(size, stride)
     pointwise.realize()
     buffer = pointwise.data.data
     assert isinstance(buffer, ir.ComputedBuffer)
