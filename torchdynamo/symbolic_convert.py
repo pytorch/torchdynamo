@@ -872,6 +872,27 @@ class InstructionTranslatorBase(object):
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
                 self.push(TensorVariable.create(self, proxy[i], **options))
+        # elif isinstance(seq, NNModuleVariable):
+
+        #     # for i in reversed(range(inst.argval)):
+        #         # self.push(TensorVariable.create(self, proxy[i], **options))
+        #     print("inst count", inst, self.output, seq, seq.module_type, seq.module_key)
+        #     x = self.output.get_submodule(seq.module_key)
+        #     print("tot", len(self.output.nn_modules))
+        #     l = list(x.named_modules())
+        #     print("mods:", l)
+        #     print("len: ", len(l))
+        #     # unimplemented(f"UNPACK_SEQUENCE {seq}")
+        #     # unpacked = seq.unpack_var_sequence(self)
+
+        #     # print("unpacked:", unpacked)
+        #     # for i in reversed(range(inst.argval)):
+        #     #     # se.fp
+        #     #     print(options)
+        #     #     options["source"] = seq.source
+        #     # self.push(seq.module_key)
+        #     self.push(seq)
+        #     self.push(ConstantVariable(seq.module_key, **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 

@@ -242,6 +242,7 @@ class NNModuleVariable(VariableTracker):
         def wrap_values(items, getsource=AttrSource):
             result = []
             for name, submod in items:
+                print("Wrapping:", name)
                 # layer.0.foo => layer[0].foo
                 name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
                 src = NNModuleSource(getsource(self.source, name))
@@ -259,7 +260,27 @@ class NNModuleVariable(VariableTracker):
         if name == "children":
             assert not (args or kwargs)
             return wrap_values(module.named_children())
-        elif name == "parameters":
+        elif name == "named_modules":
+            assert not (args or kwargs)
+            result = []
+            for name, submod in module.named_modules():
+                result.append(
+                    TupleVariable(
+                        [
+                            ConstantVariable(name, **options),
+                            tx.output.add_submodule(
+                                submod,
+                                key,
+                                name,
+                                source=NNModuleSource(GetItemSource(self.source, name)),
+                                **options,
+                            ),
+                        ]
+                    )
+                )
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+                # **get_kwargs("memo", "prefix", "remove_duplicate")))
+        elif name == "parameters" or name == "named_parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
             assert not (args or kwargs)

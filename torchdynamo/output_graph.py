@@ -239,7 +239,9 @@ class OutputGraph(fx.Tracer):
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
+            and False
         ):
+            print("Optimization")
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
