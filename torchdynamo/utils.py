@@ -361,7 +361,9 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None), slice))
+    return istype(
+        v, (types.CodeType, int, float, bool, str, bytes, type(None), slice, type(type))
+    )
 
 
 def check_constant_args(args, kwargs):

@@ -133,14 +133,13 @@ class PyCodegen(object):
 
             if isinstance(value, UnspecializedNumpyVariable):
                 unspec_var = self.tx.output.new_var("unspec")
+                raw_type = type(value.raw_value)
                 output.extend(
                     [
                         self.create_load_attr("item"),
                         create_instruction("CALL_FUNCTION", 0),
                         self.create_store(unspec_var),
-                        self.create_load_global("type", add=True),
-                        self.create_load_const(value.raw_value),
-                        create_instruction("CALL_FUNCTION", 1),
+                        self.create_load_const(raw_type),
                         self.create_load(unspec_var),
                         create_instruction("CALL_FUNCTION", 1),
                     ]
@@ -246,11 +245,7 @@ class PyCodegen(object):
         )
 
     def create_load_const(self, value):
-        assert (
-            is_safe_constant(value)
-            or is_numpy_int_type(value)
-            or is_numpy_float_type(value)
-        ), f"unsafe constant {value}"
+        assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
     @staticmethod

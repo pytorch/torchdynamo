@@ -137,11 +137,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():
+        # func : example value
         fns = {
-            random.random,
-            random.randint,
-            random.randrange,
-            random.uniform,
+            random.random: 0.5,
+            random.randint: 10,
+            random.randrange: 20,
+            random.uniform: 1.5,
         }
         return fns
 
@@ -223,7 +224,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            example_value = 0.5
+            example_value = self._supported_random_functions()[self.value]
             source = RandomValueSource(random_call_index=len(tx.random_calls))
             tx.random_calls.append(
                 (
