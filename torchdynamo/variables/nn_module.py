@@ -261,9 +261,9 @@ class NNModuleVariable(VariableTracker):
             assert not (args or kwargs)
             return wrap_values(module.named_children())
         elif name == "named_modules":
-            assert not (args or kwargs)
             result = []
             for name, submod in module.named_modules():
+                print("Entry for:", name)
                 result.append(
                     TupleVariable(
                         [

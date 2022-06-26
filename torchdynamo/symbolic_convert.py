@@ -853,6 +853,7 @@ class InstructionTranslatorBase(object):
         # TODO(jansel): rewrite this using unpack_var_sequence
         seq = self.pop()
         options = VariableTracker.propagate([seq])
+        print("UNPACKING:", inst, seq)
         if isinstance(seq, BaseListVariable):
             assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
