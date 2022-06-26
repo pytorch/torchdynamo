@@ -166,8 +166,8 @@ gpu-inductor-dynamic: develop
 
 cpu-inductor: develop
 	rm -f inductor.csv speedup_ts.csv cpu_8t_inductor.csv
-	python torchbench.py --inductor-settings --fast --inductor --threads=8
-	python torchbench.py --inductor-settings --fast --backend=ts --threads=8
+	python torchbench.py --inductor-settings --fast --inductor
+	python torchbench.py --inductor-settings --fast --backend=ts
 	paste -d, inductor.csv speedup_ts.csv > cpu_8t_inductor.csv
 
 cpu-inductor-seq: develop

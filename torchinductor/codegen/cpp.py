@@ -283,7 +283,7 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
         if threads < 1:
-            threads = multiprocessing.cpu_count()
+            threads = multiprocessing.cpu_count() // 2
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
