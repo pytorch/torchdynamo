@@ -15,8 +15,6 @@ from .bytecode_transformation import unique_id
 from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
-from .utils import is_numpy_float_type
-from .utils import is_numpy_int_type
 from .utils import is_safe_constant
 from .utils import istype
 from .utils import rot_n_helper
