@@ -260,10 +260,27 @@ class NNModuleVariable(VariableTracker):
         if name == "children":
             assert not (args or kwargs)
             return wrap_values(module.named_children())
+        elif name == "named_parameters":
+            result = []
+            for name, submod in module.named_parameters(**get_kwargs("recurse")):
+                result.append(
+                    TupleVariable(
+                        [
+                            ConstantVariable(name, **options),
+                            tx.output.add_submodule(
+                                submod,
+                                key,
+                                name,
+                                source=NNModuleSource(GetItemSource(self.source, name)),
+                                **options,
+                            ),
+                        ]
+                    )
+                )
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules():
-                print("Entry for:", name)
                 result.append(
                     TupleVariable(
                         [
@@ -280,7 +297,7 @@ class NNModuleVariable(VariableTracker):
                 )
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
                 # **get_kwargs("memo", "prefix", "remove_duplicate")))
-        elif name == "parameters" or name == "named_parameters":
+        elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
             assert not (args or kwargs)

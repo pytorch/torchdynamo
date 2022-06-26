@@ -270,6 +270,15 @@ class BuiltinVariable(VariableTracker):
     def call_slice(self, tx, *args):
         return variables.SliceVariable(args)
 
+    def call_sorted(self, tx, *args, **kwargs):
+        print("Sorted called:", args, kwargs)
+        options = VariableTracker.propagate(self, args)
+        assert len(args) > 0
+        if args[0].has_unpack_var_sequence(tx):
+            l = args[0].unpack_var_sequence(tx)
+            return variables.ListVariable(sorted(l, **{k: v.value for k, v in kwargs.items()), **options)
+        return None
+
     def _call_iter_tuple_list(self, tx, obj=None):
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:

@@ -26,6 +26,10 @@ class ConstantVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    # note - here for sorting operations, utilizing the underlying value.
+    def __lt__(self, other):
+        return self.as_python_constant() < other.as_python_constant()
+
     @property
     def items(self):
         """
@@ -93,6 +97,11 @@ class ConstantVariable(VariableTracker):
             search = args[0].as_python_constant()
             result = search in self.value
             return ConstantVariable(result, **options)
+        elif name == "add" and len(args) == 1 and args[0].is_python_constant():
+            # This feels like a hack, instead of making const collections and then blowing them up on `add`, we should do analysis and classify this as something else.
+            added_value = args[0].as_python_constant()
+            self.value.add(added_value)
+            return ConstantVariable(self.value, **options)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
