@@ -96,6 +96,12 @@ def _disallowed_function_ids():
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
     ]
     remove += dtypes
+    storage = [
+        obj
+        for obj in torch.__dict__.values()
+        if isinstance(obj, type(torch.FloatStorage))
+    ]
+    remove += storage
     return {id(x) for x in remove}
 
 

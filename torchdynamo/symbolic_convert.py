@@ -308,10 +308,11 @@ class InstructionTranslatorBase(object):
             ):
                 pass
         except (
-            exc.Unsupported,
+            exc.BackendCompilerFailed,
             exc.RestartAnalysis,
-            exc.TorchRuntimeError,
             exc.SkipFrame,
+            exc.TorchRuntimeError,
+            exc.Unsupported,
         ):
             raise
         except Exception as e:
@@ -1127,6 +1128,12 @@ class InstructionTranslatorBase(object):
             lookup_line=False,
         )
 
+    def find_symbolic_locals_name(self, tensor_variable):
+        for key, value in self.symbolic_locals.items():
+            if value is tensor_variable:
+                return key
+        return None
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1235,6 +1242,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                         GuardBuilder.LIST_LENGTH,
                         GuardBuilder.DICT_KEYS,
                         GuardBuilder.ODICT_KEYS,
+                        GuardBuilder.TUPLE_ITERATOR_LEN,
                     )
                 ]
                 self.output.guards.update(index_guards)

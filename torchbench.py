@@ -842,6 +842,11 @@ def main():
         action="store_true",
         help="Use same settings as --inductor for baseline comparisons",
     )
+    parser.add_argument(
+        "--raise-on-backend-error",
+        action="store_true",
+        help="Fail a benchmark if backend throws an exception",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -1014,6 +1019,8 @@ def main():
     if args.verbose:
         torchdynamo.config.debug = True
 
+    torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
+
     if args.training:
         model_iter_fn = forward_and_backward_pass
         SKIP.update(SKIP_TRAIN)
@@ -1156,12 +1163,16 @@ def main():
                 "resnext50_32x4d",
             }
         )
+        args.float32 = True
+        args.float16 = False
+        args.cosine = True
     elif args.speedup_fx2trt_fp16:
         optimize_ctx = torchdynamo.optimize(
             backends.fx2trt_compiler_fp16, nopython=args.nopython
         )
         experiment = speedup_experiment_fx2trt
         output_filename = "speedups_fx2trt_fp16.csv"
+        args.float32 = False
         args.float16 = True
         args.cosine = True
     elif args.accuracy_aot_nop:
@@ -1339,7 +1350,6 @@ def run_one_model(
     skip_accuracy_check=False,
 ):
     t0 = time.perf_counter()
-
     tolerance = 1e-4
     # Increase the tolerance for torch allclose
     if is_training and current_device == "cuda" and name in REQUIRE_HIGHER_TOLERANCE:
