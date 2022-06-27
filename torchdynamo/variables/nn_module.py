@@ -284,7 +284,7 @@ class NNModuleVariable(VariableTracker):
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
-            for name, submod in module.named_modules():
+            for name, submod in module.named_modules(**get_kwargs("memo", "prefix", "remove_duplicate")):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "parameters":
