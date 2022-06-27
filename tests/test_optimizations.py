@@ -3,6 +3,7 @@ import importlib
 import json
 import os
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -13,7 +14,6 @@ from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
 from torchdynamo.testing import same
-from unittest.mock import patch
 
 
 def has_onnxruntime():
