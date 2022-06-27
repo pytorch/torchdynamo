@@ -160,7 +160,8 @@ class TensorVariable(VariableTracker):
                     example_value = fake_wrapper(example_value)
 
         if isinstance(example_value, torch.Tensor):
-            if not use_fake_tensors:
+            # tensor subclasses will not be converted to FakeTensors and need to be cloned
+            if not use_fake_tensors or not isinstance(example_value, FakeTensor):
                 example_value = clone_tensor(example_value)
             proxy.node.meta["example_value"] = example_value
             specialized_props = cls.specialize(example_value)

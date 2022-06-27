@@ -13,6 +13,7 @@ from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
 from torchdynamo.testing import same
+from unittest.mock import patch
 
 
 def has_onnxruntime():
@@ -97,6 +98,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_log_conv_args(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
