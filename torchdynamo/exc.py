@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import traceback
 
@@ -18,6 +19,11 @@ class SkipFrame(RuntimeError):
 
 class TorchRuntimeError(RuntimeError):
     pass
+
+
+@dataclasses.dataclass
+class FakeTensorError(RuntimeError):
+    reason: str
 
 
 class BackendCompilerFailed(RuntimeError):

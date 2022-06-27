@@ -62,6 +62,21 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass
+class RandomValueSource(Source):
+    random_call_index: int
+
+    def reconstruct(self, codegen):
+        return [
+            codegen.create_load(codegen.tx.output.random_values_var),
+            codegen.create_load_const(self.random_call_index),
+            create_instruction("BINARY_SUBSCR"),
+        ]
+
+    def name(self):
+        return rename_implicit(f"random_value_{self.random_call_index}")
+
+
+@dataclasses.dataclass
 class GlobalSource(Source):
     global_name: str
 
