@@ -60,8 +60,10 @@ def cpp_prefix():
         textwrap.dedent(
             """
             #include <algorithm>
+            #include <atomic>
             #include <cmath>
             #include <cstdlib>
+            #include <iostream>
             #include <limits>
             #define SLEEF_ENABLE_OMP_SIMD
             //#include <sleef.h>
@@ -220,10 +222,26 @@ class CppKernel(Kernel):
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
-        self.stores.writeline(name, f"{var}[{cexpr(index)}] = {value};")
+        if mode is None:
+            line = f"{var}[{cexpr(index)}] = {value};"
+        elif mode == "atomic_add":
+            if config.cpp.threads == 1:
+                line = f"{var}[{cexpr(index)}] += {value};"
+            else:
+                self.stores.writeline(
+                    name,
+                    "static_assert(std::atomic_ref<"
+                    + f"std::remove_pointer_t<decltype({var})>"
+                    + ">::is_always_lock_free);",
+                )
+                line = f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
+        else:
+            raise NotImplementedError(f"store mode={mode}")
+        self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         tmpvar = self.cse.generate(
@@ -391,7 +409,6 @@ class CppScheduling:
 
             # first any pointwise sharing same loops
             for node in scheduler.pop_group((group + reduction_group, ())):
-                scheduler.maybe_remove_buffer(node, check_group1)
                 node.run(vars, reduction_vars)
                 node.mark_fusable()
 
@@ -408,7 +425,6 @@ class CppScheduling:
                 # we can fuse in some extra pointwise into the suffix
                 with kernel.write_to_suffix():
                     for node in scheduler.pop_group((group, ())):
-                        scheduler.maybe_remove_buffer(node, check_group2)
                         node.run(vars, ())
                         node.mark_fusable()
 

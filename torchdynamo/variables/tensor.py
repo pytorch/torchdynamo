@@ -151,7 +151,7 @@ class TensorVariable(VariableTracker):
                             lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
                         )
                 except RuntimeError as e:
-                    raise TorchRuntimeError from e
+                    raise TorchRuntimeError() from e
             else:
                 if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
@@ -236,8 +236,13 @@ class TensorVariable(VariableTracker):
             and proxy.node.target == "item"
             and config.capture_scalar_outputs
         ):
-            return UnspecializedPrimitiveVariable.create(
-                tx=tx, proxy=proxy, example_value=torch.tensor(example_value)
+            return UnspecializedPythonVariable.create(
+                tx=tx,
+                proxy=proxy,
+                example_value=torch.tensor(example_value),
+                raw_value=example_value,
+                need_unwrap=False,
+                **options,
             )
         else:
             assert (
@@ -610,10 +615,41 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class UnspecializedPrimitiveVariable(TensorVariable):
+class UnspecializedNumpyVariable(TensorVariable):
     """
-    This is a 1-element tensor represents unspecialized primitive type,
-    e.g, int, float, np.int, np.float, etc
+    This is a 1-element tensor represents unspecialized numpy float/int.
     """
 
-    pass
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        raw_value = kwargs.pop("raw_value", True)
+        super(UnspecializedNumpyVariable, self).__init__(proxy, **kwargs)
+        self.raw_value = raw_value
+
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable, raw_value):
+        # Convert a `TensorVariable` instance into an `UnspecializedNumpyVariable` instance.
+        return UnspecializedNumpyVariable(
+            **dict(tensor_variable.__dict__), raw_value=raw_value
+        )
+
+
+class UnspecializedPythonVariable(TensorVariable):
+    """
+    This is a 1-element tensor represents unspecialized python float/int.
+    """
+
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        raw_value = kwargs.pop("raw_value", True)
+        need_unwrap = kwargs.pop("need_unwrap", True)
+        super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
+        self.raw_value = raw_value
+        self.need_unwrap = need_unwrap
+
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable, raw_value, need_unwrap=True):
+        # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
+        return UnspecializedPythonVariable(
+            **dict(tensor_variable.__dict__),
+            raw_value=raw_value,
+            need_unwrap=need_unwrap,
+        )

@@ -525,7 +525,7 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
     def reduction(self, name, dtype, reduction_type, index, value):
@@ -556,10 +556,11 @@ class Kernel(CodeGen):
                 return self.load(name, index, upcast)
 
             @staticmethod
-            def store(name, index, value):
-                self.cse.store_cache[name] = value
+            def store(name, index, value, mode=None):
+                if mode is None:
+                    self.cse.store_cache[name] = value
                 if name not in V.graph.removed_buffers:
-                    return self.store(name, index, value)
+                    return self.store(name, index, value, mode=mode)
 
             @staticmethod
             def reduction(name, dtype, reduction_type, index, value):
@@ -578,6 +579,7 @@ class Kernel(CodeGen):
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
+        index = sympy.expand(index)
         index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
         subs = {
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")

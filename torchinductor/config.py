@@ -5,7 +5,7 @@ debug = False
 dce = False
 
 # assume there will be no backwards
-forward_only = True
+forward_only = False
 
 # assume input tensors are dynamic
 dynamic_shapes = True
@@ -65,3 +65,5 @@ class triton:
 
     # enable codegen to use Triton's mm
     use_mm = False
+
+    use_bmm = False

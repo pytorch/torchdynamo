@@ -1348,6 +1348,16 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         fn(torch.randn(3))
 
+    def test_isinstance_storage(self):
+        @torchdynamo.optimize("eager")
+        def fn(x):
+            f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
+            bools = torch.BoolStorage.from_buffer(f, "big")
+            self.assertTrue(isinstance(bools, torch.BoolStorage))
+            return x
+
+        fn(torch.randn(3))
+
     def test_dict_list_values(self):
         def inner_fn(args):
             return [x[1].shape for x in args]
@@ -1375,3 +1385,35 @@ class ReproTests(torchdynamo.testing.TestCase):
             y = model(x)
 
         self.assertEqual(y, 10)
+
+    def test_sort_out(self):
+
+        dtype = torch.float32
+        device = "cpu"
+
+        def fn():
+            tensor = torch.randn((3, 5), dtype=dtype, device=device)[:, 0]
+            values1 = torch.tensor(0, dtype=dtype, device=device)
+            indices1 = torch.tensor(0, dtype=torch.long, device=device)
+            torch.sort(tensor, out=(values1, indices1))
+            self.assertEqual(values1.stride(), (1,))
+            self.assertEqual(indices1.stride(), (1,))
+
+        fn()
+        with torchdynamo.optimize("eager"):
+            fn()
+
+    def test_sigmoid_out(self):
+
+        dtype = torch.float32
+        device = "cpu"
+
+        def fn():
+            inp = torch.randn((3, 5), dtype=dtype, device=device)
+            out1 = torch.tensor(0, dtype=dtype, device=device)
+            torch.sigmoid(inp, out=out1)
+            self.assertEqual(out1.numel(), 15)
+
+        fn()
+        with torchdynamo.optimize("eager"):
+            fn()
