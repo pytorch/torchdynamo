@@ -230,7 +230,7 @@ class SchedulerNode(BaseSchedulerNode):
         (
             self._sizes,
             self._body,
-        ) = node.reorder_channel_last()
+        ) = node.simplify_reorder_and_tile(channel_last=True)
 
     def re_simplify_reorder_and_tile(self):
         node = self.node
@@ -631,7 +631,13 @@ class Scheduler:
     def iter_runable_groups(self):
         while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
-                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
+                runnable_extern_kernel = self.runable_extern_kernels.popleft()
+                try:
+                    self.current_device = runnable_extern_kernel.get_device()
+                except AttributeError:
+                    # 'MultiOutputLayout' object has no attribute 'device'
+                    pass
+                runnable_extern_kernel.run(self.codegen_extern_call)
             else:
                 group, priority = self.runable_groups.most_common(1)[0]
                 del self.runable_groups[group]
