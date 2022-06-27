@@ -6,9 +6,11 @@ import dis
 import enum
 import functools
 import math
+import random
 import sys
 import typing
 import unittest
+import weakref
 from unittest.mock import patch
 
 import numpy as np
@@ -160,7 +162,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i)
-        with torchdynamo.optimize(lambda gm: gm.forward):
+        with torchdynamo.optimize("eager"):
             r2 = fn(i)
         self.assertTrue(same(r1, r2))
 
@@ -171,7 +173,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         i = torch.randn(5, 10)
         r1 = fn(i, [])
-        with torchdynamo.optimize(lambda gm: gm.forward):
+        with torchdynamo.optimize("eager"):
             r2 = fn(i, [])
             r3 = fn(i, tuple())
         self.assertTrue(same(r1, r2))
@@ -1408,6 +1410,21 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_unsupported_fake_tensor(self):
+        def f(x):
+            return torch.quantize_per_tensor(
+                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
+            )
+
+        x = torch.randn(2, 2)
+        with self.assertRaises(RuntimeError):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                f(x)
+
+        with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                f(x)
+
     def test_inline_list_mutation(self):
         def f1(x):
             x.append(torch.ones(8))
@@ -1524,6 +1541,53 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_release_input_memory(self):
+        x = torch.rand([4])
+        x_ref = weakref.ref(x)
+
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts)
+        def foo(x):
+            return x + x
+
+        out = foo(x)
+        self.assertTrue(same(out, x + x))
+        del x
+        self.assertIs(x_ref(), None)
+
+    def test_release_module_memory(self):
+
+        mod = torch.nn.Linear(10, 10)
+        x = torch.rand([10, 10])
+        mod_weight_ref = weakref.ref(mod.weight)
+        mod_ref = weakref.ref(mod)
+
+        # Modules that are passed into torchdynamo optimized functions
+        # will normally be held onto through the generated GraphModule,
+        # which contains the modules. remove the reference in this backend
+        # and test that no additional references are being held.
+        class NoLeakBackend:
+            def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+                gm.mod = None
+
+                def foo(*args, **kwargs):
+                    return (1,)
+
+                return foo
+
+        no_leak_backend = NoLeakBackend()
+
+        @torchdynamo.optimize(no_leak_backend)
+        def foo(mod, x):
+            return mod(x)
+
+        foo(mod, x)
+        del mod
+        del x
+        self.assertIsNone(mod_ref(), None)
+        self.assertIsNone(mod_weight_ref(), None)
+
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
             perm = [0, 3, 5]
@@ -1569,7 +1633,7 @@ class MiscTests(torchdynamo.testing.TestCase):
                 "b": xy,
                 "c": np_y[0][0] / 68,
                 "d": np_x.sum(),
-            }
+            }, x + np_y.sum() + z
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         y = torch.ones([2, 2], dtype=torch.int64)
@@ -1592,6 +1656,37 @@ class MiscTests(torchdynamo.testing.TestCase):
                 fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_unspecialized_primitive_variable3(self):
+        # test unspecialized primitive max/min
+        def fn(x, y, z):
+            return z + 1, max(x, y), min(x - 4, y)
+
+        x = np.int64(12)
+        y = 10
+        z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        res1 = fn(x, y, z)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x, y, z)
+        self.assertTrue(same(res1, res2))
+
+    def test_unspecialized_primitive_variable4(self):
+        # test random functions
+        def fn(x):
+            r1 = random.random()
+            y = x + random.uniform(10, 20)
+            r2 = random.randint(2, 18)
+            return y + r1, r2
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        random.seed(1)
+        res1 = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(x)
+        self.assertTrue(same(res1, res2))
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
@@ -1760,6 +1855,20 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(tensor.sum(), torch.tensor(sum(pylist))))
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
+
+    @patch.object(torchdynamo.config, "raise_on_backend_error", True)
+    def test_raise_on_backend_error(self):
+        def my_compiler(gm, _):
+            raise RuntimeError("duck!")
+
+        @torchdynamo.optimize(my_compiler)
+        def fn(a, b):
+            return a + b / (a - b)
+
+        self.assertRaises(
+            torchdynamo.exc.BackendCompilerFailed,
+            lambda: fn(torch.randn(10), torch.randn(10)),
+        )
 
 
 class TestTracer(JitTestCase):

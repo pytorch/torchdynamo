@@ -96,10 +96,10 @@ class RecordLoadStore(V.MockHandler):
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"load({name}, {index}, {upcast})"
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"store({name}, {index}, {value})"
+        return f"store({name}, {index}, {value}, {mode})"
 
     def reduction(self, name, dtype, reduction_type, index, value):
         return self.store(name, index, f"reduce_{reduction_type})({value})")

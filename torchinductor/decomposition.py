@@ -15,6 +15,7 @@ from torchinductor import config
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
@@ -33,19 +34,21 @@ decompositions = get_decompositions(
         aten.glu_backward,
         aten.grid_sampler_2d,
         aten.hardsigmoid,
+        aten.hardsigmoid_backward,
         aten.hardswish,
+        aten.hardswish_backward,
         aten.hardtanh,
+        aten.hardtanh_backward,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
-        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
+        aten.narrow,
         aten.native_batch_norm,
         aten.native_batch_norm_backward,
-        aten.native_dropout_backward,
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
@@ -54,6 +57,8 @@ decompositions = get_decompositions(
         aten.select_backward,
         aten.select_scatter,
         aten.sigmoid_backward,
+        aten.silu_backward,
+        aten.slice_backward,
         aten._softmax_backward_data,
         aten.stack,
         aten.tanh_backward,
@@ -66,6 +71,9 @@ decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
+    for op in [ops] if callable(ops) else ops:
+        if op in decompositions:
+            log.warning(f"duplicate decomp: {ops}")
     return functorch._src.decompositions.register_decomposition(ops, decompositions)
 
 
@@ -344,3 +352,13 @@ def nll_loss_forward(
                 result = result.sum() / total_weight
 
     return result, total_weight
+
+
+@register_decomposition([aten.index_put])
+def index_put(self, indices, values, accumulate=False):
+    return torch.index_put_(self.clone(), indices, values, accumulate)
+
+
+@register_decomposition([aten.narrow])
+def narrow(self, dim, start, length):
+    return aten.slice(self, dim, start, start + length)
