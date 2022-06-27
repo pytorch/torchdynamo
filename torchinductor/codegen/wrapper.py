@@ -10,6 +10,7 @@ from ..utils import has_triton
 from ..utils import sympy_product
 from ..virtualized import V
 from .common import CodeGen
+from .common import DeferredLine
 from .common import IndentedBuffer
 from .common import Kernel
 from .triton import texpr
@@ -87,6 +88,11 @@ class WrapperCodeGen(CodeGen):
                     "from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
                 )
 
+            if config.triton.use_bmm:
+                self.header.writeline(
+                    "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
+                )
+
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
@@ -117,7 +123,10 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
-            self.writeline(f"{name} = {layout.view.codegen_reference()}")
+            allocation = DeferredLine(
+                name, f"{name} = {layout.view.codegen_reference()}"
+            )
+            self.writeline(allocation)
             return
 
         # try to reuse a recently freed buffer
@@ -131,12 +140,14 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        self.writeline(
+        allocation = DeferredLine(
+            name,
             f"{name} = empty_strided("
             f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
             f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
+            f"device='{device.type}', dtype={dtype})",
         )
+        self.writeline(allocation)
 
     def codegen_free(self, buffer):
         name = buffer.get_name()

@@ -2,7 +2,9 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import logging
 import math
+import operator
 from typing import Dict
 from typing import List
 
@@ -15,10 +17,13 @@ from .. import ir
 from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
+from .common import DeferredLine
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+
+log = logging.getLogger(__name__)
 
 
 class TritonPrinter(ExprPrinter):
@@ -396,6 +401,76 @@ class TritonKernel(Kernel):
             for length, ranges in zip(lengths, self.range_trees)
         ]
 
+    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
+        """
+        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
+
+        To do this we need to split up the iteration space of i0 into something like:
+            for i1 in s0:
+              for i2 in s1:
+                i0 = i1*s1 + i2
+                ....
+
+        This function matches and resplits lengths to the groups of
+        this kernel to enable tiled + non-tiled fusions.
+        """
+        sv = V.graph.sizevars
+        new_ranges = [[] for _ in self.range_trees]
+        remaining = [sv.simplify(rt.numel) for rt in self.range_trees]
+        var_count = itertools.count()
+
+        def add_range(i, expr):
+            expr = sv.simplify(expr)
+            if not sv.maybe_guard_multiple_of(remaining[i], expr):
+                raise CantSplit()
+            # guard on the last item out
+            sv.maybe_guard_equals(remaining[i], expr)
+            remaining[i] = ir.IndexingDiv(remaining[i], expr)
+            new_ranges[i].append(expr)
+            return next(var_count)
+
+        def make_combined(size, idx1, idx2):
+            def getter(flat_vars):
+                return size * flat_vars[idx1] + flat_vars[idx2]
+
+            return getter
+
+        return_getters_groups = []
+        current_group = 0
+        for length_group in lengths:
+            return_getters = []
+            for size in length_group:
+                while (
+                    current_group < len(remaining)
+                    and sv.size_hint(remaining[current_group]) == 1
+                ):
+                    # scroll to next group with remaining elements
+                    current_group += 1
+
+                if sv.size_hint(size) > sv.size_hint(remaining[current_group]):
+                    # need to break size in two
+                    if not sv.maybe_guard_multiple_of(size, remaining[current_group]):
+                        raise CantSplit()
+                    size1 = remaining[current_group]
+                    size2 = ir.IndexingDiv(size, remaining[current_group])
+                    return_getters.append(
+                        make_combined(
+                            size2,
+                            add_range(current_group, size1),
+                            add_range(current_group + 1, size2),
+                        )
+                    )
+                else:
+                    return_getters.append(
+                        operator.itemgetter(add_range(current_group, size))
+                    )
+
+            return_getters_groups.append(return_getters)
+
+        assert all(s == 1 for s in remaining)
+        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
+        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
+
     def indexing(self, index: sympy.Expr, copy_shape=None):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -491,11 +566,16 @@ class TritonKernel(Kernel):
 
         return tmp
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         var = self.args.output(name)
         index, mask = self.indexing(index, value)
-        line = f"tl.store({var} + {index}, {value}, {mask})"
-        self.stores.writeline(line)
+        if mode is None:
+            line = f"tl.store({var} + {index}, {value}, {mask})"
+        elif mode == "atomic_add":
+            line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
+        else:
+            raise NotImplementedError(f"store mode={mode}")
+        self.stores.writeline(name, line)
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
@@ -543,7 +623,9 @@ class TritonKernel(Kernel):
         self.cse.store_cache[name] = result_var
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            self.suffix.writeline(f"tl.store({var} + {index}, {result_var}, {mask})")
+            self.suffix.writeline(
+                DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
+            )
 
     def codegen_body(self):
         """
@@ -694,33 +776,12 @@ class TritonScheduling:
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
-        def is_group_matching(other_node):
-            _, other_groups = other_node.group
-            if groups == other_groups:
-                return True
-            if len(groups) == 2 and groups[-1] != 1:
-                group, reduction_group = groups
-                if other_groups == (group * reduction_group, sympy.Integer(1)):
-                    sizes, _ = other_node.get_ranges()
-                    split = split_sizes(sizes, group, reduction_group)
-                    return split is not None
-                return other_groups == (group, sympy.Integer(1))
-            elif len(groups) == 3:
-                tile1, tile2, _ = groups
-                if other_groups == (tile1 * tile2, sympy.Integer(1)):
-                    sizes, _ = node.get_ranges()
-                    split = split_sizes(sizes, tile1, tile2)
-                    return split is not None
-
-            return False
-
         reduction_nodes = []
         reschedule = []
         with scheduler.kernel(TritonKernel(*groups)) as kernel:
             for _ in scheduler.iter_fixed_point():
                 # scheduler.pop_group will keep iterating all reachable fusable nodes
                 for node in scheduler.pop_group(groups):
-                    scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
                     node.run(*kernel.set_ranges(*node.get_ranges()))
                     if kernel.inside_reduction:
                         reduction_nodes.append(node)
@@ -737,16 +798,11 @@ class TritonScheduling:
                     for node in scheduler.pop_group(
                         (group * reduction_group, sympy.Integer(1)),
                     ):
-                        sizes, _ = node.get_ranges()
-                        split = split_sizes(sizes, group, reduction_group)
-                        if split is None:
-                            reschedule.append(node)
-                        else:
-                            scheduler.maybe_remove_buffer(
-                                node, check_group=is_group_matching
-                            )
-                            node.run(*kernel.set_ranges(sizes[:split], sizes[split:]))
+                        try:
+                            node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                             node.mark_fusable()
+                        except CantSplit:
+                            reschedule.append(node)
 
                     # we mark reductions fusable here as they rely on the loop break below
                     for node in reduction_nodes:
@@ -757,9 +813,6 @@ class TritonScheduling:
                     # disable_reduction() will close the current reduction loop
                     with kernel.disable_reduction():
                         for node in scheduler.pop_group((group, sympy.Integer(1))):
-                            scheduler.maybe_remove_buffer(
-                                node, check_group=is_group_matching
-                            )
                             node.run(*kernel.set_ranges(*node.get_ranges()))
                             node.mark_fusable()
 
@@ -769,18 +822,11 @@ class TritonScheduling:
                     for node in scheduler.pop_group(
                         (tile1 * tile2, sympy.Integer(1)),
                     ):
-                        sizes, _ = node.get_ranges()
-                        split = split_sizes(sizes, tile1, tile2)
-                        if split is None:
-                            reschedule.append(node)
-                        else:
-                            scheduler.maybe_remove_buffer(
-                                node, check_group=is_group_matching
-                            )
-                            node.run(
-                                *kernel.set_ranges(sizes[:split], sizes[split:], [])
-                            )
+                        try:
+                            node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                             node.mark_fusable()
+                        except CantSplit:
+                            reschedule.append(node)
 
         kernel_name = wrapper.next_kernel_name()
         if config.triton.many_files:
@@ -797,8 +843,5 @@ class TritonScheduling:
         pass
 
 
-def split_sizes(sizes, prod1, prod2):
-    for i in range(len(sizes)):
-        if sympy_product(sizes[:i]) == prod1 and sympy_product(sizes[i:]) == prod2:
-            return i
-    return None
+class CantSplit(Exception):
+    pass

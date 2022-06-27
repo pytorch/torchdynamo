@@ -143,6 +143,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     if has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.float)
+    torch.manual_seed(0)
     correct = model(*upcasted_inputs)
     # downcast the model back if needed
     if has_lowp_args:
@@ -155,6 +156,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
+        torch.manual_seed(0)
         actual = run(*example_inputs)
 
     assert type(actual) == type(correct)
@@ -1891,6 +1893,15 @@ class CommonTemplate:
             ],
         )
 
+    @patch.object(config.triton, "max_tiles", 2)
+    def test_fuse_tiled(self):
+        def fn(a, b, c):
+            return a + b, c + 1
+
+        self.common(
+            fn, [torch.randn(128, 1), torch.randn(1, 128), torch.randn(128, 128)]
+        )
+
     def test_expand_as(self):
         def fn(a, b):
             return aten.expand_as(a, b), aten.expand_as(a + 1, b + 1) + 1
@@ -1902,6 +1913,101 @@ class CommonTemplate:
                 torch.randn(6, 128, 100),
             ],
         )
+
+    def test_index_put1(self):
+        def fn(a, b, c):
+            return (
+                torch.index_put(a, [b], c),
+                torch.index_put_(a + 1, [b + 1], c + 1) + 1,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([800, 256, 7, 7]),
+                torch.randperm(601),
+                torch.randn([601, 256, 7, 7]),
+            ],
+        )
+
+    def test_index_put2(self):
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c, True)
+
+        self.common(
+            fn,
+            [
+                torch.randn([100, 256, 7, 7]),
+                torch.randint(0, 100, size=[600], dtype=torch.int64),
+                torch.randn([600, 256, 7, 7]),
+            ],
+            # workaround for https://github.com/openai/triton/issues/558
+            check_lowp=False,
+        )
+
+    def test_bernoulli(self):
+        def fn(a):
+            b = torch.empty_like(a)
+            return aten.bernoulli_(b), b
+
+        self.common(
+            fn,
+            [
+                torch.randn([100]),
+            ],
+        )
+
+    def test_narrow(self):
+        def fn(x):
+            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+
+        self.common(fn, [torch.randn(64, 64)])
+
+    def test_as_strided(self):
+        def fn(x):
+            return (
+                aten.as_strided(x, (8, 8, 64), (8 * 64, 64, 1), 0),
+                aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2,
+            )
+
+        self.common(fn, [torch.randn(64, 64)])
+
+    def test_select_scatter(self):
+        def fn(x, a, b):
+            return (
+                aten.select_scatter(x, a, 1, 0),
+                aten.select_scatter(x, b, 0, 1),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn(8, 197, 38),
+                torch.randn(8, 38),
+                torch.randn(197, 38),
+            ],
+        )
+
+    def test_slice_scatter(self):
+        def fn(x, a):
+            return (
+                aten.slice_scatter(x, a, 2, 10, -10),
+                aten.slice_scatter(x, a[:, :, :40], 2, 10, -10, 2),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn(4, 8, 100),
+                torch.randn(4, 8, 80),
+            ],
+        )
+
+    def test_new_empty_strided(self):
+        def fn(a):
+            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
+
+        self.common(fn, [torch.randn(55)])
 
 
 if HAS_CPU:

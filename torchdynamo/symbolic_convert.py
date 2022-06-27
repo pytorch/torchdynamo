@@ -17,6 +17,8 @@ from typing import Iterable
 from typing import List
 from unittest.mock import patch
 
+import torch
+
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
@@ -44,6 +46,7 @@ from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
+from .utils import fake_tensors_available
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
@@ -308,10 +311,11 @@ class InstructionTranslatorBase(object):
             ):
                 pass
         except (
-            exc.Unsupported,
+            exc.BackendCompilerFailed,
             exc.RestartAnalysis,
-            exc.TorchRuntimeError,
             exc.SkipFrame,
+            exc.TorchRuntimeError,
+            exc.Unsupported,
         ):
             raise
         except Exception as e:
@@ -1127,6 +1131,16 @@ class InstructionTranslatorBase(object):
             lookup_line=False,
         )
 
+    @property
+    def fake_mode(self):
+        return self._fake_mode
+
+    def find_symbolic_locals_name(self, tensor_variable):
+        for key, value in self.symbolic_locals.items():
+            if value is tensor_variable:
+                return key
+        return None
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1159,7 +1173,11 @@ class InstructionTranslatorBase(object):
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
+        if fake_tensors_available:
+            self._fake_mode = torch._subclasses.FakeTensorMode(inner=None)
+
         self.checkpoint = None
+        self.random_calls: List[tuple] = []
 
         if sys.version_info >= (3, 10):
             from .resume_execution import CO_ASYNC_GENERATOR
@@ -1235,6 +1253,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                         GuardBuilder.LIST_LENGTH,
                         GuardBuilder.DICT_KEYS,
                         GuardBuilder.ODICT_KEYS,
+                        GuardBuilder.TUPLE_ITERATOR_LEN,
                     )
                 ]
                 self.output.guards.update(index_guards)
@@ -1405,6 +1424,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
+
+    @property
+    def fake_mode(self):
+        return self.parent.fake_mode
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:

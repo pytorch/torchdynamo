@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import textwrap
+from collections import OrderedDict
 from functools import partial
 from typing import Any
 from typing import Callable
@@ -213,6 +214,33 @@ class Pointwise(Loops):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(device, self.dtype, loader, self.ranges)
+
+
+@dataclasses.dataclass
+class Scatter(Pointwise):
+    output_indexer: Callable[[List[Expr]], Expr]
+    scatter_mode: str = None
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Scatter(
+            device,
+            self.dtype,
+            loader,
+            self.ranges,
+            self.output_indexer,
+            self.scatter_mode,
+        )
+
+    def store_output(self, output_name, indexer, vars):
+        return ops.store(
+            output_name,
+            indexer(self.output_indexer(vars)),
+            self.inner_fn(vars),
+            mode=self.scatter_mode,
+        )
 
 
 @dataclasses.dataclass
@@ -1149,7 +1177,7 @@ class Buffer(IRNode):
         return self.layout.device
 
     def get_dtype(self):
-        return self.layout.dtype
+        return getattr(self.layout, "dtype", None)
 
     def get_size(self):
         return self.layout.size
@@ -1691,6 +1719,15 @@ class ExternKernel(InputsKernel):
             wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
             wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
 
+    def get_group_stride(self):
+        """
+        get output sizes and strides, for template_codegen
+        """
+        _size = self.get_size()
+        _stride = self.get_stride()
+        # iter_ranges = _size of output tensor, reduce_range = [] because no reduction
+        return [_size, []], _stride
+
 
 @dataclasses.dataclass
 class ExternKernelOut(ExternKernel):
@@ -1729,6 +1766,65 @@ class ExternKernelAlloc(ExternKernel):
         return False
 
 
+class IndexPutFallback(ExternKernel):
+    # TODO(jansel): delete this when this is fixed:
+    # https://github.com/openai/triton/issues/558
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        x, *indices, values = [t.codegen_reference() for t in self.inputs]
+        (accumulate,) = self.constant_args
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{', '.join(indices)}], {values}, {accumulate!r})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, x, indices, values, accumulate=False):
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage([x, *indices, values]),
+            [accumulate],
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class InplaceBernoulliFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    kernel = "aten.bernoulli_"
+
+    def codegen(self, wrapper):
+        (x,) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(
+            f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, x, *constant_args):
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage([x]),
+            constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
@@ -1765,6 +1861,15 @@ class MatrixMultiply(ExternKernelOut):
 
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"
+
+    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+        super().__init__(layout, inputs, constant_args, output_view)
+        if (
+            config.triton.use_bmm
+            and len(inputs) > 0
+            and inputs[0].get_device().type == "cuda"
+        ):
+            self.kernel = "triton_bmm_out"
 
     @classmethod
     def create(cls, a, b):
@@ -2152,6 +2257,95 @@ class Convolution(ExternKernelAlloc):
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
 
+    def map_args(self):
+        # x, w, bias
+        in_args = [x.codegen_reference() for x in self.inputs]
+        # stride, padding, dilation, transposed, output_padding, groups
+        const_args = self.constant_args
+        if len(in_args) < 3:
+            # otherwise, bias=None is the first constant_args
+            const_args = const_args[1:]
+        # stride of inputs and outputs
+        stride_x = f"{in_args[0]}.stride()"
+        stride_w = f"{in_args[1]}.stride()"
+        stride_y = f"{self.get_name()}.stride()"
+
+        args_dict = OrderedDict(
+            [
+                ("x", f"{in_args[0]}"),
+                ("w", f"{in_args[1]}"),
+                ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
+                ("y", f"{self.get_name()}"),
+                ("stride_xn", stride_x + "[0]"),
+                ("stride_xc", stride_x + "[1]"),
+                ("stride_xh", stride_x + "[2]"),
+                ("stride_xw", stride_x + "[3]"),
+                ("stride_wn", stride_w + "[0]"),
+                ("stride_wc", stride_w + "[1]"),
+                ("stride_wh", stride_w + "[2]"),
+                ("stride_ww", stride_w + "[3]"),
+                ("stride_yn", stride_y + "[0]"),
+                ("stride_yc", stride_y + "[1]"),
+                ("stride_yh", stride_y + "[2]"),
+                ("stride_yw", stride_y + "[3]"),
+                (
+                    "stride_biasn",
+                    f"{in_args[2]}.stride()[0]" if len(in_args) >= 3 else "None",
+                ),
+                ("delta_x_ptr", "None"),
+                ("BATCH", f"{in_args[0]}.shape[0]"),
+                ("IN_C", f"{in_args[0]}.shape[1]"),
+                ("IN_H", f"{in_args[0]}.shape[2]"),
+                ("IN_W", f"{in_args[0]}.shape[3]"),
+                ("KERNEL_N", f"{in_args[1]}.shape[0]"),
+                ("KERNEL_H", f"{in_args[1]}.shape[2]"),
+                ("KERNEL_W", f"{in_args[1]}.shape[3]"),
+                ("OUT_H", f"{self.get_name()}.shape[2]"),
+                ("OUT_W", f"{self.get_name()}.shape[3]"),
+                ("stride_h", f"{const_args[0][0]}"),
+                ("stride_w", f"{const_args[0][1]}"),
+                ("padding_h", f"{const_args[1][0]}"),
+                ("padding_w", f"{const_args[1][1]}"),
+                ("dilation_h", f"{const_args[2][0]}"),
+                ("dilation_w", f"{const_args[2][1]}"),
+                # ("transposed", f"{const_args[3]}"),
+                ("output_padding_h", f"{const_args[4][0]}"),
+                ("output_padding_w", f"{const_args[4][1]}"),
+                ("groups", f"{const_args[5]}"),
+            ]
+        )
+
+        # accumulator type
+        ACC_TYPE = (
+            "tl.float32"
+            if self.inputs[0].get_dtype()
+            in [torch.float16, torch.bfloat16, torch.float32]
+            else "tl.int32"
+        )
+        CONV1X1_NHWC = (
+            "True"
+            if self.inputs[0].get_stride()[1] == 1
+            and self.inputs[1].shape[2] == 1
+            and self.inputs[1].shape[3] == 1
+            else "False"
+        )
+        # dict for tl.constexpr
+        const_dict = OrderedDict(
+            [
+                ("ACC_TYPE", ACC_TYPE),
+                ("CONV1X1_NHWC", CONV1X1_NHWC),
+            ]
+        )
+
+        # dict for non-kernel args (e.g. delta_x_ptr)
+        other_dict = OrderedDict(
+            [
+                ("device", f'"{self.inputs[0].get_device()}"'),
+            ]
+        )
+
+        return args_dict, const_dict, other_dict
+
 
 @dataclasses.dataclass
 class MutableBox(IRNode):
@@ -2308,9 +2502,9 @@ class LoopBodyBlock:
                 index = add_index(index, "reads")
                 return self._inner.load(name, index, upcast)
 
-            def store(self, name, index, value):
+            def store(self, name, index, value, mode=None):
                 index = add_index(index, "writes")
-                return self._inner.store(name, index, value)
+                return self._inner.store(name, index, value, mode)
 
             def reduction(self, name, dtype, reduction_type, index, value):
                 index = add_index(index, "writes")
