@@ -221,6 +221,15 @@ class NNModuleVariable(VariableTracker):
         if name == "forward":
             return self.call_function(tx, args, kwargs)
 
+        if name == "train":
+            fn = module.train
+            print("FN is:", fn.__class__)
+            print("FN can be:", fn.__func__)
+            v = variables.UserMethodVariable(fn.__func__, module, **options)
+            return v.call_function(
+                tx, args, kwargs
+            )
+
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
@@ -262,13 +271,13 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_children())
         elif name == "named_parameters":
             result = []
-            for name, submod in module.named_parameters(**get_kwargs("recurse")):
+            for name, param in module.named_parameters(**get_kwargs("recurse")):
                 result.append(
                     TupleVariable(
                         [
                             ConstantVariable(name, **options),
                             tx.output.add_submodule(
-                                submod,
+                                param,
                                 key,
                                 name,
                                 source=NNModuleSource(GetItemSource(self.source, name)),
