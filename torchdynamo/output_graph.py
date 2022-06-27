@@ -275,6 +275,7 @@ class OutputGraph(fx.Tracer):
                     output.append(create_instruction("POP_TOP"))
             self.add_output_instructions(output + pass2.get_instructions())
 
+        # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )

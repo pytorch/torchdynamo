@@ -2,9 +2,9 @@ from . import allowed_functions
 from . import convert_frame
 from . import resume_execution
 from .eval_frame import disable
+from .eval_frame import export_experimental
 from .eval_frame import optimize
 from .eval_frame import optimize_assert
-from .eval_frame import export_experimental
 from .eval_frame import reset_code
 from .eval_frame import run
 from .eval_frame import skip

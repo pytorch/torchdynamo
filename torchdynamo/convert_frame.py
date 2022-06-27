@@ -308,12 +308,14 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 print(dis.Bytecode(code).dis())
                 print("\nGUARDS:")
                 for guard in sorted(output.guards):
-                    print(guard)
+                    print(" -", str(guard))
                 print()
-        
+
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
-            guarded_code = GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            guarded_code = GuardedCode(
+                code, output.guards, frame.f_locals, frame.f_globals
+            )
             if guard_export_fn is not None:
                 guard_export_fn(output.guards)
             return guarded_code

@@ -237,25 +237,31 @@ def optimize(backend, nopython=False):
 def export_experimental(f, *args):
     graph = None
     out_guards = None
+
     def guard_export_print(guards):
         nonlocal out_guards
-        assert (out_guards is None), "whole graph export entails exactly one guard export"
+        assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
 
-    def dynamo_normalization_capturing_compiler(gm: torch.fx.GraphModule, example_inputs):
+    def dynamo_normalization_capturing_compiler(
+        gm: torch.fx.GraphModule, example_inputs
+    ):
         nonlocal graph
-        assert (graph is None), "whole graph export entails exactly one graph"
+        assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
         return gm.forward
 
     backend_ctx_ctor = null_context
- 
-    with optimize_assert(dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print):
+
+    with optimize_assert(
+        dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
+    ):
         f(*args)
 
-    assert (graph is not None), "whole graph export entails exactly one call"
-    assert (out_guards is not None), "whole graph export entails exactly one guard export"
+    assert graph is not None, "whole graph export entails exactly one call"
+    assert out_guards is not None, "whole graph export entails exactly one guard export"
     return (graph, out_guards)
+
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
     """
@@ -321,6 +327,3 @@ class TorchPatcher:
             return fn(*args, **kwargs)
 
         return inner_fn
-
-
-    
