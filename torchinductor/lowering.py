@@ -120,9 +120,11 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
 
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
+    else:
+        aten_fn = list(aten_fn)
 
     for fn in list(aten_fn):
-        if hasattr(fn, "overloads"):
+        if isinstance(fn, torch._ops.OpOverloadPacket):
             for overload in fn.overloads():
                 other_fn = getattr(fn, overload)
                 if other_fn not in lowerings:
