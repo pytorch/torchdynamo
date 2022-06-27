@@ -4,6 +4,7 @@ from . import resume_execution
 from .eval_frame import disable
 from .eval_frame import optimize
 from .eval_frame import optimize_assert
+from .eval_frame import export_experimental
 from .eval_frame import reset_code
 from .eval_frame import run
 from .eval_frame import skip
@@ -13,6 +14,7 @@ from .utils import orig_code_map
 __all__ = [
     "optimize",
     "optimize_assert",
+    "export_experimental",
     "run",
     "disable",
     "reset",

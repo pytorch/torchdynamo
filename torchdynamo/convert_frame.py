@@ -193,7 +193,7 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def convert_frame_assert(compiler_fn: Callable, one_graph=True):
+def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
     """Fully convert a frame into an FX graph"""
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
@@ -308,11 +308,15 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 print(dis.Bytecode(code).dis())
                 print("\nGUARDS:")
                 for guard in sorted(output.guards):
-                    print(" -", str(guard))
+                    print(guard)
                 print()
+        
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
-            return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            guarded_code = GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            if guard_export_fn is not None:
+                guard_export_fn(output.guards)
+            return guarded_code
         except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
             debug_print("WONT CONVERT")
             raise
@@ -330,9 +334,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     return wrap_convert_context(_convert_frame_assert)
 
 
-def convert_frame(compiler_fn: typing.Callable):
+def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1
