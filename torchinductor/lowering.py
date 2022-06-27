@@ -426,6 +426,7 @@ def repeat(x, repeats):
 
 @register_lowering(aten._unsafe_view)
 @register_lowering(aten.view)
+@register_lowering(aten.reshape)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
