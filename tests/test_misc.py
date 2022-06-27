@@ -1833,25 +1833,19 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertTrue(torch.allclose(v_a, v))
 
     def test_module_complex_iter(self):
-        from torch import nn
-
         n_embd = 768
         block_size = 128
         vocab_size = 65
         embd_pdrop = 0.1
 
-        class GPT(nn.Module):
+        class FakeGPT(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-
-                # input embedding stem
-                self.tok_emb = nn.Embedding(vocab_size, n_embd)
-                self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd))
-                self.drop = nn.Dropout(embd_pdrop)
-                # transformer
-                # decoder head
-                self.ln_f = nn.LayerNorm(n_embd)
-                self.head = nn.Linear(n_embd, vocab_size, bias=False)
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.ln_f = torch.nn.LayerNorm(n_embd)
+                self.head = torch.nn.Linear(n_embd, vocab_size, bias=False)
 
                 self.block_size = block_size
                 self.names = []
@@ -1892,22 +1886,22 @@ class MiscTests(torchdynamo.testing.TestCase):
                         self.names.append(fpn)
 
         # Test plain recurse
-        model_a = GPT()
+        model_a = FakeGPT()
         model_a.foo()
         a_names = model_a.names
 
-        model_b = GPT()
+        model_b = FakeGPT()
         with torchdynamo.optimize("eager", nopython=True):
             model_b.foo()
 
         self.assertEqual(model_a.names, model_b.names)
 
         # Test with prefix
-        model_a = GPT()
+        model_a = FakeGPT()
         model_a.foo(prefix="abc")
         a_names = model_a.names
 
-        model_b = GPT()
+        model_b = FakeGPT()
         with torchdynamo.optimize("eager", nopython=True):
             model_b.foo(prefix="abc")
 
