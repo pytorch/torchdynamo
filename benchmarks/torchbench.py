@@ -13,7 +13,6 @@ import torch
 from common import BenchmarkRunner
 from common import main
 
-import torchdynamo
 from torchdynamo.testing import collect_results
 from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.utils import clone_inputs
@@ -284,7 +283,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
-    def set_tolerance(self, is_training, current_device, name):
+    def get_tolerance(self, is_training, current_device, name):
         tolerance = 1e-4
         # Increase the tolerance for torch allclose
         if (
@@ -304,17 +303,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def compute_loss(self, pred):
         return reduce_to_scalar_loss(pred)
 
-    @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
 
-    @torchdynamo.skip
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)
-        pred = mod(*cloned_inputs)
-        loss = self.compute_loss(pred)
-        loss.backward()
+        with self.autocast():
+            pred = mod(*cloned_inputs)
+            loss = self.compute_loss(pred)
+        self.grad_scaler.scale(loss).backward()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None
