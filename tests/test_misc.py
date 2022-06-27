@@ -1851,6 +1851,8 @@ class MiscTests(torchdynamo.testing.TestCase):
                 self.names = []
 
             def forward(self, idx, targets=None):
+                from torch.nn import functional as F
+
                 b, t = idx.size()
                 assert (
                     t <= self.block_size
@@ -1894,7 +1896,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize("eager", nopython=True):
             model_b.foo()
 
-        self.assertEqual(model_a.names, model_b.names)
+        self.assertEqual(a_names, model_b.names)
 
         # Test with prefix
         model_a = FakeGPT()
@@ -1905,7 +1907,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize("eager", nopython=True):
             model_b.foo(prefix="abc")
 
-        self.assertEqual(model_a.names, model_b.names)
+        self.assertEqual(a_names, model_b.names)
 
 
 class TestTracer(JitTestCase):
