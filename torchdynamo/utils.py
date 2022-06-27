@@ -403,7 +403,7 @@ def rename_implicit(v):
 # to allow pytorch 1.12 to work
 fake_tensors_available = True
 try:
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses import FakeTensorMode  # noqa: F401
 except ImportError:
     fake_tensors_available = False
 
