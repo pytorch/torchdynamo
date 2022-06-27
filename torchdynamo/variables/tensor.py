@@ -96,9 +96,9 @@ class TensorVariable(VariableTracker):
                             example_value = nnmodule(*args, **kwargs)
                         else:
                             example_value = copy.deepcopy(nnmodule)(*args, **kwargs)
-                except NotImplementedError as ne:
-                    # Proceed w/o example?
-                    pass
+                # except NotImplementedError as ne:
+                #     # Proceed w/o example?
+                #     pass
                 except RuntimeError as e:
                     # Track the assertion when the pytorch execution raises
                     # assertion
