@@ -683,8 +683,19 @@ def clone(x, *, memory_format=0):
     )
 
 
-@register_lowering(torch.arange)
-def arange(start, end=None, step=1, *, dtype=None, device=None):
+@register_lowering([torch.arange, aten.arange])
+def arange(
+    start,
+    end=None,
+    step=1,
+    *,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+):
+    assert layout == torch.strided
+    assert not pin_memory
     if end is None:
         end = start
         start = 0
@@ -968,9 +979,9 @@ def tensor_constructor(fill_value):
     return inner
 
 
-register_lowering(torch.empty)(tensor_constructor(0))
-register_lowering(torch.zeros)(tensor_constructor(0))
-register_lowering(torch.ones)(tensor_constructor(1))
+register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
+register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
+register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
 
 
 def new_constant(fill_value):
