@@ -224,13 +224,13 @@ def template_codegen(scheduler, scheduler_node):
             for node in scheduler.pop_group(
                 (tile1 * tile2, sympy.Integer(1)),
             ):
-                # if not channel_last layout (data.get_size()[1] != 1),
+                # if not channel_last layout (data.get_stride()[1] != 1),
                 # reorder node loop ordering to channel last
                 # so that it could be fused with convolution and
                 # have correct results of split_and_set_ranges()
                 if (
-                    len(node.node.data.get_size()) == 4
-                    and node.node.data.get_size()[1] != 1
+                    len(node.node.get_size()) == 4
+                    and node.node.get_stride()[1] != 1
                 ):
                     node.reorder_channel_last()
                 try:
@@ -244,8 +244,8 @@ def template_codegen(scheduler, scheduler_node):
                 except CantSplit:
                     reschedule.append(node)
                     if (
-                        len(node.node.data.get_size()) == 4
-                        and node.node.data.get_size()[1] != 1
+                        len(node.node.get_size()) == 4
+                        and node.node.get_stride()[1] != 1
                     ):
                         node.re_simplify_reorder_and_tile()
         else:
