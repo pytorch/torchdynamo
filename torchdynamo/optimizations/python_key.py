@@ -152,25 +152,9 @@ def python_key_normalize(
 
         return tuple(unpack(x) for x in out)
 
-    class DynamoPythonKeyTracer(PythonKeyTracer):
-        def __init__(self):
-            super().__init__()
-
-        def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-            if isinstance(attr_val, torch.nn.Parameter):
-                for n, p in self.root.named_parameters():
-                    if attr_val is p:
-                        if n not in parameter_proxy_cache:
-                            proxy = self.create_proxy("get_attr", n, (), {})
-                            parameter_proxy_cache[n] = python_tensor_cls(
-                                attr_val, proxy
-                            )
-                        return parameter_proxy_cache[n]
-                return attr_val
-            return attr_val
 
     with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
-        tracer: torch.fx.Tracer = DynamoPythonKeyTracer()
+        tracer: torch.fx.Tracer = PythonKeyTracer()
         graph = tracer.trace(fake_signature(fn_for_tracing, nargs))
         traced = GraphModule(tracer.root, graph, "python_key_traced")
         # https://github.com/pytorch/pytorch/pull/80013 switched over
