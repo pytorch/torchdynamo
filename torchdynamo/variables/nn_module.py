@@ -226,10 +226,10 @@ class NNModuleVariable(VariableTracker):
         ):
             return ConstantVariable(True, **options)
 
-        for x in itertools.chain(args, kwargs):
-            # CALL_FUNCTION_KW -> call_function -> call_function -> call_method may not produce a variables.*
-            if isinstance(x, variables.VariableTracker) and not x.is_python_constant():
-                raise unimplemented(f"non-const NNModule method {name}")
+        if not all(
+            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+        ):
+            raise unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
             fn = getattr(module, name)
