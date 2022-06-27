@@ -10,7 +10,6 @@ import operator
 import sys
 import traceback
 import types
-import torch
 import typing
 from typing import Any
 from typing import Dict
@@ -18,8 +17,7 @@ from typing import Iterable
 from typing import List
 from unittest.mock import patch
 
-
-from .utils import fake_tensors_available
+import torch
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
@@ -48,6 +46,7 @@ from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
+from .utils import fake_tensors_available
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker

@@ -1059,7 +1059,7 @@ class CommonTemplate:
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
-    # waiting on https://github.com/pytorch/pytorch/pull/80193   
+    # waiting on https://github.com/pytorch/pytorch/pull/80193
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):

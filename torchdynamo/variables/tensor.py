@@ -10,10 +10,13 @@ from typing import List
 
 import torch.fx
 import torch.random
+
 from ..utils import fake_tensors_available
+
 if fake_tensors_available:
     from torch._subclasses import FakeTensor
     from torch._subclasses import UnsupportedFakeTensorException
+
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map
