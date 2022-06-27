@@ -226,8 +226,10 @@ class NNModuleVariable(VariableTracker):
         ):
             return ConstantVariable(True, **options)
 
-        if not all(x.is_python_constant() for x in itertools.chain(args, kwargs)):
-            raise unimplemented(f"non-const NNModule method {name}")
+        for x in itertools.chain(args, kwargs):
+            # CALL_FUNCTION_KW -> call_function -> call_function -> call_method may not produce a variables.*
+            if isinstance(x, variables.VariableTracker) and not x.is_python_constant():
+                raise unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
             fn = getattr(module, name)
@@ -257,19 +259,32 @@ class NNModuleVariable(VariableTracker):
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
 
         def named_embed(name, obj):
-            return TupleVariable([ConstantVariable(name, **options), tx.output.add_submodule(obj, key, name, source=NNModuleSource(GetItemSource(self.source, name)), **options,),])
+            return TupleVariable(
+                [
+                    ConstantVariable(name, **options),
+                    tx.output.add_submodule(
+                        obj,
+                        key,
+                        name,
+                        source=NNModuleSource(GetItemSource(self.source, name)),
+                        **options,
+                    ),
+                ]
+            )
 
         if name == "children":
             assert not (args or kwargs)
             return wrap_values(module.named_children())
         elif name == "named_parameters":
             result = []
-            for name, param in module.named_parameters(**get_kwargs("recurse")):
+            for name, param in module.named_parameters(
+                **get_kwargs("prefix", "recurse")
+            ):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
-            for name, submod in module.named_modules(**get_kwargs("memo", "prefix", "remove_duplicate")):
+            for name, submod in module.named_modules():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "parameters":
