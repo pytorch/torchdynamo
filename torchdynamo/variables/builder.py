@@ -9,6 +9,7 @@ from abc import ABCMeta
 from typing import Any
 from typing import List
 
+import numpy as np
 import torch
 
 import torchdynamo
@@ -23,11 +24,11 @@ from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
+from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
 from ..utils import is_namedtuple
-from ..utils import is_numpy_float_type
 from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype
@@ -57,7 +58,8 @@ from .misc import TypingVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
-from .tensor import UnspecializedPrimitiveVariable
+from .tensor import UnspecializedNumpyVariable
+from .tensor import UnspecializedPythonVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -67,6 +69,7 @@ from .user_defined import UserDefinedObjectVariable
 class GraphArg:
     source: Source
     example: Any
+    is_unspecialized: bool
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -282,18 +285,8 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif is_numpy_int_type(value) or is_numpy_float_type(value):
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), torch.tensor(value))
-            )
-            return UnspecializedPrimitiveVariable.create(
-                tx=self.tx,
-                proxy=self.tx.output.create_graph_input(
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                ),
-                example_value=torch.tensor(value),
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
-            )
+        elif isinstance(value, (int, float, np.number)):
+            return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)
@@ -327,7 +320,7 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            self.tx.output.graphargs.append(GraphArg(self.get_source(), value))
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # user code.
             with torch._C.DisableTorchFunction():
@@ -349,6 +342,37 @@ class VariableBuilder:
                     subclass_type,
                 )
             return tensor_variable
+
+    def wrap_unspecialized_primitive(self, value):
+        wrapped_value = torch.tensor(value)
+        self.tx.output.graphargs.append(
+            GraphArg(self.get_source(), wrapped_value, True)
+        )
+        if not isinstance(self.get_source(), RandomValueSource):
+            guards_options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
+        else:
+            guards_options = {}
+
+        proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
+        )
+
+        if isinstance(value, np.number):
+            return UnspecializedNumpyVariable.create(
+                tx=self.tx,
+                proxy=proxy,
+                example_value=wrapped_value,
+                raw_value=value,
+                **guards_options,
+            )
+        else:
+            return UnspecializedPythonVariable.create(
+                tx=self.tx,
+                proxy=proxy,
+                example_value=wrapped_value,
+                raw_value=value,
+                **guards_options,
+            )
 
 
 def _dataclasses_fields_lambda(obj):

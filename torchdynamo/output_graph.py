@@ -33,6 +33,8 @@ from .utils import count_calls
 from .utils import counters
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+from .variables.tensor import UnspecializedNumpyVariable
+from .variables.tensor import UnspecializedPythonVariable
 
 
 class FakeRootModule(torch.nn.Module):
@@ -77,6 +79,7 @@ class OutputGraph(fx.Tracer):
         self.root_tx = root_tx
         self.cleanups = []
         self.should_exit = False
+        self.random_values_var = None
 
     @property
     def output(self):
@@ -234,8 +237,17 @@ class OutputGraph(fx.Tracer):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
+        if len(tx.random_calls) > 0:
+            self.random_values_var = self.new_var("random_values")
+
         if (
             stack_values
+            and all(
+                not isinstance(
+                    v, (UnspecializedNumpyVariable, UnspecializedPythonVariable)
+                )
+                for v in stack_values
+            )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
