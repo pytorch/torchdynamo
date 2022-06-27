@@ -10,6 +10,7 @@ import random
 import sys
 import typing
 import unittest
+import weakref
 from unittest.mock import patch
 
 import numpy as np
@@ -1409,6 +1410,21 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_unsupported_fake_tensor(self):
+        def f(x):
+            return torch.quantize_per_tensor(
+                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
+            )
+
+        x = torch.randn(2, 2)
+        with self.assertRaises(RuntimeError):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                f(x)
+
+        with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                f(x)
+
     def test_inline_list_mutation(self):
         def f1(x):
             x.append(torch.ones(8))
@@ -1524,6 +1540,53 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(sample)
 
         self.assertTrue(same(ref, res))
+
+    def test_release_input_memory(self):
+        x = torch.rand([4])
+        x_ref = weakref.ref(x)
+
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts)
+        def foo(x):
+            return x + x
+
+        out = foo(x)
+        self.assertTrue(same(out, x + x))
+        del x
+        self.assertIs(x_ref(), None)
+
+    def test_release_module_memory(self):
+
+        mod = torch.nn.Linear(10, 10)
+        x = torch.rand([10, 10])
+        mod_weight_ref = weakref.ref(mod.weight)
+        mod_ref = weakref.ref(mod)
+
+        # Modules that are passed into torchdynamo optimized functions
+        # will normally be held onto through the generated GraphModule,
+        # which contains the modules. remove the reference in this backend
+        # and test that no additional references are being held.
+        class NoLeakBackend:
+            def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+                gm.mod = None
+
+                def foo(*args, **kwargs):
+                    return (1,)
+
+                return foo
+
+        no_leak_backend = NoLeakBackend()
+
+        @torchdynamo.optimize(no_leak_backend)
+        def foo(mod, x):
+            return mod(x)
+
+        foo(mod, x)
+        del mod
+        del x
+        self.assertIsNone(mod_ref(), None)
+        self.assertIsNone(mod_weight_ref(), None)
 
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
