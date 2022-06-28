@@ -29,10 +29,10 @@ def test_total_time(shapes):
         b = torch.randn(b_shape, device="cuda", dtype=a.dtype)
 
         config.triton.use_bmm = False
-        c1 = inductor_aten_bmm(a, b)
+        inductor_aten_bmm(a, b)
 
         config.triton.use_bmm = True
-        c2 = inductor_triton_bmm(a, b)
+        inductor_triton_bmm(a, b)
 
         torch_ms = time_with_torch_timer(torch_bmm, (a, b)).mean * 1000
 

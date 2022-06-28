@@ -1,6 +1,3 @@
-import time
-
-import torch
 from torch.utils.benchmark import Timer
 
 

@@ -58,21 +58,21 @@ def profile_op(
     if layout == "nhwc":
         x = x.to(memory_format=torch.channels_last)
         w = w.to(memory_format=torch.channels_last)
-    OUT_H = (
-        IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]
-    ) // stride[0]
-    OUT_W = (
-        IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]
-    ) // stride[1]
 
     if provider == "cublas":
-        fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    if provider == "triton":
-        fn = lambda: torchinductor.triton_ops.conv(
-            x, w, bias, stride, padding, dilation, False, (0, 0), groups
-        )
+
+        def fn():
+            return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+
+    elif provider == "triton":
+
+        def fn():
+            return torchinductor.triton_ops.conv(
+                x, w, bias, stride, padding, dilation, False, (0, 0), groups
+            )
+
     else:
-        ValueError(f"{provider} not supported")
+        raise ValueError(f"{provider} not supported")
     # warm up
     for _ in range(warmup):
         fn()

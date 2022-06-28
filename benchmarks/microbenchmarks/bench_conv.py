@@ -100,11 +100,16 @@ def bench_op(
         * 1e-9
     )
     if provider == "cublas":
-        fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    if provider == "triton":
-        fn = lambda: torchinductor.triton_ops.conv(
-            x, w, bias, stride, padding, dilation, False, (0, 0), groups
-        )
+
+        def fn():
+            return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+
+    elif provider == "triton":
+
+        def fn():
+            return torchinductor.triton_ops.conv(
+                x, w, bias, stride, padding, dilation, False, (0, 0), groups
+            )
 
     # useCudaGraph won't change the TFLOPs,
     # because do_bench() clear L2 cache to hide the latency of CPU launch time
@@ -118,13 +123,13 @@ def bench_op(
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             for i in range(3):
-                tmp = fn()
+                fn()
         torch.cuda.current_stream().wait_stream(s)
 
         # capture
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g):
-            tmp = fn()
+            fn()
 
         def fn():
             x.copy_(new_x)
