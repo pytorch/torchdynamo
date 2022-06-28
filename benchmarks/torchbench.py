@@ -33,6 +33,7 @@ for torchbench_dir in (
     if exists(torchbench_dir):
         break
 assert exists(torchbench_dir), "../../torchbenchmark does not exist"
+original_dir = abspath(os.getcwd())
 torchbench_dir = abspath(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
@@ -186,9 +187,6 @@ SKIP = {
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
-    def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
-
     @property
     def skip_models(self):
         return SKIP
@@ -325,4 +323,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TorchBenchmarkRunner())
+    main(TorchBenchmarkRunner(), original_dir)
