@@ -1870,6 +1870,140 @@ class MiscTests(torchdynamo.testing.TestCase):
             lambda: fn(torch.randn(10), torch.randn(10)),
         )
 
+    def test_named_parameters(self):
+        n_embd = 768
+        block_size = 128
+        vocab_size = 65
+        embd_pdrop = 0.1
+
+        class MyModel2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+
+            def forward(self, x):
+                return x
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.submod2 = MyModel2()
+
+            def forward(self, x):
+                return x
+
+        # Regular
+        params = []
+        mod = MyModel()
+        actual_params = list(mod.named_parameters())
+
+        with torchdynamo.optimize("eager", nopython=True):
+            params = list(mod.named_parameters())
+
+        self.assertEqual(len(actual_params), len(params))
+        for idx in range(len(params)):
+            k_a, v_a = actual_params[idx]
+            k, v = params[idx]
+            self.assertEqual(k_a, k)
+            self.assertTrue(torch.allclose(v_a, v))
+
+        # Prefix
+        params = []
+        mod = MyModel()
+        actual_params = list(mod.named_parameters(prefix="foo"))
+
+        with torchdynamo.optimize("eager", nopython=True):
+            params = list(mod.named_parameters(prefix="foo"))
+
+        self.assertEqual(len(actual_params), len(params))
+        for idx in range(len(params)):
+            k_a, v_a = actual_params[idx]
+            k, v = params[idx]
+            self.assertEqual(k_a, k)
+            self.assertTrue(torch.allclose(v_a, v))
+
+    def test_module_complex_iter(self):
+        n_embd = 768
+        block_size = 128
+        vocab_size = 65
+        embd_pdrop = 0.1
+
+        class FakeGPT(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.ln_f = torch.nn.LayerNorm(n_embd)
+                self.head = torch.nn.Linear(n_embd, vocab_size, bias=False)
+
+                self.block_size = block_size
+                self.names = []
+
+            def forward(self, idx, targets=None):
+                from torch.nn import functional as F
+
+                b, t = idx.size()
+                assert (
+                    t <= self.block_size
+                ), "Cannot forward, model block size is exhausted."
+
+                # forward the GPT model
+                token_embeddings = self.tok_emb(
+                    idx
+                )  # each index maps to a (learnable) vector
+                position_embeddings = self.pos_emb[
+                    :, :t, :
+                ]  # each position maps to a (learnable) vector
+                x = self.drop(token_embeddings + position_embeddings)
+                x = self.blocks(x)
+                x = self.ln_f(x)
+                logits = self.head(x)
+
+                # if we are given some desired targets also calculate the loss
+                loss = None
+                if targets is not None:
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)), targets.view(-1)
+                    )
+
+                return logits, loss
+
+            def foo(self, memo=None, prefix="", remove_duplicate=False):
+                for mn, m in self.named_modules(
+                    memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
+                ):
+                    for pn, p in self.named_parameters():
+                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        self.names.append(fpn)
+
+        # Test plain recurse
+        model_a = FakeGPT()
+        model_a.foo()
+        a_names = model_a.names
+
+        model_b = FakeGPT()
+        with torchdynamo.optimize("eager", nopython=True):
+            model_b.foo()
+
+        self.assertEqual(a_names, model_b.names)
+
+        # Test with prefix
+        model_a = FakeGPT()
+        model_a.foo(prefix="abc")
+        a_names = model_a.names
+
+        model_b = FakeGPT()
+        with torchdynamo.optimize("eager", nopython=True):
+            model_b.foo(prefix="abc")
+
+        self.assertEqual(a_names, model_b.names)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
