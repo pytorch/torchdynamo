@@ -212,9 +212,8 @@ class GuardBuilder:
 
         self.code.append(code)
 
-        val = self.get(guard.name)
-        obj_id = self.id_ref(val)
-        t = type(val)
+        obj_id = self.id_ref(self.get(base))
+        t = type(self.get(base))
 
         guard.set_export_info("HASATTR", t, code, obj_id)
 
@@ -418,7 +417,7 @@ class GuardBuilder:
             code = "not ___is_grad_enabled()"
         print("Code:", code)
         self.code.append(code)
-        guard.set_export_info("GRAD_MODE", None, code, obj_id)
+        guard.set_export_info("GRAD_MODE", None, code, None)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
