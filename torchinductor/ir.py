@@ -2298,7 +2298,7 @@ class Convolution(ExternKernelAlloc):
         # manually generate index formula for conv
         sizes = self.get_size()
         index_vars = [sympy.Symbol(f"s{i}") for i in range(len(sizes))]
-        indexer = self.layout.make_indexer()
+        indexer = self.make_indexer()
         index = indexer(index_vars)
 
         new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
