@@ -2272,16 +2272,20 @@ class Convolution(ExternKernelAlloc):
             order = list(reversed(range(len(output_size))))
 
         channels_last_order = [3, 0, 2, 1]
+        device = x.get_device()
+        if device == "cuda" and config.triton.convolution != "aten":
+            # Force the output layout of conv to be channel last
+            layout = FlexibleLayout.stride_ordered(
+                output_size,
+                channels_last_order[len(channels_last_order) - len(output_size) :],
+            )
+        else:
+            layout = FlexibleLayout.stride_ordered(output_size, order)
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            # Force the output layout of conv to be channel last
-            FlexibleLayout.stride_ordered(
-                output_size,
-                channels_last_order[len(channels_last_order) - len(output_size) :],
-            ),
-            # FlexibleLayout.stride_ordered(output_size, order),
+            layout,
         )
 
         if bias is not None:
