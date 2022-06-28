@@ -317,7 +317,9 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 code, output.guards, frame.f_locals, frame.f_globals
             )
             if guard_export_fn is not None:
-                assert config.export_guards is True, "guard_export_fn defined, but config.export_guards not enabled"
+                assert (
+                    config.export_guards is True
+                ), "guard_export_fn defined, but config.export_guards not enabled"
 
                 guard_export_fn(output.guards)
             return guarded_code

@@ -109,7 +109,7 @@ class Guard:
         return self.source.is_local()
 
     def set_export_info(self, guard_type, guarded_class, code, id):
-        if config.export_guards == False:
+        if config.export_guards is False:
             return
 
         assert self.guard_type is None
