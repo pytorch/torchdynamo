@@ -2271,11 +2271,16 @@ class Convolution(ExternKernelAlloc):
         else:
             order = list(reversed(range(len(output_size))))
 
+        channels_last_order = [3, 0, 2, 1]
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            FlexibleLayout.stride_ordered(output_size, order),
+            # Force the output layout of conv to be channel last
+            FlexibleLayout.stride_ordered(
+                output_size, channels_last_order[len(channels_last_order)-len(output_size):]
+            ),
+            # FlexibleLayout.stride_ordered(output_size, order),
         )
 
         if bias is not None:
@@ -2297,7 +2302,13 @@ class Convolution(ExternKernelAlloc):
         """
         # manually generate index formula for conv
         sizes = self.get_size()
-        index_vars = [sympy.Symbol(f"s{i}") for i in range(len(sizes))]
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)),key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
         indexer = self.make_indexer()
         index = indexer(index_vars)
 

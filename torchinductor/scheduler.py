@@ -203,6 +203,13 @@ def pick_loop_order(stride_lengths, sizes):
         if sizes[a] == 1 or sizes[b] == 1:
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
+        
+        # if any input is channel_last aka stride[1] == 1
+        # let the output to be channel_last
+        if a == 1 and any(stride_lengths[:,a] == 1):
+            return -1
+        if b == 1 and any(stride_lengths[:,a] == 1):
+            return 1
 
         a_first = np.logical_or(
             stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
