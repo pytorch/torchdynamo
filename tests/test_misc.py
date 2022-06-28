@@ -710,10 +710,10 @@ class MiscTests(torchdynamo.testing.TestCase):
         correct1 = fn(m1, v)
         correct2 = fn(m2, v)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, nopython=True):
             for _ in range(10):
                 self.assertTrue(same(fn(m1, v), correct1))
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, nopython=True):
             for _ in range(10):
                 self.assertTrue(same(fn(m2, v), correct2))
         self.assertEqual(cnts.frame_count, 1)
