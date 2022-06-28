@@ -2,6 +2,7 @@ import base64
 import functools
 import getpass
 import hashlib
+import logging
 import os
 import random
 import re
@@ -14,6 +15,8 @@ from torch.utils import cpp_extension
 
 from . import config
 from . import exc
+
+log = logging.getLogger(__name__)
 
 
 def cache_dir():
@@ -44,17 +47,47 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-@functools.lru_cache(None)
 def cpp_compiler():
-    if isinstance(config.cpp.cxx, str):
-        return config.cpp.cxx
-    for cxx in config.cpp.cxx:
+    if isinstance(config.cpp.cxx, (list, tuple)):
+        search = tuple(config.cpp.cxx)
+    else:
+        search = (config.cpp.cxx,)
+    return cpp_compiler_search(search)
+
+
+@functools.lru_cache(1)
+def cpp_compiler_search(search):
+    for cxx in search:
         try:
-            subprocess.check_output([cxx, "--version"])
-            return cxx
+            if cxx is None:
+                return install_gcc_via_conda()
+            else:
+                subprocess.check_output([cxx, "--version"])
+                return cxx
         except (subprocess.SubprocessError, FileNotFoundError):
             continue
     raise exc.InvalidCxxCompiler()
+
+
+def install_gcc_via_conda():
+    """On older systems, this is a quick way to get a modern compiler"""
+    prefix = os.path.join(cache_dir(), "gcc")
+    cxx_path = os.path.join(prefix, "bin", "g++")
+    if not os.path.exists(cxx_path):
+        log.info("Downloading GCC via conda")
+        subprocess.check_call(
+            [
+                "conda",
+                "create",
+                f"--prefix={prefix}",
+                "--channel=conda-forge",
+                "-y",
+                "python=3.8",
+                "gxx",
+            ]
+        )
+        assert os.path.exists(cxx_path)
+    return cxx_path
 
 
 def is_gcc():
