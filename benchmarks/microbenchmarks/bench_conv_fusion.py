@@ -1,4 +1,4 @@
-from microbenchmarks import model as model
+import model
 import torch
 import torchdynamo
 import torchinductor.config
@@ -192,7 +192,7 @@ for fusion_type in fusion_types:
         field_names.append(f"triton conv+{fusion_type}")
 p.field_names = field_names
 p.float_format = ".3"
-for id, layer in enumerate(model.resnet50_layers):
+for id, layer in enumerate(model.resnet50_layers[0:1]):
     bench(layer, id, p, fusion_types)
 
 print(p)
