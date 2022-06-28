@@ -874,7 +874,7 @@ def parse_args():
     return args
 
 
-def main(runner):
+def main(runner, original_dir=None):
     args = parse_args()
 
     # defaults
@@ -1175,7 +1175,8 @@ def main(runner):
     elif args.isolate:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
-        os.chdir(torchdynamo.config.base_dir + "/model_benchmark")
+        if original_dir:
+            os.chdir(original_dir)
         for name in runner.iter_model_names(args):
             current_name = name
             try:
