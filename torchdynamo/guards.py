@@ -416,7 +416,7 @@ class GuardBuilder:
             code = "___is_grad_enabled()"
         else:
             code = "not ___is_grad_enabled()"
-
+        print("Code:", code)
         self.code.append(code)
         guard.set_export_info("GRAD_MODE", None, code, obj_id)
 

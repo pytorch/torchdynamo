@@ -228,9 +228,9 @@ def optimize(backend, nopython=False):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn)
+        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn=None)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, guard_export_fn), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
     )
 
 
