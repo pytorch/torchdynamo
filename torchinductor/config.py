@@ -38,7 +38,7 @@ class cpp:
     threads = -1  # set to cpu_count()
     simdlen = None
     min_chunk_size = 4096
-    cxx = ("/scratch/jansel/wd20220623/gcc12/bin/g++", "g++-10", "clang++-10", "g++")
+    cxx = ("g++-10", "clang++-10", "g++")
     # cxx = "clang++-12"
 
 

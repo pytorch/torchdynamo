@@ -278,16 +278,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-@register_decomposition([aten.index_put])
-def index_put(self, indices, values, accumulate=False):
-    return torch.index_put_(self.clone(), indices, values, accumulate)
-
-
-@register_decomposition([aten.narrow])
-def narrow(self, dim, start, length):
-    return aten.slice(self, dim, start, start + length)
-
-
 class Reduction(Enum):
     NONE = 0
     MEAN = 1
@@ -362,3 +352,13 @@ def nll_loss_forward(
                 result = result.sum() / total_weight
 
     return result, total_weight
+
+
+@register_decomposition([aten.index_put])
+def index_put(self, indices, values, accumulate=False):
+    return torch.index_put_(self.clone(), indices, values, accumulate)
+
+
+@register_decomposition([aten.narrow])
+def narrow(self, dim, start, length):
+    return aten.slice(self, dim, start, start + length)

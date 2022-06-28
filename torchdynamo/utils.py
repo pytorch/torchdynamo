@@ -6,6 +6,7 @@ import gc
 import inspect
 import itertools
 import logging
+import math
 import operator
 import re
 import sys
@@ -360,7 +361,9 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None), slice))
+    return istype(
+        v, (types.CodeType, int, float, bool, str, bytes, type(None), slice, type(type))
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -396,6 +399,15 @@ def rename_implicit(v):
     return v
 
 
+# FakeTensors were introduced after pytorch 1.12, so gate their use
+# to allow pytorch 1.12 to work
+fake_tensors_available = True
+try:
+    from torch._subclasses import FakeTensorMode  # noqa: F401
+except ImportError:
+    fake_tensors_available = False
+
+
 def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
@@ -429,8 +441,10 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
-    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
+    elif isinstance(a, (str, int, type(None), bool, torch.device)):
         return a == b
+    elif isinstance(a, float):
+        return math.isclose(a, b, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(a) or is_numpy_float_type(a):
         return (type(a) is type(b)) and (a == b)
     elif type(a).__name__ in (

@@ -1,7 +1,8 @@
 .PHONY: default develop test torchbench format lint setup clean autotune
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
-            $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py)
+            $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
+            $(wildcard model_benchmark/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -44,8 +45,8 @@ setup:
 setup_nightly:
 	pip install ninja
 	pip install Jinja2
-	pip install --pre torch==1.13.0.dev20220620+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
+	pip install --pre torch==1.13.0.dev20220626+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v git+https://github.com/pytorch/functorch.git@0022325a700ed00022c812a549050
 	pip install -r requirements.txt
 	python setup.py develop
 
