@@ -9,3 +9,4 @@ tabulate
 torch
 sympy
 expecttest
+pyyaml

@@ -19,9 +19,11 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .eval_frame import TorchPatcher
 from .eval_frame import WrapperBackend
 from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
+from .exc import BackendCompilerFailed
 from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
 from .exc import Unsupported
@@ -34,6 +36,7 @@ from .utils import guard_failures
 from .utils import is_namedtuple
 from .utils import istype
 from .utils import orig_code_map
+from .utils import troubleshooting_url
 
 log = logging.getLogger(__name__)
 
@@ -107,9 +110,9 @@ def wrap_convert_context(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
-        rng_state = torch.clone(torch.random.get_rng_state())
+        rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+            cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         try:
@@ -124,6 +127,7 @@ def wrap_convert_context(fn):
     return _fn
 
 
+@TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
     # Check if the function was decorated with torchdynamo.optimize
@@ -160,7 +164,11 @@ def has_tensor_in_frame(frame):
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
             return seen_ids[obj_id]
-        elif hasattr(obj, "__dict__") and len(getattr(obj, "__dict__")):
+        elif (
+            not is_allowed(obj)
+            and hasattr(obj, "__dict__")
+            and len(getattr(obj, "__dict__"))
+        ):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
@@ -214,6 +222,15 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
         if code.co_name == "<module>" and code.co_filename == "<string>":
             return None
 
+        if (
+            code.co_name == "<lambda>"
+            and code.co_filename == "<string>"
+            and not bool(frame.f_builtins)
+        ):
+            # namedtuple subclass constructor. Empty builtins cause issue with
+            # len keyword in LIST_LEN guard.
+            return None
+
         if is_generator(code):
             unimplemented("generator")
         if cache_size >= config.cache_size_limit:
@@ -229,7 +246,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
                 f"for function {format_func_info(code)}, "
                 f"due to the following guard failures: {format_guard_failures(code)}"
-                f"to diagnose recompilation issues, try using torchdynamo.utils.CompileProfiler."
+                f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
         output = None
@@ -296,7 +313,7 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
-        except (Unsupported, TorchRuntimeError):
+        except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
             debug_print("WONT CONVERT")
             raise
         except Exception:
@@ -323,6 +340,8 @@ def convert_frame(compiler_fn: typing.Callable):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
+        except BackendCompilerFailed:
+            raise
         except Exception:
             pass
         return None

@@ -6,6 +6,7 @@ import gc
 import inspect
 import itertools
 import logging
+import math
 import operator
 import re
 import sys
@@ -20,6 +21,7 @@ import numpy as np
 import tabulate
 import torch
 from torch import fx
+from torch.nn.modules.lazy import LazyModuleMixin
 
 import torchdynamo.config
 
@@ -27,6 +29,9 @@ from . import config
 
 log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
+troubleshooting_url = (
+    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
+)
 
 
 def count_calls(g: fx.Graph):
@@ -116,6 +121,10 @@ def istensor(obj):
     return istype(
         obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
     )
+
+
+def is_lazy_module(mod):
+    return isinstance(mod, LazyModuleMixin)
 
 
 @functools.lru_cache(4096)
@@ -352,7 +361,9 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(v, (types.CodeType, int, float, bool, str, bytes, type(None), slice))
+    return istype(
+        v, (types.CodeType, int, float, bool, str, bytes, type(None), slice, type(type))
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -388,6 +399,15 @@ def rename_implicit(v):
     return v
 
 
+# FakeTensors were introduced after pytorch 1.12, so gate their use
+# to allow pytorch 1.12 to work
+fake_tensors_available = True
+try:
+    from torch._subclasses import FakeTensorMode  # noqa: F401
+except ImportError:
+    fake_tensors_available = False
+
+
 def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
@@ -410,19 +430,21 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             assert b.is_sparse
             a = a.to_dense()
             b = b.to_dense()
-        assert isinstance(b, torch.Tensor)
+        assert isinstance(b, torch.Tensor), f"type mismatch {type(a)} {type(b)}"
         if cos_similarity:
             # TRT will bring error loss larger than current threshold. Use cosine similarity as replacement
             a = a.flatten().to(torch.float32)
             b = b.flatten().to(torch.float32)
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().numpy()}")
+                print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
-    elif isinstance(a, (str, int, float, type(None), bool, torch.device)):
+    elif isinstance(a, (str, int, type(None), bool, torch.device)):
         return a == b
+    elif isinstance(a, float):
+        return math.isclose(a, b, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(a) or is_numpy_float_type(a):
         return (type(a) is type(b)) and (a == b)
     elif type(a).__name__ in (

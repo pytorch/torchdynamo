@@ -4,6 +4,14 @@ from os.path import dirname
 
 import torch
 
+try:
+    import torch._prims
+    import torch._refs
+
+    HAS_REFS_PRIMS = True
+except ImportError:
+    HAS_REFS_PRIMS = False
+
 # print out lots of stuff
 debug = False
 
@@ -41,6 +49,9 @@ guard_nn_modules = False
 # Run the FX graph as it is created to get better type information
 dynamic_propagation = True
 
+# Run the FX graph with FakeTensors
+fake_tensor_propagation = False
+
 # run FX normalization passes in optimizer
 normalize_ir = True
 
@@ -57,6 +68,12 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
 }
+if HAS_REFS_PRIMS:
+    skipfiles_inline_module_allowlist |= {
+        torch._refs,
+        torch._prims,
+        torch._decomp,
+    }
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -65,4 +82,11 @@ skipfiles_inline_module_allowlist = {
 allowed_functions_module_string_ignorelist = {
     "torch.distributions",
     "torch.testing",
+    "torch._refs",
+    "torch._prims",
+    "torch._decomp",
 }
+
+# Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
+# When this flag is set to False, we introduce a graph break instead of capturing.
+capture_scalar_outputs = False

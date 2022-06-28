@@ -91,6 +91,17 @@ def _disallowed_function_ids():
         torch.autograd.profiler.profile,
         warnings.warn,
     ]
+    # extract all dtypes from torch
+    dtypes = [
+        obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
+    ]
+    remove += dtypes
+    storage = [
+        obj
+        for obj in torch.__dict__.values()
+        if isinstance(obj, type(torch.FloatStorage))
+    ]
+    remove += storage
     return {id(x) for x in remove}
 
 
@@ -100,7 +111,6 @@ def _allowed_function_ids():
     Walk torch.* and get the ids of all the stuff in it
     """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
-    torch.distributions.Distribution.set_default_validate_args(False)
     torch_object_ids = dict()
 
     def _is_allowed_module_prefix(obj):
@@ -179,12 +189,13 @@ def _numpy_function_ids():
 
 def is_allowed(obj):
     """Is this safe to trace like torch.add ?"""
-    return id(obj) in _allowed_function_ids
-
-
-def is_disallowed(obj):
-    """Is this safe to trace like torch.add ?"""
-    return id(obj) in _disallowed_function_ids
+    # torch.ops is populated lazily so we don't necessarily have them in
+    # _allowed_function_ids.  Figure it out by testing the type instead
+    # in those cases
+    return id(obj) in _allowed_function_ids or isinstance(
+        obj,
+        (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
+    )
 
 
 def torch_get_name(obj, default):

@@ -1,7 +1,8 @@
 .PHONY: default develop test torchbench format lint setup clean autotune
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
-            $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py)
+            $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
+            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -43,8 +44,9 @@ setup:
 
 setup_nightly:
 	pip install ninja
-	pip install --pre torch==1.13.0.dev20220601+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install -v git+https://github.com/pytorch/functorch.git@ae70048d9ff538062207922e37337
+	pip install Jinja2
+	pip install --pre torch==1.13.0.dev20220626+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v git+https://github.com/pytorch/functorch.git@0022325a700ed00022c812a549050
 	pip install -r requirements.txt
 	python setup.py develop
 
@@ -74,10 +76,10 @@ pull-deps:
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo
-	# conda create --name torchdynamo python=3.8
+	# conda create --name torchdynamo -y python=3.8
 	# conda activate torchdynamo
-	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake \
-        cffi typing_extensions future six requests dataclasses protobuf numba
+	conda install -y astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
+        cffi typing_extensions future six requests dataclasses protobuf numba cython
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 
@@ -139,7 +141,7 @@ gpu-inductor-cudagraphs-fp32: develop
 	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
 	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser
 	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts
+	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts -x densenet121
 	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs_fp32.csv
 
@@ -150,7 +152,7 @@ gpu-inductor-cudagraphs-fp16: develop
 	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
 	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts --nvfuser
 	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts
+	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts -x densenet121
 	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs_fp16.csv
 
@@ -159,14 +161,14 @@ gpu-inductor-dynamic: develop
 	python torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor-dynamic
 	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts --nvfuser
 	mv speedup_ts.csv baseline_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts
+	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts -x densenet121
 	mv speedup_ts.csv baseline_nnc.csv
 	paste -d, inductor.csv baseline_nvfuser.csv baseline_nnc.csv > inductor_gpu_dynamic.csv
 
 cpu-inductor: develop
 	rm -f inductor.csv speedup_ts.csv cpu_8t_inductor.csv
-	python torchbench.py --inductor-settings --fast --inductor --threads=8
-	python torchbench.py --inductor-settings --fast --backend=ts --threads=8
+	python torchbench.py --inductor-settings --fast --inductor
+	python torchbench.py --inductor-settings --fast --backend=ts
 	paste -d, inductor.csv speedup_ts.csv > cpu_8t_inductor.csv
 
 cpu-inductor-seq: develop

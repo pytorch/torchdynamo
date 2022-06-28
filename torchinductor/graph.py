@@ -17,6 +17,7 @@ from .ir import FixedLayout
 from .ir import InputBuffer
 from .ir import TensorBox
 from .lowering import lowerings
+from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
 
 log = logging.getLogger(__name__)
@@ -191,7 +192,9 @@ class GraphLowering(torch.fx.Interpreter):
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
-        assert all(isinstance(x, TensorBox) for x in result), result
+        assert all(
+            isinstance(x, (TensorBox, ir.Constant, type(None))) for x in result
+        ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
 
         for name, value in self.graph_inputs.items():
@@ -203,6 +206,7 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(value, InputBuffer) or value.get_name() != name:
                 # one of our inputs was mutated, need to turn that into a copy
                 ir.MutationLayout.realize_into(value, self.graph_inputs_original[name])
+
         self.finalize()
 
     def finalize(self):
@@ -213,6 +217,10 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().run_node(n)
         num_users = len(set(n.users))
         if num_users > 1 and isinstance(result, TensorBox):
+            for user in n.users:
+                if user.target in needs_realized_inputs:
+                    result.realize()
+
             # TODO(jansel): introduce a store vs inline choice
             result.mark_reuse(len(n.users))
         return result

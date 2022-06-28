@@ -8,6 +8,7 @@ from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -18,6 +19,13 @@ import torchdynamo.testing
 import torchdynamo.utils
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
+
+try:
+    import torch._refs
+
+    HAS_REFS = True
+except ImportError:
+    HAS_REFS = False
 
 
 def ifdyn(count1, count2):
@@ -719,6 +727,18 @@ class TransformerEncoderLayer(nn.Module):
         return self.ff_block(x)
 
 
+class TestModule(torch.nn.Module):
+    def inner_fn(self, left, right):
+        return tuple(left) == tuple(right)
+
+    def fn(self, tensor):
+        if type(tensor) is int:
+            return False
+
+        torch.add(tensor, tensor)
+        return self.inner_fn(tensor.shape, (1, 2, 3))
+
+
 class ReproTests(torchdynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
@@ -780,8 +800,11 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes1), correct1))
             self.assertTrue(same(convert_boxes_to_pooler_format(boxes2), correct2))
 
-        self.assertEqual(cnt.frame_count, ifdyn(1, 4))
-        self.assertEqual(cnt.op_count, 10)
+        # repeat_interleave is a dynamic shape operator we do not execute/
+        # In the future, we could reduce the frame_count down to 1
+        # by guarding on the exact values of `Tensor repeats` arg
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, ifdyn(5, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -857,7 +880,27 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
 
-    def test_maml(self):
+    # see: https://github.com/pytorch/pytorch/issues/80067
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_maml_item_capture(self):
+        a = torch.randn(5, 1, 28, 28)
+        b = torch.zeros(5, dtype=torch.int64)
+        c = torch.randn(75, 1, 28, 28)
+        d = torch.zeros(75, dtype=torch.int64)
+        model = PartialMaml()
+        correct = model(a, b, c, d)
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt):
+            for _ in range(10):
+                self.assertTrue(same(model(a, b, c, d), correct))
+
+        self.assertEqual(cnt.frame_count, ifdyn(3, 2))
+        # TODO(jansel): figure out why op count depends on imports
+        self.assertIn(cnt.op_count, (36, 35, 29, 28))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
+    def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
         c = torch.randn(75, 1, 28, 28)
@@ -870,7 +913,8 @@ class ReproTests(torchdynamo.testing.TestCase):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
         self.assertEqual(cnt.frame_count, ifdyn(5, 4))
-        self.assertEqual(cnt.op_count, ifdyn(36, 29))
+        # TODO(jansel): figure out why op count depends on imports
+        self.assertIn(cnt.op_count, (36, 35, 29, 28))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -970,7 +1014,8 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         cnt = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnt):
-            test_fn()
+            out = test_fn()
+        self.assertTrue(isinstance(out, torch.nn.Parameter))
 
     def test_Size(self):
         def test_fn():
@@ -1246,3 +1291,128 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
+
+    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
+    @unittest.expectedFailure
+    def test_primtorch(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            torch._refs.abs(x)
+
+        fn(torch.randn(3))
+
+    @unittest.skipIf(
+        not isinstance(torch.ops.aten.abs, torch._ops.OpOverloadPacket),
+        "old pt doesn't work",
+    )
+    def test_torch_ops_aten(self):
+        # Picked an op that doesn't show up in the default list
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            return torch.ops.aten.absolute(x)
+
+        fn(torch.randn(3))
+
+    def test_guard_ordering_shape_fail(self):
+        # If a function which takes a tensor has an inner function which
+        # is compiled and generates a guard on its shape,
+        # they are evaluated in the wrong order. So if on a subsequent call
+        # an int is passed instead of a tensor, guard evaluation will crash
+        # with a "no attribute: shape" error
+        m = TestModule()
+        with torchdynamo.optimize("eager"):
+            m.fn(torch.ones((5, 5)))
+            m.fn(-3)
+
+    def test_tensor_isinstance_tuple(self):
+        @torchdynamo.optimize("eager")
+        def fn():
+            t = torch.ones(5, 5)
+            if not isinstance(t, (int, torch.Tensor)):
+                msg = str.format(
+                    "{0} is not an instance of {1}",
+                    type(t),
+                    (int, torch.Tensor),
+                )
+                raise ValueError(msg)
+            return True
+
+        fn()
+
+    def test_isinstance_dtype(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn(x):
+            isinstance(torch.bfloat16, torch.dtype)
+            return x
+
+        fn(torch.randn(3))
+
+    def test_isinstance_storage(self):
+        @torchdynamo.optimize("eager")
+        def fn(x):
+            f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
+            bools = torch.BoolStorage.from_buffer(f, "big")
+            self.assertTrue(isinstance(bools, torch.BoolStorage))
+            return x
+
+        fn(torch.randn(3))
+
+    def test_dict_list_values(self):
+        def inner_fn(args):
+            return [x[1].shape for x in args]
+
+        @torchdynamo.optimize("eager")
+        def fn(tensors):
+            return inner_fn(zip(itertools.count(), tensors["args"]))
+
+        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
+        fn({"args": [torch.ones(5, 5)]})
+
+    def test_dict_iter(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                z = {"my": 1, "const": 2, "dict": 3, "variable": 4}
+                tot = 0
+                for key in z:
+                    tot += z[key]
+
+                return tot
+
+        with torchdynamo.optimize("eager", nopython=True):
+            x = torch.tensor([0])
+            model = MyMod()
+            y = model(x)
+
+        self.assertEqual(y, 10)
+
+    def test_sort_out(self):
+
+        dtype = torch.float32
+        device = "cpu"
+
+        def fn():
+            tensor = torch.randn((3, 5), dtype=dtype, device=device)[:, 0]
+            values1 = torch.tensor(0, dtype=dtype, device=device)
+            indices1 = torch.tensor(0, dtype=torch.long, device=device)
+            torch.sort(tensor, out=(values1, indices1))
+            self.assertEqual(values1.stride(), (1,))
+            self.assertEqual(indices1.stride(), (1,))
+
+        fn()
+        with torchdynamo.optimize("eager"):
+            fn()
+
+    def test_sigmoid_out(self):
+
+        dtype = torch.float32
+        device = "cpu"
+
+        def fn():
+            inp = torch.randn((3, 5), dtype=dtype, device=device)
+            out1 = torch.tensor(0, dtype=dtype, device=device)
+            torch.sigmoid(inp, out=out1)
+            self.assertEqual(out1.numel(), 15)
+
+        fn()
+        with torchdynamo.optimize("eager"):
+            fn()

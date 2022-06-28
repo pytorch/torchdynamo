@@ -103,6 +103,8 @@ class SizeVarAllocator(object):
         return expr
 
     def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+        left = sympy.expand(left)
+        right = sympy.expand(right)
         if left == right:
             return left
         expr = self.simplify(left - right)
@@ -175,6 +177,18 @@ class SizeVarAllocator(object):
     def guard_max(self, left: sympy.Expr, right: sympy.Expr):
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
+
+    def maybe_guard_multiple_of(self, numerator, denominator):
+        """if denominator divides numerator, return True and guard on that fact"""
+        if sympy.gcd(numerator, denominator) == denominator:
+            # can prove it symbolically
+            return True
+        if self.size_hint(numerator) % self.size_hint(denominator) == 0:
+            from .ir import ModularIndexing
+
+            self.guard_equals(ModularIndexing(numerator, 1, denominator), 0)
+            return True
+        return False
 
     def guard_static_shape(self, left):
         right = self.size_hint(left)
@@ -334,9 +348,9 @@ class SimplifyIndexing(V.WrapperHandler):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
         return self._inner.load(name, index, upcast)
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.store(name, index, value)
+        return self._inner.store(name, index, value, mode=mode)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)

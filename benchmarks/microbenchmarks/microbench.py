@@ -10,6 +10,7 @@ import torch
 from torch.cuda import synchronize
 
 import torchinductor
+from torchdynamo.optimizations.backends import cudagraphs_inner
 from torchdynamo.testing import same
 from torchinductor.compile_fx import compile_fx
 
@@ -56,9 +57,13 @@ def compute_speedups(args, models, example_inputs):
 
 def microbenchmark(args, model, example_inputs):
     compiled_fn = compile_fx(torch.fx.symbolic_trace(model), example_inputs)
+    cudagraphs_eager = cudagraphs_inner(model, example_inputs, copy_outputs=False)
+    cudagraphs_jit = cudagraphs_inner(
+        torch.jit.trace(model, example_inputs), example_inputs, copy_outputs=False
+    )
     return compute_speedups(
         args,
-        [model, torch.jit.trace(model, example_inputs), compiled_fn],
+        [cudagraphs_eager, cudagraphs_jit, compiled_fn],
         example_inputs,
     )
 
@@ -154,6 +159,8 @@ def main():
 
     if args.verbose:
         torchinductor.config.debug = True
+
+    torchinductor.config.triton.autotune = True
 
     rows = []
     for model in (MicroBenchmarks.sum,):

@@ -2,7 +2,7 @@ import base64
 import functools
 import getpass
 import hashlib
-import operator
+import logging
 import os
 import random
 import re
@@ -15,6 +15,8 @@ from torch.utils import cpp_extension
 
 from . import config
 from . import exc
+
+log = logging.getLogger(__name__)
 
 
 def cache_dir():
@@ -45,17 +47,47 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-@functools.lru_cache(None)
 def cpp_compiler():
-    if isinstance(config.cpp.cxx, str):
-        return config.cpp.cxx
-    for cxx in config.cpp.cxx:
+    if isinstance(config.cpp.cxx, (list, tuple)):
+        search = tuple(config.cpp.cxx)
+    else:
+        search = (config.cpp.cxx,)
+    return cpp_compiler_search(search)
+
+
+@functools.lru_cache(1)
+def cpp_compiler_search(search):
+    for cxx in search:
         try:
-            subprocess.check_output([cxx, "--version"])
-            return cxx
+            if cxx is None:
+                return install_gcc_via_conda()
+            else:
+                subprocess.check_output([cxx, "--version"])
+                return cxx
         except (subprocess.SubprocessError, FileNotFoundError):
             continue
     raise exc.InvalidCxxCompiler()
+
+
+def install_gcc_via_conda():
+    """On older systems, this is a quick way to get a modern compiler"""
+    prefix = os.path.join(cache_dir(), "gcc")
+    cxx_path = os.path.join(prefix, "bin", "g++")
+    if not os.path.exists(cxx_path):
+        log.info("Downloading GCC via conda")
+        subprocess.check_call(
+            [
+                "conda",
+                "create",
+                f"--prefix={prefix}",
+                "--channel=conda-forge",
+                "-y",
+                "python=3.8",
+                "gxx",
+            ]
+        )
+        assert os.path.exists(cxx_path)
+    return cxx_path
 
 
 def is_gcc():
@@ -78,7 +110,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} -shared -fPIC -Wall -std=c++20 -Wno-unused-variable
             {ipaths} {lpaths} {libs}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
             -o{output} {input}
@@ -204,124 +236,3 @@ class TritonCodeCache:
             # this breaks cudagraphs, but speeds up small inputs:
             patch_triton_hackery()
         return PyCodeCache.load(source_code)
-
-
-def block_size_fn(maximum, hint, key):
-    from triton import next_power_of_2
-
-    if next_power_of_2(hint) >= maximum:
-        return lambda args: maximum
-
-    def block_size(args):
-        return min(maximum, next_power_of_2(args[key]))
-
-    return block_size
-
-
-def conditional_product(*args):
-    return functools.reduce(operator.mul, [x for x in args if x])
-
-
-def triton_config(size_hints, x, y=None, z=None, num_warps=4, num_stages=2):
-    from triton import Config
-
-    target = conditional_product(x, y, z)
-
-    # shrink sizes to size hints
-    x = min(x, size_hints[0])
-    if y:
-        y = min(y, size_hints[1])
-    if z:
-        z = min(z, size_hints[2])
-
-    # if we are below original block size, scale up where we can
-    while x < size_hints[0] and conditional_product(x, y, z) < target:
-        x *= 2
-    while y and y < size_hints[1] and conditional_product(x, y, z) < target:
-        y *= 2
-    while z and z < size_hints[2] and conditional_product(x, y, z) < target:
-        z *= 2
-
-    cfg = {"XBLOCK": x}
-    if y:
-        cfg["YBLOCK"] = y
-    if z:
-        cfg["ZBLOCK"] = z
-    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
-
-
-def apply_triton_config(config):
-    from triton import heuristics
-
-    def getter(name):
-        def get(args):
-            return config.kwargs[name]
-
-        return get
-
-    return heuristics({name: getter(name) for name in config.kwargs.keys()})
-
-
-def pointwise_heuristics(size_hints):
-    """
-    Construct @triton.heuristics() based on size_hints.
-    """
-    from triton import autotune
-
-    if len(size_hints) == 1:
-        return apply_triton_config(triton_config(size_hints, 1024))
-    if len(size_hints) == 2:
-        if not config.triton.autotune:
-            return apply_triton_config(triton_config(size_hints, 64, 64))
-        return autotune(
-            [
-                triton_config(size_hints, 64, 64),
-                triton_config(size_hints, 4, 256),
-                triton_config(size_hints, 256, 4),
-            ],
-            key=["xnumel", "ynumel"],
-        )
-    if len(size_hints) == 3:
-        return apply_triton_config(triton_config(size_hints, 16, 16, 16))
-    raise NotImplementedError(f"size_hints: {size_hints}")
-
-
-def reduction_heuristics(size_hints):
-    """args to @triton.heuristics()"""
-    from triton import heuristics
-    from triton import next_power_of_2
-
-    def reduction_size(args):
-        return next_power_of_2(args["rnumel"])
-
-    if len(size_hints) == 2:
-        return heuristics(
-            {
-                "RBLOCK": reduction_size,
-                "XBLOCK": block_size_fn(
-                    next_power_of_2(4096 // size_hints[-1] or 1),
-                    size_hints[0],
-                    "xnumel",
-                ),
-                # "num_warps": lambda args: num_warps(args["rnumel"]),
-            }
-        )
-    raise NotImplementedError(f"size_hints: {size_hints}")
-
-
-def cdiv(numel, bs):
-    return (numel + bs - 1) // bs
-
-
-def grid(xnumel, ynumel=None, znumel=None):
-    """Helper function to compute triton grids"""
-
-    def grid_fn(meta):
-        result = [cdiv(xnumel, meta["XBLOCK"])]
-        if ynumel:
-            result.append(cdiv(ynumel, meta["YBLOCK"]))
-            if znumel:
-                result.append(cdiv(znumel, meta["ZBLOCK"]))
-        return result
-
-    return grid_fn
