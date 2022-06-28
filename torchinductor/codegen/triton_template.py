@@ -228,10 +228,7 @@ def template_codegen(scheduler, scheduler_node):
                 # reorder node loop ordering to channel last
                 # so that it could be fused with convolution and
                 # have correct results of split_and_set_ranges()
-                if (
-                    len(node.node.get_size()) == 4
-                    and node.node.get_stride()[1] != 1
-                ):
+                if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
                     node.reorder_channel_last()
                 try:
                     node.run(*kernel.split_and_set_ranges(node.get_ranges()))

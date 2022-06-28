@@ -22,10 +22,10 @@ from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
 from .dependencies import extract_read_writes
+from .dependencies import var_builder
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
-from .dependencies import var_builder
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -2275,8 +2275,7 @@ class Convolution(ExternKernelAlloc):
             x.get_device(),
             x.get_dtype(),
             output_size,
-            # for the output layout of conv to be channel last
-            FlexibleLayout.stride_ordered(output_size, [3, 0, 2, 1]),
+            FlexibleLayout.stride_ordered(output_size, order),
         )
 
         if bias is not None:
@@ -2304,7 +2303,7 @@ class Convolution(ExternKernelAlloc):
         index = sympy.Add(*sub_index_list)
         index = sympy.simplify(index)
 
-        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index]) #, channel_last=True)
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
 
         # assign new variables each dimension to deal with numbering mismatches
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1

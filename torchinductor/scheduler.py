@@ -143,7 +143,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
-
     def update_dep_type(self):
         assert isinstance(self.node, ir.Convolution)
         assert len(self.read_writes.writes) == 1
