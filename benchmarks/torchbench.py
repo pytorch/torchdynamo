@@ -157,6 +157,10 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",
+    # as_strided issue
+    "hf_Longformer",
+    # out of memory
+    "timm_efficientdet",
 }
 
 

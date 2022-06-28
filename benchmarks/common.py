@@ -950,7 +950,9 @@ def main(runner, original_dir=None):
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update({"demucs", "pyhpc_equation_of_state"})
+        runner.non_deterministic_models.update(
+            {"demucs", "pyhpc_equation_of_state", "timm_efficientdet"}
+        )
 
     if args.no_skip:
         runner.skip_models.clear()

@@ -428,6 +428,7 @@ def repeat(x, repeats):
 
 @register_lowering(aten._unsafe_view)
 @register_lowering(aten.view)
+@register_lowering(aten.reshape)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
@@ -627,6 +628,7 @@ make_fallback(aten.avg_pool2d_backward)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
+make_fallback(aten.cumsum)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d)
 make_fallback(aten.max_pool2d_with_indices_backward)
@@ -684,8 +686,19 @@ def clone(x, *, memory_format=0):
     )
 
 
-@register_lowering(torch.arange)
-def arange(start, end=None, step=1, *, dtype=None, device=None):
+@register_lowering([torch.arange, aten.arange])
+def arange(
+    start,
+    end=None,
+    step=1,
+    *,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+):
+    assert layout == torch.strided
+    assert not pin_memory
     if end is None:
         end = start
         start = 0
@@ -969,9 +982,9 @@ def tensor_constructor(fill_value):
     return inner
 
 
-register_lowering(torch.empty)(tensor_constructor(0))
-register_lowering(torch.zeros)(tensor_constructor(0))
-register_lowering(torch.ones)(tensor_constructor(1))
+register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
+register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
+register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
 
 
 def new_constant(fill_value):

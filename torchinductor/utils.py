@@ -2,6 +2,7 @@ import functools
 import operator
 
 import sympy
+import torch
 
 
 @functools.lru_cache(None)
@@ -19,7 +20,9 @@ def has_torchvision_roi_align():
     try:
         from torchvision.ops import roi_align  # noqa
 
-        return roi_align is not None
+        return roi_align is not None and hasattr(
+            getattr(torch.ops, "torchvision", None), "roi_align"
+        )
     except (ImportError, ModuleNotFoundError):
         return False
 
