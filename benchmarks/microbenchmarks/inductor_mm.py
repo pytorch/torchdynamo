@@ -1,6 +1,7 @@
 import torch
 import triton
 from benchmark_helper import time_with_torch_timer
+
 import torchdynamo
 import torchdynamo.config
 import torchinductor.config as config
@@ -10,23 +11,27 @@ import torchinductor.config as config
 def inductor_aten_mm(a, b):
     return torch.mm(a, b)
 
+
 @torchdynamo.optimize("inductor", nopython=True)
 def inductor_triton_mm(a, b):
     return torch.mm(a, b)
 
+
 def torch_mm(a, b):
     return torch.mm(a, b)
+
 
 def triton_mm(a, b):
     return triton.ops.matmul(a, b)
 
+
 def test_total_time(shapes):
-    print('shape; torch mm; triton mm; inductor aten mm; inductor triton mm')
+    print("shape; torch mm; triton mm; inductor aten mm; inductor triton mm")
     for i in range(len(shapes)):
         a_shape, b_shape = shapes[i]
-        print(a_shape, 'x', b_shape, end='; ')
-        a = torch.randn(a_shape, device='cuda', dtype=torch.float16)
-        b = torch.randn(b_shape, device='cuda', dtype=a.dtype)
+        print(a_shape, "x", b_shape, end="; ")
+        a = torch.randn(a_shape, device="cuda", dtype=torch.float16)
+        b = torch.randn(b_shape, device="cuda", dtype=a.dtype)
 
         config.triton.use_mm = False
         inductor_aten_mm(a, b)
@@ -44,17 +49,18 @@ def test_total_time(shapes):
         config.triton.use_mm = True
         ind_triton_ms = time_with_torch_timer(inductor_triton_mm, (a, b)).mean * 1000
 
-        print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep='; ')
+        print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
         torchdynamo.reset()
 
+
 def test_GPU_time(shapes):
-    print('shape; torch mm; triton mm; inductor aten mm; inductor triton mm')
+    print("shape; torch mm; triton mm; inductor aten mm; inductor triton mm")
     for i in range(len(shapes)):
         a_shape, b_shape = shapes[i]
-        print(a_shape, 'x', b_shape, end='; ')
-        a = torch.randn(a_shape, device='cuda', dtype=torch.float16)
-        b = torch.randn(b_shape, device='cuda', dtype=a.dtype)
+        print(a_shape, "x", b_shape, end="; ")
+        a = torch.randn(a_shape, device="cuda", dtype=torch.float16)
+        b = torch.randn(b_shape, device="cuda", dtype=a.dtype)
 
         config.triton.use_mm = False
         inductor_aten_mm(a, b)
@@ -66,10 +72,10 @@ def test_GPU_time(shapes):
         triton_ms, _, _ = triton.testing.do_bench(lambda: triton_mm(a, b))
         ind_aten_ms, _, _ = triton.testing.do_bench(lambda: inductor_aten_mm(a, b))
         ind_triton_ms, _, _ = triton.testing.do_bench(lambda: inductor_triton_mm(a, b))
-        print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep='; ')
+        print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
         torchdynamo.reset()
-      
+
 
 if __name__ == "__main__":
     shapes = [
@@ -87,18 +93,15 @@ if __name__ == "__main__":
         ([1024, 3072], [3072, 768]),
         ([1024, 768], [768, 2304]),
     ]
-    print('test total time')
+    print("test total time")
     test_total_time(shapes)
 
-    print('test GPU time')
+    print("test GPU time")
     test_GPU_time(shapes)
-
-      
-
 
 
 # Results Preview on AWS AI cluster
-'''
+"""
 test total time
 shape; torch mm; triton mm; inductor aten mm; inductor triton mm
 [128, 9216] x [9216, 4096]; 0.07240759208798409; 0.10885953903198242; 0.20063146017491817; 0.20054904278367758
@@ -123,4 +126,4 @@ shape; torch mm; triton mm; inductor aten mm; inductor triton mm
 [1024, 768] x [768, 3072]; 0.03174399957060814; 0.03276799991726875; 0.053247999399900436; 0.053247999399900436
 [1024, 3072] x [3072, 768]; 0.04403200000524521; 0.03379200026392937; 0.06860800087451935; 0.062463998794555664
 [1024, 768] x [768, 2304]; 0.02969600073993206; 0.02969600073993206; 0.04915200173854828; 0.048128001391887665
-'''
+"""

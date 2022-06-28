@@ -20,7 +20,6 @@ except ImportError:
     tti = None
 
 
-
 def timed(model, example_inputs, times=1):
     synchronize()
     torch.manual_seed(1337)
