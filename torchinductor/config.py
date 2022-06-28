@@ -5,7 +5,7 @@ debug = False
 dce = False
 
 # assume there will be no backwards
-forward_only = True
+forward_only = False
 
 # assume input tensors are dynamic
 dynamic_shapes = True
@@ -34,8 +34,16 @@ class cpp:
     threads = -1  # set to cpu_count()
     simdlen = None
     min_chunk_size = 4096
-    cxx = ("g++-10", "g++")
-    # cxx = "clang++-12"
+    cxx = (
+        None,  # download gcc12 from conda-forge if conda is installed
+        "g++-12",
+        "g++-11",
+        "g++-10",
+        "clang++-12",
+        "clang++-11",
+        "clang++-10",
+        "g++",
+    )
 
 
 # config specific to codegen/triton.py

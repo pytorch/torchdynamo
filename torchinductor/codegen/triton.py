@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import logging
 import math
 import operator
 from typing import Dict
@@ -21,6 +22,8 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+
+log = logging.getLogger(__name__)
 
 
 class TritonPrinter(ExprPrinter):
@@ -563,10 +566,15 @@ class TritonKernel(Kernel):
 
         return tmp
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         var = self.args.output(name)
         index, mask = self.indexing(index, value)
-        line = f"tl.store({var} + {index}, {value}, {mask})"
+        if mode is None:
+            line = f"tl.store({var} + {index}, {value}, {mask})"
+        elif mode == "atomic_add":
+            line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
+        else:
+            raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)

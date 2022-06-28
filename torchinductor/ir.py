@@ -217,6 +217,33 @@ class Pointwise(Loops):
 
 
 @dataclasses.dataclass
+class Scatter(Pointwise):
+    output_indexer: Callable[[List[Expr]], Expr]
+    scatter_mode: str = None
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Scatter(
+            device,
+            self.dtype,
+            loader,
+            self.ranges,
+            self.output_indexer,
+            self.scatter_mode,
+        )
+
+    def store_output(self, output_name, indexer, vars):
+        return ops.store(
+            output_name,
+            indexer(self.output_indexer(vars)),
+            self.inner_fn(vars),
+            mode=self.scatter_mode,
+        )
+
+
+@dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
@@ -1150,7 +1177,7 @@ class Buffer(IRNode):
         return self.layout.device
 
     def get_dtype(self):
-        return self.layout.dtype
+        return getattr(self.layout, "dtype", None)
 
     def get_size(self):
         return self.layout.size
@@ -1737,6 +1764,65 @@ class ExternKernelAlloc(ExternKernel):
 
     def should_allocate(self):
         return False
+
+
+class IndexPutFallback(ExternKernel):
+    # TODO(jansel): delete this when this is fixed:
+    # https://github.com/openai/triton/issues/558
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        x, *indices, values = [t.codegen_reference() for t in self.inputs]
+        (accumulate,) = self.constant_args
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{', '.join(indices)}], {values}, {accumulate!r})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, x, indices, values, accumulate=False):
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage([x, *indices, values]),
+            [accumulate],
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class InplaceBernoulliFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    kernel = "aten.bernoulli_"
+
+    def codegen(self, wrapper):
+        (x,) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(
+            f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, x, *constant_args):
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage([x]),
+            constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
 
 
 class MatrixMultiply(ExternKernelOut):
@@ -2416,9 +2502,9 @@ class LoopBodyBlock:
                 index = add_index(index, "reads")
                 return self._inner.load(name, index, upcast)
 
-            def store(self, name, index, value):
+            def store(self, name, index, value, mode=None):
                 index = add_index(index, "writes")
-                return self._inner.store(name, index, value)
+                return self._inner.store(name, index, value, mode)
 
             def reduction(self, name, dtype, reduction_type, index, value):
                 index = add_index(index, "writes")

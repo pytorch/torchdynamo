@@ -11,6 +11,7 @@ from torch.nn.parameter import UninitializedParameter
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
 from torchdynamo.mutation_guard import GenerationTracker
+from torchdynamo.testing import same
 
 from . import test_functions
 
@@ -855,10 +856,12 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
             def test_torch_static():
                 input = torch.ones(*input_shape)
-                module(input)  # fully materialized
+                return module(input)  # fully materialized
 
             test_torch_static()
-            test_torch_static()
+            out = test_torch_static()
+
+        self.assertTrue(same(out, module(torch.ones(*input_shape))))
 
         self.assertTrue(
             isinstance(module, torch.nn.modules.batchnorm.BatchNorm3d),
