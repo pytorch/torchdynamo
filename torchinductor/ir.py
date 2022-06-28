@@ -2273,7 +2273,7 @@ class Convolution(ExternKernelAlloc):
 
         channels_last_order = [3, 0, 2, 1]
         device = x.get_device()
-        if device == "cuda" and config.triton.convolution != "aten":
+        if is_triton(device) and config.triton.convolution != "aten":
             # Force the output layout of conv to be channel last
             layout = FlexibleLayout.stride_ordered(
                 output_size,
