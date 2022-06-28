@@ -1,5 +1,6 @@
-import torch
 import math
+
+import torch
 
 
 def rounded_linspace(low, high, steps, div):
