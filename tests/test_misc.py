@@ -6,9 +6,11 @@ import dis
 import enum
 import functools
 import math
+import random
 import sys
 import typing
 import unittest
+import weakref
 from unittest.mock import patch
 
 import numpy as np
@@ -1408,6 +1410,21 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_unsupported_fake_tensor(self):
+        def f(x):
+            return torch.quantize_per_tensor(
+                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
+            )
+
+        x = torch.randn(2, 2)
+        with self.assertRaises(RuntimeError):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                f(x)
+
+        with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
+            with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
+                f(x)
+
     def test_inline_list_mutation(self):
         def f1(x):
             x.append(torch.ones(8))
@@ -1524,6 +1541,53 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_release_input_memory(self):
+        x = torch.rand([4])
+        x_ref = weakref.ref(x)
+
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts)
+        def foo(x):
+            return x + x
+
+        out = foo(x)
+        self.assertTrue(same(out, x + x))
+        del x
+        self.assertIs(x_ref(), None)
+
+    def test_release_module_memory(self):
+
+        mod = torch.nn.Linear(10, 10)
+        x = torch.rand([10, 10])
+        mod_weight_ref = weakref.ref(mod.weight)
+        mod_ref = weakref.ref(mod)
+
+        # Modules that are passed into torchdynamo optimized functions
+        # will normally be held onto through the generated GraphModule,
+        # which contains the modules. remove the reference in this backend
+        # and test that no additional references are being held.
+        class NoLeakBackend:
+            def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+                gm.mod = None
+
+                def foo(*args, **kwargs):
+                    return (1,)
+
+                return foo
+
+        no_leak_backend = NoLeakBackend()
+
+        @torchdynamo.optimize(no_leak_backend)
+        def foo(mod, x):
+            return mod(x)
+
+        foo(mod, x)
+        del mod
+        del x
+        self.assertIsNone(mod_ref(), None)
+        self.assertIsNone(mod_weight_ref(), None)
+
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
             perm = [0, 3, 5]
@@ -1569,7 +1633,7 @@ class MiscTests(torchdynamo.testing.TestCase):
                 "b": xy,
                 "c": np_y[0][0] / 68,
                 "d": np_x.sum(),
-            }
+            }, x + np_y.sum() + z
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         y = torch.ones([2, 2], dtype=torch.int64)
@@ -1592,6 +1656,37 @@ class MiscTests(torchdynamo.testing.TestCase):
                 fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_unspecialized_primitive_variable3(self):
+        # test unspecialized primitive max/min
+        def fn(x, y, z):
+            return z + 1, max(x, y), min(x - 4, y)
+
+        x = np.int64(12)
+        y = 10
+        z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
+        res1 = fn(x, y, z)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res2 = fn(x, y, z)
+        self.assertTrue(same(res1, res2))
+
+    def test_unspecialized_primitive_variable4(self):
+        # test random functions
+        def fn(x):
+            r1 = random.random()
+            y = x + random.uniform(10, 20)
+            r2 = random.randint(2, 18)
+            return y + r1, r2
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        random.seed(1)
+        res1 = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(x)
+        self.assertTrue(same(res1, res2))
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
@@ -1774,6 +1869,140 @@ class MiscTests(torchdynamo.testing.TestCase):
             torchdynamo.exc.BackendCompilerFailed,
             lambda: fn(torch.randn(10), torch.randn(10)),
         )
+
+    def test_named_parameters(self):
+        n_embd = 768
+        block_size = 128
+        vocab_size = 65
+        embd_pdrop = 0.1
+
+        class MyModel2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+
+            def forward(self, x):
+                return x
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.submod2 = MyModel2()
+
+            def forward(self, x):
+                return x
+
+        # Regular
+        params = []
+        mod = MyModel()
+        actual_params = list(mod.named_parameters())
+
+        with torchdynamo.optimize("eager", nopython=True):
+            params = list(mod.named_parameters())
+
+        self.assertEqual(len(actual_params), len(params))
+        for idx in range(len(params)):
+            k_a, v_a = actual_params[idx]
+            k, v = params[idx]
+            self.assertEqual(k_a, k)
+            self.assertTrue(torch.allclose(v_a, v))
+
+        # Prefix
+        params = []
+        mod = MyModel()
+        actual_params = list(mod.named_parameters(prefix="foo"))
+
+        with torchdynamo.optimize("eager", nopython=True):
+            params = list(mod.named_parameters(prefix="foo"))
+
+        self.assertEqual(len(actual_params), len(params))
+        for idx in range(len(params)):
+            k_a, v_a = actual_params[idx]
+            k, v = params[idx]
+            self.assertEqual(k_a, k)
+            self.assertTrue(torch.allclose(v_a, v))
+
+    def test_module_complex_iter(self):
+        n_embd = 768
+        block_size = 128
+        vocab_size = 65
+        embd_pdrop = 0.1
+
+        class FakeGPT(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.ln_f = torch.nn.LayerNorm(n_embd)
+                self.head = torch.nn.Linear(n_embd, vocab_size, bias=False)
+
+                self.block_size = block_size
+                self.names = []
+
+            def forward(self, idx, targets=None):
+                from torch.nn import functional as F
+
+                b, t = idx.size()
+                assert (
+                    t <= self.block_size
+                ), "Cannot forward, model block size is exhausted."
+
+                # forward the GPT model
+                token_embeddings = self.tok_emb(
+                    idx
+                )  # each index maps to a (learnable) vector
+                position_embeddings = self.pos_emb[
+                    :, :t, :
+                ]  # each position maps to a (learnable) vector
+                x = self.drop(token_embeddings + position_embeddings)
+                x = self.blocks(x)
+                x = self.ln_f(x)
+                logits = self.head(x)
+
+                # if we are given some desired targets also calculate the loss
+                loss = None
+                if targets is not None:
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)), targets.view(-1)
+                    )
+
+                return logits, loss
+
+            def foo(self, memo=None, prefix="", remove_duplicate=False):
+                for mn, m in self.named_modules(
+                    memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
+                ):
+                    for pn, p in self.named_parameters():
+                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        self.names.append(fpn)
+
+        # Test plain recurse
+        model_a = FakeGPT()
+        model_a.foo()
+        a_names = model_a.names
+
+        model_b = FakeGPT()
+        with torchdynamo.optimize("eager", nopython=True):
+            model_b.foo()
+
+        self.assertEqual(a_names, model_b.names)
+
+        # Test with prefix
+        model_a = FakeGPT()
+        model_a.foo(prefix="abc")
+        a_names = model_a.names
+
+        model_b = FakeGPT()
+        with torchdynamo.optimize("eager", nopython=True):
+            model_b.foo(prefix="abc")
+
+        self.assertEqual(a_names, model_b.names)
 
 
 class TestTracer(JitTestCase):
