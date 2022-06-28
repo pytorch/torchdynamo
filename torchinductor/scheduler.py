@@ -14,6 +14,7 @@ from . import config
 from . import dependencies
 from . import ir
 from .codegen.triton_template import template_codegen
+from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
@@ -141,6 +142,19 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
     def can_remove_buffer(self, **kwargs):
         return False
+
+
+    def update_dep_type(self):
+        assert isinstance(self.node, ir.Convolution)
+        assert len(self.read_writes.writes) == 1
+        write = self.read_writes.writes.pop()
+        if isinstance(write, StarDep):
+            name = write.name
+            canonicalized_index, canonicalized_size = self.node.canonicalize()
+            new_dep = MemoryDep(name, canonicalized_index, canonicalized_size)
+            self.read_writes.writes.add(new_dep)
+        else:
+            self.read_writes.writes.add(write)
 
     def mark_fusable(self, broadcast_after_reduce=False):
         self.scheduler.fusable_deps.update(self.read_writes.writes)

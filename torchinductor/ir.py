@@ -25,6 +25,7 @@ from .dependencies import extract_read_writes
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
+from .dependencies import var_builder
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -2274,7 +2275,8 @@ class Convolution(ExternKernelAlloc):
             x.get_device(),
             x.get_dtype(),
             output_size,
-            FlexibleLayout.stride_ordered(output_size, order),
+            # for the output layout of conv to be channel last
+            FlexibleLayout.stride_ordered(output_size, [3, 0, 2, 1]),
         )
 
         if bias is not None:
@@ -2289,6 +2291,28 @@ class Convolution(ExternKernelAlloc):
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
+
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the conv output index
+        """
+        # manually generate index formula for conv
+        sizes = self.get_size()
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"s{i}") for i in range(len(sizes))]
+        sub_index_list = [index_vars[i] * strides[i] for i in range(len(sizes))]
+        index = sympy.Add(*sub_index_list)
+        index = sympy.simplify(index)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index]) #, channel_last=True)
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
 
     def map_args(self):
         # x, w, bias

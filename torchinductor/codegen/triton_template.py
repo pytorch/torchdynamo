@@ -210,13 +210,13 @@ def template_codegen(scheduler, scheduler_node):
         # set self.args name to match the TritonTemplateKernel's args names
         kernel.rename_vars()
         # update node dep from StarDep to MemoryDep
-        # node.update_dep_type()
+        scheduler_node.update_dep_type()
         # mark node of TritonTemplateKernel as fusable and update fusable_deps
         scheduler_node.mark_fusable()
         # enqueue any nodes that became runable after this node is run
         # otherwise, relu after conv is in blocked_nodes that could not be in
         # runable_groups to be fused to conv
-        scheduler.barrier()
+        # scheduler.barrier()
         tile1, tile2, _ = group
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
         if isinstance(kernel.node, ir.Convolution):
