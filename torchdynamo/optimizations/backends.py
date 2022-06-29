@@ -680,10 +680,11 @@ def tvm_compile_inner(
                 ):
                     lib = relay.build(mod, target=target, params=params)
         elif tuning_option == "meta_schedule":
+            from os import path as osp
+
             from tvm.meta_schedule import TuneConfig
             from tvm.meta_schedule.database import JSONDatabase
             from tvm.meta_schedule.tune import tune_relay
-            from os import path as osp
 
             with tempfile.TemporaryDirectory() as work_dir:
                 if log_file != None:
