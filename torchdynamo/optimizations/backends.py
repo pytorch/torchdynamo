@@ -744,7 +744,6 @@ def tvm_compile_inner(
         return exec_tvm
     except Exception as ex:
         log.exception("tvm error")
-        print(ex)
         return jit_mod  # explicit fall back to eager
 
 
