@@ -119,10 +119,19 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
 
         return decomp_fn(*args, **kwargs)
 
-    if isinstance(aten_fn, (list, tuple)):
-        lowerings.update({fn: wrapped for fn in aten_fn})
+    if not isinstance(aten_fn, (list, tuple)):
+        aten_fn = [aten_fn]
     else:
-        lowerings[aten_fn] = wrapped
+        aten_fn = list(aten_fn)
+
+    for fn in list(aten_fn):
+        if isinstance(fn, torch._ops.OpOverloadPacket):
+            for overload in fn.overloads():
+                other_fn = getattr(fn, overload)
+                if other_fn not in lowerings:
+                    aten_fn.append(other_fn)
+
+    lowerings.update({fn: wrapped for fn in aten_fn})
     return wrapped
 
 
