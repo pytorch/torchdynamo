@@ -319,7 +319,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             guarded_code = GuardedCode(
                 code, output.guards, frame.f_locals, frame.f_globals
             )
-            if config.export_guards:
+            if config.debug and config.export_guards:
                 print("\nGUARDS:")
                 for guard in sorted(output.guards):
                     print(" -", str(guard))
