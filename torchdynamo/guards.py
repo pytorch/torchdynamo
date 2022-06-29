@@ -321,7 +321,6 @@ class GuardBuilder:
             setup_guard()
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
-            
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -439,9 +438,9 @@ class GuardBuilder:
             self.tensor_check_names.append(self.arg_ref(guard))
             self.tensor_check_examples.append(value)
 
-            # Note: Guard code produced for tensor_match is a little different. 
-            # We accumulate tensor names, then do a single install of `___check_tensors`. 
-            # See _guards.cpp and TensorGuard for more information. 
+            # Note: Guard code produced for tensor_match is a little different.
+            # We accumulate tensor names, then do a single install of `___check_tensors`.
+            # See _guards.cpp and TensorGuard for more information.
             # TODO(voz): Add tensor matching code to export
             guard.set_export_info("TENSOR_MATCH", type(value), None, id(value))
 
