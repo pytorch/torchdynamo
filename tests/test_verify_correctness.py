@@ -97,7 +97,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         d = 4
         r1 = None
         r2 = fn(a, (b, c), d)
-        with torchdynamo.optimize_assert(compiler_fn):
+        with torchdynamo.optimize_assert(compiler_fn, strict_mode=True):
             r3 = fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
@@ -109,7 +109,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        with torchdynamo.optimize(fixed_strategy1):
+        with torchdynamo.optimize(fixed_strategy1, strict_mode=True):
             r2 = s(i)
         self.assertTrue(same(r1, r2))
 
@@ -118,12 +118,12 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        with torchdynamo.optimize("nnc"):
+        with torchdynamo.optimize("nnc", strict_mode=True):
             r2 = s(i)
         self.assertTrue(same(r1, r2))
 
     @patch.object(config, "verify_correctness", True)
-    def test_incorrect_verify_true(self):
+    def test_incorrect_verify_true_no_strict(self):
         """
         Even the bad optimization return a graph that
         is not functionally equal to the original graph;
@@ -138,9 +138,31 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
             return transform(gm).forward
 
         r1 = toy_example(i1, i2)
-        with torchdynamo.optimize(incorrect_compile_fn):
+        with torchdynamo.optimize(incorrect_compile_fn, strict_mode=False):
             r2 = toy_example(i1, i2)
         self.assertTrue(same(r1, r2))
+
+    @patch.object(config, "verify_correctness", True)
+    def test_incorrect_verify_true_strict(self):
+        """
+        Even the bad optimization return a graph that
+        is not functionally equal to the original graph;
+        When config.verify_correctness=True, it will
+        check the correctness of outputs and fallback using
+        the original graph
+        """
+        from torchdynamo.exc import BackendCompilerFailed
+
+        i1 = torch.randn(10)
+        i2 = torch.randn(10)
+
+        def incorrect_compile_fn(gm, example_inputs):
+            return transform(gm).forward
+
+        r1 = toy_example(i1, i2)
+        with self.assertRaises(BackendCompilerFailed):
+            with torchdynamo.optimize(incorrect_compile_fn, strict_mode=True):
+                r2 = toy_example(i1, i2)
 
     @patch.object(config, "verify_correctness", False)
     def test_incorrect_verify_false(self):
@@ -157,7 +179,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
             return transform(gm).forward
 
         r1 = toy_example(i1, i2)
-        with torchdynamo.optimize(incorrect_compile_fn):
+        with torchdynamo.optimize(incorrect_compile_fn, strict_mode=True):
             r2 = toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
 
@@ -179,7 +201,9 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        with torchdynamo.optimize(backends.ipex_fp32), torch.no_grad():
+        with torchdynamo.optimize(
+            backends.ipex_fp32, strict_mode=True
+        ), torch.no_grad():
             r2 = model(input)
         self.assertTrue(same(r1, r2))
         self.assertEqual(r2.dtype, torch.float32)
@@ -193,7 +217,7 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
         with torchdynamo.optimize(
-            backends.ipex_bf16
+            backends.ipex_bf16, strict_mode=True
         ), torch.no_grad(), torch.cpu.amp.autocast():
             r2 = model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))

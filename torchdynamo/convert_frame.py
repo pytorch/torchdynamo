@@ -96,7 +96,9 @@ def wrap_compiler_fn(compiler_fn, strict_mode=False):
 
     if config.verify_correctness:
         # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(wrapped_compiler_fn, strict_mode=strict_mode)
+        wrapper_backend_compiler_fn = WrapperBackend(
+            wrapped_compiler_fn, strict_mode=strict_mode
+        )
 
         return wrapper_backend_compiler_fn
 
@@ -343,7 +345,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True, strict_mode=Fals
 
 def convert_frame(compiler_fn: typing.Callable, strict_mode=False):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False, strict_mode=strict_mode)
+    inner_convert = convert_frame_assert(
+        compiler_fn, one_graph=False, strict_mode=strict_mode
+    )
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1

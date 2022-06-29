@@ -124,6 +124,10 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
+class DynamoStrictError(Exception):
+    pass
+
+
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
@@ -157,6 +161,7 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
 class WrapperBackend:
     def __init__(self, backend=None, strict_mode=False):
         self.backend = backend
+        self.strict_mode = strict_mode
 
     @property
     def example_inputs(self):
@@ -185,13 +190,17 @@ class WrapperBackend:
             if same(correct, result):
                 return self.candidate
 
-            if strict_mode:
-                raise RuntimeError("Incorrect result of backend {self}")
+            if self.strict_mode:
+                raise DynamoStrictError("Incorrect result of backend {self}")
 
             print(f"incorrect results of backend {self}")
             return self.gm.forward
 
-        except Exception:
+        except Exception as e:
+            if isinstance(e, DynamoStrictError):
+                # Strict mode error, keep bubbling up!
+                raise e
+
             log.exception("error in verify_correctness")
             return self.gm.forward
         finally:
