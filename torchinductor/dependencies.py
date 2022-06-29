@@ -62,6 +62,13 @@ class ReadWrites:
             self.index_exprs,
         )
 
+    def with_read_dependency(self, dep: Set[MemoryDep]):
+        return ReadWrites(
+            set.union(self.reads, dep),
+            self.writes,
+            self.index_exprs,
+        )
+
 
 class RecordLoadStore(V.MockHandler):
     def __init__(self, var_ranges, normalize):

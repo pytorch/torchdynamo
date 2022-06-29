@@ -125,7 +125,9 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
-def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+def check_model(
+    self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True, cuda_checking=None
+):
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
     has_lowp_args = False
 
@@ -172,7 +174,9 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
-def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
+def check_model_cuda(
+    self: TestCase, model, example_inputs, check_lowp=True, cuda_checking=None
+):
     if hasattr(model, "to"):
         model = model.to("cuda")
 
@@ -200,6 +204,9 @@ def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
         if hasattr(model, "to"):
             model = model.to(torch.half)
         check_model(self, model, example_inputs, 2e-3)
+
+    if cuda_checking:
+        cuda_checking()
 
 
 class SweepInputs2:
@@ -412,6 +419,33 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
+    def test_vertical_fusion2(self):
+        def fn(a, b, c, x):
+            # TODO: Using empty_like will generate another kernel in Triton.
+            # It will be nice to fix that.
+            # x = torch.empty_like(a)
+            n = a.shape[-1]
+            for i in range(0, n):
+                w = a[..., i] / b[..., i]
+                x[..., i] = -w * c[..., i]
+            return x
+
+        def check_kernel_count():
+            # cpu/cpp backend generates more kernels because it requires stricter
+            # dependency checking
+            self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 10, 5),
+                torch.randn(10, 10, 5),
+                torch.randn(10, 10, 5),
+                torch.randn(10, 10, 5),
+            ),
+            cuda_checking=check_kernel_count,
+        )
 
     def test_sum1(self):
         def fn(a, b):

@@ -66,7 +66,15 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.rename(renames))
 
     def add_mutation_dep(self, name):
-        self.set_read_writes(self.read_writes.with_read(name))
+        if ir.is_triton(self.get_device()) and name in self.scheduler.name_to_node:
+            # If name maps to a buffer, we can use a more accurate dependency based
+            # on that buffer's write. However, we are skipping this for the cpp
+            # backend because it needs stricter dependency checking in order to
+            # parallelize loops correctly.
+            write_dep = self.scheduler.name_to_node[name].read_writes.writes
+            self.set_read_writes(self.read_writes.with_read_dependency(write_dep))
+        else:
+            self.set_read_writes(self.read_writes.with_read(name))
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
@@ -406,6 +414,7 @@ class Scheduler:
             else:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
+        self.live_aliased_buffer = set()
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -459,6 +468,8 @@ class Scheduler:
                 # this node must run after the prior writer
                 add_user(alt_name, node)
                 node.add_mutation_dep(alt_name)
+                # Mark this node as live so it won't be dead-code-eliminated
+                self.live_aliased_buffer.add(node.get_name())
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
@@ -537,11 +548,14 @@ class Scheduler:
         # it means the buffer becomes kernel-local after fusion
         for name in self.pending_buffer_names:
             node = self.name_to_node[name]
-            is_live = any(
-                [
-                    (user.get_name() not in self.pending_buffer_names)
-                    for user in node.users
-                ]
+            is_live = (
+                any(
+                    [
+                        (user.get_name() not in self.pending_buffer_names)
+                        for user in node.users
+                    ]
+                )
+                or name in self.live_aliased_buffer
             )
             if not is_live:
                 # Assign a special value instead of deleting the entry

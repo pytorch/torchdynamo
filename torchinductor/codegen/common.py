@@ -563,6 +563,11 @@ class Kernel(CodeGen):
             def store(name, index, value, mode=None):
                 if mode is None:
                     self.cse.store_cache[name] = value
+                    # If there is an alias, we will also store with the real name which may be used later
+                    if name in V.graph.scheduler.mutation_real_name:
+                        self.cse.store_cache[
+                            V.graph.scheduler.mutation_real_name[name]
+                        ] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
