@@ -150,6 +150,8 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
         if hasattr(model, "to"):
             model = model.to(torch.half)
 
+    torchinductor.metrics.reset()
+
     @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
     def run(*ex):
         return model(*ex)
@@ -409,6 +411,7 @@ class CommonTemplate:
                 torch.randn(26),
             ),
         )
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
 
     def test_sum1(self):
         def fn(a, b):
