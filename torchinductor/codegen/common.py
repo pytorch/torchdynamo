@@ -11,6 +11,7 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from .. import metrics
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -498,6 +499,7 @@ class Kernel(CodeGen):
 
     def __init__(self, args=None):
         super().__init__()
+        metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
