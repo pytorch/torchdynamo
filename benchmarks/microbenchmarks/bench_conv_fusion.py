@@ -242,8 +242,9 @@ for fusion_type in fusion_types:
         field_names.append("torch conv")
         field_names.append("triton conv")
     else:
-        field_names.append("torch conv+{fusion_type}")
-        field_names.append("triton conv+{fusion_type}")
+        field_names.append(f"torch conv+{fusion_type}")
+        field_names.append(f"triton conv+{fusion_type}")
+
 p.field_names = field_names
 p.float_format = ".3"
 for id, layer in enumerate(model.resnet50_layers):
