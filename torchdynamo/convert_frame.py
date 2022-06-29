@@ -314,17 +314,21 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
             CleanupManager.instance[code] = output.cleanups
             return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
         except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
-            debug_print("WONT CONVERT")
+            if config.debug or config.trace or config.print_internal_exceptions:
+                debug_print("WONT CONVERT")
             raise
         except Exception:
-            debug_print("WONT CONVERT")
-            sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
-            traceback.print_exc()
-            sys.stderr.write(
-                "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
-            )
-            traceback.print_stack(frame)
-            sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+            if config.debug or config.trace or config.print_internal_exceptions:
+                debug_print("WONT CONVERT")
+                sys.stderr.write(
+                    "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+                )
+                traceback.print_exc()
+                sys.stderr.write(
+                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
+                )
+                traceback.print_stack(frame)
+                sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
             raise InternalTorchDynamoError()
 
     return wrap_convert_context(_convert_frame_assert)

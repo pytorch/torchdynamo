@@ -319,11 +319,12 @@ class InstructionTranslatorBase(object):
         ):
             raise
         except Exception as e:
-            sys.stderr.write(
-                f"ERROR FROM offset={self.current_instruction.offset} "
-                f"filename {self.code_options.get('co_filename')} "
-                f"{self.lineno} {typestr(e)}\n"
-            )
+            if config.debug or config.trace or config.print_internal_exceptions:
+                sys.stderr.write(
+                    f"ERROR FROM offset={self.current_instruction.offset} "
+                    f"filename {self.code_options.get('co_filename')} "
+                    f"{self.lineno} {typestr(e)}\n"
+                )
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
