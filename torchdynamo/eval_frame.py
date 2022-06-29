@@ -234,7 +234,7 @@ def optimize(backend, nopython=False):
     )
 
 
-def export_experimental(f, *args):
+def export(f, *args):
     graph = None
     out_guards = None
 
