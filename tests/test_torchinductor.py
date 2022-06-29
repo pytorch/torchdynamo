@@ -22,16 +22,18 @@ try:
 
     from torch._decomp import get_decompositions
 
+    import torchinductor.config
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx
     from torchinductor.ir import IndexingDiv
     from torchinductor.ir import ModularIndexing
     from torchinductor.sizevars import SizeVarAllocator
+    from torchinductor.utils import has_torchvision_roi_align
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
 except (ImportError, ModuleNotFoundError, AssertionError):
-    raise unittest.SkipTest("requires functorch")
+    raise unittest.SkipTest("requires sympy/functorch")
 
 
 HAS_CPU = False
@@ -56,6 +58,22 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+torchinductor.config.triton.autotune = False  # too slow
+
+
+def requires_decomp(fn):
+    """Decorator to disable test if a decomp is missing"""
+
+    def wrap_test(test):
+        @functools.wraps(test)
+        def maybe_test(*args, **kwargs):
+            if len(get_decompositions([fn])) == 0:
+                raise unittest.SkipTest(f"requires decomp for {fn.__name__}")
+            return test(*args, **kwargs)
+
+        return maybe_test
+
+    return wrap_test
 
 
 class TestCase(unittest.TestCase):
@@ -125,6 +143,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     if has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.float)
+    torch.manual_seed(0)
     correct = model(*upcasted_inputs)
     # downcast the model back if needed
     if has_lowp_args:
@@ -137,6 +156,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     torchdynamo.reset()
     with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
+        torch.manual_seed(0)
         actual = run(*example_inputs)
 
     assert type(actual) == type(correct)
@@ -368,6 +388,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    def test_vertical_fusion1(self):
+        def fn(sa, ct, p):
+            # From torchbench.pyhpc_equation_of_state
+            v17 = -3.087032500374211e-7
+            v18 = -1.988366587925593e-8
+            v19 = -1.061519070296458e-11
+            v20 = 1.550932729220080e-10
+            t15 = v19 * ct
+            t19 = v17 + ct * (v18 + t15) + v20 * sa
+            t20 = 1.0 / t19
+            t128 = t19 * p
+            return t20 + t128
+
+        self.common(
+            fn,
+            (
+                torch.randn(204, 204, 26),
+                torch.randn(204, 204, 26),
+                torch.randn(26),
+            ),
+        )
+
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
@@ -540,10 +582,12 @@ class CommonTemplate:
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
 
+        # without manual_seed, there is some chance this test fails due to:
+        # https://github.com/openai/triton/issues/530
+        torch.manual_seed(0)
+
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
-        self.common(
-            fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10), check_lowp=False
-        )
+        self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_silu(self):
         def fn(a):
@@ -813,6 +857,7 @@ class CommonTemplate:
                 aten._to_copy(a, dtype=6),
                 aten._to_copy(b + 1, dtype=6),
                 aten.to(b, torch.float64),
+                aten.to(b, torch.bool),
             )
 
         self.common(
@@ -1117,6 +1162,71 @@ class CommonTemplate:
         c = fn(a, b)
         self.assertEqual(a.stride(), c.stride())
         self.assertEqual(c.stride()[2], 1)
+
+    @requires_cuda()
+    @patch.object(config.triton, "convolution", "triton")
+    def test_triton_conv(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def triton_conv(
+            x,
+            w,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        ):
+            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+            return y
+
+        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
+        dtype = torch.float32
+        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
+        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
+        bias = torch.randn((32), dtype=dtype, device=self.device)
+
+        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
+        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
+
+    @requires_cuda()
+    @patch.object(config.triton, "convolution", "autotune")
+    def test_conv_autotune(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def triton_conv(
+            x,
+            w,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        ):
+            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+            return y
+
+        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
+        dtype = torch.float32
+        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
+        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
+        bias = torch.randn((32), dtype=dtype, device=self.device)
+
+        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
+        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
+
+    @patch.object(config.triton, "use_mm", True)
+    def test_triton_mm2(self):
+        @torchdynamo.optimize("inductor", nopython=True)
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        N = 1024
+        a = torch.randn([N, N], device=self.device, dtype=torch.float32)
+        b = torch.randn([N, N], device=self.device, dtype=torch.float32)
+        c1 = torch.mm(a, b)
+        c = fn(a, b)
+        assert torch.allclose(c1, c, atol=1e-3, rtol=1e-3)
 
     def test_std(self):
         def fn(x):
@@ -1598,6 +1708,7 @@ class CommonTemplate:
                 torch.randn([2, 3, 16, 16]),
                 torch.randn([2, 3, 16, 16]),
             ),
+            check_lowp=False,
         )
 
     def test_triu(self):
@@ -1713,6 +1824,190 @@ class CommonTemplate:
                 arg190,
             ),
         )
+
+    @unittest.skipIf(not has_torchvision_roi_align(), "requirs torchvision")
+    def test_roi_align(self):
+        def fn(a, b):
+            return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
+
+        self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
+
+    @requires_decomp(aten.nll_loss_forward)
+    def test_nll_loss_forward(self):
+        def fn(a, b):
+            return aten.nll_loss_forward(a, b, None, 1, -100)
+
+        self.common(
+            fn,
+            (
+                torch.randn([5, 5]),
+                torch.zeros([5], dtype=torch.int64),
+            ),
+        )
+
+    def test_isinf(self):
+        def fn(x):
+            return x.isinf(), x.isnan()
+
+        self.common(
+            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
+        )
+
+    def test_any(self):
+        def fn(x):
+            return (
+                x.any(-1),
+                x.isinf().any(),
+                torch.all(x.isinf(), dim=0),
+                torch.all(torch.logical_not(x.isinf())),
+            )
+
+        self.common(fn, [-torch.rand(64)])
+        tmp = torch.randn(16, 8)
+        tmp[1, 1] = float("inf")
+        self.common(fn, [tmp])
+
+    def test_inplace_activations(self):
+        def fn(x):
+            a = aten.hardswish_(x + 1)
+            b = aten.hardtanh_(x + 1)
+            c = aten.leaky_relu_(x + 1)
+            d = aten.silu_(x + 1)
+            e = aten.log1p(x + 1)
+            f = aten.masked_fill_(x + 1, torch.zeros_like(x, dtype=torch.bool), 99.0)
+            h = aten.masked_fill_(x + 1, torch.ones_like(x, dtype=torch.bool), 99.0)
+            return (a, b, c, d, e, f, h)
+
+        self.common(fn, [torch.randn(64) * 10])
+
+    def test_baddbmm(self):
+        def fn(a, b, c):
+            return aten.baddbmm(a, b, c)
+
+        self.common(
+            fn,
+            [
+                torch.randn(6, 1, 100),
+                torch.randn(6, 128, 64),
+                torch.randn(6, 64, 100),
+            ],
+        )
+
+    @patch.object(config.triton, "max_tiles", 2)
+    def test_fuse_tiled(self):
+        def fn(a, b, c):
+            return a + b, c + 1
+
+        self.common(
+            fn, [torch.randn(128, 1), torch.randn(1, 128), torch.randn(128, 128)]
+        )
+
+    def test_expand_as(self):
+        def fn(a, b):
+            return aten.expand_as(a, b), aten.expand_as(a + 1, b + 1) + 1
+
+        self.common(
+            fn,
+            [
+                torch.randn(6, 1, 100),
+                torch.randn(6, 128, 100),
+            ],
+        )
+
+    def test_index_put1(self):
+        def fn(a, b, c):
+            return (
+                torch.index_put(a, [b], c),
+                torch.index_put_(a + 1, [b + 1], c + 1) + 1,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([800, 256, 7, 7]),
+                torch.randperm(601),
+                torch.randn([601, 256, 7, 7]),
+            ],
+        )
+
+    def test_index_put2(self):
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c, True)
+
+        self.common(
+            fn,
+            [
+                torch.randn([100, 256, 7, 7]),
+                torch.randint(0, 100, size=[600], dtype=torch.int64),
+                torch.randn([600, 256, 7, 7]),
+            ],
+            # workaround for https://github.com/openai/triton/issues/558
+            check_lowp=False,
+        )
+
+    def test_bernoulli(self):
+        def fn(a):
+            b = torch.empty_like(a)
+            return aten.bernoulli_(b), b
+
+        self.common(
+            fn,
+            [
+                torch.randn([100]),
+            ],
+        )
+
+    def test_narrow(self):
+        def fn(x):
+            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+
+        self.common(fn, [torch.randn(64, 64)])
+
+    def test_as_strided(self):
+        def fn(x):
+            return (
+                aten.as_strided(x, (8, 8, 64), (8 * 64, 64, 1), 0),
+                aten.as_strided(x + 1, (8, 8, 64), (8 * 64, 64, 1), 0) + 2,
+            )
+
+        self.common(fn, [torch.randn(64, 64)])
+
+    def test_select_scatter(self):
+        def fn(x, a, b):
+            return (
+                aten.select_scatter(x, a, 1, 0),
+                aten.select_scatter(x, b, 0, 1),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn(8, 197, 38),
+                torch.randn(8, 38),
+                torch.randn(197, 38),
+            ],
+        )
+
+    def test_slice_scatter(self):
+        def fn(x, a):
+            return (
+                aten.slice_scatter(x, a, 2, 10, -10),
+                aten.slice_scatter(x, a[:, :, :40], 2, 10, -10, 2),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn(4, 8, 100),
+                torch.randn(4, 8, 80),
+            ],
+        )
+
+    def test_new_empty_strided(self):
+        def fn(a):
+            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
+
+        self.common(fn, [torch.randn(55)])
 
 
 if HAS_CPU:

@@ -21,6 +21,7 @@ from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import unique_id
 from .codegen import PyCodegen
+from .exc import BackendCompilerFailed
 from .exc import unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -30,8 +31,11 @@ from .source import Source
 from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
+from .utils import fake_tensors_available
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+from .variables.tensor import UnspecializedNumpyVariable
+from .variables.tensor import UnspecializedPythonVariable
 
 
 class FakeRootModule(torch.nn.Module):
@@ -76,10 +80,15 @@ class OutputGraph(fx.Tracer):
         self.root_tx = root_tx
         self.cleanups = []
         self.should_exit = False
+        self.random_values_var = None
 
     @property
     def output(self):
         return self
+
+    @property
+    def fake_mode(self):
+        return self.root_tx.fake_mode
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
@@ -233,8 +242,17 @@ class OutputGraph(fx.Tracer):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
+        if len(tx.random_calls) > 0:
+            self.random_values_var = self.new_var("random_values")
+
         if (
             stack_values
+            and all(
+                not isinstance(
+                    v, (UnspecializedNumpyVariable, UnspecializedPythonVariable)
+                )
+                for v in stack_values
+            )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
@@ -247,8 +265,9 @@ class OutputGraph(fx.Tracer):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
-            self.side_effects.codegen(pass1)
+            self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
+            self.side_effects.codegen_update_mutated(pass1)
 
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
@@ -257,8 +276,9 @@ class OutputGraph(fx.Tracer):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
-            self.side_effects.codegen(pass2)
+            self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
+            self.side_effects.codegen_update_mutated(pass2)
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -320,14 +340,14 @@ class OutputGraph(fx.Tracer):
         try:
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
             assert callable(compiled_fn), "compiler_fn did not return callable"
-        except Exception:
+        except Exception as e:
             sys.stderr.write("-" * 40 + "\n")
             sys.stderr.write("TORCHDYNAMO: backend compiler failed\n")
             traceback.print_exc()
             sys.stderr.write("-" * 40 + "\n")
             compiled_fn = gm.forward
             if config.raise_on_backend_error:
-                raise
+                raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):
@@ -375,7 +395,15 @@ class OutputGraph(fx.Tracer):
     def cleanup(self):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
+
+        # Clear cache for conversion of real -> fake tensors
+        if fake_tensors_available:
+            self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
+
+        # Note: generated fx graph will hold a reference to the nn_module,
+        # So depending on the backend they may not be released
+        self.nn_modules = None
 
         # Cleanup graphargs
         for graph_arg in self.graphargs:

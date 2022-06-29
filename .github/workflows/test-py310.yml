@@ -15,7 +15,7 @@ jobs:
       with:
         python-version: '3.10'
         cache: 'pip'
-    - run: make setup
+    - run: make setup_nightly
     - run: make test
 
 concurrency:

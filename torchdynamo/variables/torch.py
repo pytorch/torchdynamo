@@ -6,6 +6,7 @@ from typing import List
 import torch._C
 import torch.nn
 
+from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import ProfileRecordFunctionVariable
 
 from .. import config
@@ -51,6 +52,9 @@ class TorchVariable(VariableTracker):
         else:
             assert False, f"{value} found with __self__ set"
 
+    def __repr__(self):
+        return f"TorchVariable({self.value})"
+
     def unique_var_name(self):
         name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
@@ -72,6 +76,8 @@ class TorchVariable(VariableTracker):
     def can_constant_fold_through(self):
         if self.value in (
             torch.device,
+            torch.finfo,
+            torch.iinfo,
             torch.is_tensor,
             torch.is_floating_point,
             torch.overrides.is_tensor_like,
@@ -104,6 +110,8 @@ class TorchVariable(VariableTracker):
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.Softmax:
                 return self._call_softmax(tx, args, kwargs, options)
+            if self.value is torch.nn.CrossEntropyLoss:
+                return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
         elif (
@@ -184,13 +192,35 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1
             return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
         else:
-            return TensorVariable.create(
+            tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function", self.value, *proxy_args_kwargs(args, kwargs)
                 ),
                 **options,
             )
+
+            if "out" in kwargs:
+                # out variants of torch operators like torch.sort and
+                # torch.sigmoid mutate the tensors in the out field. Track such
+                # tensors and rewrite the symbolic locals.
+                if isinstance(tensor_variable, TupleVariable):
+                    assert isinstance(kwargs["out"], TupleVariable)
+                    output_tensor_names = [
+                        tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
+                    ]
+                    for idx, name in enumerate(output_tensor_names):
+                        assert name in tx.symbolic_locals
+                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                elif isinstance(tensor_variable, TensorVariable):
+                    assert isinstance(kwargs["out"], TensorVariable)
+                    name = tx.find_symbolic_locals_name(kwargs["out"])
+                    assert name in tx.symbolic_locals
+                    tx.symbolic_locals[name] = tensor_variable
+                else:
+                    unimplemented(f"out variant of {type(kwargs['out'])}")
+
+            return tensor_variable
 
     def is_dynamic_shapes(self, args, kwargs):
         """Check for dynamic shapes when shape specialization is enabled"""
@@ -240,6 +270,81 @@ class TorchVariable(VariableTracker):
             )
 
         return variables.LambdaVariable(fake_softmax, **options)
+
+    def _call_cross_entropy_loss(self, tx, args, kwargs, options):
+        """
+        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional loss call: input, target, optional_output
+        """
+        from . import ConstantVariable
+
+        def normalize_args(
+            weight=ConstantVariable(None),
+            size_average=ConstantVariable(None),
+            ignore_index=ConstantVariable(-100),
+            reduce=ConstantVariable(None),
+            reduction=ConstantVariable("mean"),
+            label_smoothing=ConstantVariable(0.0),
+        ):
+            return (
+                weight,
+                size_average,
+                ignore_index,
+                reduce,
+                reduction,
+                label_smoothing,
+            )
+
+        (
+            weight,
+            size_average,
+            ignore_index,
+            reduce_arg,
+            reduction,
+            label_smoothing,
+        ) = normalize_args(*args, **kwargs)
+
+        def fake_cross_entropy_loss(input, target):
+            return variables.TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.nn.functional.cross_entropy,
+                    *proxy_args_kwargs(
+                        [
+                            input,
+                            target,
+                            weight,
+                            size_average,
+                            ignore_index,
+                            reduce_arg,
+                            reduction,
+                            label_smoothing,
+                        ],
+                        {},
+                    ),
+                ),
+                **VariableTracker.propagate(
+                    [
+                        self,
+                        weight,
+                        size_average,
+                        ignore_index,
+                        reduce_arg,
+                        reduction,
+                        label_smoothing,
+                        input,
+                        target,
+                    ]
+                ),
+            )
+
+        return variables.LambdaVariable(fake_cross_entropy_loss, **options)
 
     def _call_ntuple(self, tx, args, kwargs, options):
         """inline behavior of torch.nn.modules.utils._ntuple"""

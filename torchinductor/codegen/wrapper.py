@@ -6,18 +6,20 @@ from itertools import count
 from .. import codecache
 from .. import config
 from .. import ir
+from ..utils import has_triton
+from ..utils import sympy_product
 from ..virtualized import V
 from .common import CodeGen
+from .common import DeferredLine
 from .common import IndentedBuffer
 from .common import Kernel
-from .common import product
 from .triton import texpr
 
 pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    return (node.get_device(), node.get_dtype(), product(node.get_size()))
+    return (node.get_device(), node.get_dtype(), sympy_product(node.get_size()))
 
 
 def make_buffer_reuse(old, new):
@@ -61,15 +63,36 @@ class WrapperCodeGen(CodeGen):
                 from ctypes import c_void_p, c_long
                 import torch
                 from torch import empty_strided, as_strided
-                from {codecache.__name__} import CppCodeCache, TritonCodeCache, grid
-                try:
-                    import triton
-                    import triton.language as tl
-                except ImportError:
-                    pass
+                from {codecache.__name__} import CppCodeCache, TritonCodeCache
+
                 aten = torch.ops.aten
+
             """
         )
+
+        if has_triton():
+            self.header.splice(
+                """
+                    import triton
+                    import triton.language as tl
+
+                    from torchinductor.triton_ops.autotune import pointwise_heuristics
+                    from torchinductor.triton_ops.autotune import reduction_heuristics
+                    from torchinductor.triton_ops.autotune import grid
+
+                """
+            )
+
+            if config.triton.use_mm:
+                self.header.writeline(
+                    "from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
+                )
+
+            if config.triton.use_bmm:
+                self.header.writeline(
+                    "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
+                )
+
         self.prefix.writelines(
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
@@ -100,7 +123,10 @@ class WrapperCodeGen(CodeGen):
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
-            self.writeline(f"{name} = {layout.view.codegen_reference()}")
+            allocation = DeferredLine(
+                name, f"{name} = {layout.view.codegen_reference()}"
+            )
+            self.writeline(allocation)
             return
 
         # try to reuse a recently freed buffer
@@ -114,12 +140,14 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        self.writeline(
+        allocation = DeferredLine(
+            name,
             f"{name} = empty_strided("
             f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
             f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})"
+            f"device='{device.type}', dtype={dtype})",
         )
+        self.writeline(allocation)
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
@@ -182,12 +210,12 @@ class WrapperCodeGen(CodeGen):
         """
         if not config.benchmark_harness:
             return
-        output.writelines(["", 'if __name__ == "__main__":'])
+        output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
                 """
                 from torchdynamo.testing import rand_strided
-                from torchinductor.microbench import print_performance
+                from microbenchmarks.microbench import print_performance
                 """,
                 strip=True,
             )

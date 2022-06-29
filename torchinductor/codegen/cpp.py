@@ -11,15 +11,16 @@ import torch
 
 from .. import codecache
 from .. import config
+from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
+from .common import DeferredIndentedBuffer
 from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import KernelArgs
 from .common import OpOverrides
-from .common import product
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -35,7 +36,7 @@ INDEX_TYPE = "long"
 
 
 def reduction_init(reduction_type, dtype):
-    if reduction_type == "sum":
+    if reduction_type in ("sum", "any"):
         return 0
     # TODO(jansel): infinity for floats?
     if reduction_type == "max":
@@ -48,6 +49,8 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "any":
+        return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
 
 
@@ -57,8 +60,10 @@ def cpp_prefix():
         textwrap.dedent(
             """
             #include <algorithm>
+            #include <atomic>
             #include <cmath>
             #include <cstdlib>
+            #include <iostream>
             #include <limits>
             #define SLEEF_ENABLE_OMP_SIMD
             //#include <sleef.h>
@@ -133,6 +138,14 @@ class CppOverrides(OpOverrides):
         return f"std::trunc({x})"
 
     @staticmethod
+    def isinf(x):
+        return f"std::isinf({x})"
+
+    @staticmethod
+    def isnan(x):
+        return f"std::isnan({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 
@@ -200,7 +213,7 @@ class CppKernel(Kernel):
         self.itervars = None
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        self.reduction_suffix = IndentedBuffer()
+        self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
@@ -209,11 +222,26 @@ class CppKernel(Kernel):
         index = self.rename_indexing(index)
         return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
-        self.stores.writeline(f"{var}[{cexpr(index)}] = {value};")
+        if mode is None:
+            line = f"{var}[{cexpr(index)}] = {value};"
+        elif mode == "atomic_add":
+            if config.cpp.threads == 1:
+                line = f"{var}[{cexpr(index)}] += {value};"
+            else:
+                self.stores.writeline(
+                    name,
+                    "static_assert(std::atomic_ref<"
+                    + f"std::remove_pointer_t<decltype({var})>"
+                    + ">::is_always_lock_free);",
+                )
+                line = f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
+        else:
+            raise NotImplementedError(f"store mode={mode}")
+        self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
         tmpvar = self.cse.generate(
@@ -224,11 +252,13 @@ class CppKernel(Kernel):
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
-        self.stores.writeline(f"{reduction_combine(reduction_type, tmpvar, value)};")
+        self.stores.writeline(
+            None, f"{reduction_combine(reduction_type, tmpvar, value)};"
+        )
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            self.reduction_suffix.writeline(f"{var}[{cexpr(index)}] = {tmpvar};")
-        self.cse.store_cache[(name, index)] = tmpvar
+            self.reduction_suffix.writeline(name, f"{var}[{cexpr(index)}] = {tmpvar};")
+        self.cse.store_cache[name] = tmpvar
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -247,7 +277,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
-        return V.graph.sizevars.size_hint(product(self.call_ranges))
+        return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
@@ -341,7 +371,7 @@ class CppKernel(Kernel):
         prior = (self.loads, self.compute, self.stores, self.cse)
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
+        self.stores = DeferredIndentedBuffer()
         self.cse = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)
@@ -379,7 +409,6 @@ class CppScheduling:
 
             # first any pointwise sharing same loops
             for node in scheduler.pop_group((group + reduction_group, ())):
-                scheduler.maybe_remove_buffer(node, check_group1)
                 node.run(vars, reduction_vars)
                 node.mark_fusable()
 
@@ -396,7 +425,6 @@ class CppScheduling:
                 # we can fuse in some extra pointwise into the suffix
                 with kernel.write_to_suffix():
                     for node in scheduler.pop_group((group, ())):
-                        scheduler.maybe_remove_buffer(node, check_group2)
                         node.run(vars, ())
                         node.mark_fusable()
 
@@ -511,7 +539,7 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
-            lookup = {"sum": "+", "min": "min", "max": "max"}
+            lookup = {"sum": "+", "min": "min", "max": "max", "any": "||"}
             reduction = " " + " ".join(
                 f"reduction({lookup[rtype]}:{var})"
                 for var, rtype in self.reduction_vars.items()

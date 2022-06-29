@@ -11,6 +11,7 @@ import torchdynamo
 
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
+from .bytecode_transformation import unique_id
 from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
@@ -21,6 +22,8 @@ from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import TensorWithTFOverrideVariable
+from .variables.tensor import UnspecializedNumpyVariable
+from .variables.tensor import UnspecializedPythonVariable
 
 
 @dataclasses.dataclass
@@ -31,6 +34,13 @@ class GraphOutputEntry:
     def merge(self, other: VariableTracker):
         # merge in any extra guards
         self.variable = self.variable.add_options(other)
+
+
+def _get_gen_rand_values_fn(random_calls):
+    def _gen_rand_values():
+        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+
+    return _gen_rand_values
 
 
 class PyCodegen(object):
@@ -93,7 +103,15 @@ class PyCodegen(object):
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
-        elif isinstance(value, (TensorVariable, TensorWithTFOverrideVariable)):
+        elif isinstance(
+            value,
+            (
+                TensorVariable,
+                TensorWithTFOverrideVariable,
+                UnspecializedNumpyVariable,
+                UnspecializedPythonVariable,
+            ),
+        ):
             if isinstance(value, TensorWithTFOverrideVariable):
                 # unwrap back to tensor
                 value = value.tensor_variable
@@ -110,6 +128,27 @@ class PyCodegen(object):
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
+
+            if isinstance(value, UnspecializedNumpyVariable):
+                unspec_var = self.tx.output.new_var("unspec")
+                raw_type = type(value.raw_value)
+                output.extend(
+                    [
+                        self.create_load_attr("item"),
+                        create_instruction("CALL_FUNCTION", 0),
+                        self.create_store(unspec_var),
+                        self.create_load_const(raw_type),
+                        self.create_load(unspec_var),
+                        create_instruction("CALL_FUNCTION", 1),
+                    ]
+                )
+            if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
+                output.extend(
+                    [
+                        self.create_load_attr("item"),
+                        create_instruction("CALL_FUNCTION", 0),
+                    ]
+                )
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:
@@ -289,8 +328,36 @@ class PyCodegen(object):
         self.extend_output(self.load_function_name(fn_name))
 
         graphargs = self.tx.output.graphargs
+
+        # to handle random calls
+        if len(self.tx.random_calls) > 0:
+            rand_fn_name = unique_id("__gen_rand_values")
+            rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(self.tx.random_calls))
+            self.tx.output.install_global(rand_fn_name, rand_fn)
+            self.extend_output(self.load_function_name(rand_fn_name))
+            self.extend_output(
+                [
+                    create_instruction("CALL_FUNCTION", 0),
+                    self.create_store(self.tx.output.random_values_var),
+                ]
+            )
+
         for arg in graphargs:
-            self.extend_output(arg.load(self))
+            if arg.is_unspecialized:
+                self.extend_output(
+                    [
+                        self.create_load_global("torch", add=True),
+                        self.create_load_attr("tensor"),
+                    ]
+                )
+                self.extend_output(arg.load(self))
+                self.extend_output(
+                    [
+                        create_instruction("CALL_FUNCTION", 1),
+                    ]
+                )
+            else:
+                self.extend_output(arg.load(self))
 
         self.append_output(create_instruction("CALL_FUNCTION", len(graphargs)))
 

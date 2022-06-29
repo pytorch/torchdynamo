@@ -56,10 +56,11 @@ def ensure_patched(cls):
 class GenerationTracker:
     generation = 0
     dynamic_classes = ExactWeakKeyDictionary()
+    generation_values = ExactWeakKeyDictionary()
 
     @classmethod
     def tag(cls, obj):
-        obj.generation = cls.generation
+        cls.generation_values[obj] = cls.generation
 
     @staticmethod
     def mark_class_dynamic(cls):
@@ -67,8 +68,17 @@ class GenerationTracker:
         GenerationTracker.dynamic_classes[cls] = True
 
     @classmethod
+    def get_generation_value(cls, obj):
+        if obj not in cls.generation_values:
+            return -1
+        return cls.generation_values[obj]
+
+    @classmethod
     def check(cls, obj):
-        return getattr(obj, "generation", -1) == cls.generation
+        return (
+            obj in cls.generation_values
+            and cls.generation_values[obj] == cls.generation
+        )
 
 
 def is_dynamic_nn_module(obj):
