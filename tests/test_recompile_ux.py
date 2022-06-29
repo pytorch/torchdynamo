@@ -25,8 +25,6 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         )
 
     def test_drop_cache_on_skip(self):
-        torchdynamo.config.debug = True
-        torchdynamo.config.trace = True
         def model(x, i):
             return x + i
 
@@ -41,6 +39,8 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             nonlocal attached
             f = gm.forward
             assert not attached
+            # NB: making this a weakref.ref causes the cycle to no
+            # longer be promptly GC'ed
             weakref.finalize(f, trigger)
             attached = True
             return f
@@ -49,7 +49,6 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         for i in range(2):
             with torchdynamo.optimize(compiler):
                 model(x, i)
-        print("trace")
 
         self.assertTrue(triggered)
 
@@ -200,5 +199,6 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
         )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
