@@ -8,6 +8,8 @@ import re
 import textwrap
 import types
 import weakref
+from inspect import currentframe
+from inspect import getframeinfo
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -77,8 +79,9 @@ class Guard:
     create_fn: Callable
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_type: Optional[str] = None
-    code: Optional[str] = None
+    guard_types: Optional[Set[str]] = None
+    code_list: Optional[List[str]] = None
+    obj_weakref: Optional[Any] = None
     obj_id: Optional[int] = None
     guarded_class: Optional[type] = None
 
@@ -98,12 +101,13 @@ class Guard:
 
     def __str__(self):
         s = f"{self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
-        if config.export_guards:
+        if config.export_guards is True:
             s = f"""
                 {s} EXPORT_INFO:
                 {{
-                    'guard_type': {self.guard_type},
-                    'code': {self.code},
+                    'guard_types': {self.guard_types},
+                    'code': {self.code_list},
+                    'obj_weakref': {self.obj_weakref}
                     'obj_id': {self.obj_id},
                     'guarded_class': {self.guarded_class}
                 }}
@@ -119,21 +123,39 @@ class Guard:
     def is_local(self):
         return self.source.is_local()
 
-    def set_export_info(self, guard_type, guarded_class, code, id):
+    def set_export_info(
+        self, guard_type, guarded_class, code_list, obj_weakref, obj_id
+    ):
         if config.export_guards is False:
             return
 
-        assert self.guard_type is None
-        self.guard_type = guard_type
+        if not self.guard_types:
+            self.guard_types = set()
 
-        assert self.guarded_class is None
+        self.guard_types.add(guard_type)
+
+        assert self.guarded_class in (
+            guarded_class,
+            None,
+        ), "Guarded class id must be identical, or None"
         self.guarded_class = guarded_class
 
-        assert self.code is None
-        self.code = code
+        if not self.code_list:
+            self.code_list = code_list
+        else:
+            self.code_list.extend(code_list)
 
-        assert self.obj_id is None
-        self.obj_id = code
+        assert self.obj_weakref in (
+            obj_weakref,
+            None,
+        ), "Guarded object must be identical, or None"
+        self.obj_weakref = obj_weakref
+
+        assert self.obj_id in (
+            obj_id,
+            None,
+        ), "Guarded object id must be identical, or None"
+        self.obj_id = obj_id
 
 
 def strip_function_call(name):
@@ -191,8 +213,7 @@ class GuardBuilder:
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
-        self.code.append(code)
-        guard.set_export_info("TYPE_MATCH", t, code, obj_id)
+        self._produce_guard_code(guard, [code])
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
@@ -206,8 +227,7 @@ class GuardBuilder:
         t = type(val)
 
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
-        self.code.append(code)
-        guard.set_export_info("ID_MATCH", t, code, obj_id)
+        self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
         m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
@@ -221,12 +241,7 @@ class GuardBuilder:
         else:
             code = f"not hasattr({ref}, {attr!r})"
 
-        self.code.append(code)
-
-        obj_id = self.id_ref(self.get(base))
-        t = type(self.get(base))
-
-        guard.set_export_info("HASATTR", t, code, obj_id)
+        self._produce_guard_code(guard, [code])
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -264,41 +279,35 @@ class GuardBuilder:
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
             code = f"str({ref}) == {str(val)!r}"
-            self.code.append(code)
-            guard.set_export_info("EQUALS_MATCH", t, code, obj_id)
+            self._produce_guard_code(guard, [code])
             return
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
-            code = f"___check_type_id({ref}, {self.id_ref(t)})"
-            export_code = code
-            self.code.append(code)
-            code = f"__math_isnan({ref})"
-            self.code.append(code)
-            export_code = f"{export_code} and {code}"
-            guard.set_export_info("EQUALS_MATCH", t, export_code, obj_id)
+            code = list()
+            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            code.append(f"__math_isnan({ref})")
+            self._produce_guard_code(guard, code)
             return
 
         # Add type check to prevent equality check between tensor and non-tensor.
-        export_code = None
+        code = list()
         if istype(val, (list, tuple)):
             self.LIST_LENGTH(guard)
+
             for idx, elem in enumerate(val):
-                code = f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
-                self.code.append(code)
-                export_code = f"{export_code} and {code}" if export_code else code
+                code.append(
+                    f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
+                )
+
         elif not istype(val, torch.Size):
-            code = f"___check_type_id({ref}, {self.id_ref(t)})"
-            self.code.append(code)
-            export_code = code
+            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
         if istype(val, torch.Size):
             val = tuple(val)
 
-        code = f"{ref} == {val!r}"
-        self.code.append(code)
-        export_code = f"{export_code} and {code}" if export_code else code
-        guard.set_export_info("EQUALS_MATCH", t, export_code, obj_id)
+        code.append(f"{ref} == {val!r}")
+        self._produce_guard_code(guard, code)
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
@@ -338,45 +347,33 @@ class GuardBuilder:
         value = self.get(guard.name)
         t = type(value)
 
-        code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
-        self.code.append(code_type_check)
-        code_len_check = f"len({ref}) == {len(value)}"
-        self.code.append(code_len_check)
+        code = list()
+        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        code.append(f"len({ref}) == {len(value)}")
 
-        guard.set_export_info(
-            "LIST_LENGTH", t, f"{code_type_check} and {code_len_check}", id(value)
-        )
+        self._produce_guard_code(guard, code)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
-        code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
-        self.code.append(code_type_check)
-        code_len_check = f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}"
-        self.code.append(code_len_check)
+        code = list()
+        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
-        guard.set_export_info(
-            "TUPLE_ITERATOR_LEN",
-            t,
-            f"{code_type_check} and {code_len_check}",
-            id(value),
-        )
+        self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
-        code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
-        self.code.append(code_type_check)
-        code_key_check = f"{ref}.keys() == {set(value.keys())!r}"
-        self.code.append(code_key_check)
+        code = list()
+        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        code.append(f"{ref}.keys() == {set(value.keys())!r}")
 
-        guard.set_export_info(
-            "DICT_KEYS", t, f"{code_type_check} and {code_key_check}", id(value)
-        )
+        self._produce_guard_code(guard, code)
 
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
@@ -384,35 +381,23 @@ class GuardBuilder:
         t = type(value)
         keys = {k for k, v in value.named_parameters()}
 
-        obj_id = self.id_ref(value)
+        code = list()
+        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
-        code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
-        self.code.append(code_type_check)
-        code_param_check = f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}"
-        self.code.append(code_param_check)
-
-        guard.set_export_info(
-            "NN_MODULE_PARAM_NAMES",
-            t,
-            f"{code_type_check} and {code_param_check}",
-            obj_id,
-        )
+        self._produce_guard_code(guard, code)
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
-        obj_id = self.id_ref(value)
 
-        code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
-        self.code.append(code_type_check)
-        code_key_check = f"str({ref}.keys()) == {str(value.keys())!r}"
-        self.code.append(code_key_check)
+        code = list()
+        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
 
-        guard.set_export_info(
-            "ODICT_KEYS", t, f"{code_type_check} and {code_key_check}", obj_id
-        )
+        self._produce_guard_code(guard, code)
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
@@ -426,9 +411,7 @@ class GuardBuilder:
             code = "___is_grad_enabled()"
         else:
             code = "not ___is_grad_enabled()"
-        print("Code:", code)
-        self.code.append(code)
-        guard.set_export_info("GRAD_MODE", None, code, None)
+        self._produce_guard_code(guard, [code])
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -442,7 +425,35 @@ class GuardBuilder:
             # We accumulate tensor names, then do a single install of `___check_tensors`.
             # See _guards.cpp and TensorGuard for more information.
             # TODO(voz): Add tensor matching code to export
-            guard.set_export_info("TENSOR_MATCH", type(value), None, id(value))
+            # Note: this is a bit of a special case, and so does not use _produce_guard_code
+            guard.set_export_info(
+                "TENSOR_MATCH", type(value), None, weakref.ref(value), id(value)
+            )
+
+    # A util that appends guarded code, or, in the case of export, adds data onto guards
+    def _produce_guard_code(self, guard, code_list):
+        caller = currentframe().f_back
+        func_name = getframeinfo(caller)[2]
+        # We use func_name for export, so might as well get a nice defensive check out of it
+        assert func_name in dir(
+            self.__class__
+        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+
+        self.code.extend(code_list)
+
+        if config.export_guards is True:
+            # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
+            guarded_object = self.get(guard.name) if guard.name != "" else None
+            guarded_object_type = (
+                type(guarded_object) if guarded_object is not None else None
+            )
+            obj_ref = None
+            if hasattr(guarded_object.__class__, "__weakref__"):
+                obj_ref = weakref.ref(guarded_object)
+
+            guard.set_export_info(
+                func_name, guarded_object_type, code_list, obj_ref, id(guarded_object)
+            )
 
 
 class GuardedCode:
