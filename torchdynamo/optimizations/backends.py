@@ -569,7 +569,7 @@ def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
     if jit_mod is None:
         return None
     try:
-        return tvm_compile_inner(jit_mod, example_inputs, log_file, **kwargs)
+        return tvm_compile_inner(jit_mod, example_inputs, None, log_file, **kwargs)
     except Exception as e:
         if log_file and os.path.exists(log_file):
             os.unlink(log_file)
@@ -742,7 +742,9 @@ def tvm_compile_inner(
             ]
 
         return exec_tvm
-    except Exception:
+    except Exception as ex:
+        log.exception("tvm error")
+        print(ex)
         return jit_mod  # explicit fall back to eager
 
 
