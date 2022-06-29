@@ -2,11 +2,6 @@ import logging
 import operator
 import os
 from itertools import chain
-from typing import Any
-from typing import Callable
-from typing import Dict
-from typing import Optional
-from typing import Tuple
 
 import torch
 from torch.fx import GraphModule
@@ -151,7 +146,6 @@ def python_key_normalize(
             return x
 
         return tuple(unpack(x) for x in out)
-
 
     with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
         tracer: torch.fx.Tracer = PythonKeyTracer()
