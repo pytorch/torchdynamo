@@ -10,6 +10,7 @@ import torch
 from torch.cuda import synchronize
 
 import torchinductor
+from torchdynamo.optimizations.backends import cudagraphs_inner
 from torchdynamo.testing import same
 from torchinductor.compile_fx import compile_fx
 
@@ -56,9 +57,13 @@ def compute_speedups(args, models, example_inputs):
 
 def microbenchmark(args, model, example_inputs):
     compiled_fn = compile_fx(torch.fx.symbolic_trace(model), example_inputs)
+    cudagraphs_eager = cudagraphs_inner(model, example_inputs, copy_outputs=False)
+    cudagraphs_jit = cudagraphs_inner(
+        torch.jit.trace(model, example_inputs), example_inputs, copy_outputs=False
+    )
     return compute_speedups(
         args,
-        [model, torch.jit.trace(model, example_inputs), compiled_fn],
+        [cudagraphs_eager, cudagraphs_jit, compiled_fn],
         example_inputs,
     )
 
@@ -99,6 +104,10 @@ class MicroBenchmarks:
     def add_relu_softmax(x, a):
         return (torch.softmax(torch.relu(x + a), -1),)
 
+    @staticmethod
+    def sum(a, b):
+        return ((a + b).sum(),)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -130,7 +139,7 @@ def main():
     args.devices = args.devices or ["cpu", "cuda"]
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
-    args.size = args.size or [64, 256, 1024, 4096]
+    args.size = args.size or [64, 256, 1024, 4096, 8192]
 
     if args.nvfuser:
         torch._C._jit_override_can_fuse_on_cpu(False)
@@ -151,8 +160,10 @@ def main():
     if args.verbose:
         torchinductor.config.debug = True
 
+    torchinductor.config.triton.autotune = True
+
     rows = []
-    for model in (MicroBenchmarks.add_relu_softmax,):
+    for model in (MicroBenchmarks.sum,):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:

@@ -6,8 +6,6 @@ import torchdynamo
 import torchdynamo.config
 import torchdynamo.testing
 
-torchdynamo.config.debug = False
-
 
 class RecompileUxTests(torchdynamo.testing.TestCase):
     # TODO(whc) dynamo actualy recompiles one more time than the cache limit
@@ -20,6 +18,9 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             unittest.mock.patch.object(
                 torchdynamo.config, "cache_size_limit", cls.cache_limit
             )
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(torchdynamo.config, "debug", False)
         )
 
     def test_loop_torture(self):
@@ -111,7 +112,10 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
     def test_verbose_tensor_check(self):
         def func(a):
-            return torch.sum(a)
+            # Warning: choose a function here whose meta implementation lives
+            # entirely in C++.  If you do a Python one, Dynamo will dive into
+            # torch._refs which is OK but it will muddy up the warnings
+            return torch.add(a, 4)
 
         def cache_fail_test(cached_input, missed_input, expected_failure):
             # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient

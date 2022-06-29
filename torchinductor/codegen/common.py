@@ -1,8 +1,7 @@
 import collections
 import contextlib
-import functools
 import itertools
-import operator
+import math
 import re
 import textwrap
 import typing
@@ -12,12 +11,70 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
 
 
-def product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
+def _simplify_loops(index_vars, sizes, index_formulas):
+    """
+    Try to remove as many axis from loop iterations as possible, by:
+        1) removing size==1 dimensions
+        2) fuse contiguous dimensions into a single loop
+    """
+    sizes = list(sizes)
+
+    strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
+    assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+
+    for i in range(len(sizes)):
+        if sizes[i] == 1:
+            # remove dim
+            sizes[i] = None
+
+    def can_merge_dims(a, b):
+        for k in range(len(strides)):
+            if strides[k][a] * sizes[a] == strides[k][b]:
+                # approximate test passed, try sound version
+                va = index_vars[a]
+                vb = index_vars[b]
+                v = sympy.Symbol("_merge_tester")
+                expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
+                expr2 = index_formulas[k].subs({va: 0, vb: v})
+                if expr1 == expr2:
+                    continue
+            return False
+        return True
+
+    changed = True
+    while changed:
+        changed = False
+        for i, j in itertools.product(
+            reversed(range(len(sizes))), reversed(range(len(sizes)))
+        ):
+            if i == j or sizes[i] is None or sizes[j] is None:
+                continue
+            if can_merge_dims(i, j):
+                changed = True
+                sizes[i] = sizes[i] * sizes[j]
+                sizes[j] = None
+
+    def reindex(index):
+        it = list(reversed(index))
+        new_index = []
+        for size in sizes:
+            if size is None:
+                new_index.append(sympy.Integer(0))
+            else:
+                new_index.append(it.pop())
+        assert not it
+        return new_index
+
+    def prune(index):
+        assert len(index) == len(sizes)
+        return [i for i, s in zip(index, sizes) if s is not None]
+
+    return [x for x in sizes if x is not None], reindex, prune
 
 
 class ExprPrinter(Printer):
@@ -120,20 +177,37 @@ class IndentedBuffer:
     tabwidth = 4
 
     def __init__(self, initial_indent=0):
-        self.contents = StringIO()
+        self._lines = []
         self._indent = initial_indent
-        self.getvalue = self.contents.getvalue
+
+    def getvalue(self):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLine):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            buf.write(line)
+            buf.write("\n")
+        return buf.getvalue()
+
+    def clear(self):
+        self._lines.clear()
 
     def __bool__(self):
-        return len(self.getvalue()) > 0
+        return bool(self._lines)
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        self.contents.write(self.prefix())
-        self.contents.write(line)
-        self.contents.write("\n")
+        if isinstance(line, DeferredLine):
+            self._lines.append(line.with_prefix(self.prefix()))
+        elif line.strip():
+            self._lines.append(f"{self.prefix()}{line}")
+        else:
+            self._lines.append("")
 
     def writelines(self, lines):
         for line in lines:
@@ -150,14 +224,64 @@ class IndentedBuffer:
 
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):
-            other_code = other_code.getvalue()
-        other_code = textwrap.dedent(other_code)
-        if strip:
-            other_code = other_code.lstrip()
-        if not other_code:
-            return
-        assert other_code.endswith("\n")
-        self.contents.write(textwrap.indent(other_code, self.prefix()))
+            dedent = float("inf")
+            for line in other_code._lines:
+                if line:
+                    dedent = min(dedent, len(line) - len(line.lstrip()))
+            if math.isinf(dedent):
+                dedent = 0
+            for line in other_code._lines:
+                IndentedBuffer.writeline(self, line[dedent:])
+        else:
+            other_code = textwrap.dedent(other_code)
+            if strip:
+                other_code = other_code.lstrip()
+            if not other_code:
+                return
+            other_code = other_code.rstrip()
+            for line in other_code.split("\n"):
+                self.writeline(line)
+
+
+class DeferredLine:
+    """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
+
+    def __init__(self, name, line):
+        if not line.strip():
+            line = ""
+        self.name = name
+        self.line = line
+
+    def __call__(self):
+        if self.name not in V.graph.removed_buffers:
+            return self.line
+        return None
+
+    def with_prefix(self, prefix):
+        return DeferredLine(self.name, f"{prefix}{self.line}")
+
+    def lstrip(self):
+        return DeferredLine(self.name, self.line.lstrip())
+
+    def __getitem__(self, index):
+        return DeferredLine(self.name, self.line[index])
+
+    def __bool__(self):
+        return bool(self.line)
+
+    def __len__(self):
+        return len(self.line)
+
+
+class DeferredIndentedBuffer(IndentedBuffer):
+    def __init__(self, initial_indent=0):
+        super(DeferredIndentedBuffer, self).__init__(initial_indent)
+
+    def writeline(self, name, line):
+        if name is None:
+            return super().writeline(line)
+        assert "buf" in name
+        return super().writeline(DeferredLine(name, line))
 
 
 class BracesBuffer(IndentedBuffer):
@@ -184,10 +308,6 @@ class BracesBuffer(IndentedBuffer):
 class InplacedBuffer(typing.NamedTuple):
     inner_name: str
     other_names: typing.List[str]
-
-
-def unique(it):
-    return {id(x): x for x in it}.values()
 
 
 class KernelArgs:
@@ -261,7 +381,7 @@ class KernelArgs:
             arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
             call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers:
+            if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
@@ -280,7 +400,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers:
+            if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -315,6 +435,12 @@ class CSE:
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
+
+    def invalidate(self, keep_vars: typing.Set[str]):
+        for name, tmp in list(self.store_cache.items()):
+            if tmp not in keep_vars:
+                del self.store_cache[name]
+        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
         return CSE(
@@ -365,7 +491,7 @@ class Kernel(CodeGen):
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
+        self.stores = DeferredIndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
 
     @contextlib.contextmanager
@@ -399,7 +525,7 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
-    def store(self, name, index, value):
+    def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
     def reduction(self, name, dtype, reduction_type, index, value):
@@ -425,18 +551,16 @@ class Kernel(CodeGen):
                 if "tmp" in str(index):
                     return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
-                if (name, index) in store_cache:
-                    return store_cache[(name, index)]
-                if (name, self.rename_indexing(index)) in store_cache:
-                    # TODO(jansel): figure out why we need this second case
-                    return store_cache[(name, self.rename_indexing(index))]
+                if name in store_cache:
+                    return store_cache[name]
                 return self.load(name, index, upcast)
 
             @staticmethod
-            def store(name, index, value):
-                self.cse.store_cache[(name, index)] = value
+            def store(name, index, value, mode=None):
+                if mode is None:
+                    self.cse.store_cache[name] = value
                 if name not in V.graph.removed_buffers:
-                    return self.store(name, index, value)
+                    return self.store(name, index, value, mode=mode)
 
             @staticmethod
             def reduction(name, dtype, reduction_type, index, value):
@@ -448,9 +572,14 @@ class Kernel(CodeGen):
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        V.graph.scheduler.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
+
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
+        index = sympy.expand(index)
         index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
         subs = {
             x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")

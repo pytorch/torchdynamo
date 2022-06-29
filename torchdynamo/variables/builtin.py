@@ -7,13 +7,15 @@ import types
 from typing import Dict
 from typing import List
 
+import numpy as np
 import torch
 
+from torchdynamo.guards import GuardBuilder
 from torchdynamo.variables.tensor import DynamicShapeVariable
 
 from .. import config
 from .. import variables
-from ..allowed_functions import is_disallowed
+from ..allowed_functions import is_allowed
 from ..exc import Unsupported
 from ..exc import unimplemented
 from ..source import AttrSource
@@ -162,6 +164,65 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
+    def unspec_numpy_args(self, *args, **kwargs):
+        return all(
+            isinstance(
+                i,
+                (
+                    variables.UnspecializedNumpyVariable,
+                    variables.UnspecializedPythonVariable,
+                    variables.ConstantVariable,
+                ),
+            )
+            for i in itertools.chain(args, kwargs.values())
+        ) and any(
+            isinstance(x, variables.UnspecializedNumpyVariable)
+            for x in itertools.chain(args, kwargs.values())
+        )
+
+    def unspec_python_args(self, *args, **kwargs):
+        return all(
+            isinstance(
+                i,
+                (
+                    variables.UnspecializedPythonVariable,
+                    variables.ConstantVariable,
+                ),
+            )
+            for i in itertools.chain(args, kwargs.values())
+        ) and any(
+            isinstance(x, variables.UnspecializedPythonVariable)
+            for x in itertools.chain(args, kwargs.values())
+        )
+
+    @staticmethod
+    def unwrap_unspec_args_kwargs(args, kwargs):
+        unwrapped_args = []
+        unwrapped_kwargs = {}
+        for x in args:
+            if isinstance(
+                x,
+                (
+                    variables.UnspecializedNumpyVariable,
+                    variables.UnspecializedPythonVariable,
+                ),
+            ):
+                unwrapped_args.append(x.raw_value)
+            else:
+                unwrapped_args.append(x.as_python_constant())
+        for k, v in kwargs:
+            if isinstance(
+                x,
+                (
+                    variables.UnspecializedNumpyVariable,
+                    variables.UnspecializedPythonVariable,
+                ),
+            ):
+                unwrapped_kwargs.update({k: v.raw_value})
+            else:
+                unwrapped_kwargs.update({k: v.as_python_constant()})
+        return unwrapped_args, unwrapped_kwargs
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -189,15 +250,38 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
-                return variables.TensorVariable.create(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function",
-                        fn,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                    **options,
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    fn,
+                    *proxy_args_kwargs(args, kwargs),
                 )
+                if self.unspec_numpy_args(*args, **kwargs):
+                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                    raw_value = self.fn(*_args, **_kwargs)
+                    return variables.UnspecializedNumpyVariable.create(
+                        tx,
+                        proxy,
+                        raw_value=raw_value,
+                        **options,
+                    )
+                elif self.unspec_python_args(*args, **kwargs):
+                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                    raw_value = self.fn(*_args, **_kwargs)
+                    need_unwrap = any(
+                        x.need_unwrap
+                        for x in itertools.chain(args, kwargs.values())
+                        if isinstance(x, variables.UnspecializedPythonVariable)
+                    )
+                    return variables.UnspecializedPythonVariable.create(
+                        tx,
+                        proxy,
+                        raw_value=raw_value,
+                        need_unwrap=need_unwrap,
+                        **options,
+                    )
+                else:
+                    return variables.TensorVariable.create(tx, proxy, **options)
+
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
 
@@ -247,12 +331,52 @@ class BuiltinVariable(VariableTracker):
             # convert min/max to torch ops
             if b.is_python_constant():
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
-                return variables.TorchVariable(torch.clamp).call_function(
+                result = variables.TorchVariable(torch.clamp).call_function(
                     tx, [a], kwargs
                 )
             else:
                 fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                return variables.TorchVariable(fn).call_function(tx, [a, b], {})
+                result = variables.TorchVariable(fn).call_function(tx, [a, b], {})
+
+            # return unspec if both a, b are unspec or const
+            if all(
+                isinstance(
+                    i,
+                    (
+                        variables.UnspecializedNumpyVariable,
+                        variables.UnspecializedPythonVariable,
+                        variables.ConstantVariable,
+                    ),
+                )
+                for i in [a, b]
+            ):
+                if b.is_python_constant():
+                    raw_b = b.as_python_constant()
+                else:
+                    raw_b = b.raw_value
+                if self.fn is max:
+                    raw_res = max(a.raw_value, raw_b)
+                else:
+                    raw_res = min(a.raw_value, raw_b)
+
+                if isinstance(raw_res, np.number):
+                    return variables.UnspecializedNumpyVariable.from_tensor_variable(
+                        result, raw_res
+                    )
+                else:
+                    need_unwrap = any(
+                        x.need_unwrap
+                        for x in [a, b]
+                        if isinstance(x, variables.UnspecializedPythonVariable)
+                    )
+                    return variables.UnspecializedPythonVariable.from_tensor_variable(
+                        result, raw_res, need_unwrap
+                    )
+            # otherwise return tensor
+            else:
+                return result
+        else:
+            unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
     call_max = _call_min_max
@@ -277,9 +401,13 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
             )
         elif obj.has_unpack_var_sequence(tx):
+            guards = set()
+            if obj.source:
+                guards.add(obj.source.create_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
+                guards=guards,
             ).add_options(self, obj)
 
     call_iter = _call_iter_tuple_list
@@ -354,6 +482,8 @@ class BuiltinVariable(VariableTracker):
         arg_type = arg.python_type()
         isinstance_type = isinstance_type.as_python_constant()
 
+        if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+            return variables.ConstantVariable(arg.call_isinstance(isinstance_type))
         # UserDefinedObject with C extensions can have torch.Tensor attributes,
         # so break graph.
         if isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
@@ -390,6 +520,20 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(items).add_options(self, fn, seq)
 
     def call_sum(self, tx, seq, **kwargs):
+        # Special case for sum on tuple of floats and ints
+        if (
+            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
+            and all(
+                [
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, (int, float))
+                    for x in seq.items
+                ]
+            )
+            and not kwargs
+        ):
+            new_list = [x.value for x in seq.items]
+            return variables.ConstantVariable(sum(new_list))
         if seq.has_unpack_var_sequence(tx):
             start = kwargs.pop(
                 "start", variables.ConstantVariable(0)
@@ -480,7 +624,7 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if not is_disallowed(member):
+            if is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)

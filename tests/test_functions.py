@@ -68,6 +68,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return b - a
 
     @make_test
+    def test_finfo(a, b):
+        if torch.iinfo(torch.int32).bits == 32:
+            return torch.finfo(a.dtype).min * b
+
+    @make_test
     def test_globalfn(a, b):
         return sub(a, b)
 
@@ -537,6 +542,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
+        assert z.size() == y.size()
+
+    @requires_static_shapes
+    @make_test
+    def test_tensor_new_with_shape(x):
+        y = torch.rand(5, 8)
+        z = x.new(y.shape)
         assert z.size() == y.size()
 
     # # This is to test the new syntax for pattern matching

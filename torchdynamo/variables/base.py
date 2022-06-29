@@ -54,6 +54,9 @@ class VariableTracker:
                 guards.update(var.guards)
                 for i in var.items:
                     visit(i)
+            elif isinstance(var, variables.ConstDictVariable):
+                guards.update(var.guards)
+                visit(var.items.values())
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
@@ -104,7 +107,7 @@ class VariableTracker:
                 cls.apply(fn, v, cache) for v in value.items()
             )
         elif istype(value, dict):
-            result = {k: cls.apply(fn, v, cache) for k, v in value.items()}
+            result = {k: cls.apply(fn, v, cache) for k, v in list(value.items())}
         else:
             result = value
 

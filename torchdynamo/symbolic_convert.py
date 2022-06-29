@@ -13,8 +13,11 @@ import types
 import typing
 from typing import Any
 from typing import Dict
+from typing import Iterable
 from typing import List
 from unittest.mock import patch
+
+import torch
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
@@ -43,6 +46,7 @@ from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
+from .utils import fake_tensors_available
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
@@ -285,7 +289,7 @@ class InstructionTranslatorBase(object):
             return inst.opname != "RETURN_VALUE"
         except Unsupported as exc:
             exc.real_stack.append(self.frame_summary())
-            if not self.checkpoint:
+            if self.empty_checkpoint():
                 raise
 
         # generate code from checkpoint
@@ -307,10 +311,11 @@ class InstructionTranslatorBase(object):
             ):
                 pass
         except (
-            exc.Unsupported,
+            exc.BackendCompilerFailed,
             exc.RestartAnalysis,
-            exc.TorchRuntimeError,
             exc.SkipFrame,
+            exc.TorchRuntimeError,
+            exc.Unsupported,
         ):
             raise
         except Exception as e:
@@ -1106,6 +1111,18 @@ class InstructionTranslatorBase(object):
         ) = state
         self.output.restore_graphstate(output_state)
 
+    def empty_checkpoint(self):
+        if self.checkpoint is None:
+            return True
+        output_graphstate = self.checkpoint[1][0]
+        graphstate = self.checkpoint[1][1:]
+        state = (*output_graphstate, *graphstate)
+        for obj in state:
+            if isinstance(obj, Iterable):
+                if len(obj) != 0:
+                    return False
+        return True
+
     def frame_summary(self):
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
@@ -1113,6 +1130,16 @@ class InstructionTranslatorBase(object):
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
         )
+
+    @property
+    def fake_mode(self):
+        return self._fake_mode
+
+    def find_symbolic_locals_name(self, tensor_variable):
+        for key, value in self.symbolic_locals.items():
+            if value is tensor_variable:
+                return key
+        return None
 
     def __init__(
         self,
@@ -1146,7 +1173,11 @@ class InstructionTranslatorBase(object):
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
+        if fake_tensors_available:
+            self._fake_mode = torch._subclasses.FakeTensorMode(inner=None)
+
         self.checkpoint = None
+        self.random_calls: List[tuple] = []
 
         if sys.version_info >= (3, 10):
             from .resume_execution import CO_ASYNC_GENERATOR
@@ -1222,6 +1253,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                         GuardBuilder.LIST_LENGTH,
                         GuardBuilder.DICT_KEYS,
                         GuardBuilder.ODICT_KEYS,
+                        GuardBuilder.TUPLE_ITERATOR_LEN,
                     )
                 ]
                 self.output.guards.update(index_guards)
@@ -1392,6 +1424,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
+
+    @property
+    def fake_mode(self):
+        return self.parent.fake_mode
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:

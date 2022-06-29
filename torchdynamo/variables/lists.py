@@ -10,6 +10,7 @@ from ..source import GetItemSource
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
+from .constant import ConstantVariable
 
 
 class BaseListVariable(VariableTracker):
@@ -143,10 +144,11 @@ class ListVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
-            return tx.replace_all(
+            tx.replace_all(
                 self,
                 ListVariable(self.items + [arg], **options),
             )
+            return ConstantVariable(None)
         elif (
             name in ("extend", "__iadd__")
             and self.mutable_local
@@ -251,6 +253,15 @@ class SizeVariable(TupleVariable):
             create_instruction("CALL_FUNCTION", 1),
         ]
         return build_torch_size
+
+
+class ShapeVariable(TupleVariable):
+    """
+    Represents tensor.shape(...) and helps differentiate between a constant
+    TupleVariable and ShapeVariable.
+    """
+
+    pass
 
 
 class NamedTupleVariable(TupleVariable):
