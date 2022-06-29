@@ -306,9 +306,12 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 print("MODIFIED BYTECODE")
                 # print(dis.Bytecode(code).info())
                 print(dis.Bytecode(code).dis())
-                print("\nGUARDS:")
-                for guard in sorted(output.guards):
-                    print(" -", str(guard))
+
+                # When export guard is enabled, more detailed guards can be printed after creating GuardedCode
+                if not config.export_guards:
+                    print("\nGUARDS:")
+                    for guard in sorted(output.guards):
+                        print(" -", str(guard))
                 print()
 
             assert output.guards is not None
@@ -316,6 +319,12 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             guarded_code = GuardedCode(
                 code, output.guards, frame.f_locals, frame.f_globals
             )
+            if config.export_guards:
+                print("\nGUARDS:")
+                for guard in sorted(output.guards):
+                    print(" -", str(guard))
+                print()
+
             if guard_export_fn is not None:
                 assert (
                     config.export_guards is True

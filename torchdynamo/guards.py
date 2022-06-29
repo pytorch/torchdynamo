@@ -97,7 +97,18 @@ class Guard:
         return self.sort_key() < other.sort_key()
 
     def __str__(self):
-        return f"{self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__} EXPORT_INFO: {{'guard_type': {self.guard_type}, 'code': {self.code}, 'obj_id': {self.obj_id}, 'guarded_class': {self.guarded_class}}}"
+        s = f"{self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
+        if config.export_guards:
+            s = f"""
+                {s} EXPORT_INFO:
+                {{
+                    'guard_type': {self.guard_type},
+                    'code': {self.code},
+                    'obj_id': {self.obj_id},
+                    'guarded_class': {self.guarded_class}
+                }}
+                """
+        return s
 
     def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
