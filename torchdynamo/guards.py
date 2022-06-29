@@ -222,10 +222,6 @@ class GuardBuilder:
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(Guard(m.group(1), guard.source, None))
 
-        val = self.get(guard.name)
-        obj_id = self.id_ref(val)
-        t = type(val)
-
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         self._produce_guard_code(guard, [code])
 
@@ -241,13 +237,12 @@ class GuardBuilder:
         else:
             code = f"not hasattr({ref}, {attr!r})"
 
-        self._produce_guard_code(guard, [code])
+        self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        obj_id = self.id_ref(val)
         assert istype(
             val,
             (
@@ -431,7 +426,7 @@ class GuardBuilder:
             )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
-    def _produce_guard_code(self, guard, code_list):
+    def _produce_guard_code(self, guard, code_list, provided_guarded_object=None):
         caller = currentframe().f_back
         func_name = getframeinfo(caller)[2]
         # We use func_name for export, so might as well get a nice defensive check out of it
@@ -443,7 +438,13 @@ class GuardBuilder:
 
         if config.export_guards is True:
             # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
-            guarded_object = self.get(guard.name) if guard.name != "" else None
+            if provided_guarded_object is None:
+                name_valid = guard.name is not None and guard.name != ""
+
+                guarded_object = self.get(guard.name) if name_valid else None
+            else:
+                guarded_object = provided_guarded_object
+
             guarded_object_type = (
                 type(guarded_object) if guarded_object is not None else None
             )
