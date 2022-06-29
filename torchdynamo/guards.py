@@ -379,7 +379,6 @@ class GuardBuilder:
         )
 
     def NN_MODULE_PARAM_NAMES(self, guard):
-        return
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -400,7 +399,6 @@ class GuardBuilder:
         )
 
     def ODICT_KEYS(self, guard):
-        return
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
