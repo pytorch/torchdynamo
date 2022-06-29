@@ -1,4 +1,5 @@
 import unittest
+import weakref
 
 import torch
 
@@ -22,6 +23,35 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(torchdynamo.config, "debug", False)
         )
+
+    def test_drop_cache_on_skip(self):
+        torchdynamo.config.debug = True
+        torchdynamo.config.trace = True
+        def model(x, i):
+            return x + i
+
+        attached = False
+        triggered = False
+
+        def trigger():
+            nonlocal triggered
+            triggered = True
+
+        def compiler(gm, input):
+            nonlocal attached
+            f = gm.forward
+            assert not attached
+            weakref.finalize(f, trigger)
+            attached = True
+            return f
+
+        x = torch.randn(2)
+        for i in range(2):
+            with torchdynamo.optimize(compiler):
+                model(x, i)
+        print("trace")
+
+        self.assertTrue(triggered)
 
     def test_loop_torture(self):
         def loop_torture(input, iters):
@@ -169,3 +199,6 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         self.assert_single_log_contains(
             logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
         )
+
+if __name__ == '__main__':
+    unittest.main()

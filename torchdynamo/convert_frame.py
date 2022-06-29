@@ -1,5 +1,6 @@
 import dis
 import functools
+import weakref
 import itertools
 import logging
 import os
@@ -46,10 +47,12 @@ class Tracker:
         self.seen = []
         self.seen_ids = set()
 
-    def add(self, obj):
-        if obj not in self:
+    def add(self, strong_obj):
+        idx = id(strong_obj)
+        if idx not in self.seen_ids:
+            obj = weakref.ref(strong_obj, lambda: self.seen_ids.remove(idx))
             self.seen.append(obj)
-            self.seen_ids.add(id(obj))
+            self.seen_ids.add(idx)
 
     def __contains__(self, item):
         return id(item) in self.seen_ids
