@@ -15,7 +15,6 @@ from ..utils import fake_tensors_available
 
 if fake_tensors_available:
     from torch._subclasses import FakeTensor
-    from ..utils import wrap_fake_exception
     from ..utils import wrap_to_fake_tensor
     from ..utils import deepcopy_to_fake_tensor
 
@@ -101,8 +100,15 @@ class TensorVariable(VariableTracker):
                 options.update(cls.specialize(example_value))
             return cls(proxy, **options)
 
-        fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=tx.fake_mode)
         use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
+        if use_fake_tensors:
+            fake_wrapper = functools.partial(
+                wrap_to_fake_tensor, fake_mode=tx.fake_mode
+            )
+            # python errors if the import isnt here
+            from ..utils import wrap_fake_exception
+        else:
+            wrap_fake_exception = lambda func: func()
 
         with preserve_rng_state():
             if example_value is None:
