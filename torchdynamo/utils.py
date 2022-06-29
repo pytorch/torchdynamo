@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import copy
 import dataclasses
 import functools
 import gc
@@ -404,6 +405,27 @@ def rename_implicit(v):
 fake_tensors_available = True
 try:
     from torch._subclasses import FakeTensorMode  # noqa: F401
+    from torch._subclasses import UnsupportedFakeTensorException
+
+    def wrap_fake_exception(fn):
+        try:
+            return fn()
+        except UnsupportedFakeTensorException as e:
+            raise torchdynamo.exc.FakeTensorError(
+                f"Unsupported: {e.reason} with fake tensor propagation. "
+                "Run with config.fake_tensor_propagation=False"
+            ) from e
+
+    def wrap_to_fake_tensor(e, fake_mode):
+        if type(e) in (torch.Tensor, torch.nn.Parameter):
+            return wrap_fake_exception(lambda: fake_mode.from_tensor(e))
+        else:
+            return e
+
+    def deepcopy_to_fake_tensor(obj, fake_mode):
+        with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
+            return wrap_fake_exception(lambda: copy.deepcopy(obj))
+
 except ImportError:
     fake_tensors_available = False
 

@@ -15,7 +15,9 @@ from ..utils import fake_tensors_available
 
 if fake_tensors_available:
     from torch._subclasses import FakeTensor
-    from torch._subclasses import UnsupportedFakeTensorException
+    from ..utils import wrap_fake_exception
+    from ..utils import wrap_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor
 
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
@@ -25,7 +27,6 @@ from torchdynamo.guards import GuardBuilder
 
 from .. import config
 from .. import variables
-from ..exc import FakeTensorError
 from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
@@ -90,23 +91,6 @@ class TensorVariable(VariableTracker):
         assert False, op
 
     @classmethod
-    def wrap_to_fake_tensor(cls, e, fake_mode):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return cls.wrap_fake_exception(lambda: fake_mode.from_tensor(e))
-        else:
-            return e
-
-    @staticmethod
-    def wrap_fake_exception(fn):
-        try:
-            return fn()
-        except UnsupportedFakeTensorException as e:
-            raise FakeTensorError(
-                f"Unsupported: {e.reason} with fake tensor propagation. "
-                "Run with config.fake_tensor_propagation=False"
-            ) from e
-
-    @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
         if "guards" in options:
             tx.output.guards.update(options["guards"])
@@ -117,9 +101,7 @@ class TensorVariable(VariableTracker):
                 options.update(cls.specialize(example_value))
             return cls(proxy, **options)
 
-        fake_wrapper = functools.partial(
-            cls.wrap_to_fake_tensor, fake_mode=tx.fake_mode
-        )
+        fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=tx.fake_mode)
         use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
 
         with preserve_rng_state():
@@ -130,10 +112,7 @@ class TensorVariable(VariableTracker):
                     args = tree_map(fake_wrapper, args)
                     kwargs = tree_map(fake_wrapper, kwargs)
                     if op == "call_module" and not is_lazy_module(nnmodule):
-                        with torch._subclasses.fake_tensor.FakeCopyMode(tx.fake_mode):
-                            nnmodule = cls.wrap_fake_exception(
-                                lambda: copy.deepcopy(nnmodule)
-                            )
+                        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
                     def context():
                         return enable_torch_dispatch_mode(tx.fake_mode)
@@ -150,7 +129,7 @@ class TensorVariable(VariableTracker):
                     example_value = nnmodule(*args, **kwargs)
                 try:
                     with context():
-                        example_value = cls.wrap_fake_exception(
+                        example_value = wrap_fake_exception(
                             lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
                         )
                 except RuntimeError as e:

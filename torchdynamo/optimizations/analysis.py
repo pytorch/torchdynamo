@@ -7,6 +7,12 @@ from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
+from ..utils import fake_tensors_available
+
+if fake_tensors_available:
+    from ..utils import deepcopy_to_fake_tensor
+    from ..utils import wrap_to_fake_tensor
+
 
 class ShapeAliasingAndMutationProp(ShapeProp):
     def __init__(self, *args, **kwargs):
@@ -104,9 +110,18 @@ class ShapeAliasingAndMutationProp(ShapeProp):
 def has_mutation(gm, example_inputs):
     """Check if the graph module has any form of mutation"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
-    new_gm = copy.deepcopy(gm)
-    ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
+    fake_mode = FakeTensorMode()
 
+    if fake_tensors_available and config.fake_tensor_propagation:
+        fake_mode = FakeTensorMode()
+        fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=fake_mode)
+        example_inputs = tree_map(fake_wrapper, example_inputs)
+        new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
+    else:
+        new_gm = copy.deepcopy(gm)
+        example_inputs = copy.deepcopy(example_inputs)
+
+    ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     for node in new_gm.graph.nodes:
         if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
             return True
