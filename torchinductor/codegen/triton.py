@@ -363,7 +363,6 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree()
-        self.reduction_cache = {}
 
     def initialize_range_tree(self):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -593,8 +592,8 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        if (dtype, reduction_type, value) not in self.reduction_cache:
-            self.reduction_cache[(dtype, reduction_type, value)] = result_var
+        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
@@ -619,7 +618,7 @@ class TritonKernel(Kernel):
                 f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
             )
         else:
-            var_name = self.reduction_cache[(dtype, reduction_type, value)]
+            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)

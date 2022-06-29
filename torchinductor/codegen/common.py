@@ -429,12 +429,14 @@ class CSE:
         name_prefix="tmp",
         iter_buffers=None,
         store_cache=None,
+        reduction_cache=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
+        self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
 
     def invalidate(self, keep_vars: typing.Set[str]):
