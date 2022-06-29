@@ -1,11 +1,11 @@
+import model
 import torch
 import triton
-import model
 
 import torchdynamo
 import torchinductor
-import torchinductor.triton_ops
 import torchinductor.config as config
+import torchinductor.triton_ops
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -25,64 +25,117 @@ conv_confs = [
         line_names=["aten", "autotune", "triton_conv", "triton_conv1x1"],
         ylabel="TFLOPS",
         plot_name=f"resnet50-conv{i}-perf",
-        args={"BATCH": BATCH, "IN_H": IN_H, "IN_W": IN_W, "IN_C": IN_C, "KERNEL_N": KERNEL_N,
-              "KERNEL_H": KERNEL_H, "KERNEL_W": KERNEL_W, "stride": stride, "padding": padding},
-    ) for i, (IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding) in enumerate(model.resnet50_layers)
+        args={
+            "BATCH": BATCH,
+            "IN_H": IN_H,
+            "IN_W": IN_W,
+            "IN_C": IN_C,
+            "KERNEL_N": KERNEL_N,
+            "KERNEL_H": KERNEL_H,
+            "KERNEL_W": KERNEL_W,
+            "stride": stride,
+            "padding": padding,
+        },
+    )
+    for i, (
+        IN_H,
+        IN_W,
+        IN_C,
+        KERNEL_H,
+        KERNEL_W,
+        KERNEL_N,
+        stride,
+        padding,
+    ) in enumerate(model.resnet50_layers)
     for BATCH in [32]
 ]
 
 
 @triton.testing.perf_report(conv_confs)
 def bench_op(
-        # Tensor dimensions
-        BATCH, IN_C, IN_H, IN_W,
-        KERNEL_N, KERNEL_H, KERNEL_W,
-        # provider
-        provider,
-        # parameters of conv
-        stride=(1, 1), padding=(0, 0),
-        dilation=(1, 1), groups=1,
-        dtype=torch.float32, layout="nhwc",
-        warmup=25, rep=75):
+    # Tensor dimensions
+    BATCH,
+    IN_C,
+    IN_H,
+    IN_W,
+    KERNEL_N,
+    KERNEL_H,
+    KERNEL_W,
+    # provider
+    provider,
+    # parameters of conv
+    stride=(1, 1),
+    padding=(0, 0),
+    dilation=(1, 1),
+    groups=1,
+    dtype=torch.float32,
+    layout="nhwc",
+    warmup=25,
+    rep=75,
+):
 
     skip = False
     # allocate inputs, nchw
-    x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda')
-    w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
-                    dtype=dtype, device='cuda')
-    bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+    x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device="cuda")
+    w = torch.randn(
+        (KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W), dtype=dtype, device="cuda"
+    )
+    bias = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
     if layout == "nhwc":
         x = x.to(memory_format=torch.channels_last)
         w = w.to(memory_format=torch.channels_last)
-    OUT_H = (IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]) // stride[0]
-    OUT_W = (IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]) // stride[1]
+    OUT_H = (
+        IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]
+    ) // stride[0]
+    OUT_W = (
+        IN_W + 2 * padding[1] - dilation[1] * (KERNEL_W - 1) - 1 + stride[1]
+    ) // stride[1]
 
-    tflops = lambda ms: 2. * BATCH * OUT_H * OUT_W * IN_C * KERNEL_H * KERNEL_W * KERNEL_N / ms * 1e-9
+    tflops = (
+        lambda ms: 2.0
+        * BATCH
+        * OUT_H
+        * OUT_W
+        * IN_C
+        * KERNEL_H
+        * KERNEL_W
+        * KERNEL_N
+        / ms
+        * 1e-9
+    )
     if provider == "aten":
-        fn = lambda: torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    
-    if provider == "triton_conv":
 
-        fn = lambda: torchinductor.triton_ops.conv(
-            x, w, bias, stride, padding, dilation, False, (0, 0), groups
-        )
-    if provider == "triton_conv1x1":
+        def fn():
+            return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
 
-        fn = lambda: torchinductor.triton_ops.conv1x1(
-            x, w, bias, stride, padding, dilation, False, (0, 0), groups
-        )
+    elif provider == "triton_conv":
+
+        def fn():
+            return torchinductor.triton_ops.conv(
+                x, w, bias, stride, padding, dilation, False, (0, 0), groups
+            )
+
+    elif provider == "triton_conv1x1":
+
+        def fn():
+            return torchinductor.triton_ops.conv1x1(
+                x, w, bias, stride, padding, dilation, False, (0, 0), groups
+            )
+
         if KERNEL_H != 1 or KERNEL_W != 1:
             skip = True
 
     elif provider == "autotune":
+
         @torchdynamo.optimize("inductor")
         def wrap_conv(*args, **kwargs):
             return torch.conv2d(*args, **kwargs)
 
-        fn = lambda: wrap_conv(x, w, bias, stride, padding, dilation, groups)
+        def fn():
+            return wrap_conv(x, w, bias, stride, padding, dilation, groups)
 
     # use cuda graph for fair comparison
-    if provider != "autotune" and not skip:
+    elif provider != "autotune" and not skip:
         # prepare new tensor
         new_x = x.clone()
         new_w = w.clone()
@@ -93,13 +146,13 @@ def bench_op(
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             for i in range(3):
-                tmp = fn()
+                fn()
         torch.cuda.current_stream().wait_stream(s)
 
         # capture
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g):
-            tmp = fn()
+            fn()
 
         def fn():
             x.copy_(new_x)
