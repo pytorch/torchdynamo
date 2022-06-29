@@ -325,7 +325,6 @@ class GuardBuilder:
     def LIST_LENGTH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        obj_id = self.id_ref(value)
         t = type(value)
 
         code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
@@ -334,14 +333,13 @@ class GuardBuilder:
         self.code.append(code_len_check)
 
         guard.set_export_info(
-            "LIST_LENGTH", t, f"{code_type_check} and {code_len_check}", obj_id
+            "LIST_LENGTH", t, f"{code_type_check} and {code_len_check}", id(value)
         )
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
-        obj_id = self.id_ref(value)
 
         code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
         self.code.append(code_type_check)
@@ -349,13 +347,15 @@ class GuardBuilder:
         self.code.append(code_len_check)
 
         guard.set_export_info(
-            "TUPLE_ITERATOR_LEN", t, f"{code_type_check} and {code_len_check}", obj_id
+            "TUPLE_ITERATOR_LEN",
+            t,
+            f"{code_type_check} and {code_len_check}",
+            id(value),
         )
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        obj_id = self.id_ref(value)
         t = type(value)
 
         code_type_check = f"___check_type_id({ref}, {self.id_ref(t)})"
@@ -364,10 +364,11 @@ class GuardBuilder:
         self.code.append(code_key_check)
 
         guard.set_export_info(
-            "DICT_KEYS", t, f"{code_type_check} and {code_key_check}", obj_id
+            "DICT_KEYS", t, f"{code_type_check} and {code_key_check}", id(value)
         )
 
     def NN_MODULE_PARAM_NAMES(self, guard):
+        return
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -388,6 +389,7 @@ class GuardBuilder:
         )
 
     def ODICT_KEYS(self, guard):
+        return
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
