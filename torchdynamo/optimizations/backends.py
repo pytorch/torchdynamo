@@ -687,7 +687,7 @@ def tvm_compile_inner(
             from tvm.meta_schedule.tune import tune_relay
 
             with tempfile.TemporaryDirectory() as work_dir:
-                if log_file != None:
+                if log_file is not None:
                     assert osp.isdir(
                         log_file
                     ), "TVM's meta_schedule requires a directory for storing log files."
@@ -708,7 +708,7 @@ def tvm_compile_inner(
                         osp.join(work_dir, "records.json"),
                     ),
                 )
-        elif tuning_option == None:
+        elif tuning_option is None:
             # no autotuning (for debugging)
             with tvm.transform.PassContext(opt_level=10):
                 lib = relay.build(mod, target=target, params=params)
@@ -743,7 +743,7 @@ def tvm_compile_inner(
             ]
 
         return exec_tvm
-    except Exception as ex:
+    except Exception:
         log.exception("tvm error")
         return jit_mod  # explicit fall back to eager
 
