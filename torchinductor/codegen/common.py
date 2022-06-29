@@ -17,7 +17,7 @@ from ..virtualized import V
 from ..virtualized import ops
 
 
-def _simplify_loops(index_vars, sizes, index_formulas, channel_last=False):
+def _simplify_loops(index_vars, sizes, index_formulas):
     """
     Try to remove as many axis from loop iterations as possible, by:
         1) removing size==1 dimensions
@@ -54,16 +54,7 @@ def _simplify_loops(index_vars, sizes, index_formulas, channel_last=False):
         for i, j in itertools.product(
             reversed(range(len(sizes))), reversed(range(len(sizes)))
         ):
-            if not channel_last and (i == j or sizes[i] is None or sizes[j] is None):
-                continue
-            elif channel_last and (
-                i == j
-                or i == len(sizes) - 1
-                or j == len(sizes) - 1
-                or sizes[i] is None
-                or sizes[j] is None
-            ):
-                # prevent the last dim fused with other dims
+            if i == j or sizes[i] is None or sizes[j] is None:
                 continue
             if can_merge_dims(i, j):
                 changed = True

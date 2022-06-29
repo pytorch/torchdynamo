@@ -20,6 +20,7 @@ from .sizevars import SimplifyIndexing
 from .virtualized import V
 
 template_kernels = [ir.Convolution]
+priority_loop_order_kernels = [ir.Convolution]
 
 
 def cmp(a, b):
@@ -192,7 +193,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         return 200
 
 
-def pick_loop_order(stride_lengths, sizes):
+def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
     """
     A heuristic to decide loop iteration orders.  This has not been well
     tuned and may be something we should autotune.
@@ -227,6 +228,9 @@ def pick_loop_order(stride_lengths, sizes):
         return cmp(b, a)
 
     order = list(reversed(range(stride_lengths.shape[1])))
+    if len(priority_idx) > 0:
+        # if we have priority node, only use that node's order
+        stride_lengths = stride_lengths[priority_idx]
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
     return order
@@ -235,10 +239,20 @@ def pick_loop_order(stride_lengths, sizes):
 class SchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         super().__init__(scheduler, node)
+        # if high_priority = ir.Convolution out buf is in the reads of current node
+        # force the loop order follows the NHWC order]
+        priority_addrs = []
+        if ir.is_triton(self.get_device()) and config.triton.convolution != "aten":
+            priority_loop_order_nodes = scheduler.collect_priority_loop_order_kernels()
+            for read in self.read_writes.reads:
+                if read.name in priority_loop_order_nodes:
+                    priority_addrs.append(read.index)
+            # currently only support reads from only 1 convolution
+            assert len(priority_addrs) == 1
         (
             self._sizes,
             self._body,
-        ) = node.simplify_reorder_and_tile()
+        ) = node.simplify_reorder_and_tile(priority_addrs=priority_addrs)
 
         self.group = (node.get_device(), group_fn(self._sizes))
         self.set_read_writes(
@@ -725,3 +739,11 @@ class Scheduler:
                 self.current_device = device
             self.get_backend(device).codegen(*group)
         self.flush()
+
+    def collect_priority_loop_order_kernels(self):
+        names = []
+        for node in self.nodes:
+            node_type = type(node.node)
+            if node_type in priority_loop_order_kernels:
+                names.append(node.get_name())
+        return names
