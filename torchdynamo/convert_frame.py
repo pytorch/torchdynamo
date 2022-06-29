@@ -1,6 +1,5 @@
 import dis
 import functools
-import weakref
 import itertools
 import logging
 import os
@@ -8,6 +7,7 @@ import sys
 import traceback
 import types
 import typing
+import weakref
 from typing import Callable
 
 import torch
@@ -29,8 +29,8 @@ from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
-from .guards import GuardedCode
 from .guards import CheckFunctionManager
+from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
