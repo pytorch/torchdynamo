@@ -234,9 +234,13 @@ def optimize(backend, nopython=False):
     )
 
 
-def export(f, *args):
+def export(f, *args, **kwargs):
+    from inspect import signature
+
+    in_sig = signature(f)
     graph = None
     out_guards = None
+    input_types = list()
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -246,9 +250,14 @@ def export(f, *args):
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, example_inputs
     ):
+        nonlocal input_types
         nonlocal graph
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
+        for example_input in example_inputs:
+            print(example_input)
+            input_types.append(example_input.__class__)
+
         return gm.forward
 
     backend_ctx_ctor = null_context
@@ -256,10 +265,32 @@ def export(f, *args):
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
-        f(*args)
+        f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
+
+    out_sig = signature(graph.forward)
+    signature_types = [
+        out_sig.parameters[k].annotation for k in list(out_sig.parameters)
+    ]
+    print(in_sig)
+    print(out_sig)
+
+    print(signature_types)
+    print(input_types)
+
+    # TODO(voz): Add support for flatenning and unflattening via PyTree
+    assert len(in_sig.parameters) == len(
+        out_sig.parameters
+    ), "Exported callable signature must be composed only of torch.Tensors"
+    for idx in range(len(out_sig.parameters)):
+        sig_type = signature_types[idx]
+        in_type = input_types[idx]
+        assert (
+            sig_type == in_type
+        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+
     return (graph, out_guards)
 
 
