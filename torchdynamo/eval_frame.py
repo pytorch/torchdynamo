@@ -155,7 +155,7 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
 
 
 class WrapperBackend:
-    def __init__(self, backend=None):
+    def __init__(self, backend=None, strict_mode=False):
         self.backend = backend
 
     @property
@@ -185,6 +185,9 @@ class WrapperBackend:
             if same(correct, result):
                 return self.candidate
 
+            if strict_mode:
+                raise RuntimeError("Incorrect result of backend {self}")
+
             print(f"incorrect results of backend {self}")
             return self.gm.forward
 
@@ -195,7 +198,7 @@ class WrapperBackend:
             self.restore()
 
 
-def optimize(backend, nopython=False):
+def optimize(backend, nopython=False, strict_mode=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -211,6 +214,7 @@ def optimize(backend, nopython=False):
             - Or, a string backend name in `torchdynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
+        strictmode: Used only in conjunction with config.verify_correctness, throws on failing to verify.
 
     Example Usage:
 
@@ -230,16 +234,16 @@ def optimize(backend, nopython=False):
     if nopython:
         return optimize_assert(backend, backend_ctx_ctor)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend), backend_ctx_ctor
+        convert_frame.convert_frame(backend, strict_mode), backend_ctx_ctor
     )
 
 
-def optimize_assert(backend, backend_ctx_ctor=null_context):
+def optimize_assert(backend, backend_ctx_ctor=null_context, strict_mode=False):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, strict_mode), backend_ctx_ctor
     )
 
 

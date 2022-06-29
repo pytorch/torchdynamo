@@ -76,7 +76,7 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def _wrap_compiler_fn(compiler_fn):
+def _wrap_compiler_fn(compiler_fn, strict_mode=False):
     """Expand backend strings to functions"""
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
@@ -85,18 +85,18 @@ def _wrap_compiler_fn(compiler_fn):
     elif isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
-        return wrap_compiler_fn(BACKENDS[compiler_fn])
+        return wrap_compiler_fn(BACKENDS[compiler_fn], strict_mode=strict_mode)
     else:
         return compiler_fn
 
 
-def wrap_compiler_fn(compiler_fn):
+def wrap_compiler_fn(compiler_fn, strict_mode=False):
     """WrapperBackend if config.verify_correctness is True"""
-    wrapped_compiler_fn = _wrap_compiler_fn(compiler_fn)
+    wrapped_compiler_fn = _wrap_compiler_fn(compiler_fn, strict_mode=strict_mode)
 
     if config.verify_correctness:
         # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(wrapped_compiler_fn)
+        wrapper_backend_compiler_fn = WrapperBackend(wrapped_compiler_fn, strict_mode=strict_mode)
 
         return wrapper_backend_compiler_fn
 
@@ -197,9 +197,9 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def convert_frame_assert(compiler_fn: Callable, one_graph=True):
+def convert_frame_assert(compiler_fn: Callable, one_graph=True, strict_mode=False):
     """Fully convert a frame into an FX graph"""
-    compiler_fn = wrap_compiler_fn(compiler_fn)
+    compiler_fn = wrap_compiler_fn(compiler_fn, strict_mode=strict_mode)
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
@@ -341,9 +341,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     return wrap_convert_context(_convert_frame_assert)
 
 
-def convert_frame(compiler_fn: typing.Callable):
+def convert_frame(compiler_fn: typing.Callable, strict_mode=False):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False, strict_mode=strict_mode)
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1
