@@ -581,7 +581,9 @@ class BenchmarkRunner:
         raise NotImplementedError()
 
     def clone_inputs(self, inputs):
-        return tree_map(lambda x: torch.clone(x) if isinstance(x, torch.Tensor) else x, inputs)
+        return tree_map(
+            lambda x: torch.clone(x) if isinstance(x, torch.Tensor) else x, inputs
+        )
 
     def run_one_model(
         self,
@@ -605,7 +607,9 @@ class BenchmarkRunner:
                 assert not torchdynamo.utils.is_jit_model(submod)
 
             torch.manual_seed(1337)
-            correct_result = model_iter_fn(copy.deepcopy(model), self.clone_inputs(example_inputs))
+            correct_result = model_iter_fn(
+                copy.deepcopy(model), self.clone_inputs(example_inputs)
+            )
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:

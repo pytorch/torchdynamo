@@ -100,8 +100,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = {
-}
+NONDETERMINISTIC = {}
 
 
 # These benchmarks took >600s on an i9-11900K CPU
