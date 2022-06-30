@@ -101,8 +101,6 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 
 # non-deterministic output / cant check correctness
 NONDETERMINISTIC = {
-    "pyhpc_turbulent_kinetic_energy",
-    "pyhpc_isoneutral_mixing",
 }
 
 

@@ -602,12 +602,12 @@ class BenchmarkRunner:
                 assert not torchdynamo.utils.is_jit_model(submod)
 
             torch.manual_seed(1337)
-            correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
+            correct_result = model_iter_fn(copy.deepcopy(model), torch.clone(example_inputs))
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), example_inputs
+                    copy.deepcopy(model), torch.clone(example_inputs)
                 )
                 if not same(correct_result, correct_rerun_result):
                     print("INCORRECT - Variation in Eager runs itself")
