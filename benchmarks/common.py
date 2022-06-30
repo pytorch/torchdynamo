@@ -580,7 +580,7 @@ class BenchmarkRunner:
     def set_tolerance(self, is_training, current_device, name):
         raise NotImplementedError()
 
-    def clone_inputs(inputs):
+    def clone_inputs(self, inputs):
         return tree_map(lambda x: torch.clone(x) if isinstance(x, torch.Tensor) else x, inputs)
 
     def run_one_model(
