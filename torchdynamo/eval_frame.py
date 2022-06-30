@@ -255,7 +255,6 @@ def export(f, *args, **kwargs):
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
         for example_input in example_inputs:
-            print(example_input)
             input_types.append(example_input.__class__)
 
         return gm.forward

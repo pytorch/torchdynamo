@@ -311,31 +311,20 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 # print(dis.Bytecode(code).info())
                 print(dis.Bytecode(code).dis())
 
-                # When export guard is enabled, more detailed guards can be printed after creating GuardedCode
-                if config.export_guards is False:
-                    print("\nGUARDS:")
-                    for guard in sorted(output.guards):
-                        print(" -", str(guard))
-                print()
-
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             check_fn = CheckFunctionManager(
                 output.guards, frame.f_locals, frame.f_globals
             )
             guarded_code = GuardedCode(code, check_fn.check_fn)
-            if config.debug and config.export_guards is True:
+            if config.debug:
                 print("\nGUARDS:")
                 for guard in sorted(output.guards):
                     print(" -", str(guard))
                 print()
 
-            if guard_export_fn is not None:
-                assert (
-                    config.export_guards is True
-                ), "guard_export_fn defined, but config.export_guards not enabled"
-
-                guard_export_fn(output.guards)
+                if guard_export_fn is not None:
+                    guard_export_fn(output.guards)
             return guarded_code
         except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
             if config.debug or config.trace or config.print_internal_exceptions:

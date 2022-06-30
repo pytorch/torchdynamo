@@ -79,11 +79,10 @@ class Guard:
     create_fn: Callable
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[Set[str]] = None
+    guard_types: Optional[List[str]] = None
     code_list: Optional[List[str]] = None
     obj_weakref: Optional[Any] = None
-    obj_id: Optional[int] = None
-    guarded_class: Optional[type] = None
+    guarded_class_weakref: Optional[type] = None
 
     def __hash__(self):
         return hash((self.name, self.source, id(self.create_fn)))
@@ -100,18 +99,15 @@ class Guard:
         return self.sort_key() < other.sort_key()
 
     def __str__(self):
-        s = f"{self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
-        if config.export_guards is True:
-            s = f"""
-                {s} EXPORT_INFO:
-                {{
-                    'guard_types': {self.guard_types},
-                    'code': {self.code_list},
-                    'obj_weakref': {self.obj_weakref}
-                    'obj_id': {self.obj_id},
-                    'guarded_class': {self.guarded_class}
-                }}
-                """
+        s = f"""
+            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
+            {{
+                'guard_types': {self.guard_types},
+                'code': {self.code_list},
+                'obj_weakref': {self.obj_weakref}
+                'guarded_class': {self.guarded_class_weakref}
+            }}
+            """
         return s
 
     def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
@@ -123,22 +119,17 @@ class Guard:
     def is_local(self):
         return self.source.is_local()
 
-    def set_export_info(
-        self, guard_type, guarded_class, code_list, obj_weakref, obj_id
-    ):
-        if config.export_guards is False:
-            return
-
+    def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
         if not self.guard_types:
-            self.guard_types = set()
+            self.guard_types = list()
 
-        self.guard_types.add(guard_type)
+        self.guard_types.append(guard_type)
 
-        assert self.guarded_class in (
+        assert self.guarded_class_weakref in (
             guarded_class,
             None,
         ), "Guarded class id must be identical, or None"
-        self.guarded_class = guarded_class
+        self.guarded_class_weakref = guarded_class
 
         if not self.code_list:
             self.code_list = code_list
@@ -150,12 +141,6 @@ class Guard:
             None,
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
-
-        assert self.obj_id in (
-            obj_id,
-            None,
-        ), "Guarded object id must be identical, or None"
-        self.obj_id = obj_id
 
 
 def strip_function_call(name):
@@ -422,7 +407,10 @@ class GuardBuilder:
             # TODO(voz): Add tensor matching code to export
             # Note: this is a bit of a special case, and so does not use _produce_guard_code
             guard.set_export_info(
-                "TENSOR_MATCH", type(value), None, weakref.ref(value), id(value)
+                "TENSOR_MATCH",
+                weakref.ref(type(value)),
+                None,
+                weakref.ref(value),
             )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
@@ -436,25 +424,27 @@ class GuardBuilder:
 
         self.code.extend(code_list)
 
-        if config.export_guards is True:
-            # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
-            if provided_guarded_object is None:
-                name_valid = guard.name is not None and guard.name != ""
+        # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
+        if provided_guarded_object is None:
+            name_valid = guard.name is not None and guard.name != ""
 
-                guarded_object = self.get(guard.name) if name_valid else None
-            else:
-                guarded_object = provided_guarded_object
+            guarded_object = self.get(guard.name) if name_valid else None
+        else:
+            guarded_object = provided_guarded_object
 
-            guarded_object_type = (
-                type(guarded_object) if guarded_object is not None else None
-            )
-            obj_ref = None
-            if hasattr(guarded_object.__class__, "__weakref__"):
-                obj_ref = weakref.ref(guarded_object)
+        guarded_object_type = (
+            weakref.ref(type(guarded_object)) if guarded_object is not None else None
+        )
+        obj_ref = None
+        if hasattr(guarded_object.__class__, "__weakref__"):
+            obj_ref = weakref.ref(guarded_object)
 
-            guard.set_export_info(
-                func_name, guarded_object_type, code_list, obj_ref, id(guarded_object)
-            )
+        guard.set_export_info(
+            func_name,
+            guarded_object_type,
+            code_list,
+            obj_ref,
+        )
 
 
 @dataclasses.dataclass
