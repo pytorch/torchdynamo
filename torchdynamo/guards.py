@@ -346,7 +346,9 @@ class CheckFunctionManager:
         f_globals: Optional[Dict] = None,
     ):
         self.valid = True
+        self.invalidated_reason = None
         self._weakrefs = []
+        self._weakref_invalidate_reasons = {}
         self._seen_ids = set()
 
         local_builder = GuardBuilder(self.id_ref, f_locals, self, renames=True)
@@ -371,7 +373,9 @@ class CheckFunctionManager:
         )
         # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
         verbose_code_parts = (
-            ["___guarded_code.valid"] + local_builder.code + global_builder.code
+            ["__guarded_code_invalid_reason()"]
+            + local_builder.code
+            + global_builder.code
         )
 
         tensor_check_names = (
@@ -403,6 +407,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
+                ("__guarded_code_invalid_reason", lambda: self.invalidated_reason),
             ]
         )
         closure_vars.update(CLOSURE_VARS)
@@ -428,6 +433,8 @@ class CheckFunctionManager:
     def invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false
         self.valid = False
+        reasons = self._weakref_invalidate_reasons[ref]
+        self.invalidated_reason = f"This compiled code holds a weakref to object id({reasons['id']}) of type {reasons['type']}, which has been finalized"
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
@@ -435,6 +442,12 @@ class CheckFunctionManager:
             if id(obj) not in self._seen_ids:
                 self._weakrefs.append(weakref.ref(obj, self.invalidate))
                 self._seen_ids.add(id(obj))
+                # It's useful to know why we invalidated the guard, for logging.
+                # We can't get this info in the invalidate callback since the obj is dead then
+                self._weakref_invalidate_reasons[self._weakrefs[-1]] = {
+                    "type": type(obj),
+                    "id": id(obj),
+                }
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
