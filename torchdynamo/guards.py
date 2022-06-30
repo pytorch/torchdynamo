@@ -37,7 +37,11 @@ from .utils import tuple_iterator_len
 
 log = logging.getLogger(__name__)
 
-# map from modules to guarded code
+# This is a map from modules, to code. Module code map is keyed on a weakref of a module
+# itself, and is a critical component of observing module changes. 
+# torch.nn.Modules are not guarded in the traditional way, but instead are patched with 
+# observers to invalidate on change. This is done as an optimization allowing us to guard on modules.
+# see config.guard_nn_modules and guard_is_module_associated 
 module_code_map = ExactWeakKeyDictionary()  # {nn.Module: Set[GuardedCode]}
 
 CLOSURE_VARS = collections.OrderedDict(
