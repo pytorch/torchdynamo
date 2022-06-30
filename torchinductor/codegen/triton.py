@@ -145,6 +145,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    def cos(x):
+        return f"tl.cos({x})"
+
+    @staticmethod
     def index_expr(expr, dtype):
         return V.kernel.indexing(expr)[0]
 
