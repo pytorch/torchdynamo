@@ -371,7 +371,6 @@ class CheckFunctionManager:
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
-        # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
         verbose_code_parts = (
             ["__guarded_code_invalid_reason()"]
             + local_builder.code
@@ -430,7 +429,7 @@ class CheckFunctionManager:
         guard_fn.global_scope = global_builder.scope
         return guard_fn
 
-    def invalidate(self, ref):
+    def weakref_invalidate(self, ref):
         # A weakref is no longer valid, self.check_fn should return false
         self.valid = False
         reasons = self._weakref_invalidate_reasons[ref]
@@ -440,7 +439,7 @@ class CheckFunctionManager:
         """add a weakref, return the id"""
         try:
             if id(obj) not in self._seen_ids:
-                self._weakrefs.append(weakref.ref(obj, self.invalidate))
+                self._weakrefs.append(weakref.ref(obj, self.weakref_invalidate))
                 self._seen_ids.add(id(obj))
                 # It's useful to know why we invalidated the guard, for logging.
                 # We can't get this info in the invalidate callback since the obj is dead then
