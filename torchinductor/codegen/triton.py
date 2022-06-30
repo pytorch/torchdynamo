@@ -145,6 +145,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    def cos(x):
+        return f"tl.cos({x})"
+
+    @staticmethod
     def index_expr(expr, dtype):
         return V.kernel.indexing(expr)[0]
 
@@ -592,29 +596,34 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        accumulator = f"_{result_var}"
-        self.body.writeline(
-            f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
-        )
+        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
+            accumulator = f"_{result_var}"
+            self.body.writeline(
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
+            )
 
-        updated = value
-        if reduction_type == "min":
-            masks.append(f"({accumulator} > {value})")
-        elif reduction_type == "max":
-            masks.append(f"({accumulator} < {value})")
-        elif reduction_type == "sum":
-            updated = f"{accumulator} + {value}"
+            updated = value
+            if reduction_type == "min":
+                masks.append(f"({accumulator} > {value})")
+            elif reduction_type == "max":
+                masks.append(f"({accumulator} < {value})")
+            elif reduction_type == "sum":
+                updated = f"{accumulator} + {value}"
+            else:
+                raise NotImplementedError(f"reduction_type {reduction_type}")
+
+            cond = " & ".join(masks)
+            self.compute.writeline(
+                f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
+            )
+
+            self.suffix.writeline(
+                f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+            )
         else:
-            raise NotImplementedError(f"reduction_type {reduction_type}")
-
-        cond = " & ".join(masks)
-        self.compute.writeline(
-            f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
-        )
-
-        self.suffix.writeline(
-            f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
-        )
+            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
+            self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)
         assert "rmask" not in index

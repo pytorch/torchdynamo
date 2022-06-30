@@ -7,6 +7,7 @@ import sys
 import traceback
 import types
 import typing
+import weakref
 from typing import Callable
 
 import torch
@@ -28,6 +29,7 @@ from .exc import InternalTorchDynamoError
 from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
+from .guards import CheckFunctionManager
 from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
@@ -46,10 +48,12 @@ class Tracker:
         self.seen = []
         self.seen_ids = set()
 
-    def add(self, obj):
-        if obj not in self:
+    def add(self, strong_obj):
+        idx = id(strong_obj)
+        if idx not in self.seen_ids:
+            obj = weakref.ref(strong_obj, lambda _: self.seen_ids.remove(idx))
             self.seen.append(obj)
-            self.seen_ids.add(id(obj))
+            self.seen_ids.add(idx)
 
     def __contains__(self, item):
         return id(item) in self.seen_ids
@@ -312,20 +316,26 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 print()
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
-
-            return GuardedCode(code, output.guards, frame.f_locals, frame.f_globals)
+            check_fn = CheckFunctionManager(
+                output.guards, frame.f_locals, frame.f_globals
+            )
+            return GuardedCode(code, check_fn.check_fn)
         except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
-            debug_print("WONT CONVERT")
+            if config.debug or config.trace or config.print_internal_exceptions:
+                debug_print("WONT CONVERT")
             raise
         except Exception:
-            debug_print("WONT CONVERT")
-            sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
-            traceback.print_exc()
-            sys.stderr.write(
-                "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
-            )
-            traceback.print_stack(frame)
-            sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+            if config.debug or config.trace or config.print_internal_exceptions:
+                debug_print("WONT CONVERT")
+                sys.stderr.write(
+                    "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+                )
+                traceback.print_exc()
+                sys.stderr.write(
+                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
+                )
+                traceback.print_stack(frame)
+                sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
             raise InternalTorchDynamoError()
 
     return wrap_convert_context(_convert_frame_assert)

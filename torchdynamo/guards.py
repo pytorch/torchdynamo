@@ -454,15 +454,29 @@ class GuardBuilder:
         return False
 
 
+@dataclasses.dataclass
 class GuardedCode:
+    code: types.CodeType
+    check_fn: Callable
+
+
+# NB: Naively, you'd expect this to only be a function that produces
+# the callable that consistutes the guard.  However, there is some
+# delicate handling for invalidating this check function when the
+# locals/globals get invalidated, so there's some extra state
+# we have to hold in this manager class.
+#
+# TODO: this object has reference cycle with itself, via check_fn which
+# references back to CheckFunction via ___guarded_code in closure_vars.
+# Ideally, there shouldn't be any ref cycle so that guards are
+# promptly disposed of.
+class CheckFunctionManager:
     def __init__(
         self,
-        code: types.CodeType,
         guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict] = None,
         f_globals: Optional[Dict] = None,
     ):
-        self.code = code
         self.valid = True
         self._weakrefs = []
         self._seen_ids = set()
