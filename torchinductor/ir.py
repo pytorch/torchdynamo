@@ -41,6 +41,14 @@ def inverse_reorder(order):
     return reindex
 
 
+def same_reorder(order):
+    def reindex(index):
+        assert len(index) == len(order)
+        return [index[i] for i in range(len(index))]
+
+    return reindex
+
+
 def fuse_reindexing(reindex1, reindex2):
     def reindex(index):
         return reindex1(reindex2(index))
@@ -1381,13 +1389,15 @@ class ComputedBuffer(Buffer):
                 reduce_size.append(s)
 
         def simplify_and_reorder(x_vars, sizes):
-            sizes, reindex1 = self._apply_loop_reordering(
+            sizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, sizes, memory_addrs, priority_idx
             )
-            x_vars = reindex1(x_vars)
+            x_vars = reindex0(x_vars)
             sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
             x_vars = prune(x_vars)
-            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs, priority_idx)
+            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            # x_vars = prune(x_vars)
+            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
 
@@ -1542,7 +1552,7 @@ class ComputedBuffer(Buffer):
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
-        return sizes, inverse_reorder(order)
+        return sizes, same_reorder(order), inverse_reorder(order)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()

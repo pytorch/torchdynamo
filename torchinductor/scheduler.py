@@ -207,9 +207,9 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
 
         # if any input is channel_last aka stride[1] == 1
         # let the output to be channel_last
-        if a == 1 and any(stride_lengths[:, a] == 1):
+        if len(sizes) == 4 and a == 1 and any(stride_lengths[:, a] == 1):
             return -1
-        if b == 1 and any(stride_lengths[:, b] == 1):
+        if len(sizes) == 4 and b == 1 and any(stride_lengths[:, b] == 1):
             return 1
 
         a_first = np.logical_or(
