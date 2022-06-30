@@ -403,9 +403,15 @@ class Reduction(Loops):
             else:
                 return body()
 
+        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
+        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
+        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
+        intermediate_dtype = (
+            dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
+        )
         intermediate = Reduction.create(
             device,
-            dtype,
+            intermediate_dtype,
             wrapper_fn,
             [*ranges, split],
             [block_size],
