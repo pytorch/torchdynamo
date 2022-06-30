@@ -15,11 +15,14 @@ except ImportError:
 # print out lots of stuff
 debug = False
 
-# verify the correctness of optimized backend
-verify_correctness = False
-
 # an unreasonable amount of debug printouts
 trace = False
+
+# print the torchdynamo internal exceptions
+print_internal_exceptions = True
+
+# verify the correctness of optimized backend
+verify_correctness = False
 
 # need this many ops to create an FX graph
 minimum_call_count = 1

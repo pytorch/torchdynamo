@@ -23,8 +23,10 @@ __all__ = [
 
 def reset():
     """Clear all compile caches and restore initial state"""
-    for code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
-        reset_code(code)
+    for weak_code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
+        code = weak_code()
+        if code:
+            reset_code(code)
     convert_frame.input_codes.clear()
     convert_frame.output_codes.clear()
     orig_code_map.clear()
