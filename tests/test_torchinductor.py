@@ -458,7 +458,7 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(
-            fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16, device="cuda"),))
+            fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),))
         )
 
     def test_min_max_reduction(self):
