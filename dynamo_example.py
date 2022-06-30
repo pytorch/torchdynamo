@@ -30,6 +30,8 @@ def graph_break_compiler(gm: fx.GraphModule, example_inputs: List[torch.Tensor])
     gm.graph.print_tabular()
     print()
 
+    # 1. Splitting the gm into small graphs. Currently, we just naively split
+    # the graph every 3 ops.
     def insert_node(graph: fx.Graph, node: fx.Node):
       if len(graph.nodes) == 0:
         graph.create_node(node.op, node.target, node.args, node.kwargs, node.name, node.type)
@@ -79,6 +81,7 @@ def graph_break_compiler(gm: fx.GraphModule, example_inputs: List[torch.Tensor])
       graph.print_tabular()
       print()
 
+    # 2. Compiling the splitted graphs using AOT.
     gms = [fx.GraphModule(gm, graph) for graph in graphs]
     aot_compileds = []
     for g in gms:
@@ -88,6 +91,7 @@ def graph_break_compiler(gm: fx.GraphModule, example_inputs: List[torch.Tensor])
 
     print(f"AOT compiled all {len(aot_compileds)} modules\n")
 
+    # 3. Stitching the compiled graphs back to a fx gm to return.
     assert len(aot_compileds) == len(graphs)
     final_graph = fx.Graph()
     last_aot = None
