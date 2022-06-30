@@ -61,13 +61,23 @@ class Func(object):
     # bn(conv)
     @torchdynamo.optimize("inductor")
     def conv_bn_torchinductor(
-        x, w, bias, stride, padding, dilation, groups, running_mean, running_var
+        x,
+        w,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        running_mean,
+        running_var,
+        bn_weight,
+        bn_bias,
     ):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
-            weight=bias,
-            bias=None,
+            weight=bn_weight,
+            bias=bn_bias,
             running_mean=running_mean,
             running_var=running_var,
             training=False,
@@ -79,13 +89,23 @@ class Func(object):
 
     # bn(conv)
     def conv_bn(
-        x, w, bias, stride, padding, dilation, groups, running_mean, running_var
+        x,
+        w,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        running_mean,
+        running_var,
+        bn_weight,
+        bn_bias,
     ):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
-            weight=bias,
-            bias=None,
+            weight=bn_weight,
+            bias=bn_bias,
             running_mean=running_mean,
             running_var=running_var,
             training=False,
@@ -98,13 +118,23 @@ class Func(object):
     # relu(bn(conv))
     @torchdynamo.optimize("inductor")
     def conv_bn_relu_torchinductor(
-        x, w, bias, stride, padding, dilation, groups, running_mean, running_var
+        x,
+        w,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        running_mean,
+        running_var,
+        bn_weight,
+        bn_bias,
     ):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
-            weight=bias,
-            bias=None,
+            weight=bn_weight,
+            bias=bn_bias,
             running_mean=running_mean,
             running_var=running_var,
             training=False,
@@ -116,13 +146,23 @@ class Func(object):
 
     # relu(bn(conv))
     def conv_bn_relu(
-        x, w, bias, stride, padding, dilation, groups, running_mean, running_var
+        x,
+        w,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        running_mean,
+        running_var,
+        bn_weight,
+        bn_bias,
     ):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
-            weight=bias,
-            bias=None,
+            weight=bn_weight,
+            bias=bn_bias,
             running_mean=running_mean,
             running_var=running_var,
             training=False,
@@ -213,9 +253,13 @@ def bench(layer_params, layer_id, p, fusion_types=[""]):
         if "bn" in fusion_type:
             running_mean = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
             running_var = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
+            bn_weight = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
+            bn_bias = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
             args += (
                 running_mean,
                 running_var,
+                bn_weight,
+                bn_bias,
             )
 
         def fn_conv():
