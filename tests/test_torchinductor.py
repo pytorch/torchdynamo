@@ -454,6 +454,10 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1, 17, 8, 9),))
 
     def test_multilayer_low_prec(self):
+        # fp16 nyi for cpu
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
         def fn(a):
             return torch.mean(a)
 
