@@ -274,11 +274,6 @@ def export(f, *args, **kwargs):
     signature_types = [
         out_sig.parameters[k].annotation for k in list(out_sig.parameters)
     ]
-    print(in_sig)
-    print(out_sig)
-
-    print(signature_types)
-    print(input_types)
 
     # TODO(voz): Add support for flatenning and unflattening via PyTree
     assert len(in_sig.parameters) == len(
