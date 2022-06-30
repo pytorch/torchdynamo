@@ -263,6 +263,21 @@ class RangeTreeRoot(RangeTree):
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
 
+    def ranges_code_non_reshape(self):
+        """
+        Do not reshape ranges, reshape the loaded data later
+        """
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK)"
+
+    def codegen_non_reshape_header(self, code):
+        """
+        Do not reshape ranges, reshape the loaded data later
+        """
+        x = self.prefix
+        if not self.is_loop():
+            code.writeline(f"{self.name}_nonrs = {x}offset + {self.ranges_code_non_reshape()}")
+            code.writeline(f"{x}mask_nonrs = {self.name}_nonrs < {x}numel")
+
 
 class RangeTreeEntry(RangeTree):
     def __init__(self, name: str, length: sympy.Expr, parent: RangeTree):
@@ -499,6 +514,8 @@ class TritonKernel(Kernel):
                 have_loop_vars = True
                 have_dense = False
                 mask.append(f"{tree.prefix}mask")
+                # if load a 1-dim data using 2-dim, do not reshape index
+                # reshape loaded data because of triton bug if need_dense=False
             dense_mask.append(f"{tree.prefix}mask")
 
         if need_dense and not have_dense:
