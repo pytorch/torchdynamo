@@ -323,8 +323,9 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     print(" -", str(guard))
                 print()
 
-                if guard_export_fn is not None:
-                    guard_export_fn(output.guards)
+            if guard_export_fn is not None:
+                guard_export_fn(output.guards)
+                
             return guarded_code
         except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
             if config.debug or config.trace or config.print_internal_exceptions:
