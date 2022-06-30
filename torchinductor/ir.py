@@ -44,7 +44,7 @@ def inverse_reorder(order):
 def same_reorder(order):
     def reindex(index):
         assert len(index) == len(order)
-        return [index[i] for i in range(len(index))]
+        return [index[order[i]] for i in range(len(index))]
 
     return reindex
 
