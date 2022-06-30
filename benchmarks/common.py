@@ -580,11 +580,6 @@ class BenchmarkRunner:
     def set_tolerance(self, is_training, current_device, name):
         raise NotImplementedError()
 
-    def clone_inputs(self, inputs):
-        return tree_map(
-            lambda x: torch.clone(x) if isinstance(x, torch.Tensor) else x, inputs
-        )
-
     def run_one_model(
         self,
         name,
@@ -608,13 +603,13 @@ class BenchmarkRunner:
 
             torch.manual_seed(1337)
             correct_result = model_iter_fn(
-                copy.deepcopy(model), self.clone_inputs(example_inputs)
+                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
             )
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), self.clone_inputs(example_inputs)
+                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
                 if not same(correct_result, correct_rerun_result):
                     print("INCORRECT - Variation in Eager runs itself")
