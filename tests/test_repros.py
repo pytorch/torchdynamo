@@ -4,7 +4,6 @@ import copy
 import inspect
 import itertools
 import random
-import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
