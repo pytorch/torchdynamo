@@ -1,4 +1,5 @@
 import copy
+import functools
 import itertools
 import operator
 
@@ -6,10 +7,14 @@ import torch
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.utils._pytree import tree_map
 
+from .. import config
 from ..utils import fake_tensors_available
 
 if fake_tensors_available:
+    from torch._subclasses import FakeTensorMode  # noqa: F401
+
     from ..utils import deepcopy_to_fake_tensor
     from ..utils import wrap_to_fake_tensor
 
@@ -110,7 +115,6 @@ class ShapeAliasingAndMutationProp(ShapeProp):
 def has_mutation(gm, example_inputs):
     """Check if the graph module has any form of mutation"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
-    fake_mode = FakeTensorMode()
 
     if fake_tensors_available and config.fake_tensor_propagation:
         fake_mode = FakeTensorMode()

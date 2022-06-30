@@ -108,7 +108,9 @@ class TensorVariable(VariableTracker):
             # python errors if the import isnt here
             from ..utils import wrap_fake_exception
         else:
-            wrap_fake_exception = lambda func: func()
+
+            def wrap_fake_exception(func):
+                return func()
 
         with preserve_rng_state():
             if example_value is None:
