@@ -1,4 +1,4 @@
-from microbenchmarks import model as model
+from benchmarks.microbenchmarks import model as model
 import torch
 import torchdynamo
 import torchinductor.config
@@ -48,7 +48,7 @@ class Func(object):
     def conv_bn_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         y = torch.batch_norm(
-            y, weight=bias, bias=None,
+            y, weight=bias, bias=torch.ones_like(bias),
             running_mean=torch.zeros_like(bias), running_var=torch.zeros_like(bias),
             training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
         )
@@ -58,7 +58,7 @@ class Func(object):
     def conv_bn(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         y = torch.batch_norm(
-            y, weight=bias, bias=None,
+            y, weight=bias, bias=torch.ones_like(bias),
             running_mean=torch.zeros_like(bias), running_var=torch.zeros_like(bias),
             training=False, momentum=1, eps=1e-5, cudnn_enabled=True,
         )
