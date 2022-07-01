@@ -113,6 +113,14 @@ class CppOverrides(OpOverrides):
         return f"std::abs({x})"
 
     @staticmethod
+    def sin(x):
+        return f"std::sin({x})"
+
+    @staticmethod
+    def cos(x):
+        return f"std::cos({x})"
+
+    @staticmethod
     def exp(x):
         # return f"Sleef_expf_u10({x})"
         return f"std::exp({x})"
