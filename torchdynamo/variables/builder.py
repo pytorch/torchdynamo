@@ -204,6 +204,8 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
+            if type(value) in (int, float):
+                return self.wrap_unspecialized_primitive(value)
             # For these, just specialize on exact value
             return ConstantVariable(
                 value=value,
