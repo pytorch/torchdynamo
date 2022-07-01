@@ -625,7 +625,7 @@ def tvm_meta_schedule(subgraph):
 def llvm_target():
     if "avx512" in open("/proc/cpuinfo").read():
         return "llvm -mcpu=skylake-avx512"
-    return "llvm -mcpu=core-avx2 -num-cores 12"
+    return "llvm -mcpu=core-avx2"
 
 
 def tvm_compile_inner(
@@ -733,6 +733,8 @@ def tvm_compile_inner(
             args = [a.contiguous() for a in args]
             for idx, arg in enumerate(args, 0):
                 if arg.dim() != 0:
+                    if arg.requires_grad:
+                        arg = arg.detach()
                     m.set_input(
                         f"inp_{idx}",
                         tvm.nd.array(arg.numpy(), dev),
