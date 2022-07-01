@@ -362,3 +362,9 @@ def index_put(self, indices, values, accumulate=False):
 @register_decomposition([aten.narrow])
 def narrow(self, dim, start, length):
     return aten.slice(self, dim, start, start + length)
+
+
+@register_decomposition([aten.conj_physical])
+def conj_physical(self):
+    assert not self.is_complex(), "TODO: implement this"
+    return self

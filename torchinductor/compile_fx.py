@@ -142,7 +142,9 @@ def compile_fx_inner(
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphify(compiled_fn, example_inputs, static_input_idxs=range(num_fixed))
+            return cudagraphify(
+                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+            )
         else:
             return compiled_fn
     except Exception:
@@ -164,7 +166,10 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     assert isinstance(inputs, (list, tuple))
-    static_inputs = [torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx] for idx, x in enumerate(inputs)]
+    static_inputs = [
+        torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx]
+        for idx, x in enumerate(inputs)
+    ]
 
     # warmup
     torch.cuda.synchronize()
@@ -200,13 +205,14 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     """
     Infers which inputs are static for a backwards graph
     """
+
     def is_not_gradout(x):
         return "tangents" not in x.name
 
     arg_count = 0
     static_arg_idxs = []
     for n in fx_g.graph.nodes:
-        if n.op == 'placeholder':
+        if n.op == "placeholder":
             if is_not_gradout(n):
                 static_arg_idxs.append(arg_count)
             arg_count += 1
