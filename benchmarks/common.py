@@ -956,7 +956,13 @@ def main(runner, original_dir=None):
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
         runner.non_deterministic_models.update(
-            {"demucs", "pyhpc_equation_of_state", "timm_efficientdet"}
+            {
+                "demucs",
+                "pyhpc_equation_of_state",
+                "timm_efficientdet",
+                "pyhpc_isoneutral_mixing",
+                "pyhpc_turbulent_kinetic_energy",
+            }
         )
 
     if args.no_skip:
@@ -976,7 +982,7 @@ def main(runner, original_dir=None):
         )
         experiment = cold_start_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = "cold_start_{backend_str}.csv"
+        output_filename = f"cold_start_{backend_str}.csv"
         args.isolate = True
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -993,7 +999,7 @@ def main(runner, original_dir=None):
         else:
             torchinductor.config.dynamic_shapes = False
 
-        if args.training:
+        if True or args.training:
             from torchinductor.compile_fx import compile_fx_training
 
             optimize_ctx = torchdynamo.optimize(

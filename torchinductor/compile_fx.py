@@ -226,11 +226,12 @@ def compile_fx_training(
 ):
     from torchdynamo.optimizations.backends import aot_autograd
 
-    def fw_compiler(model, example_inputs):
+    def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        # model.graph.print_tabular()
         fixed = len(example_inputs) - len(example_inputs_)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
-    def bw_compiler(model, example_inputs):
+    def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 

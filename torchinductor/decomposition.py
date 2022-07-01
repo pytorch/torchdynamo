@@ -368,3 +368,8 @@ def narrow(self, dim, start, length):
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
     return self
+
+
+@register_decomposition([aten.lift])
+def lift(self):
+    return self
