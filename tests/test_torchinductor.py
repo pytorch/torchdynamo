@@ -456,6 +456,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 17, 8, 9),))
 
+    def test_multilayer_low_prec(self):
+        # fp16 nyi for cpu
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(a):
+            return torch.mean(a)
+
+        self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
     def test_min_max_reduction(self):
         def fn(a, b):
             return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
@@ -1097,6 +1107,15 @@ class CommonTemplate:
     def test_tanh(self):
         def fn(x):
             return aten.tanh(x) + 2, aten.tanh(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_cos(self):
+        def fn(x):
+            return aten.cos(x) + 2, aten.cos(x + 1)
 
         self.common(
             fn,

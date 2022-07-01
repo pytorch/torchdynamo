@@ -243,13 +243,15 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
             def format_guard_failures(code):
-                return f"{str(guard_failures[code])}"
+                # For the common case, it's sufficient to see just the most recent failure.
+                # We could add a verbose mode if needed
+                return f"{str(guard_failures[code][-1])}"
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
-                f"for function {format_func_info(code)}, "
-                f"due to the following guard failures: {format_guard_failures(code)}"
+                f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
+                f"   function: {format_func_info(code)}\n"
+                f"   reasons:  {format_guard_failures(code)}\n"
                 f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
