@@ -219,6 +219,12 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
+    if isinstance(example_inputs, dict):
+        for key, value in example_inputs.items():
+            assert isinstance(value, torch.Tensor)
+            example_inputs[key] = clone_input(value)
+        return example_inputs
+
     res = list(example_inputs)
     for i in range(len(res)):
         if isinstance(res[i], torch.Tensor):
