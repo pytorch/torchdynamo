@@ -228,18 +228,72 @@ def optimize(backend, nopython=False):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor)
+        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn=None)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
     )
 
 
-def optimize_assert(backend, backend_ctx_ctor=null_context):
+def export(f, *args, **kwargs):
+    from inspect import signature
+
+    in_sig = signature(f)
+    graph = None
+    out_guards = None
+    input_types = list()
+
+    def guard_export_print(guards):
+        nonlocal out_guards
+        assert out_guards is None, "whole graph export entails exactly one guard export"
+        out_guards = guards
+
+    def dynamo_normalization_capturing_compiler(
+        gm: torch.fx.GraphModule, example_inputs
+    ):
+        nonlocal input_types
+        nonlocal graph
+        assert graph is None, "whole graph export entails exactly one graph"
+        graph = gm
+        for example_input in example_inputs:
+            input_types.append(example_input.__class__)
+
+        return gm.forward
+
+    backend_ctx_ctor = null_context
+
+    with optimize_assert(
+        dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
+    ):
+        f(*args, **kwargs)
+
+    assert graph is not None, "whole graph export entails exactly one call"
+    assert out_guards is not None, "whole graph export entails exactly one guard export"
+
+    out_sig = signature(graph.forward)
+    signature_types = [
+        out_sig.parameters[k].annotation for k in list(out_sig.parameters)
+    ]
+
+    # TODO(voz): Add support for flatenning and unflattening via PyTree
+    assert len(in_sig.parameters) == len(
+        out_sig.parameters
+    ), "Exported callable signature must be composed only of torch.Tensors"
+    for idx in range(len(out_sig.parameters)):
+        sig_type = signature_types[idx]
+        in_type = input_types[idx]
+        assert (
+            sig_type == in_type
+        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+
+    return (graph, out_guards)
+
+
+def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
     )
 
 
