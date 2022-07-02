@@ -223,6 +223,33 @@ class BuiltinVariable(VariableTracker):
                 unwrapped_kwargs.update({k: v.as_python_constant()})
         return unwrapped_args, unwrapped_kwargs
 
+    def specialize_args_kwargs(self, tx, args, kwargs):
+        specialized_args = []
+        specialized_kwargs = {}
+        for x in args:
+            if isinstance(
+                x,
+                (
+                    variables.UnspecializedNumpyVariable,
+                    variables.UnspecializedPythonVariable,
+                ),
+            ):
+                specialized_args.append(x.convert_to_constant(tx))
+            else:
+                specialized_args.append(x)
+        for k, v in kwargs:
+            if isinstance(
+                x,
+                (
+                    variables.UnspecializedNumpyVariable,
+                    variables.UnspecializedPythonVariable,
+                ),
+            ):
+                specialized_kwargs.update({k: x.convert_to_constant(tx)})
+            else:
+                specialized_kwargs.update({k: v})
+        return specialized_args, specialized_kwargs
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -382,7 +409,8 @@ class BuiltinVariable(VariableTracker):
     call_max = _call_min_max
 
     def call_range(self, tx, *args, **kwargs):
-        if self.constant_args(*args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs):
+            args, kwargs = self.specialize_args_kwargs(tx, args, kwargs)
             return variables.RangeVariable(
                 value=range(
                     *[x.value for x in args],

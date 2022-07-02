@@ -37,6 +37,7 @@ from ..utils import proxy_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
+from .constant import ConstantVariable
 from .lists import ShapeVariable
 from .lists import SizeVariable
 
@@ -643,4 +644,14 @@ class UnspecializedPythonVariable(TensorVariable):
             **dict(tensor_variable.__dict__),
             raw_value=raw_value,
             need_unwrap=need_unwrap,
+        )
+
+    def convert_to_constant(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+        
+        return ConstantVariable(
+            value=self.raw_value,
+            guards=self.create_guard(GuardBuilder.CONSTANT_MATCH),
         )

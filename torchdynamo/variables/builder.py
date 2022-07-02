@@ -351,29 +351,32 @@ class VariableBuilder:
             GraphArg(self.get_source(), wrapped_value, True)
         )
         if not isinstance(self.get_source(), RandomValueSource):
-            guards_options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
+            options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
         else:
-            guards_options = {}
+            options = {}
 
         proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
         )
+        # print("source = " + str(self.get_source()))
+        options.update({"source": self.get_source()})
+        options.update({"raw_value": value})
+
+        # print(options)
 
         if isinstance(value, np.number):
             return UnspecializedNumpyVariable.create(
                 tx=self.tx,
                 proxy=proxy,
                 example_value=wrapped_value,
-                raw_value=value,
-                **guards_options,
+                **options,
             )
         else:
             return UnspecializedPythonVariable.create(
                 tx=self.tx,
                 proxy=proxy,
                 example_value=wrapped_value,
-                raw_value=value,
-                **guards_options,
+                **options,
             )
 
 
