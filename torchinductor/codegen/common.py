@@ -11,6 +11,7 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from .. import metrics
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -428,12 +429,14 @@ class CSE:
         name_prefix="tmp",
         iter_buffers=None,
         store_cache=None,
+        reduction_cache=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
+        self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
 
     def invalidate(self, keep_vars: typing.Set[str]):
@@ -488,6 +491,7 @@ class Kernel(CodeGen):
 
     def __init__(self, args=None):
         super().__init__()
+        metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
