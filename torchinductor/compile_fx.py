@@ -13,6 +13,7 @@ from torchdynamo.testing import same
 from torchdynamo.utils import identity
 
 from . import config
+from . import utils
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
@@ -125,6 +126,8 @@ def compile_fx_inner(
     cudagraphs=None,
     num_fixed=0,
 ):
+    utils.init_logging()
+
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 

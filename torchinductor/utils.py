@@ -1,7 +1,35 @@
 import functools
+import logging.config
 import operator
 
 import sympy
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "formatters": {
+        "simple": {"format": "%(name)s - %(levelname)s - %(message)s"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "torchinductor": {
+            "level": "DEBUG",
+            "handlers": ["console"],
+            "propagate": False,
+        },
+    },
+}
+
+
+@functools.lru_cache(None)
+def init_logging():
+    logging.config.dictConfig(LOGGING_CONFIG)
 
 
 @functools.lru_cache(None)
