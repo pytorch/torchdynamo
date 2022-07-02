@@ -4,6 +4,7 @@ import copy
 import inspect
 import itertools
 import random
+import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
@@ -784,6 +785,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             torchdynamo.utils.counters["frames"]["ok"],
         )
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
             Boxes(torch.arange(0, 8).reshape((2, 4))),
@@ -1005,6 +1007,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_nn_parameter(self):
         def test_fn():
             a = torch.nn.Parameter(torch.randn(5, 5))
