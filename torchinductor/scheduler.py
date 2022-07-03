@@ -248,11 +248,6 @@ class SchedulerNode(BaseSchedulerNode):
             self.scheduler.fusable_deps.update(
                 w.maybe_swap_sizes() for w in self.read_writes.writes
             )
-        # if broadcast_after_reduce and self.is_reduction():
-        #     self.scheduler.fusable_deps.update(
-        #         w.broadcast_extend_sizes(self._sizes[-1])
-        #         for w in self.read_writes.writes
-        #     )
 
     def get_ranges(self):
         return self._sizes
