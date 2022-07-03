@@ -386,6 +386,11 @@ def lift(self):
     return self
 
 
+@register_decomposition([aten.type_as])
+def type_as(self, other):
+    return self.type(other.type())
+
+
 if not config.fallback_random:
 
     @register_decomposition([aten.bernoulli_])
