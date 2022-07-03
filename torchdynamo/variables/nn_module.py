@@ -435,6 +435,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if method is torch.nn.Module.parameters:
                 assert not args or kwargs
+                options["guards"].add(
+                    self.source.create_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
+                )
                 items = []
                 for name, value in self.value.named_parameters():
                     items.append(
