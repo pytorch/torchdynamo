@@ -191,15 +191,28 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
-    def run(*new_inputs):
-        assert len(static_inputs) == len(new_inputs)
-        for idx, (dst, src) in enumerate(zip(static_inputs, new_inputs)):
-            if idx in static_input_idxs:
-                assert dst.data_ptr() == src.data_ptr()
-            else:
-                dst.copy_(src)
-        graph.replay()
-        return static_outputs
+    if config.size_asserts:
+
+        def run(*new_inputs):
+            assert len(static_inputs) == len(new_inputs)
+            for idx, (dst, src) in enumerate(zip(static_inputs, new_inputs)):
+                if idx in static_input_idxs:
+                    assert dst.data_ptr() == src.data_ptr()
+                else:
+                    dst.copy_(src)
+            graph.replay()
+            return static_outputs
+
+    else:
+        copy_indices = [
+            idx for idx in range(len(static_inputs)) if idx not in static_input_idxs
+        ]
+
+        def run(*new_inputs):
+            for idx in copy_indices:
+                static_inputs[idx].copy_(new_inputs[idx])
+            graph.replay()
+            return static_outputs
 
     return run
 
