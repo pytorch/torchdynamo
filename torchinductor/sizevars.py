@@ -103,6 +103,8 @@ class SizeVarAllocator(object):
         return expr
 
     def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+        left = sympy.expand(left)
+        right = sympy.expand(right)
         if left == right:
             return left
         expr = self.simplify(left - right)

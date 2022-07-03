@@ -113,6 +113,14 @@ class CppOverrides(OpOverrides):
         return f"std::abs({x})"
 
     @staticmethod
+    def sin(x):
+        return f"std::sin({x})"
+
+    @staticmethod
+    def cos(x):
+        return f"std::cos({x})"
+
+    @staticmethod
     def exp(x):
         # return f"Sleef_expf_u10({x})"
         return f"std::exp({x})"
@@ -232,6 +240,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
+                # Note atomic_ref requires C++20 and certain processor features
                 self.stores.writeline(
                     name,
                     "static_assert(std::atomic_ref<"
@@ -282,7 +291,7 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
         if threads < 1:
-            threads = multiprocessing.cpu_count()
+            threads = multiprocessing.cpu_count() // 2
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
