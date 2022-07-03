@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 import warnings
-from functools import partial as partial
+from functools import partial
 
 import torch
 from common import BenchmarkRunner
