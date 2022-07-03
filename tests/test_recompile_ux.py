@@ -1,3 +1,5 @@
+#!/usr/bin/env pytest
+import logging
 import unittest
 import weakref
 
@@ -22,6 +24,11 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(torchdynamo.config, "debug", False)
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
+                logging.getLogger(torchdynamo.__name__), "propagate", True
+            )
         )
 
     def test_drop_cache_on_skip(self):

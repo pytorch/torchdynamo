@@ -1,3 +1,4 @@
+#!/usr/bin/env pytest
 import torch
 
 import torchdynamo

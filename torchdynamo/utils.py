@@ -9,6 +9,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
 import sys
 import time
@@ -33,6 +34,40 @@ counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
 )
+
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "formatters": {
+        "torchdynamo_format": {"format": "%(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "torchdynamo_console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "torchdynamo_format",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "torchdynamo": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+        "torchinductor": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+    },
+}
+
+
+@functools.lru_cache(None)
+def init_logging():
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        logging.config.dictConfig(LOGGING_CONFIG)
 
 
 def count_calls(g: fx.Graph):
