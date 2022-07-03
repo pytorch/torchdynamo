@@ -118,6 +118,9 @@ class ExactWeakKeyDictionary:
         self.refs.clear()
         self.values.clear()
 
+    def __delitem__(self, idx):
+        self._remove_id(id(idx))
+
 
 def istype(obj, allowed_types):
     """isinstance() without subclasses"""
