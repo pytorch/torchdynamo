@@ -33,6 +33,10 @@ realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
 
+# fallback to eager for random/dropout, this is slow bug useful for debugging
+fallback_random = False
+
+
 # config specific to codegen/cpp.pp
 class cpp:
     threads = -1  # set to cpu_count()

@@ -49,6 +49,7 @@ decompositions = get_decompositions(
         aten.narrow,
         aten.native_batch_norm,
         aten.native_batch_norm_backward,
+        aten.native_dropout_backward,
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
@@ -68,6 +69,16 @@ decompositions = get_decompositions(
     ]
 )
 decompositions.update(aot_autograd_decompositions)
+
+if not config.fallback_random:
+    # these decomps have different results than eager mode
+    decompositions.update(
+        get_decompositions(
+            [
+                aten.native_dropout,
+            ]
+        )
+    )
 
 
 def register_decomposition(ops):
@@ -373,3 +384,15 @@ def conj_physical(self):
 @register_decomposition([aten.lift])
 def lift(self):
     return self
+
+
+@register_decomposition([aten.type_as])
+def type_as(self, other):
+    return self.type(other.type())
+
+
+if not config.fallback_random:
+
+    @register_decomposition([aten.bernoulli_])
+    def bernoulli_(self, p=0.5):
+        return self.copy_(torch.rand_like(self) < p)
