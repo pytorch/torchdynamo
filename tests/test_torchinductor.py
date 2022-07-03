@@ -2029,6 +2029,18 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter2(self):
+        def fn(a, b):
+            return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
+
+        self.common(
+            fn,
+            [
+                torch.randn([8, 197, 384]),
+                torch.randn([8, 197, 384]),
+            ],
+        )
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
