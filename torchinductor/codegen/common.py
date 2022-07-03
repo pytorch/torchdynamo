@@ -443,11 +443,13 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
+        self.invalidated_stores = set()
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
+                self.invalidated_stores.add(name)
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
@@ -502,6 +504,7 @@ class Kernel(CodeGen):
         self.compute = IndentedBuffer()
         self.stores = DeferredIndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
+        self.must_keep_buffers = set()
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
@@ -557,6 +560,10 @@ class Kernel(CodeGen):
 
             @staticmethod
             def load(name: str, index: sympy.Expr, upcast: bool = False):
+                if name in self.cse.invalidated_stores:
+                    # A load from an invalidated store requires us to
+                    # keep the actual buffer around
+                    V.kernel.must_keep_buffers.add(name)
                 if "tmp" in str(index):
                     return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
