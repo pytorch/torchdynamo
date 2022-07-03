@@ -74,8 +74,9 @@ class ExactWeakKeyDictionary:
         self.values[idx] = value
 
     def _remove_id(self, idx):
-        if idx in self.refs:
+        if idx in self.values:
             del self.values[idx]
+        if idx in self.refs:
             del self.refs[idx]
 
     def clear(self):
