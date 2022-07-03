@@ -254,7 +254,7 @@ class DeferredLine:
         self.line = line
 
     def __call__(self):
-        if self.name not in V.graph.removed_buffers and self:
+        if self.name not in V.graph.removed_buffers:
             return self.line
         return None
 

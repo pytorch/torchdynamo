@@ -80,6 +80,14 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
 
     def random_seed_buffer(self, device: torch.device):
+        """
+        Return a device-unique 1-element tensor storing our RNG seed.
+        This will get initialized at the start of each graph in
+        `wrapper.py`.
+
+        Note this is only used by cuda backends.  The CPU backend handles
+        RNG seeds as a sizevar.
+        """
         name = f"seed_{device.type}_{device.index}"
         if name not in self.constants:
             self.constants[name] = torch.zeros((), device=device, dtype=torch.int32)

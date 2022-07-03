@@ -121,6 +121,8 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
 
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
+    else:
+        aten_fn = list(aten_fn)
 
     for fn in list(aten_fn):
         if isinstance(fn, torch._ops.OpOverloadPacket):
@@ -619,6 +621,8 @@ if config.fallback_random:
 
     make_fallback(aten.rand)
 else:
+    # native_dropout handled in decomps
+    # bernoulli_ handled in decomps
 
     @register_lowering(aten.rand)
     def rand(
@@ -1017,6 +1021,10 @@ ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
 
 
 def create_tensor_like(creation_fn):
+    """
+    Shim to convert X_like(...) into X(...).  For example zeros_like() into zeros().
+    """
+
     def _constant_like(
         x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
     ):

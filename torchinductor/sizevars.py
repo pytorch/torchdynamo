@@ -46,7 +46,10 @@ class SizeVarAllocator(object):
 
     def seed(self):
         """
-        Seed is a special variable use to hold the rng seed for a graph
+        Seed is a special variable used to hold the rng seed for a graph.
+
+        Note this is only used by the CPU backend, we put seeds in a
+        1-element tensor for the CUDA backend.
         """
         self.need_seed = True
         return sympy.Symbol("seed")
