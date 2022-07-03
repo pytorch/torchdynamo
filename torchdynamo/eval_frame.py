@@ -24,6 +24,11 @@ try:
 except (ModuleNotFoundError, ImportError) as e:
     raise RuntimeError("run `python setup.py develop` to compile C extensions") from e
 
+try:
+    from torch.fx.experimental import proxy_tensor
+except (ModuleNotFoundError, ImportError):
+    proxy_tensor = None
+
 set_eval_frame = _eval_frame.set_eval_frame
 reset_code = _eval_frame.reset_code
 unsupported = _eval_frame.unsupported
@@ -342,6 +347,9 @@ class TorchPatcher:
 
         torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
         torch.distributions.Distribution.set_default_validate_args(False)
+
+        if proxy_tensor is not None:
+            proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
