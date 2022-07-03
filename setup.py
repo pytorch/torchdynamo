@@ -15,7 +15,7 @@ compiled with an ensemble of different backends and autotuning.
 
 setup(
     name="torchdynamo",
-    version="0.2.0",
+    version="1.13.0.dev0",
     url="https://github.com/pytorch/torchdynamo",
     description="A Python-level JIT compiler designed to make unmodified PyTorch programs faster.",
     long_description=long_description,
@@ -25,7 +25,7 @@ setup(
     license="BSD-3",
     keywords="pytorch machine learning compilers",
     python_requires=">=3.7, <3.11",
-    install_requires=["torch>=1.11.0", "numpy", "tabulate", "sympy"],
+    install_requires=["torch>=1.12.0", "numpy", "tabulate", "pyyaml", "sympy"],
     packages=find_packages(
         include=[
             "torchdynamo",
