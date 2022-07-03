@@ -255,6 +255,13 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
+    if isinstance(example_inputs, dict):
+        res = dict(example_inputs)
+        for key, value in res.items():
+            assert isinstance(value, torch.Tensor)
+            res[key] = clone_input(value)
+        return res
+
     res = list(example_inputs)
     for i in range(len(res)):
         if isinstance(res[i], torch.Tensor):
