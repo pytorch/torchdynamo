@@ -20,6 +20,31 @@ class MemoryDep(typing.NamedTuple):
         size = (*self.size, *[x for x in extra_sizes if x != 1])
         return MemoryDep(self.name, self.index, size)
 
+    def maybe_swap_sizes(self):
+        # swap only in simple cases where index is trivial and
+        # there are just 2 sizes
+        if len(self.size) == 2 and len(self.index.args) == 0 and \
+           self.index.name == 'c0':
+            size = (self.size[1], self.size[0])
+            index = self.index.subs({"c0" : "c1"})
+            return MemoryDep(self.name, index, size)
+        else:
+            return self
+
+    def strip_last_size(self):
+        nsizes = len(self.size)
+        if nsizes >= 1 and len(self.index.args) <= nsizes - 1:
+            # make sure last dim index is not used
+            v = sympy.Symbol("_strip_size_tester")
+            prefix = "c"
+            last_index = f"{prefix}{len(self.size)-1}"
+            expr1 = self.index.subs({last_index : v})
+            if expr1 == self.index:
+                size = self.size[:-1]
+                return MemoryDep(self.name, self.index, size)
+            else:
+                return self
+
     def rename(self, renames):
         if self.name in renames:
             return MemoryDep(renames[self.name], self.index, self.size)
