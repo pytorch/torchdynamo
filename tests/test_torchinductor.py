@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import random
 import unittest
 from unittest.mock import patch
 
@@ -1562,6 +1563,8 @@ class CommonTemplate:
             ),
         )
 
+    # https://github.com/pytorch/torchdynamo/issues/467
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1967,6 +1970,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(not config.fallback_random, "requires config.fallback_random")
     def test_bernoulli(self):
         def fn(a):
             b = torch.empty_like(a)
@@ -2025,11 +2029,37 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter2(self):
+        def fn(a, b):
+            return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
+
+        self.common(
+            fn,
+            [
+                torch.randn([8, 197, 384]),
+                torch.randn([8, 197, 384]),
+            ],
+        )
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
 
         self.common(fn, [torch.randn(55)])
+
+    @patch.object(torchinductor.config.triton, "cudagraphs", True)
+    def test_dropout(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.nn.functional.dropout(a, 0.5, True)
+
+        x = torch.ones(1000, device=self.device, dtype=torch.float32)
+        result = fn(x)
+        self.assertTrue(400 < result.nonzero().shape[0] < 600)
+        self.assertTrue(0.9 < result.mean().item() < 1.1)
 
 
 if HAS_CPU:

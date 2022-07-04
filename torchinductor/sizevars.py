@@ -40,8 +40,19 @@ class SizeVarAllocator(object):
         self.var_to_val: Dict[Expr, int] = collections.OrderedDict()
         self.guards = []
         self.replacements = {}
+        self.need_seed = False
         if not zero_one_const:
             self.val_to_var.clear()
+
+    def seed(self):
+        """
+        Seed is a special variable used to hold the rng seed for a graph.
+
+        Note this is only used by the CPU backend, we put seeds in a
+        1-element tensor for the CUDA backend.
+        """
+        self.need_seed = True
+        return sympy.Symbol("seed")
 
     def simplify(self, expr):
         return sympy.expand(expr).subs(self.replacements)
@@ -103,6 +114,8 @@ class SizeVarAllocator(object):
         return expr
 
     def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+        left = sympy.expand(left)
+        right = sympy.expand(right)
         if left == right:
             return left
         expr = self.simplify(left - right)
@@ -249,6 +262,9 @@ class SizeVarAllocator(object):
 
     def codegen(self, code, graph_inputs):
         """Assign all symbolic shapes to locals"""
+
+        if self.need_seed:
+            code.writeline("seed = random.randrange(2**31)")
 
         @functools.lru_cache(None)
         def sizeof(name):

@@ -1412,10 +1412,11 @@ class ComputedBuffer(Buffer):
             if len(tiled_ranges) > 1:
                 return (*tiled_ranges, reduce_ranges), body
 
-            # alternate tiling heuristic
-            tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
-            if len(tiled_ranges) > 1:
-                return (*tiled_ranges, reduce_ranges), call
+            if config.triton.tile_broadcasting:
+                # alternate tiling heuristic
+                tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
+                if len(tiled_ranges) > 1:
+                    return (*tiled_ranges, reduce_ranges), call
 
         return (iter_ranges, reduce_ranges), body
 
@@ -2006,6 +2007,7 @@ class FallbackKernel(ExternKernelAlloc):
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
         self.unflatten_args = unflatten_args
+        log.warning(f"Using FallbackKernel: {self.kernel}")
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -2425,8 +2427,12 @@ class StorageBox(MutableBox):
                 ),
                 data=self.data,
             ).get_read_writes()
+
             # TODO(jansel): this heuristic is a wild guess
-            if len(read_writes.reads) > 4 or len(self.inner_fn_str()) > 2000:
+            if (
+                len(read_writes.reads) > config.realize_reads_threshold
+                or len(self.inner_fn_str()) > config.realize_bytes_threshold
+            ):
                 self.realize()
 
 

@@ -100,7 +100,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = {}
+NONDETERMINISTIC = set()
 
 
 # These benchmarks took >600s on an i9-11900K CPU
@@ -108,6 +108,12 @@ VERY_SLOW_BENCHMARKS = {
     "hf_BigBird",  # 3339s
     "hf_Longformer",  # 3062s
     "hf_T5",  # 930s
+    "ctr_mbl_feed_30x_dense_over",  # 1850s
+    "ctr_mbl_feed_30x_over",  # 1800s
+    "dhen_5x_dense_over",
+    "dhen_5x_over",
+    "inline_cvr_7x_dense_over",
+    "inline_cvr_7x_over",
 }
 
 
@@ -151,9 +157,20 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     # RuntimeError: CUDA: Error- invalid value
     "dlrm",
     "vision_maskrcnn",
+    "dhen_5x_dense_over",
+    "dhen_5x_over",
+    # https://github.com/openai/triton/issues/540
+    "inline_cvr_7x_dense_over",
+    "inline_cvr_7x_over",
+    "ctr_mbl_feed_30x_dense_over",
+    "ctr_mbl_feed_30x_over",
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",
+    # as_strided issue
+    "hf_Longformer",
+    # out of memory
+    "timm_efficientdet",
 }
 
 
