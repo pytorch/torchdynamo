@@ -68,49 +68,48 @@ class NNModuleChangeTrackerUtil:
 
     @classmethod
     def register_patches_on_torch_nn_module(cls):
-        torch_nn_module_cls = torch.nn.Module
-        if getattr(torch_nn_module_cls, "__dynamo_module_patch", True):
+        if getattr(torch.nn.Module, "_NNModuleChangeTrackerUtil__dynamo_module_patch", True):
             # register_parameter
-            torch_nn_module_cls.__dynamo_module_patch = False
+            torch.nn.Module.__dynamo_module_patch = False
 
-            original_register_parameter = torch_nn_module_cls.register_parameter
+            original_register_parameter = torch.nn.Module.register_parameter
 
             @functools.wraps(original_register_parameter)
             def custom_register_parameter(self, key, value):
                 NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_register_parameter(self, key, value)
 
-            torch_nn_module_cls.register_parameter = custom_register_parameter
+            torch.nn.Module.register_parameter = custom_register_parameter
 
             # add_module
-            original_add_module = torch_nn_module_cls.add_module
+            original_add_module = torch.nn.Module.add_module
 
             @functools.wraps(original_add_module)
             def custom_add_module(self, name, module):
                 NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_add_module(self, name, module)
 
-            torch_nn_module_cls.add_module = custom_add_module
+            torch.nn.Module.add_module = custom_add_module
 
             # load_state_dict
-            original_load_state_dict = torch_nn_module_cls.load_state_dict
+            original_load_state_dict = torch.nn.Module.load_state_dict
 
             @functools.wraps(original_load_state_dict)
             def custom_load_state_dict(self, state_dict, strict):
                 NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_load_state_dict(self, state_dict, strict)
 
-            torch_nn_module_cls.load_state_dict = custom_load_state_dict
+            torch.nn.Module.load_state_dict = custom_load_state_dict
 
             # __setattr__
-            original_setattr = torch_nn_module_cls.__setattr__
+            original_setattr = torch.nn.Module.__setattr__
 
             @functools.wraps(original_setattr)
             def custom_setattr(self, key, value):
                 NNModuleChangeTrackerUtil.invalidate_module(self)
                 return original_setattr(self, key, value)
 
-            torch_nn_module_cls.__setattr__ = custom_setattr
+            torch.nn.Module.__setattr__ = custom_setattr
             cls.original_register_parameter = original_register_parameter
             cls.original_add_module = original_add_module
             cls.original_load_state_dict = original_load_state_dict
@@ -118,16 +117,16 @@ class NNModuleChangeTrackerUtil:
 
     @classmethod
     def de_register_patches_on_torch_nn_module(cls):
-        torch_nn_module_cls = torch.nn.Module
+        torch.nn.Module = torch.nn.Module
         if hasattr(
-            torch_nn_module_cls, "_NNModuleChangeTrackerUtil__dynamo_module_patch"
+            torch.nn.Module, "_NNModuleChangeTrackerUtil__dynamo_module_patch"
         ):
-            torch_nn_module_cls.__setattr__ = cls.original_setattr
-            torch_nn_module_cls.load_state_dict = cls.original_load_state_dict
-            torch_nn_module_cls.add_module = cls.original_add_module
-            torch_nn_module_cls.register_parameter = cls.original_register_parameter
+            torch.nn.Module.__setattr__ = cls.original_setattr
+            torch.nn.Module.load_state_dict = cls.original_load_state_dict
+            torch.nn.Module.add_module = cls.original_add_module
+            torch.nn.Module.register_parameter = cls.original_register_parameter
             delattr(
-                torch_nn_module_cls, "_NNModuleChangeTrackerUtil__dynamo_module_patch"
+                torch.nn.Module, "_NNModuleChangeTrackerUtil__dynamo_module_patch"
             )
 
     @staticmethod
@@ -407,7 +406,7 @@ class GuardBuilder:
         self.ID_MATCH(guard)
 
         val = self.get(guard.name)
-        if hasattr(val, "training"):
+        if hasattr(val, "training") and config.guard_nn_modules:
             self.register_module_for_invalidation(val, self.guarded_code)
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
