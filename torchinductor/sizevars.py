@@ -264,7 +264,9 @@ class SizeVarAllocator(object):
         """Assign all symbolic shapes to locals"""
 
         if self.need_seed:
-            code.writeline("seed = random.randrange(2**31)")
+            code.writeline(
+                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
+            )
 
         @functools.lru_cache(None)
         def sizeof(name):

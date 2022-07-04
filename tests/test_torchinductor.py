@@ -2049,6 +2049,40 @@ class CommonTemplate:
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
+    def test_dropout_deterministic(self):
+        if self.device == "cpu":
+            # TODO(jansel): CPU RNG is not yet deterministic
+            raise unittest.SkipTest("CPU currently nondeterministic")
+
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.nn.functional.dropout(a, 0.55, True)
+
+        for cg in (False, True):
+            with patch.object(torchinductor.config.triton, "cudagraphs", cg):
+                torchdynamo.reset()
+
+                x = torch.ones(1024, device=self.device, dtype=torch.float16)
+
+                torch.cuda.manual_seed(1234)
+                a0 = fn(x).clone()
+                a1 = fn(x).clone()
+                a2 = fn(x).clone()
+
+                torch.cuda.manual_seed(1234)
+                b0 = fn(x).clone()
+                b1 = fn(x).clone()
+                b2 = fn(x).clone()
+
+                # same seed, same values
+                self.assertTrue(torch.allclose(a0, b0))
+                self.assertTrue(torch.allclose(a1, b1))
+                self.assertTrue(torch.allclose(a2, b2))
+
+                # different calls, different values
+                self.assertFalse(torch.allclose(a0, a1))
+                self.assertFalse(torch.allclose(a1, a2))
+
 
 if HAS_CPU:
 

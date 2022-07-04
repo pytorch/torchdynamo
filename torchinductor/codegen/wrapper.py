@@ -99,7 +99,9 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             for name in V.graph.randomness_seeds:
-                self.prefix.writeline(f"{name}.fill_(random.randrange(2**31))")
+                self.prefix.writeline(
+                    f"torch.randint(2**31, size=(), dtype=torch.int32, out={name})"
+                )
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
 
         for name, value in V.graph.constants.items():
