@@ -501,8 +501,8 @@ class TritonKernel(Kernel):
         Compute the index and mask to pass to tl.load() or tl.store()
         """
         index_vars = set(index.free_symbols)
-        index = self.reshape_indexing(index)
         expr = self.rename_indexing(self.simplify_indexing(index))
+        expr = self.reshape_indexing(expr)
         index_str = texpr(expr)
 
         need_dense = (
@@ -607,12 +607,12 @@ class TritonKernel(Kernel):
         if self._load_mask:
             mask.append(self._load_mask)
 
-        mask =  map(self.reshape_indexing, mask)
+        mask =  list(map(str,(map(self.reshape_indexing, mask))))
 
         if copy_shape is None \
                 and (len(self.range_trees) - int(self.numels[-1] == 1)) > len(mask):
-                reshape_data = True
-                data_shape = self.reshape_vars(mask)
+            reshape_data = True
+            data_shape = self.reshape_vars(mask)
 
         if not mask:
             mask = ["None"]
@@ -629,6 +629,8 @@ class TritonKernel(Kernel):
         )
 
     def reshape_indexing(self, index: sympy.Expr):
+        if isinstance(index, str):
+            index = sympy.Symbol(index)
         index_vars = set(index.free_symbols)
         dict = {
             index_var: sympy.Symbol(f"{index_var}{self.reshape_vars([index_var])}") for index_var in index_vars
@@ -636,19 +638,22 @@ class TritonKernel(Kernel):
         return index.subs(dict)
     
     def reshape_vars(self, index_vars: List[sympy.Symbol]):
-        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+        sizes = ["None"] * len(self.range_trees)
+        # get prefix of range trees
+        prefix_tree = [range_tree.prefix for range_tree in self.range_trees]
         # do not reshape if range tree size is 1
-        if len(sizes) == 1:
+        if len(sizes) <= 1:
             return ""
         for index_var in index_vars:
-            if str(index_var).startswith("x"):
-                idx = 0
-            elif str(index_var).startswith("y"):
-                idx = 1
-            elif str(index_var).startswith("z"):
-                idx = 2
-            sizes[idx] = [":"]
-        return f"[{', '.join(sizes)}]"
+            prefix_index_var = str(index_var)[0]
+            if prefix_index_var in prefix_tree:
+                idx = prefix_tree.index(prefix_index_var)
+                sizes[idx] = ":"
+        if ":" in sizes:
+            return f"[{', '.join(sizes)}]"
+        else:
+            # if sizes are ["None", "None"], shouldn't reshape
+            return ""
 
     def simplify_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -717,6 +722,8 @@ class TritonKernel(Kernel):
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
+        # reshape mask to match rank
+        masks =  list(map(str,(map(self.reshape_indexing, masks))))
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
         sizes[-1] = "1"
         if reduction_type == "any":
