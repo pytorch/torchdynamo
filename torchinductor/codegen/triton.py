@@ -560,14 +560,16 @@ class TritonKernel(Kernel):
         #     # ==========
         #     # acc = tl.zeros((BLOCK_M, BLOCK_N))
         #     # x1 = tl.reshape(tl.arange(0, BLOCK_M), [BLOCK_M, 1])
-        #     # tmp = tl.load(in_ptr + x1 + tl.reshape(y1, [1, BLOCK_N]))
+        #     # mask_x = x1 < xnumel
+        #     # tmp = tl.load(in_ptr + x1 + tl.zeros([BLOCK_M, BLOCK_N]), tl.int32), mask_x)
         #     # acc += tmp
         #     # ==========
         #     # to
         #     # ==========
         #     # acc = tl.zeros((BLOCK_M, BLOCK_N))
         #     # x1_nonrs = tl.arange(0, BLOCK_M)
-        #     # tmp = tl.reshape(tl.load(in_ptr + x1_nonrs)), [BLOCK_M, 1])
+        #     # mask_x = x1_nonrs < xnumel
+        #     # tmp = tl.reshape(tl.load(in_ptr + x1_nonrs), mask_x), [BLOCK_M, 1])
         #     # acc += tmp
         #     reshape_data = True
         # elif len(non_reshape_mask) > 1:
