@@ -650,8 +650,9 @@ class UnspecializedPythonVariable(TensorVariable):
         for graph_arg in tx.output.graphargs:
             if graph_arg.source is self.source:
                 graph_arg.erase()
-        
-        return ConstantVariable(
-            value=self.raw_value,
-            guards=self.create_guard(GuardBuilder.CONSTANT_MATCH),
-        )
+
+        for g in self.guards:
+            if g.name == self.source.name():
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable(value=self.raw_value, guards=self.guards)

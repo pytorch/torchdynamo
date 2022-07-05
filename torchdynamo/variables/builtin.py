@@ -409,7 +409,9 @@ class BuiltinVariable(VariableTracker):
     call_max = _call_min_max
 
     def call_range(self, tx, *args, **kwargs):
-        if self.unspec_python_args(*args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs) or self.constant_args(
+            *args, **kwargs
+        ):
             args, kwargs = self.specialize_args_kwargs(tx, args, kwargs)
             return variables.RangeVariable(
                 value=range(

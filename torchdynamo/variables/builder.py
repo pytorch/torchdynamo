@@ -104,6 +104,11 @@ class VariableBuilder:
         return self._wrap(value).clone(**self.options())
 
     @staticmethod
+    @functools.lru_cache(None)
+    def _common_constants():
+        return {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 20.0, 0.1, 0.5, 64, 256, 4096}
+
+    @staticmethod
     def list_type(value):
         if is_namedtuple(value):
             return functools.partial(NamedTupleVariable, tuple_cls=type(value))
@@ -205,12 +210,20 @@ class VariableBuilder:
             value, (torch.Size, torch.device, torch.dtype)
         ):
             if type(value) in (int, float):
-                return self.wrap_unspecialized_primitive(value)
-            # For these, just specialize on exact value
-            return ConstantVariable(
-                value=value,
-                guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-            )
+                print(">>> " + str(value))
+                if float(value) in self._common_constants():
+                    print("============")
+                    return ConstantVariable(
+                        value=value,
+                        guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+                else:
+                    return self.wrap_unspecialized_primitive(value)
+            else:
+                return ConstantVariable(
+                    value=value,
+                    guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                )
         elif isinstance(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
