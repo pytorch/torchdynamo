@@ -17,12 +17,12 @@ class Func(object):
     # conv
     @torchdynamo.optimize("inductor")
     def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
-        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         return torch.relu(y)
 
     # conv
     def conv(x, w, bias, stride, padding, dilation, groups):
-        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         return torch.relu(y)
 
     # conv+bias
@@ -73,7 +73,7 @@ class Func(object):
         bn_weight,
         bn_bias,
     ):
-        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
             weight=bn_weight,
@@ -101,7 +101,7 @@ class Func(object):
         bn_weight,
         bn_bias,
     ):
-        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
             weight=bn_weight,
@@ -130,7 +130,7 @@ class Func(object):
         bn_weight,
         bn_bias,
     ):
-        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
             weight=bn_weight,
@@ -158,7 +158,7 @@ class Func(object):
         bn_weight,
         bn_bias,
     ):
-        y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
+        y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         y = torch.batch_norm(
             y,
             weight=bn_weight,
