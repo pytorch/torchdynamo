@@ -160,6 +160,10 @@ class TritonOverrides(OpOverrides):
             new_mask, result, TritonOverrides.constant(other, torch.float32)
         )
 
+    @staticmethod
+    def rand(seed, offset):
+        return f"tl.rand({seed}, {offset})"
+
 
 @dataclasses.dataclass
 class RangeTree:
@@ -482,11 +486,14 @@ class TritonKernel(Kernel):
         index_vars = set(index.free_symbols)
         index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
 
-        need_dense = config.triton.dense_indexing or any(
-            # tmpX  means indirect indexing
-            str(v).startswith("tmp")
-            for v in index_vars
-        )
+        need_dense = (
+            config.triton.dense_indexing
+            or any(
+                # tmpX  means indirect indexing
+                str(v).startswith("tmp")
+                for v in index_vars
+            )
+        ) and index != 0
         have_dense = True
         have_loop_vars = False
         mask = []

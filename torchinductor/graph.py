@@ -76,6 +76,31 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_dynamic_inputs = num_dynamic_inputs
         self.num_static_inputs = None
         self.mutated_inputs = set()
+        self.randomness_offset = sympy.Integer(0)
+        self.randomness_seeds = []
+
+    def random_seed_buffer(self, device: torch.device):
+        """
+        Return a device-unique 1-element tensor storing our RNG seed.
+        This will get initialized at the start of each graph in
+        `wrapper.py`.
+
+        Note this is only used by cuda backends.  The CPU backend handles
+        RNG seeds as a sizevar.
+        """
+        name = f"seed_{device.type}_{device.index}"
+        if name not in self.constants:
+            self.constants[name] = torch.zeros((), device=device, dtype=torch.int32)
+            self.randomness_seeds.append(name)
+        return name
+
+    def increment_randomness_offset(self, numel):
+        """
+        A global counter of how many random numbers we have handed out so far.
+        """
+        offset = self.randomness_offset
+        self.randomness_offset = offset + numel
+        return offset
 
     def run(self, *args):
         if self.num_dynamic_inputs is None:

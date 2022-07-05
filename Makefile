@@ -75,10 +75,10 @@ pull-deps:
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo
-	# conda create --name torchdynamo python=3.8
+	# conda create --name torchdynamo -y python=3.8
 	# conda activate torchdynamo
-	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake \
-        cffi typing_extensions future six requests dataclasses protobuf numba
+	conda install -y astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
+        cffi typing_extensions future six requests dataclasses protobuf numba cython
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 
@@ -165,10 +165,10 @@ gpu-inductor-dynamic: develop
 	paste -d, inductor.csv baseline_nvfuser.csv baseline_nnc.csv > inductor_gpu_dynamic.csv
 
 cpu-inductor: develop
-	rm -f inductor.csv speedup_ts.csv cpu_8t_inductor.csv
-	python benchmarks/torchbench.py --inductor-settings --fast --inductor --threads=8
-	python benchmarks/torchbench.py --inductor-settings --fast --backend=ts --threads=8
-	paste -d, inductor.csv speedup_ts.csv > cpu_8t_inductor.csv
+	rm -f inductor.csv speedup_ts.csv cpu_mt_inductor.csv
+	python torchbench.py --inductor-settings --fast --inductor
+	python torchbench.py --inductor-settings --fast --backend=ts
+	paste -d, inductor.csv speedup_ts.csv > cpu_mt_inductor.csv
 
 cpu-inductor-seq: develop
 	rm -f inductor.csv speedup_ts.csv cpu_1t_inductor.csv

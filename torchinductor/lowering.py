@@ -428,6 +428,7 @@ def repeat(x, repeats):
 
 @register_lowering(aten._unsafe_view)
 @register_lowering(aten.view)
+@register_lowering(aten.reshape)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
@@ -585,27 +586,6 @@ def _embedding_bag(
     )
 
 
-@register_lowering(aten.native_dropout, type_promote=False)
-def native_dropout(x, p, train):
-    # There is a decomp in core for this, but it produces different answers than eager
-    if train:
-        return list(
-            map(
-                TensorBox.create,
-                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
-            )
-        )
-    return x, ones_like(x, dtype=torch.bool)
-
-
-@register_lowering(aten.bernoulli_, type_promote=False)
-def bernoulli_(x, *args):
-    x.realize()
-    V.graph.realize_users_of(x.get_name())
-    ir.InplaceBernoulliFallback(x, *args)
-    return x
-
-
 def make_fallback(kernel):
     needs_realized_inputs.add(kernel)
 
@@ -618,6 +598,78 @@ def make_fallback(kernel):
             return TensorBox.create(result)
 
 
+if config.fallback_random:
+
+    @register_lowering(aten.native_dropout, type_promote=False)
+    def native_dropout(x, p, train):
+        # There is a decomp in core for this, but it produces different answers than eager
+        if train:
+            return list(
+                map(
+                    TensorBox.create,
+                    ir.FallbackKernel.create(aten.native_dropout, x, p, train),
+                )
+            )
+        return x, ones_like(x, dtype=torch.bool)
+
+    @register_lowering(aten.bernoulli_, type_promote=False)
+    def bernoulli_(x, *args):
+        x.realize()
+        V.graph.realize_users_of(x.get_name())
+        ir.InplaceBernoulliFallback(x, *args)
+        return x
+
+    make_fallback(aten.rand)
+else:
+    # native_dropout handled in decomps
+    # bernoulli_ handled in decomps
+
+    @register_lowering(aten.rand)
+    def rand(
+        *size, dtype=None, layout=0, device=None, pin_memory=False, memory_format=None
+    ):
+        assert not pin_memory
+        assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
+        device = decode_device(device)
+        dtype = dtype or torch.get_default_dtype()
+        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+            size = tuple(size[0])
+        size = [sympy.expand(s) for s in size]
+        offset = V.graph.increment_randomness_offset(sympy_product(size))
+
+        if device.type == "cuda":
+            random_pos = ir.FixedLayout(
+                device,
+                dtype,
+                size,
+                ir.FlexibleLayout.contiguous_strides(size),
+                offset=offset,
+            ).make_indexer()
+            seed_buffer = V.graph.random_seed_buffer(device)
+
+            def inner_fn(index):
+                return ops.rand(
+                    ops.load(seed_buffer, sympy.Integer(0)),
+                    ops.index_expr(random_pos(index), torch.int32),
+                )
+
+        else:
+            # on CPU we use mt19937 which doesn't use the offset
+            # TODO(jansel): we should rewrite CPU RNG to be closer to cuda and deterministic
+            seed_var = V.graph.sizevars.seed()
+
+            def inner_fn(index):
+                return ops.rand_cpu(ops.index_expr(seed_var, torch.int32), dtype)
+
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=list(size),
+        )
+
+
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
@@ -627,11 +679,11 @@ make_fallback(aten.avg_pool2d_backward)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
+make_fallback(aten.cumsum)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d)
 make_fallback(aten.max_pool2d_with_indices_backward)
 make_fallback(aten.native_batch_norm_backward)
-make_fallback(aten.native_dropout_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
 make_fallback(aten.sort)
@@ -684,8 +736,19 @@ def clone(x, *, memory_format=0):
     )
 
 
-@register_lowering(torch.arange)
-def arange(start, end=None, step=1, *, dtype=None, device=None):
+@register_lowering([torch.arange, aten.arange])
+def arange(
+    start,
+    end=None,
+    step=1,
+    *,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+):
+    assert layout == torch.strided
+    assert not pin_memory
     if end is None:
         end = start
         start = 0
@@ -929,7 +992,39 @@ def _full(fill_value, device, dtype, size):
     )
 
 
-def constant_like(fill_value):
+@register_lowering(aten.full_like)
+def full_like(x, fill_value, **kwargs):
+    return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
+
+
+def tensor_constructor(fill_value):
+    # torch.zeros, torch.ones, etc
+    def inner(
+        *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+    ):
+        assert not pin_memory
+        assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
+        device = decode_device(device)
+        dtype = dtype or torch.get_default_dtype()
+        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+            size = tuple(size[0])
+        size = [sympy.expand(s) for s in size]
+        return _full(fill_value, device, dtype, size)
+
+    return inner
+
+
+empty = register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
+zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
+ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
+
+
+def create_tensor_like(creation_fn):
+    """
+    Shim to convert X_like(...) into X(...).  For example zeros_like() into zeros().
+    """
+
     def _constant_like(
         x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
     ):
@@ -941,37 +1036,27 @@ def constant_like(fill_value):
         else:
             dtype = decode_dtype(dtype)
         device = device or x.get_device()
-        return _full(fill_value, device, dtype, x.get_size())
+        size = list(x.get_size())
+        return creation_fn(
+            size,
+            dtype=dtype,
+            device=device,
+            layout=layout,
+            pin_memory=pin_memory,
+            memory_format=memory_format,
+        )
 
     return _constant_like
 
 
-empty_like = register_lowering(aten.empty_like)(constant_like(0))
-zeros_like = register_lowering(aten.zeros_like)(constant_like(0))
-ones_like = register_lowering(aten.ones_like)(constant_like(1))
+def constant_like(fill_value):
+    return create_tensor_like(tensor_constructor(fill_value))
 
 
-@register_lowering(aten.full_like)
-def full_like(x, fill_value, **kwargs):
-    return constant_like(fill_value)(x, **kwargs)
-
-
-def tensor_constructor(fill_value):
-    # torch.zeros, torch.ones, etc
-    def inner(*size, dtype=None, device=None):
-        device = decode_device(device)
-        dtype = dtype or torch.get_default_dtype()
-        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
-            size = tuple(size[0])
-        size = [sympy.Integer(s) for s in size]
-        return _full(fill_value, device, dtype, size)
-
-    return inner
-
-
-register_lowering(torch.empty)(tensor_constructor(0))
-register_lowering(torch.zeros)(tensor_constructor(0))
-register_lowering(torch.ones)(tensor_constructor(1))
+empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
+zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
+ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
+rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
 
 def new_constant(fill_value):
@@ -1033,7 +1118,7 @@ def new_empty_strided(
     )
 
 
-@register_lowering(torch.full)
+@register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
     return tensor_constructor(fill_value)(size, **kwargs)
 
