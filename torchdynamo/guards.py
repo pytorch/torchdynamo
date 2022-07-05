@@ -69,10 +69,10 @@ class NNModuleChangeTrackerUtil:
     @classmethod
     def register_patches_on_torch_nn_module(cls):
         if getattr(
-            torch.nn.Module, "_NNModuleChangeTrackerUtil__dynamo_module_patch", True
+            torch.nn.Module, "_dynamo_module_patch", True
         ):
             # register_parameter
-            torch.nn.Module.__dynamo_module_patch = False
+            torch.nn.Module._dynamo_module_patch = False
 
             original_register_parameter = torch.nn.Module.register_parameter
 
@@ -120,12 +120,12 @@ class NNModuleChangeTrackerUtil:
     @classmethod
     def de_register_patches_on_torch_nn_module(cls):
         torch.nn.Module = torch.nn.Module
-        if hasattr(torch.nn.Module, "_NNModuleChangeTrackerUtil__dynamo_module_patch"):
+        if hasattr(torch.nn.Module, "_dynamo_module_patch"):
             torch.nn.Module.__setattr__ = cls.original_setattr
             torch.nn.Module.load_state_dict = cls.original_load_state_dict
             torch.nn.Module.add_module = cls.original_add_module
             torch.nn.Module.register_parameter = cls.original_register_parameter
-            delattr(torch.nn.Module, "_NNModuleChangeTrackerUtil__dynamo_module_patch")
+            delattr(torch.nn.Module, "_dynamo_module_patch")
 
     @staticmethod
     def invalidate_module(module):
