@@ -26,10 +26,13 @@ class MemoryDep(typing.NamedTuple):
         if (
             len(self.size) == 2
             and len(self.index.args) == 0
-            and self.index.name == "c0"
+            and self.index.name == canonicalization_prefix() + "0"
         ):
+            c = canonicalization_prefix()
             size = (self.size[1], self.size[0])
-            index = self.index.subs({"c0": "c1"})
+            s0 = sympy.Symbol(c + "0", is_integer=True)
+            s1 = sympy.Symbol(c + "1", is_integer=True)
+            index = self.index.subs(s0, s1)
             return MemoryDep(self.name, index, size)
         else:
             return self
@@ -38,11 +41,14 @@ class MemoryDep(typing.NamedTuple):
         nsizes = len(self.size)
         if nsizes >= 1 and len(self.index.args) <= nsizes - 1:
             # make sure last dim index is not used
-            v = sympy.Symbol("_strip_size_tester")
-            prefix = "c"
+            prefix = canonicalization_prefix()
+            len_prefix = len(prefix)
+            prefixes = [fs.name[:len_prefix] for fs in self.index.free_symbols]
+            assert (
+                len(prefixes) == 0 or prefix in prefixes
+            ), "index expression should contain canonicalized symbols"
             last_index = f"{prefix}{len(self.size)-1}"
-            expr1 = self.index.subs({last_index: v})
-            if expr1 == self.index:
+            if last_index not in self.index.free_symbols:
                 size = self.size[:-1]
                 return MemoryDep(self.name, self.index, size)
             else:
@@ -113,7 +119,7 @@ class RecordLoadStore(V.MockHandler):
 
         # assign new variables each dimension to deal with numbering mismatches
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
-        _, add_var = var_builder("c")
+        _, add_var = var_builder(canonicalization_prefix())
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
 
         index = sympy.expand(index).subs(replacement)
@@ -177,3 +183,7 @@ def extract_read_writes(fn, *argsizes, normalize=False):
     with V.set_ops_handler(rw):
         fn(*args)
     return ReadWrites(rw._reads, rw._writes, rw._index_exprs)
+
+
+def canonicalization_prefix():
+    return "c"
