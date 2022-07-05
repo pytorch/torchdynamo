@@ -68,9 +68,7 @@ class NNModuleChangeTrackerUtil:
 
     @classmethod
     def register_patches_on_torch_nn_module(cls):
-        if getattr(
-            torch.nn.Module, "_dynamo_module_patch", True
-        ):
+        if getattr(torch.nn.Module, "_dynamo_module_patch", True):
             # register_parameter
             torch.nn.Module._dynamo_module_patch = False
 
