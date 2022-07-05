@@ -251,8 +251,10 @@ class RangeTreeRoot(RangeTree):
         return list(reversed(itervars))
 
     def ranges_code(self):
-        size = self.kernel.reshape_size_str(self.index, self.prefix)
-        return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+        # size = self.kernel.reshape_size_str(self.index, self.prefix)
+        # return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+        # generate 1-dim range, reshape when use
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK)"
 
     def codegen_header(self, code):
         x = self.prefix
@@ -267,20 +269,20 @@ class RangeTreeRoot(RangeTree):
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
 
-    def ranges_code_non_reshape(self):
-        """
-        Do not reshape ranges, reshape the loaded data later
-        """
-        return f"tl.arange(0, {self.prefix.upper()}BLOCK)"
+    # def ranges_code_non_reshape(self):
+    #     """
+    #     Do not reshape ranges, reshape the loaded data later
+    #     """
+    #     return f"tl.arange(0, {self.prefix.upper()}BLOCK)"
 
-    def codegen_non_reshape_header(self, code):
-        """
-        Do not reshape ranges, reshape the loaded data later
-        """
-        x = self.prefix
-        if not self.is_loop():
-            code.writeline(f"{self.name}_nonrs = {x}offset + {self.ranges_code_non_reshape()}")
-            code.writeline(f"{x}mask_nonrs = {self.name}_nonrs < {x}numel")
+    # def codegen_non_reshape_header(self, code):
+    #     """
+    #     Do not reshape ranges, reshape the loaded data later
+    #     """
+    #     x = self.prefix
+    #     if not self.is_loop():
+    #         code.writeline(f"{self.name}_nonrs = {x}offset + {self.ranges_code_non_reshape()}")
+    #         code.writeline(f"{x}mask_nonrs = {self.name}_nonrs < {x}numel")
 
 
 class RangeTreeEntry(RangeTree):
@@ -499,6 +501,7 @@ class TritonKernel(Kernel):
         Compute the index and mask to pass to tl.load() or tl.store()
         """
         index_vars = set(index.free_symbols)
+        index = self.reshape_indexing(index)
         expr = self.rename_indexing(self.simplify_indexing(index))
         index_str = texpr(expr)
 
@@ -515,8 +518,8 @@ class TritonKernel(Kernel):
         mask = []
         dense_mask = []
         # keep track the tree from which the mask code gens
-        mask_tree = []
-        non_reshape_mask = []
+        # mask_tree = []
+        # non_reshape_mask = []
         reshape_data = False
         data_shape = None
 
@@ -527,32 +530,32 @@ class TritonKernel(Kernel):
                 have_loop_vars = True
                 have_dense = False
                 mask.append(f"{tree.prefix}mask")
-                mask_tree.append(tree)
+                # mask_tree.append(tree)
             dense_mask.append(f"{tree.prefix}mask")
 
-        # if load a 1-dim data using 2-dim, do not reshape index
-        # reshape loaded data because of triton bug if need_dense=False
-        if copy_shape is None \
-                and (len(self.range_trees) - int(self.numels[-1] == 1)) > len(mask_tree) \
-                and len(mask_tree) == 1:
-            for tree in mask_tree:
-                if tree.prefix != "r":
-                    # gen non-reshaped ranges
-                    tree.codegen_non_reshape_header(self.body)
-                    non_reshape_mask.append(f"{tree.prefix}mask_nonrs")
-            # index_str = texpr(self.rename_indexing(self.simplify_indexing(index, mask_tree)))
-            if len(non_reshape_mask) > 0:
-                non_reshape_symbols = [sympy.Symbol(tree.name) for tree in mask_tree]
-                replace_dict = {}
-                for sym in index_vars:
-                    if sym in non_reshape_symbols:
-                        replace_dict[sym] = sympy.Symbol(f"{sym}_nonrs")
-                expr = expr.subs(replace_dict)
-                index_str = texpr(expr)
-                need_dense = False
-                reshape_data = True
-                mask = non_reshape_mask
-                data_shape = self.reshape_size_str(mask_tree[0].index, mask_tree[0].prefix)
+        # # if load a 1-dim data using 2-dim, do not reshape index
+        # # reshape loaded data because of triton bug if need_dense=False
+        # if copy_shape is None \
+        #         and (len(self.range_trees) - int(self.numels[-1] == 1)) > len(mask_tree) \
+        #         and len(mask_tree) == 1:
+        #     for tree in mask_tree:
+        #         if tree.prefix != "r":
+        #             # gen non-reshaped ranges
+        #             tree.codegen_non_reshape_header(self.body)
+        #             non_reshape_mask.append(f"{tree.prefix}mask_nonrs")
+        #     # index_str = texpr(self.rename_indexing(self.simplify_indexing(index, mask_tree)))
+        #     if len(non_reshape_mask) > 0:
+        #         non_reshape_symbols = [sympy.Symbol(tree.name) for tree in mask_tree]
+        #         replace_dict = {}
+        #         for sym in index_vars:
+        #             if sym in non_reshape_symbols:
+        #                 replace_dict[sym] = sympy.Symbol(f"{sym}_nonrs")
+        #         expr = expr.subs(replace_dict)
+        #         index_str = texpr(expr)
+        #         need_dense = False
+        #         reshape_data = True
+        #         mask = non_reshape_mask
+        #         data_shape = self.reshape_size_str(mask_tree[0].index, mask_tree[0].prefix)
             
         
         # if len (non_reshape_mask) == 1:
@@ -568,6 +571,7 @@ class TritonKernel(Kernel):
         #     # ==========
         #     # acc = tl.zeros((BLOCK_M, BLOCK_N))
         #     # x1_nonrs = tl.arange(0, BLOCK_M)
+              # x1_next = x1 // 56
         #     # mask_x = x1_nonrs < xnumel
         #     # tmp = tl.reshape(tl.load(in_ptr + x1_nonrs), mask_x), [BLOCK_M, 1])
         #     # acc += tmp
@@ -586,7 +590,7 @@ class TritonKernel(Kernel):
         #     # acc = tl.zeros((BLOCK_M, BLOCK_N, BLOCK_K))
         #     # x1_nonrs = tl.arange(0, BLOCK_M)
         #     # y1_nonrs = tl.arange(0, BLOCK_N)
-        #     # tmp = tl.reshape(tl.load(in_ptr + tl.reshape(x1_nonrs, [BLOCK_M, 1]) + tl.reshape(y1_nonrs, [1, BLOCK_N])), [BLOCK_M, BLOCK_N, 1])
+        #     # tmp = tl.load(in_ptr + tl.reshape(x1_nonrs, [BLOCK_M, 1, 1]) + tl.reshape(y1_nonrs, [1, BLOCK_N, 1]))
         #     # acc += tmp
         #     # ==========
         #     reshape_mask = True
@@ -602,7 +606,15 @@ class TritonKernel(Kernel):
 
         if self._load_mask:
             mask.append(self._load_mask)
-        elif not mask:
+
+        mask =  map(self.reshape_indexing, mask)
+
+        if copy_shape is None \
+                and (len(self.range_trees) - int(self.numels[-1] == 1)) > len(mask):
+                reshape_data = True
+                data_shape = self.reshape_vars(mask)
+
+        if not mask:
             mask = ["None"]
 
         return index_str, " & ".join(mask), reshape_data, data_shape
@@ -615,6 +627,28 @@ class TritonKernel(Kernel):
                 )
             ),
         )
+
+    def reshape_indexing(self, index: sympy.Expr):
+        index_vars = set(index.free_symbols)
+        dict = {
+            index_var: sympy.Symbol(f"{index_var}{self.reshape_vars([index_var])}") for index_var in index_vars
+        }
+        return index.subs(dict)
+    
+    def reshape_vars(self, index_vars: List[sympy.Symbol]):
+        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+        # do not reshape if range tree size is 1
+        if len(sizes) == 1:
+            return ""
+        for index_var in index_vars:
+            if str(index_var).startswith("x"):
+                idx = 0
+            elif str(index_var).startswith("y"):
+                idx = 1
+            elif str(index_var).startswith("z"):
+                idx = 2
+            sizes[idx] = [":"]
+        return f"[{', '.join(sizes)}]"
 
     def simplify_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -651,7 +685,7 @@ class TritonKernel(Kernel):
         if upcast:
             line += ".to(tl.float32)"
         if reshape_data:
-            line = f"tl.reshape({line}, {data_shape})"
+            line = f"{line}{data_shape}"
 
         if self.inside_reduction and "rmask" not in mask:
             # can lift a common load outside of reduction loop
