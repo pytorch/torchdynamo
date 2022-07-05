@@ -39,7 +39,7 @@ with torchdynamo.optimize(my_compiler):
         toy_example(torch.randn(10), torch.randn(10))
 ```
 
-This allows TorchDynamo to capture the interpreted Python frames, grab any and all relevant information, and speed things up wherever it can. The speedup comes from a few places, and can be rather dependent on the backend (my_compiler above) provided, but the one speedup we care about most for today's overview is **caching**.
+This allows TorchDynamo to capture the interpreted Python frames, grab any and all relevant information, and speed things up wherever it can. The speedup comes from a few places, and can be rather dependent on the backend (my_compiler above) provided, but the one speedup we care about most for today's overview is **caching**. Caching itself is not a direct speedup, so much as a critical enablement to allow us to prevent recompilation. We dig a hole with dynamo, and caching allows us to get out. Its a speedup from that perspective, but relatively neutral when all things are considered - however, it enables us to hold perf neutrality while then enabling backends - the true source of our speedups.
 
 With even a pass-through no-op backend provided:
 ```py
@@ -50,7 +50,7 @@ We can see TorchDynamo speeding up Python execution quite a bit, even on regular
 
 ## Caching and Guards Overview
 
-TorchDynamo operates through caching modified (by TorchDynamo) user bytecode. When we receive a frame for evaluation, we check if the **objects referenced in the frame have changed** in certain ways, and if not, we read the modified user bytecode out and evaluate it.  The detail of how we do this will be saved for a later writeup. Instead, we will focus on how we can identify wether or not the **objects referenced in the frame have changed**. This is a critical piece of functionality in TorchDynamo, because it drives the entire invalidation lifecycle. We refer to this functionality as **guards**.
+TorchDynamo operates through caching modified (by TorchDynamo) user bytecode. When we receive a frame for evaluation, we check if the **objects referenced in the frame have changed** in certain ways, and if not, we read the previously (or already) modified user bytecode to evaluate it.  The detail of how we do this will be saved for a later writeup. Instead, we will focus on how we can identify wether or not the **objects referenced in the frame have changed**. This is a critical piece of functionality in TorchDynamo, because it drives the entire invalidation lifecycle. We refer to this functionality as **guards**.
 
 At a very high level, the vastly oversimplified TLDR flow is this:
 
