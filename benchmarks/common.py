@@ -602,12 +602,14 @@ class BenchmarkRunner:
                 assert not torchdynamo.utils.is_jit_model(submod)
 
             torch.manual_seed(1337)
-            correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
+            correct_result = model_iter_fn(
+                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+            )
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), example_inputs
+                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
                 if not same(correct_result, correct_rerun_result):
                     print("INCORRECT - Variation in Eager runs itself")
@@ -947,10 +949,21 @@ def main(runner, original_dir=None):
         if not (args.float16 or args.float32):
             # https://github.com/openai/triton/issues/543 causes only 98.8% similarity
             runner.non_deterministic_models.add("pyhpc_equation_of_state")
+        if args.training:
+            # dropout,etc makes results not match
+            args.skip_accuracy_check = True
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update({"demucs", "pyhpc_equation_of_state"})
+        runner.non_deterministic_models.update(
+            {
+                "demucs",
+                "pyhpc_equation_of_state",
+                "timm_efficientdet",
+                "pyhpc_isoneutral_mixing",
+                "pyhpc_turbulent_kinetic_energy",
+            }
+        )
 
     if args.no_skip:
         runner.skip_models.clear()
@@ -969,7 +982,7 @@ def main(runner, original_dir=None):
         )
         experiment = cold_start_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = "cold_start_{backend_str}.csv"
+        output_filename = f"cold_start_{backend_str}.csv"
         args.isolate = True
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True

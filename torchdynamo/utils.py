@@ -6,9 +6,10 @@ import functools
 import gc
 import inspect
 import itertools
-import logging
+import logging.config
 import math
 import operator
+import os
 import re
 import sys
 import time
@@ -33,6 +34,40 @@ counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
 )
+
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "formatters": {
+        "torchdynamo_format": {"format": "%(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "torchdynamo_console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "torchdynamo_format",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "torchdynamo": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+        "torchinductor": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+    },
+}
+
+
+@functools.lru_cache(None)
+def init_logging():
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        logging.config.dictConfig(LOGGING_CONFIG)
 
 
 def count_calls(g: fx.Graph):
@@ -74,13 +109,14 @@ class ExactWeakKeyDictionary:
         self.values[idx] = value
 
     def _remove_id(self, idx):
-        if idx in self.refs:
+        if idx in self.values:
             del self.values[idx]
+        if idx in self.refs:
             del self.refs[idx]
 
     def clear(self):
-        self.values.clear()
         self.refs.clear()
+        self.values.clear()
 
 
 def istype(obj, allowed_types):
@@ -219,6 +255,13 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
+    if isinstance(example_inputs, dict):
+        res = dict(example_inputs)
+        for key, value in res.items():
+            assert isinstance(value, torch.Tensor)
+            res[key] = clone_input(value)
+        return res
+
     res = list(example_inputs)
     for i in range(len(res)):
         if isinstance(res[i], torch.Tensor):

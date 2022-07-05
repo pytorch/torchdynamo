@@ -2,6 +2,7 @@ from . import allowed_functions
 from . import convert_frame
 from . import resume_execution
 from .eval_frame import disable
+from .eval_frame import export
 from .eval_frame import optimize
 from .eval_frame import optimize_assert
 from .eval_frame import reset_code
@@ -13,6 +14,7 @@ from .utils import orig_code_map
 __all__ = [
     "optimize",
     "optimize_assert",
+    "export",
     "run",
     "disable",
     "reset",

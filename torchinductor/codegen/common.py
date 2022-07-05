@@ -331,6 +331,8 @@ class KernelArgs:
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
+        if name.startswith("seed"):
+            return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
@@ -346,6 +348,9 @@ class KernelArgs:
         self.inplace_buffers[output_name] = buf
 
     def size(self, name):
+        if str(name) == "seed":
+            self.sizevars["seed"] = "seed"
+            return "seed"
         return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):

@@ -65,8 +65,8 @@ def cpp_prefix():
             #include <cstdlib>
             #include <iostream>
             #include <limits>
-            #define SLEEF_ENABLE_OMP_SIMD
-            //#include <sleef.h>
+            #include <random>
+            #include <omp.h>
 
             template<typename T>
             inline T mod(T a, T b) { return a % b; }
@@ -74,6 +74,12 @@ def cpp_prefix():
             inline float mod(float a, float b) { return std::fmod(a, b); }
             template<>
             inline double mod(double a, double b) { return std::fmod(a, b); }
+
+            float rand_cpu(unsigned int seed) {
+                static thread_local std::mt19937 gen(seed ^ omp_get_thread_num());
+                static_assert(std::mt19937::min() == 0);
+                return gen() * static_cast<float>(1.0 / (std::mt19937::max() + 1.0));
+            }
             """
         ),
         "h",
@@ -111,6 +117,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def abs(x):
         return f"std::abs({x})"
+
+    @staticmethod
+    def sin(x):
+        return f"std::sin({x})"
+
+    @staticmethod
+    def cos(x):
+        return f"std::cos({x})"
 
     @staticmethod
     def exp(x):
@@ -199,6 +213,10 @@ class CppOverrides(OpOverrides):
     def and_(a, b):
         return f"{a} && {b}"
 
+    @staticmethod
+    def rand_cpu(seed: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(rand_cpu({seed}));"
+
 
 class CppKernel(Kernel):
     overrides = CppOverrides
@@ -232,6 +250,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
+                # Note atomic_ref requires C++20 and certain processor features
                 self.stores.writeline(
                     name,
                     "static_assert(std::atomic_ref<"
@@ -282,7 +301,7 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
         if threads < 1:
-            threads = multiprocessing.cpu_count()
+            threads = multiprocessing.cpu_count() // 2
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -390,17 +409,6 @@ class CppScheduling:
 
     def codegen(self, *groups):
         group, reduction_group = groups
-
-        def check_group1(other_node):
-            other_groups = other_node.group
-            return (
-                check_group2(other_node)
-                or other_groups == groups
-                or other_groups == (group + reduction_group, ())
-            )
-
-        def check_group2(other_node):
-            return other_node.group == (group, ())
 
         kernel_group = self.kernel_group
         scheduler = self.scheduler

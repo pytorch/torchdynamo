@@ -35,6 +35,7 @@ from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
 from .utils import guard_failures
+from .utils import init_logging
 from .utils import is_namedtuple
 from .utils import istype
 from .utils import orig_code_map
@@ -197,8 +198,10 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def convert_frame_assert(compiler_fn: Callable, one_graph=True):
+def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
     """Fully convert a frame into an FX graph"""
+    init_logging()
+
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
@@ -243,13 +246,15 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
             def format_guard_failures(code):
-                return f"{str(guard_failures[code])}"
+                # For the common case, it's sufficient to see just the most recent failure.
+                # We could add a verbose mode if needed
+                return f"{str(guard_failures[code][-1])}"
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torchdynamo hit recompilation cache limit ({config.cache_size_limit}) "
-                f"for function {format_func_info(code)}, "
-                f"due to the following guard failures: {format_guard_failures(code)}"
+                f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
+                f"   function: {format_func_info(code)}\n"
+                f"   reasons:  {format_guard_failures(code)}\n"
                 f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
@@ -310,16 +315,23 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
                 print("MODIFIED BYTECODE")
                 # print(dis.Bytecode(code).info())
                 print(dis.Bytecode(code).dis())
-                print("\nGUARDS:")
-                for guard in sorted(output.guards):
-                    print(" -", str(guard))
-                print()
+
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             check_fn = CheckFunctionManager(
                 output.guards, frame.f_locals, frame.f_globals
             )
-            return GuardedCode(code, check_fn.check_fn)
+            guarded_code = GuardedCode(code, check_fn.check_fn)
+            if config.debug:
+                print("\nGUARDS:")
+                for guard in sorted(output.guards):
+                    print(" -", str(guard))
+                print()
+
+            if guard_export_fn is not None:
+                guard_export_fn(output.guards)
+
+            return guarded_code
         except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
             if config.debug or config.trace or config.print_internal_exceptions:
                 debug_print("WONT CONVERT")
@@ -341,9 +353,9 @@ def convert_frame_assert(compiler_fn: Callable, one_graph=True):
     return wrap_convert_context(_convert_frame_assert)
 
 
-def convert_frame(compiler_fn: typing.Callable):
+def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1

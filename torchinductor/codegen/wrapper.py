@@ -62,6 +62,7 @@ class WrapperCodeGen(CodeGen):
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
+                import random
                 from torch import empty_strided, as_strided
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache
 
@@ -97,6 +98,10 @@ class WrapperCodeGen(CodeGen):
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
         with self.prefix.indent():
+            for name in V.graph.randomness_seeds:
+                self.prefix.writeline(
+                    f"torch.randint(2**31, size=(), dtype=torch.int32, out={name})"
+                )
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
 
         for name, value in V.graph.constants.items():

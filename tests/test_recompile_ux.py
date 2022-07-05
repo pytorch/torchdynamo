@@ -1,3 +1,4 @@
+#!/usr/bin/env pytest
 import unittest
 import weakref
 
@@ -100,7 +101,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         self.assertTrue(
             logs.records[0]
             .getMessage()
-            .startswith("torchdynamo hit recompilation cache limit")
+            .startswith("torchdynamo hit config.cache_size_limit")
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")

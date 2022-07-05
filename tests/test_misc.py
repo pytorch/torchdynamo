@@ -1410,6 +1410,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(
