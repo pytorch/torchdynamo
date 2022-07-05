@@ -520,7 +520,6 @@ class TritonKernel(Kernel):
         # keep track the tree from which the mask code gens
         # mask_tree = []
         # non_reshape_mask = []
-        reshape_data = False
         data_shape = None
 
         for tree in self.range_trees:
@@ -609,15 +608,14 @@ class TritonKernel(Kernel):
 
         mask =  list(map(str,(map(self.reshape_indexing, mask))))
 
-        if copy_shape is None \
-                and (len(self.range_trees) - int(self.numels[-1] == 1)) > len(mask):
-            reshape_data = True
+        dim_wo_reduction = len(self.range_trees) - int(self.numels[-1] == 1)
+        if copy_shape is None and dim_wo_reduction < len(mask):
             data_shape = self.reshape_vars(mask)
 
         if not mask:
             mask = ["None"]
 
-        return index_str, " & ".join(mask), reshape_data, data_shape
+        return index_str, " & ".join(mask), data_shape
 
     def var_ranges(self):
         return (
@@ -638,7 +636,8 @@ class TritonKernel(Kernel):
         return index.subs(dict)
     
     def reshape_vars(self, index_vars: List[sympy.Symbol]):
-        sizes = ["None"] * len(self.range_trees)
+        # if no reduction (self.numels[-1]==1), do not consider the reduction dimension
+        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
         # get prefix of range trees
         prefix_tree = [range_tree.prefix for range_tree in self.range_trees]
         # do not reshape if range tree size is 1
@@ -685,11 +684,11 @@ class TritonKernel(Kernel):
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         var = self.args.input(name)
-        index, mask, reshape_data, data_shape = self.indexing(index)
+        index, mask, data_shape = self.indexing(index)
         line = f"tl.load({var} + {index}, {mask})"
         if upcast:
             line += ".to(tl.float32)"
-        if reshape_data:
+        if data_shape is not None:
             line = f"{line}{data_shape}"
 
         if self.inside_reduction and "rmask" not in mask:
@@ -705,7 +704,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask, _, _ = self.indexing(index, value)
+        index, mask, _ = self.indexing(index, value)
         if mode is None:
             line = f"tl.store({var} + {index}, {value}, {mask})"
         elif mode == "atomic_add":
@@ -760,7 +759,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        index, mask, _, _ = self.indexing(index, result_var)
+        index, mask, _= self.indexing(index, result_var)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
