@@ -50,7 +50,7 @@ We can see TorchDynamo speeding up Python execution quite a bit, even on regular
 
 ## Caching and Guards Overview
 
-TorchDynamo operates through caching modified (by TorchDynamo) user bytecode. When we receive a frame for evaluation, we check if the **objects referenced in the frame have changed** in certain ways, and if not, we read the previously (or already) modified user bytecode to evaluate it.  The detail of how we do this will be saved for a later writeup. Instead, we will focus on how we can identify wether or not the **objects referenced in the frame have changed**. This is a critical piece of functionality in TorchDynamo, because it drives the entire invalidation lifecycle. We refer to this functionality as **guards**.
+TorchDynamo operates through caching transformed (by TorchDynamo) user bytecode. When we receive a frame for evaluation, we check if the **objects referenced in the frame have changed** in certain ways, and if not, we read the previously transformed user bytecode to evaluate it.  The details of how we do this will be saved for a later writeup. Instead, we will focus on how we can identify whether or not the **objects referenced in the frame have changed**. This is a critical piece of functionality in TorchDynamo, because it drives the entire invalidation lifecycle. We refer to this functionality as **guards**.
 
 At a very high level, the vastly oversimplified TLDR flow is this:
 
@@ -58,7 +58,7 @@ At a very high level, the vastly oversimplified TLDR flow is this:
 2) We convert the given frame from (1), passing it through instruction translation
 3) For the objects captured in (2), we create tracking objects that are (a) tracked on an output graph, which is an internal specialization of a torch.fx.Tracer (and the topic of a later writeup), and (b) guards, the topic of this document.
 4) We process the guard objects created in (3), turning them into a generated python function, check_fn, associated with a piece of code.
-5) The check_fn is evaluated whenever we encounter this code a subsequent time - if a check_fn passes and evaluates to True, we know the code in the cache and the code encountered here is the same, and can be safely used. If it fails and evaluates to False, we know the code in the cache is not valid, and can be thrown out in favor of a new entry.
+5) The check_fn is evaluated whenever we encounter this code a subsequent time - if a check_fn passes and evaluates to True, we know the code in the cache and the code encountered here is the same, and can be safely used. If it fails and evaluates to False, we know the code in the cache is not valid, and can be thrown out in favor of a new entry, through recompilation or a graph break. 
 
 ## Python Frame Evaluation and PEP 523
 
@@ -84,8 +84,8 @@ So, what does this function do?
 Top to bottom, we:
 
 1) Check if we have seen this `code`(see: f_code here https://docs.python.org/3/library/inspect.html) before, and exit early if we have
-2) Check if the code we are looking at is a tricky case we have not added support for yet (The detail of what happens when we skip a frame is a bit out of scope of this writeup, but a later writeup around unimplemented, eager fallback vs whole graph capture, and more of that is planned for later)
-3) We check if the `cache_size` (second arg above) crosses the limit defined in our config , `cache_size_limit`. If it has, we drop the frame and log out some warnings. This helps us avoid constant recompilation of a frame as it generally means that the frame is hot in an unexpected way, and caching it is producing needless overhead, as it is likely to get blown away the next time we encounter it anyway.
+2) Check if the code we are looking at is a tricky case we have not added support for yet (The detail of what happens when we skip a frame is a bit out of scope of this writeup, but will be the focus of a later writeup around unimplemented, eager fallback vs whole graph capture)
+3) We check if the `cache_size` (second arg above) crosses the limit defined in our config , `cache_size_limit`. If it has, we drop the frame and log out some warnings. This helps us avoid constant recompilation of a frame as it generally means that the frame is hot in an unexpected way, and caching it is producing needless overhead, as it is likely to get evicted the next time we encounter it anyway.
 4) We pass the frame, alongside a function that creates an `InstructionTranslator` (more on this later) through bytecode transformation, via `transform_code_object`. A few crucial things happen under the hood here:
     1)  We produce new code through `transform_code_object`
 
@@ -95,7 +95,7 @@ Top to bottom, we:
 
     4) We produce `output_instructions` and store them on `output` above (a bit out of scope for this document)
 
-    5) We  and map the newly produced transformed code to the initial code we read off the frame. (This mapping is worth remembering, we will refer to it much later on below where we cover guard failures).
+    5) We map the newly produced transformed code to the initial code we read off the frame. (This mapping is worth remembering, we will refer to it much later on below where we cover guard failures).
 
 5) Using the transformed code from 4.1 above, and the guards from 4.3 above, we produce a GuardedCode.
 
@@ -112,7 +112,7 @@ self.symbolic_locals = collections.OrderedDict(
     if k in f_locals
 )
 ```
-We will get to how this works later, from a few other examples that lead us to understanding `VariableTracker` and `VariableBuilder`. The important component here, for us, for now, is the invocation of a call onto `VariableBuilder`. `VariableBuilder`'s call implementation proxies into a function called `_wrap`, which in turn both constructs instances of `VariableTracker` and  calls `make_guards` on them. More on that later.
+We will get to how this works later, from a few other examples that lead us to understanding `VariableTracker` and `VariableBuilder`. The important component here, for us, for now, is the invocation of a call into `VariableBuilder`. `VariableBuilder`'s call implementation proxies into a function called `_wrap`, which in turn both constructs instances of `VariableTracker` and  calls `make_guards` on them. More on that later.
 
 This mapping, in turn, is critical as each Variable has associated guards, which are then passed to `self.output`, the instance of `OutputGraph`, an fx tracer, mentioned in 4.2 of the section above. If you recall, this `OutputGraph`, stored in a variable called `output` is where our guards are stored before being passed on to become `GuardedCode`
 
@@ -177,7 +177,7 @@ Knowing what we know now, we can see an example of how an instruction from `dis`
 > BUILD_TUPLE(count)
 Creates a tuple consuming count items from the stack, and pushes the resulting tuple onto the stack.
 
-In our case, our signature will be a *little* different due to the way we create `Instruction` objects, but the gist of it will be the same. Instead of passing in `count`, we pass in an object with a little extra bookeeping, and of course, we deal with turning regular old python objects into TorchDynamo notions:
+In our case, our signature will be a *little* different due to the way we create `Instruction` objects, but the gist of it will be the same. Instead of passing in `count`, we pass in an object with a little extra bookkeeping, and of course, we deal with turning regular old python objects into TorchDynamo notions:
 
 ```
 def BUILD_TUPLE(self, inst):
@@ -199,14 +199,14 @@ What is happening here?
 
 4) We then make a new instance of a `VariableTracker`, `TupleVariable`out of the `items` and `options`. This then allows us to install all the appropriate guards from the `items` that make up the new `TupleVariable`
 
-Note: You may wonder - where the did the first guards come from? Propagation is good and all, but don't we need something created before it can be propagated. Yes! Remember that `VariableBuilder` above? It calls `make_guards` as it creates `VariableTracker` instances, from `f_locals`. This in turn calls into the `source`, to have it create guards.
+Note: You may wonder - where did the first guards come from? Propagation is good and all, but don't we need something created before it can be propagated. Yes! Remember that `VariableBuilder` above? It calls `make_guards` as it creates `VariableTracker` instances, from `f_locals`. This in turn calls into the `source`, to have it create guards.
 
 After all this, bytecode translation is done and we are one step closer to producing `GuardedCode`. We now understand how locals become `VariableTracker`s, how instructions are handled, and where guards are called on for creation. Before we can go into seeing how code and guards are combined into a GuardedCode object, we need to dig a little bit into those `make_guard` and `source.create_guard` calls above. We can then understand, really, what was going on when we made guards alongside, and on, `VariableTracker` instances.
 
 ## Making Guards
 Guards are just python objects, of the class `Guard`, however, theres a good amount of detail around this little class.
 
-Looking at the definition of the dataclass (and therefor, ctor signature), we see that it has a name, a source, and a create function.
+Looking at the definition of the dataclass (and therefore, ctor signature), we see that it has a name, a source, and a create function.
 ```
 @dataclasses.dataclass
 class Guard:
@@ -219,9 +219,9 @@ The name should be the name of the variable.
 
 The source here is an enum indicating what *kind* of source the guard belongs to [Note: not to be confused with `Source` and the other types in source.py, as stored on `VariableTracker`, as discussed above]
 
-And create_fn is the heart of how we go from having this simple dataclass to actually producing valid python code to be invoked for knowing wether or not things have changed in between invocations, and wether we can safely read from the code cache or not (In case you forgot what all this was for!)
+And create_fn is the heart of how we go from having this simple dataclass to actually producing valid python code to be invoked for knowing whether or not things have changed in between invocations, and whether we can safely read from the code cache or not (In case you forgot what all this was for!)
 
-The most common codepaths for getting an instance of a guard are through `make_guards` on `VariableTracker`. `make_guards`->`source.create_guard`->`return Guard(self.name(), self.guard_source(), fn)`
+The most common code paths for getting an instance of a guard are through `make_guards` on `VariableTracker`. `make_guards`->`source.create_guard`->`return Guard(self.name(), self.guard_source(), fn)`
 
 Or, in a concrete example:
 
@@ -236,7 +236,7 @@ Since `source` was set at the construction time of this `VariableTracker`, all t
 
 This `create_fn` must be a method on `GuardBuilder`. The reason for this becomes apparent in our next step. Once we have all the guards created for a frame, we move on to `CheckFunctionManager` and `compile_check_fn`.
 
-Remember that `convert_frame` function way above, in the first section? Before it can produce a `GuardedCode`, it needs to run the `CheckFunctionManager`, with all the guards, to produce a `check_fn` which will then, in turn get passed in alongside the code into `GuardedCode`. This is the same `check_fn` that we store in our cache entry, and the same one we run to know wether or not to retrieve the code stored alongside. For reference, here is that code:
+Remember that `convert_frame` function way above, in the first section? Before it can produce a `GuardedCode`, it needs to run the `CheckFunctionManager`, with all the guards, to produce a `check_fn` which will then, in turn get passed in alongside the code into `GuardedCode`. This is the same `check_fn` that we store in our cache entry, and the same one we run to know whether or not to retrieve the code stored alongside. For reference, here is that code:
 
 ```c
 static CacheEntry *create_cache_entry(CacheEntry *next,
@@ -293,7 +293,7 @@ If all of these are still true, then we can use the code cached alongside this `
 
 If not, then, we can move on to recompiling the code anew, and storing that in the cache alongside this code, and a whole new `check_fn`, again to be checked on yet another subsequent frame.
 
-There are lots of other such functions, on `GuardBuilder` which get coalseced into, at times massive, strings which then get evaluated as python code and stored into `check_fn`. Our example above is illustrative of a simple case, but I urge you to read the other functions on `GuardBuilder`, or better yet, dump the `code` variable in `compile_check_fn` to really see what's getting produced, especially on larger, real models!
+There are lots of other such functions on `GuardBuilder` which get coalesced into, at times massive, strings which then get evaluated as python code and stored into `check_fn`. Our example above is illustrative of a simple case, but I urge you to read the other functions on `GuardBuilder`, or better yet, dump the `code` variable in `compile_check_fn` to really see what's getting produced, especially on larger, real models!
 
 ## Recap
 
