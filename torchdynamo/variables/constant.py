@@ -82,7 +82,12 @@ class ConstantVariable(VariableTracker):
         except NotImplementedError:
             return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
 
-        if isinstance(self.value, str) and name in str.__dict__.keys():
+        if (
+            isinstance(self.value, str)
+            and name in str.__dict__.keys()
+            or isinstance(self.value, int)
+            and name in int.__dict__.keys()
+        ):
             assert not kwargs
             method = getattr(self.value, name)
             return ConstantVariable(method(*const_args, **const_kwargs), **options)

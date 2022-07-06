@@ -53,7 +53,7 @@ guard_nn_modules = False
 dynamic_propagation = True
 
 # Run the FX graph with FakeTensors
-fake_tensor_propagation = True
+fake_tensor_propagation = False
 
 # run FX normalization passes in optimizer
 normalize_ir = True
@@ -69,7 +69,7 @@ raise_on_backend_error = True
 # to inline objects from it or its children.
 skipfiles_inline_module_allowlist = {
     torch.nn,
-    torch.distributions,
+    torch.distributions
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
