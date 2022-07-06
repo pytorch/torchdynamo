@@ -22,6 +22,7 @@ from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
 from .dependencies import extract_read_writes
+from .dependencies import var_builder
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -36,6 +37,14 @@ def inverse_reorder(order):
     def reindex(index):
         assert len(index) == len(inv_order)
         return [index[inv_order[i]] for i in range(len(index))]
+
+    return reindex
+
+
+def same_reorder(order):
+    def reindex(index):
+        assert len(index) == len(order)
+        return [index[order[i]] for i in range(len(index))]
 
     return reindex
 
@@ -1327,7 +1336,7 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_reorder_and_tile(self, channel_last=False):
+    def simplify_reorder_and_tile(self, priority_addrs=[]):
         """
         This is the main place where we do loop transformations in a
         backend-agnostic way.
@@ -1350,6 +1359,21 @@ class ComputedBuffer(Buffer):
         index_formulas = [*body.indexing_exprs.values()]
         memory_addrs = [*body.reads, *body.writes]
 
+        # find the matching idx from priority_addrs in memory_addrs
+        priority_idx = []
+        if len(priority_addrs) > 0:
+            for priority_addr in priority_addrs:
+                map_dict = {
+                    k: v
+                    for k, v in zip(
+                        list(sympy.ordered(priority_addr.free_symbols)),
+                        list(sympy.ordered(args[0])),
+                    )
+                }
+                priority_addr = priority_addr.subs(map_dict)
+                if priority_addr in [*body.reads]:
+                    priority_idx.append([*body.reads].index(priority_addr))
+
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -1365,33 +1389,20 @@ class ComputedBuffer(Buffer):
                 reduce_size.append(s)
 
         def simplify_and_reorder(x_vars, sizes):
-            sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex0, reindex1 = self._apply_loop_reordering(
+                x_vars, sizes, memory_addrs, priority_idx
+            )
+            x_vars = reindex0(x_vars)
+            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
             x_vars = prune(x_vars)
-            sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
+            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            # x_vars = prune(x_vars)
+            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
 
-        def simplify_and_reorder_channel_last(x_vars, sizes):
-            # first reorder, then simply loops (otherwise dimension may be < 4)
-            sizes, reindex1, x_vars = self._apply_loop_reordering_channel_last(
-                x_vars, sizes
-            )
-            sizes, reindex2, prune = _simplify_loops(
-                x_vars, sizes, index_formulas, channel_last=True
-            )
-            x_vars = prune(x_vars)
-            reindex = fuse_reindexing(reindex1, reindex2)
-            return sizes, reindex
-
-        simplify_and_reorder_fn = (
-            simplify_and_reorder
-            if not channel_last
-            else simplify_and_reorder_channel_last
-        )
-        iter_ranges, iter_reindex = simplify_and_reorder_fn(index_vars, index_size)
-        reduce_ranges, reduce_reindex = simplify_and_reorder_fn(
-            reduce_vars, reduce_size
-        )
+        iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
+        reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
@@ -1518,7 +1529,7 @@ class ComputedBuffer(Buffer):
             return (iter_ranges,), body
 
     @staticmethod
-    def _apply_loop_reordering(index_vars, sizes, memory_addrs):
+    def _apply_loop_reordering(index_vars, sizes, memory_addrs, priority_idx=[]):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -1533,7 +1544,7 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
-            order = list(reversed(pick_loop_order(strides, sizes)))
+            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
                 log.warning(
@@ -1541,21 +1552,7 @@ class ComputedBuffer(Buffer):
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
-        return sizes, inverse_reorder(order)
-
-    @staticmethod
-    def _apply_loop_reordering_channel_last(index_vars, sizes):
-        """
-        apply channel-last loop order
-        """
-        # nchw -> nhwc
-        if len(sizes) == 4:
-            order = [0, 2, 3, 1]
-            sizes = [sizes[i] for i in order]
-            index_vars = [index_vars[i] for i in order]
-            return sizes, inverse_reorder(order), index_vars
-        else:
-            return sizes, inverse_reorder(range(len(sizes))), index_vars
+        return sizes, same_reorder(order), inverse_reorder(order)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()
@@ -2270,11 +2267,21 @@ class Convolution(ExternKernelAlloc):
         else:
             order = list(reversed(range(len(output_size))))
 
+        channels_last_order = [3, 0, 2, 1]
+        device = x.get_device()
+        if is_triton(device) and config.triton.convolution != "aten":
+            # Force the output layout of conv to be channel last
+            layout = FlexibleLayout.stride_ordered(
+                output_size,
+                channels_last_order[len(channels_last_order) - len(output_size) :],
+            )
+        else:
+            layout = FlexibleLayout.stride_ordered(output_size, order)
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            FlexibleLayout.stride_ordered(output_size, order),
+            layout,
         )
 
         if bias is not None:
@@ -2289,6 +2296,32 @@ class Convolution(ExternKernelAlloc):
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
+
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the conv output index
+        """
+        # manually generate index formula for conv
+        sizes = self.get_size()
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
+        indexer = self.make_indexer()
+        index = indexer(index_vars)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
 
     def map_args(self):
         # x, w, bias
