@@ -859,6 +859,10 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     src_loader = src.make_loader()
 
     def inner_fn(idx):
+        if start == 0 and end == dim_size and step == 1:
+            # selecting every element is the same as just src.clone()
+            return src_loader(idx)
+
         idx_dim = ops.index_expr(idx[dim], torch.int32)
         src_idx = list(idx)
         src_idx[dim] = ir.IndexingDiv(idx[dim] - start, step)
