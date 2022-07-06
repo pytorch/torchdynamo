@@ -883,6 +883,11 @@ def parse_args():
     group.add_argument(
         "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
     )
+    group.add_argument(
+        "--speedup-dynamo-ts",
+        action="store_true",
+        help="TorchDynamo frontend with torchscript backend",
+    )
     group.add_argument("--python-key", action="store_true")
     group.add_argument(
         "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
@@ -1147,6 +1152,10 @@ def main(runner, original_dir=None):
     elif args.speedup_trt:
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
+    elif args.speedup_dynamo_ts:
+        optimize_ctx = torchdynamo.optimize(backends.ts, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "speedup_dynamo_ts.csv"
     elif args.speedup_fx2trt:
         optimize_ctx = torchdynamo.optimize(
             backends.fx2trt_compiler, nopython=args.nopython
