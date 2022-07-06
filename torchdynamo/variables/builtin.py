@@ -223,7 +223,8 @@ class BuiltinVariable(VariableTracker):
                 unwrapped_kwargs.update({k: v.as_python_constant()})
         return unwrapped_args, unwrapped_kwargs
 
-    def specialize_args_kwargs(self, tx, args, kwargs):
+    @staticmethod
+    def specialize_args_kwargs(tx, args, kwargs):
         specialized_args = []
         specialized_kwargs = {}
         for x in args:
@@ -255,8 +256,11 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
+        unspec_python_args = self.unspec_python_args(*args, **kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        has_constant_handler = self.can_constant_fold_through() and constant_args
+        has_constant_handler = self.can_constant_fold_through() and (
+            constant_args or unspec_python_args
+        )
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
 
@@ -292,7 +296,6 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
-                    print("AAAAAAAAAAAAAa")
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
                     need_unwrap = any(

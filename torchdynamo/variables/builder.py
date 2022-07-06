@@ -22,8 +22,9 @@ from ..allowed_functions import is_numpy
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..side_effects import SideEffects
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource
 from ..source import GetItemSource
+from ..source import GlobalSource
 from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
@@ -106,7 +107,35 @@ class VariableBuilder:
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 20.0, 0.1, 0.5, 64, 256, 4096}
+        return {
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            20,
+            32,
+            64,
+            128,
+            256,
+            1024,
+            2048,
+            4096,
+            0.1,
+            0.5,
+        }
 
     @staticmethod
     def list_type(value):
@@ -210,26 +239,20 @@ class VariableBuilder:
             value, (torch.Size, torch.device, torch.dtype)
         ):
             if type(value) in (int, float):
-                print(">>> " + str(value))
-                print(self.source)
+                # should specialize for these conditions
                 if (
-                    float(value) in self._common_constants()
+                    value in self._common_constants()
                     or isinstance(self.source, GlobalSource)
                     or (
                         isinstance(self.source, AttrSource)
                         and isinstance(self.source.base, GlobalSource)
                     )
                 ):
-                    print("============")
                     return ConstantVariable(
                         value=value,
                         guards=make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
                 else:
-                    # return ConstantVariable(
-                    #     value=value,
-                    #     guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-                    # )
                     return self.wrap_unspecialized_primitive(value)
             else:
                 return ConstantVariable(
@@ -379,15 +402,12 @@ class VariableBuilder:
             options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
         else:
             options = {}
+        options.update({"source": self.get_source()})
+        options.update({"raw_value": value})
 
         proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
         )
-        # print("source = " + str(self.get_source()))
-        options.update({"source": self.get_source()})
-        options.update({"raw_value": value})
-
-        # print(options)
 
         if isinstance(value, np.number):
             return UnspecializedNumpyVariable.create(

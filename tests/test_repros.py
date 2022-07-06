@@ -914,9 +914,9 @@ class ReproTests(torchdynamo.testing.TestCase):
             for _ in range(10):
                 self.assertTrue(same(model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(4, 3))
+        self.assertEqual(cnt.frame_count, ifdyn(5, 3))
         # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (33, 32, 26, 25))
+        self.assertIn(cnt.op_count, (36, 35, 26, 25))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
