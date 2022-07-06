@@ -242,8 +242,6 @@ def bench(layer_params, layer_id, p, fusion_types=[""]):
         else:
             conv_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
             conv = getattr(Func, f"conv_{fusion_type}")
-        print(conv.__name__)
-        print(conv_torchinductor.__name__)
 
         if "add" in fusion_type:
             bias = torch.randn((KERNEL_N,), dtype=dtype, device="cuda")
