@@ -186,6 +186,19 @@ class TritonTemplateKernel(TritonKernel):
                         )
                     """
                 )
+        if isinstance(self.node, ir.MatrixMultiply):
+            M = self.args_dict["M"]
+            N = self.args_dict["N"]
+            with code.indent():
+                code.splice(
+                    f"""
+                    def grid_{name}(META):
+                        return (
+                            triton.cdiv({M}, META["BLOCK_M"]),
+                            triton.cdiv({N}, META["BLOCK_N"]),
+                        )
+                    """
+                )
         return code.getvalue()
 
     def call_kernel(self, wrapper, name: str):
@@ -212,13 +225,13 @@ def template_codegen(scheduler, scheduler_node):
     scheduler_node: ExternKernelSchedulerNode
     """
     wrapper = V.graph.wrapper_code
-    deivce, group = scheduler_node.group
+    deivce, groups = scheduler_node.group
 
     reschedule = []
     fuse = False
     could_remove_kernel_buf = False
     fusable_nodes = []
-    with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *group)) as kernel:
+    with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *groups)) as kernel:
         # map const args/ shape/ strides to kernel args
         kernel.map_args()
         # set self.args name to match the TritonTemplateKernel's args names
@@ -227,46 +240,38 @@ def template_codegen(scheduler, scheduler_node):
         scheduler_node.update_dep_type()
         # mark node of TritonTemplateKernel as fusable and update fusable_deps
         scheduler_node.mark_fusable()
-        # enqueue any nodes that became runable after this node is run
-        # otherwise, relu after conv is in blocked_nodes that could not be in
-        # runable_groups to be fused to conv
-        # scheduler.barrier()
-        tile1, tile2, _ = group
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
         if isinstance(kernel.node, ir.Convolution):
-            # Add pointwise with compatible dimensions
-            for node in scheduler.pop_group(
-                (tile1 * tile2, sympy.Integer(1)),
-            ):
-                # if not channel_last layout (data.get_stride()[1] != 1),
-                # reorder node loop ordering to channel last
-                # so that it could be fused with convolution and
-                # have correct results of split_and_set_ranges()
-                # if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
-                #     node.reorder_channel_last()
-                # make sure we force the reads of conv are channel_last layout
-                if len(node.node.get_size()) == 4:
-                    assert node.node.get_stride()[1] == 1
-                try:
-                    node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                    node.mark_fusable()
-                    fuse = True
-                    fusable_nodes.append(node)
-                    # if node.output buffer has the same stride/size as kernel output buffer
-                    # replace kernel output buffer name as node.output buffer
-                    could_remove_kernel_buf = True
-                except CantSplit:
-                    reschedule.append(node)
-                    # if (
-                    #     len(node.node.get_size()) == 4
-                    #     and node.node.get_stride()[1] != 1
-                    # ):
-                    #     node.re_simplify_reorder_and_tile()
-        else:
-            for node in scheduler.pop_group(group):
-                # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
-                node.run(*kernel.set_ranges(*node.get_ranges()))
+            tile1, tile2, _ = groups
+            fusable_group = tile1 * tile2
+        elif isinstance(kernel.node, ir.MatrixMultiply):
+            group, reduction_group = groups
+            fusable_group = group * reduction_group
+
+        # Add pointwise with compatible dimensions
+        for node in scheduler.pop_group(
+            (fusable_group, sympy.Integer(1)),
+        ):
+            # make sure we force the reads of conv are channel_last layout
+            if len(node.node.get_size()) == 4:
+                assert node.node.get_stride()[1] == 1
+            try:
+                node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                 node.mark_fusable()
+                fuse = True
+                fusable_nodes.append(node)
+                # if node.output buffer has the same stride/size as kernel output buffer
+                # replace kernel output buffer name as node.output buffer
+                could_remove_kernel_buf = True
+            except CantSplit:
+                reschedule.append(node)
+                
+
+        # else:
+        #     for node in scheduler.pop_group(group):
+        #         # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
+        #         node.run(*kernel.set_ranges(*node.get_ranges()))
+        #         node.mark_fusable()
 
         # TODO: reduction
 
