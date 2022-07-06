@@ -214,13 +214,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def is_supported_random(self):
+        try:
+            return self.value in self._supported_random_functions()
+        except TypeError:
+            # TypeError: unhashable type
+            return False
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import VariableBuilder
 
         if (
-            self.value in self._supported_random_functions()
+            self.is_supported_random()
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):

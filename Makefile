@@ -16,10 +16,10 @@ test: develop
 	pytest tests
 
 torchbench: develop
-	python torchbench.py --fast
+	python benchmarks/torchbench.py --fast
 
 overhead: develop
-	python torchbench.py --overhead
+	python benchmarks/torchbench.py --overhead
 
 format:
 	isort $(PY_FILES)
@@ -44,9 +44,8 @@ setup:
 
 setup_nightly:
 	pip install ninja
-	pip install Jinja2
-	pip install --pre torch==1.13.0.dev20220626+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install -v git+https://github.com/pytorch/functorch.git@0022325a700ed00022c812a549050
+	pip install --pre torch==1.13.0.dev20220701+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v git+https://github.com/pytorch/functorch.git@6dfa19e61e27012be87c49a249633a58f0cdd024
 	pip install -r requirements.txt
 	python setup.py develop
 
@@ -76,10 +75,10 @@ pull-deps:
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo
-	# conda create --name torchdynamo python=3.8
+	# conda create --name torchdynamo -y python=3.8
 	# conda activate torchdynamo
-	conda install -y astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake \
-        cffi typing_extensions future six requests dataclasses protobuf numba
+	conda install -y astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
+        cffi typing_extensions future six requests dataclasses protobuf numba cython
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 
@@ -95,86 +94,86 @@ build-deps: clone-deps
 
 offline-autotune-cpu: develop
 	rm -rf subgraphs
-	python torchbench.py --offline-autotune -n3
+	python benchmarks/torchbench.py --offline-autotune -n3
 	python autotune.py
-	python torchbench.py --offline-autotune -n50
+	python benchmarks/torchbench.py --offline-autotune -n50
 
 offline-autotune-gpu: develop
 	rm -rf subgraphs
-	python torchbench.py --nvfuser -d cuda --offline-autotune -n3
+	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n3
 	python autotune.py --nvfuser
-	python torchbench.py --nvfuser -d cuda --offline-autotune -n100
+	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n100
 
 online-autotune-cpu: develop
-	python torchbench.py --online-autotune -n50
+	python benchmarks/torchbench.py --online-autotune -n50
 
 online-autotune-gpu: develop
-	python torchbench.py --nvfuser -d cuda --online-autotune -n100
+	python benchmarks/torchbench.py --nvfuser -d cuda --online-autotune -n100
 
 fixed1-gpu: develop
-	python torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
+	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
 
 fixed2-gpu: develop
-	python torchbench.py --nvfuser -d cuda --speedup-fixed2 -n100
+	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed2 -n100
 
 baseline-cpu: develop
 	 rm -f baseline_*.csv
-	 python torchbench.py --isolate -n50 --overhead
-	 python torchbench.py --isolate -n50 --speedup-ts
-	 python torchbench.py --isolate -n50 --speedup-sr
-	 python torchbench.py --isolate -n50 --speedup-onnx
+	 python benchmarks/torchbench.py --isolate -n50 --overhead
+	 python benchmarks/torchbench.py --isolate -n50 --speedup-ts
+	 python benchmarks/torchbench.py --isolate -n50 --speedup-sr
+	 python benchmarks/torchbench.py --isolate -n50 --speedup-onnx
 	 paste -d, baseline_ts.csv baseline_sr.csv baseline_onnx.csv > baseline_all.csv
 
 baseline-gpu: develop
 	 rm -f baseline_*.csv
-	 python torchbench.py -dcuda --isolate -n100 --overhead
-	 python torchbench.py -dcuda --isolate -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
-	 python torchbench.py -dcuda --isolate -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
-	 python torchbench.py -dcuda --isolate -n100 --speedup-trt
-	 python torchbench.py -dcuda --isolate -n100 --speedup-onnx
+	 python benchmarks/torchbench.py -dcuda --isolate -n100 --overhead
+	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
+	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
+	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-trt
+	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-onnx
 	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
 
 gpu-inductor-cudagraphs-fp32: develop
 	rm -f inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv inductor_gpu_cudagraphs_fp32.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs
 	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser
 	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts
 	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs_fp32.csv
 
 gpu-inductor-cudagraphs-fp16: develop
 	rm -f inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv inductor_gpu_cudagraphs_fp16.csv
-	python torchbench.py -dcuda --inductor-settings --float16 -n50 --inductor
-	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float16 -n50 --inductor
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs
 	mv speedup_cudagraphs.csv baseline_cudagraphs.csv
-	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts --nvfuser
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts --nvfuser
 	mv speedup_cudagraphs_ts.csv baseline_cg_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float16 -n50 --backend=cudagraphs_ts
 	mv speedup_cudagraphs_ts.csv baseline_cg_nnc.csv
 	paste -d, inductor.csv baseline_cudagraphs.csv baseline_cg_nvfuser.csv baseline_cg_nnc.csv > inductor_gpu_cudagraphs_fp16.csv
 
 gpu-inductor-dynamic: develop
 	rm -f inductor.csv baseline_nvfuser.csv baseline_nnc.csv inductor_gpu_dynamic.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor-dynamic
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts --nvfuser
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor-dynamic
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts --nvfuser
 	mv speedup_ts.csv baseline_nvfuser.csv
-	python torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts
+	python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --backend=ts
 	mv speedup_ts.csv baseline_nnc.csv
 	paste -d, inductor.csv baseline_nvfuser.csv baseline_nnc.csv > inductor_gpu_dynamic.csv
 
 cpu-inductor: develop
-	rm -f inductor.csv speedup_ts.csv cpu_8t_inductor.csv
-	python torchbench.py --inductor-settings --fast --inductor --threads=8
-	python torchbench.py --inductor-settings --fast --backend=ts --threads=8
-	paste -d, inductor.csv speedup_ts.csv > cpu_8t_inductor.csv
+	rm -f inductor.csv speedup_ts.csv cpu_mt_inductor.csv
+	python torchbench.py --inductor-settings --fast --inductor
+	python torchbench.py --inductor-settings --fast --backend=ts
+	paste -d, inductor.csv speedup_ts.csv > cpu_mt_inductor.csv
 
 cpu-inductor-seq: develop
 	rm -f inductor.csv speedup_ts.csv cpu_1t_inductor.csv
-	taskset 1 python torchbench.py --inductor-settings --fast --inductor --threads=1
-	taskset 1 python torchbench.py --inductor-settings --fast --backend=ts --threads=1
+	taskset 1 python benchmarks/torchbench.py --inductor-settings --fast --inductor --threads=1
+	taskset 1 python benchmarks/torchbench.py --inductor-settings --fast --backend=ts --threads=1
 	paste -d, inductor.csv speedup_ts.csv > cpu_1t_inductor.csv
 
 
