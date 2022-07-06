@@ -22,7 +22,7 @@ from ..allowed_functions import is_numpy
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..side_effects import SideEffects
-from ..source import AttrSource
+from ..source import AttrSource, GlobalSource
 from ..source import GetItemSource
 from ..source import RandomValueSource
 from ..source import Source
@@ -211,13 +211,25 @@ class VariableBuilder:
         ):
             if type(value) in (int, float):
                 print(">>> " + str(value))
-                if float(value) in self._common_constants():
+                print(self.source)
+                if (
+                    float(value) in self._common_constants()
+                    or isinstance(self.source, GlobalSource)
+                    or (
+                        isinstance(self.source, AttrSource)
+                        and isinstance(self.source.base, GlobalSource)
+                    )
+                ):
                     print("============")
                     return ConstantVariable(
                         value=value,
                         guards=make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
                 else:
+                    # return ConstantVariable(
+                    #     value=value,
+                    #     guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                    # )
                     return self.wrap_unspecialized_primitive(value)
             else:
                 return ConstantVariable(

@@ -292,6 +292,7 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
+                    print("AAAAAAAAAAAAAa")
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
                     need_unwrap = any(
@@ -338,6 +339,7 @@ class BuiltinVariable(VariableTracker):
                 exc.remove_from_stats()
 
         if has_constant_handler:
+            args, kwargs = self.specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return variables.ConstantVariable(
                 self.as_python_constant()(
