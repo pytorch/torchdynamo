@@ -226,42 +226,6 @@ class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
         super(HuggingfaceRunner, self).__init__()
 
-    @property
-    def skip_models(self):
-        return set()
-
-    @property
-    def slow_models(self):
-        return set()
-
-    @property
-    def very_slow_models(self):
-        return set()
-
-    @property
-    def non_deterministic_models(self):
-        return set()
-
-    @property
-    def skip_not_suitable_for_training_models(self):
-        return set()
-
-    @property
-    def failing_python_key_models(self):
-        return set()
-
-    @property
-    def failing_torchinductor_models(self):
-        return set()
-
-    @property
-    def failing_fx2trt_models(self):
-        return set()
-
-    @property
-    def failing_dynamic_shape_models(self):
-        return set()
-
     def load_model(self, device, model_name, is_training, use_eval_mode):
         dtype = torch.float32
         config, model_cls, input_fn = ALL_MODELS[model_name]
@@ -315,7 +279,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
-    def set_tolerance(self, is_training, current_device, name):
+    def get_tolerance(self, is_training, current_device, name):
         return 1e-3
 
     def compute_loss(self, pred):
@@ -329,9 +293,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)
-        pred = mod(**cloned_inputs)
-        loss = self.compute_loss(pred)
-        loss.backward()
+        with self.autocast():
+            pred = mod(**cloned_inputs)
+            loss = self.compute_loss(pred)
+        self.grad_scaler.scale(loss).backward()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None

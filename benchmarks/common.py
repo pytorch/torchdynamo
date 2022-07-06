@@ -572,12 +572,72 @@ def cast_to_fp32(model, inputs):
     return model, inputs
 
 
+class DummyGradScaler:
+    def scale(self, loss):
+        return loss
+
+
 class BenchmarkRunner:
+    def __init__(self):
+        self.use_amp = False
+        self.grad_scaler = DummyGradScaler()
+        self.autocast = NullContext
+        self._args = None
+
+    def setup_amp(self):
+        if self.args.amp and self.args.training:
+            assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
+            self.grad_scaler = torch.cuda.amp.GradScaler()
+            self.autocast = torch.cuda.amp.autocast
+            # TODO - Debug whats going wrong with the numerics
+            self.args.cosine = True
+
+    @property
+    def args(self):
+        return self._args
+
+    @args.setter
+    def args(self, args):
+        self._args = args
+
+    @property
+    def skip_models(self):
+        return set()
+
+    @property
+    def slow_models(self):
+        return set()
+
+    @property
+    def very_slow_models(self):
+        return set()
+
     @property
     def non_deterministic_models(self):
         return set()
 
-    def set_tolerance(self, is_training, current_device, name):
+    @property
+    def skip_not_suitable_for_training_models(self):
+        return set()
+
+    @property
+    def failing_python_key_models(self):
+        return set()
+
+    @property
+    def failing_torchinductor_models(self):
+        return set()
+
+    @property
+    def failing_fx2trt_models(self):
+        return set()
+
+    @property
+    def failing_dynamic_shape_models(self):
+        return set()
+
+    @property
+    def get_tolerance(self, is_training, current_device, name):
         raise NotImplementedError()
 
     def run_one_model(
@@ -593,7 +653,7 @@ class BenchmarkRunner:
         skip_accuracy_check=False,
     ):
         t0 = time.perf_counter()
-        tolerance = self.set_tolerance(is_training, current_device, name)
+        tolerance = self.get_tolerance(is_training, current_device, name)
         with self.pick_grad(name, is_training):
             mode = "train" if is_training else "eval"
             sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
@@ -710,6 +770,9 @@ def parse_args():
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
     parser.add_argument("--float32", action="store_true", help="cast model to fp32")
+    parser.add_argument(
+        "--amp", action="store_true", help="use automatic mixed precision"
+    )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
@@ -879,6 +942,9 @@ def parse_args():
 def main(runner, original_dir=None):
     args = parse_args()
 
+    # Pass the parsed args object to benchmark runner object
+    runner.args = args
+
     # defaults
     args.devices = args.devices or ["cpu"]
     args.filter = args.filter or [r"."]
@@ -962,6 +1028,7 @@ def main(runner, original_dir=None):
                 "timm_efficientdet",
                 "pyhpc_isoneutral_mixing",
                 "pyhpc_turbulent_kinetic_energy",
+                "shufflenet_v2_x1_0",
             }
         )
 
@@ -1136,6 +1203,8 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    runner.setup_amp()
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 

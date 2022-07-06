@@ -698,8 +698,8 @@ def tvm_compile_inner(
                     target=target,
                     config=TuneConfig(
                         strategy="evolutionary",
-                        num_trials_per_iter=32,
-                        max_trials_per_task=32,
+                        num_trials_per_iter=64,
+                        max_trials_per_task=trials,
                         max_trials_global=trials,
                     ),
                     work_dir=work_dir,
