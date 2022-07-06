@@ -962,6 +962,7 @@ def main(runner, original_dir=None):
                 "timm_efficientdet",
                 "pyhpc_isoneutral_mixing",
                 "pyhpc_turbulent_kinetic_energy",
+                "shufflenet_v2_x1_0",
             }
         )
 
