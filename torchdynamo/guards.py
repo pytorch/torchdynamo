@@ -117,7 +117,6 @@ class NNModuleChangeTrackerUtil:
 
     @classmethod
     def de_register_patches_on_torch_nn_module(cls):
-        torch.nn.Module = torch.nn.Module
         if hasattr(torch.nn.Module, "_dynamo_module_patch"):
             torch.nn.Module.__setattr__ = cls.original_setattr
             torch.nn.Module.load_state_dict = cls.original_load_state_dict
