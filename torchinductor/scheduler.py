@@ -548,6 +548,8 @@ class Scheduler:
         # If all the uses of this buffer are also in self.pending_buffer_names,
         # it means the buffer becomes kernel-local after fusion
         for name in self.pending_buffer_names:
+            if name in V.kernel.must_keep_buffers:
+                continue
             node = self.name_to_node[name]
             is_live = any(
                 [
