@@ -194,8 +194,8 @@ class TritonTemplateKernel(TritonKernel):
                     f"""
                     def grid_{name}(META):
                         return (
-                            triton.cdiv({M}, META["BLOCK_M"]),
-                            triton.cdiv({N}, META["BLOCK_N"]),
+                            triton.cdiv({M}, META["BLOCK_M"]) * triton.cdiv({N}, META["BLOCK_N"]),
+                            META["SPLIT_K"],
                         )
                     """
                 )

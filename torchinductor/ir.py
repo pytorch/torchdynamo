@@ -1901,6 +1901,9 @@ class MatrixMultiply(ExternKernelOut):
         )
         args_dict = OrderedDict(
             [
+                ("M", f"{self.inputs[0].get_size()[0]}"),
+                ("N", f"{self.inputs[1].get_size()[1]}"),
+                ("K", f"{self.inputs[0].get_size()[1]}"),
                 ("stride_am", f"{self.inputs[0].get_stride()[0]}"),
                 ("stride_ak", f"{self.inputs[0].get_stride()[1]}"),
                 ("stride_bk", f"{self.inputs[1].get_stride()[0]}"),
@@ -1919,6 +1922,7 @@ class MatrixMultiply(ExternKernelOut):
         # dict for tl.constexpr
         const_dict = OrderedDict(
             [
+                ("GROUP_M", "8"),
                 ("ACC_TYPE", ACC_TYPE),
             ]
         )

@@ -33,7 +33,7 @@ from triton.ops.matmul_perf_model import estimate_matmul_time
         triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},num_stages=4,num_warps=4,),
         triton.Config({"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},num_stages=4,num_warps=4,),
         triton.Config({"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},num_stages=5,num_warps=2,),
-    ]
+    ],
     # Do not allow SPLIT_K > 1, otherwise, the fusable add-pointwise kernels will be added multiple times
     # + get_configs_io_bound(),
     key=["M", "N", "K"],
@@ -44,7 +44,7 @@ from triton.ops.matmul_perf_model import estimate_matmul_time
     },
 )
 @triton.jit
-def _kernel(
+def {{kernel_name}}(
     {% for i in template_inout_argdefs %}
     {{i}},
     {% endfor %}
@@ -107,33 +107,9 @@ def _kernel(
     C_ptrs = {{out_def}} + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
     mask = (rm < M)[:, None] & (rn < N)[None, :]
 
-{# {% if pointwise_code %}
-if SPLIT_K == 1:
-{{ pointwise_code[0] | indent(4, true) }}
-    {# tl.store(xxx, acc, mask=mask) #}
-elif pid_z == 0:
-    {# only do point-wise operation once if SPLIT_K > 1 #}
-    {# 
-    acc += z
-    tl.atomic_add(z_ptrs, acc, mask = mask_z)
-    #}
-{{ pointwise_code[1] | indent(4, true) }}
-else:
-    {# if SPILT > 1 and current pid_z is not the one to do point-wise operations,
-    leave the pointwise operations done #}
-    {# tl.atomic_add(C, acc, mask=mask) #}
-{{ pointwise_code[2] | indent(4, true) }}
-{% else %}
-    # handles write-back with reduction-splitting
-    if SPLIT_K == 1:
-        tl.store(C, acc, mask=mask)
-    else:
-        tl.atomic_add(C, acc, mask=mask)
-{% endif %} #}
-
 {% if pointwise_code %}
 {{ pointwise_code | indent(4, true) }}
 {% else %}
     # handles write-back with reduction-splitting
-    tl.store(C, acc, mask=mask)
+    tl.store(C_ptrs, acc, mask=mask)
 {% endif %}
