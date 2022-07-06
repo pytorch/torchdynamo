@@ -145,7 +145,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return False
 
     def update_dep_type(self):
-        assert isinstance(self.node, ir.Convolution)
+        assert type(self.node) in template_kernels
         assert len(self.read_writes.writes) == 1
         write = self.read_writes.writes.pop()
         if isinstance(write, StarDep):
@@ -462,6 +462,8 @@ class Scheduler:
                 if should_use_template(node):
                     if isinstance(node, ir.Convolution):
                         group_fn = self.get_backend(node.get_device()).group_fn_NHW_C
+                    elif isinstance(node, ir.MatrixMultiply):
+                        group_fn = self.get_backend(node.get_device()).group_fn_M_N
                     else:
                         group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))

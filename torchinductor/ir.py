@@ -1758,6 +1758,32 @@ class ExternKernel(InputsKernel):
         # iter_ranges = _size of output tensor, reduce_range = [] because no reduction
         return [_size, []], _stride
 
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the output index
+        """
+        # manually generate index formula for conv
+        sizes = self.get_size()
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
+        indexer = self.make_indexer()
+        index = indexer(index_vars)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
+
 
 @dataclasses.dataclass
 class ExternKernelOut(ExternKernel):
@@ -1891,7 +1917,7 @@ class MatrixMultiply(ExternKernelOut):
     def map_args(self):
         # a, b
         in_args = [x.codegen_reference() for x in self.inputs]
-        const_args = self.constant_args
+        # const_args = self.constant_args
         inout_dict = OrderedDict(
             [
                 ("A", f"{in_args[0]}"),
@@ -2339,31 +2365,6 @@ class Convolution(ExternKernelAlloc):
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
 
-    def canonicalize(self):
-        """
-        Manually get cononicalization of the conv output index
-        """
-        # manually generate index formula for conv
-        sizes = self.get_size()
-        strides = self.get_stride()
-        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
-        # reorder index vars according to stride
-        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
-        lookup = {pos: idx for idx, pos in enumerate(index_order)}
-        order = [lookup[i] for i in range(len(lookup))]
-        index_vars = [index_vars[i] for i in order]
-        indexer = self.make_indexer()
-        index = indexer(index_vars)
-
-        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
-
-        # assign new variables each dimension to deal with numbering mismatches
-        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
-        _, add_var = var_builder("c")
-        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
-
-        index = sympy.expand(index).subs(replacement)
-        return index, tuple(new_sizes)
 
     def map_args(self):
         # x, w, bias

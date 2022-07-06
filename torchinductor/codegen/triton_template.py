@@ -66,8 +66,8 @@ class TritonTemplateKernel(TritonKernel):
         # current TritonTemplateKernel args
         for (argdef, call_arg) in zip(argdefs, call_args):
             if (
-                call_arg not in self.inout_dict.values()
-                and call_arg not in self.args_dict.values()
+                argdef not in self.inout_dict.keys()
+                and argdef not in self.args_dict.keys()
             ):
                 self.extra_argdefs.append(argdef)
                 self.extra_call_args.append(call_arg)
@@ -241,12 +241,9 @@ def template_codegen(scheduler, scheduler_node):
         # mark node of TritonTemplateKernel as fusable and update fusable_deps
         scheduler_node.mark_fusable()
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
-        if isinstance(kernel.node, ir.Convolution):
+        if isinstance(kernel.node, ir.Convolution) or isinstance(kernel.node, ir.MatrixMultiply):
             tile1, tile2, _ = groups
             fusable_group = tile1 * tile2
-        elif isinstance(kernel.node, ir.MatrixMultiply):
-            group, reduction_group = groups
-            fusable_group = group * reduction_group
 
         # Add pointwise with compatible dimensions
         for node in scheduler.pop_group(

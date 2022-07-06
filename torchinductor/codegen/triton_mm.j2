@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 {# from triton.ops.matmul import get_configs_io_bound #}
 from triton.ops.matmul_perf_model import early_config_prune
-from triton.ops.matmul_perf_model import estimate_matmul_time
+from torchinductor.triton_ops.mm_perf_model import estimate_matmul_time
 
 
 @triton.heuristics(

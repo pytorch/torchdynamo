@@ -784,6 +784,15 @@ class TritonScheduling:
             else:
                 group += (V.graph.sizevars.simplify(sympy_product(s)),)
         return group
+    
+    def group_fn_M_N(self, sizes):
+        group = ()
+        for s in sizes:
+            if len(s) == 2:
+                group += (s[0],s[1])
+            else:
+                group += (V.graph.sizevars.simplify(sympy_product(s)),)
+        return group
 
     def codegen(self, *groups):
         wrapper = V.graph.wrapper_code
