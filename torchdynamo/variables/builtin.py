@@ -21,6 +21,8 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
 from ..utils import check_constant_args
+from ..utils import check_unspec_python_args
+from ..utils import specialize_args_kwargs
 from ..utils import istype
 from ..utils import proxy_args_kwargs
 from .base import MutableLocal
@@ -181,19 +183,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     def unspec_python_args(self, *args, **kwargs):
-        return all(
-            isinstance(
-                i,
-                (
-                    variables.UnspecializedPythonVariable,
-                    variables.ConstantVariable,
-                ),
-            )
-            for i in itertools.chain(args, kwargs.values())
-        ) and any(
-            isinstance(x, variables.UnspecializedPythonVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
+        return check_unspec_python_args(args, kwargs)
 
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
@@ -222,34 +212,6 @@ class BuiltinVariable(VariableTracker):
             else:
                 unwrapped_kwargs.update({k: v.as_python_constant()})
         return unwrapped_args, unwrapped_kwargs
-
-    @staticmethod
-    def specialize_args_kwargs(tx, args, kwargs):
-        specialized_args = []
-        specialized_kwargs = {}
-        for x in args:
-            if isinstance(
-                x,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                ),
-            ):
-                specialized_args.append(x.convert_to_constant(tx))
-            else:
-                specialized_args.append(x)
-        for k, v in kwargs:
-            if isinstance(
-                x,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                ),
-            ):
-                specialized_kwargs.update({k: x.convert_to_constant(tx)})
-            else:
-                specialized_kwargs.update({k: v})
-        return specialized_args, specialized_kwargs
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -342,7 +304,7 @@ class BuiltinVariable(VariableTracker):
                 exc.remove_from_stats()
 
         if has_constant_handler:
-            args, kwargs = self.specialize_args_kwargs(tx, args, kwargs)
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return variables.ConstantVariable(
                 self.as_python_constant()(
@@ -417,7 +379,7 @@ class BuiltinVariable(VariableTracker):
         if self.unspec_python_args(*args, **kwargs) or self.constant_args(
             *args, **kwargs
         ):
-            args, kwargs = self.specialize_args_kwargs(tx, args, kwargs)
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             return variables.RangeVariable(
                 value=range(
                     *[x.value for x in args],

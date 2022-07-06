@@ -110,9 +110,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        print("value = " + str(value))
-        print(truth_fn)
-        # breakpoint()
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)

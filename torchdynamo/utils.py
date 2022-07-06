@@ -414,6 +414,57 @@ def check_constant_args(args, kwargs):
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
 
+def check_unspec_python_args(args, kwargs):
+    from .variables.constant import ConstantVariable
+    from .variables.tensor import UnspecializedPythonVariable
+
+    return all(
+        isinstance(
+            i,
+            (
+                UnspecializedPythonVariable,
+                ConstantVariable,
+            ),
+        )
+        for i in itertools.chain(args, kwargs.values())
+    ) and any(
+        isinstance(x, UnspecializedPythonVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
+def specialize_args_kwargs(tx, args, kwargs):
+    from .variables.constant import ConstantVariable
+    from .variables.tensor import UnspecializedNumpyVariable
+    from .variables.tensor import UnspecializedPythonVariable
+
+    specialized_args = []
+    specialized_kwargs = {}
+    for x in args:
+        if isinstance(
+            x,
+            (
+                UnspecializedNumpyVariable,
+                UnspecializedPythonVariable,
+            ),
+        ):
+            specialized_args.append(x.convert_to_constant(tx))
+        else:
+            specialized_args.append(x)
+    for k, v in kwargs:
+        if isinstance(
+            x,
+            (
+                UnspecializedNumpyVariable,
+                UnspecializedPythonVariable,
+            ),
+        ):
+            specialized_kwargs.update({k: x.convert_to_constant(tx)})
+        else:
+            specialized_kwargs.update({k: v})
+    return specialized_args, specialized_kwargs
+
+
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
 tuple_iterator = type(iter(tuple()))

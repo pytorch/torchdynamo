@@ -112,17 +112,9 @@ class VariableBuilder:
             1,
             2,
             3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
             10,
             11,
             12,
-            13,
-            14,
             15,
             16,
             20,
@@ -243,6 +235,7 @@ class VariableBuilder:
                 if (
                     value in self._common_constants()
                     or isinstance(self.source, GlobalSource)
+                    or isinstance(self.source, GetItemSource)
                     or (
                         isinstance(self.source, AttrSource)
                         and isinstance(self.source.base, GlobalSource)
