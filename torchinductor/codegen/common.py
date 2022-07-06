@@ -332,6 +332,8 @@ class KernelArgs:
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
+        if name.startswith("seed"):
+            return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
@@ -347,6 +349,9 @@ class KernelArgs:
         self.inplace_buffers[output_name] = buf
 
     def size(self, name):
+        if str(name) == "seed":
+            self.sizevars["seed"] = "seed"
+            return "seed"
         return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):
@@ -430,12 +435,14 @@ class CSE:
         name_prefix="tmp",
         iter_buffers=None,
         store_cache=None,
+        reduction_cache=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
+        self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
 
     def invalidate(self, keep_vars: typing.Set[str]):

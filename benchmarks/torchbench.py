@@ -100,10 +100,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = {
-    "pyhpc_turbulent_kinetic_energy",
-    "pyhpc_isoneutral_mixing",
-}
+NONDETERMINISTIC = set()
 
 
 # These benchmarks took >600s on an i9-11900K CPU
@@ -157,6 +154,10 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",
+    # as_strided issue
+    "hf_Longformer",
+    # out of memory
+    "timm_efficientdet",
 }
 
 

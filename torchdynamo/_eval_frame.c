@@ -369,6 +369,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   } else {
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
+    destroy_cache_entry(extra);
     set_extra(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
