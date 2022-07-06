@@ -18,12 +18,12 @@ class Func(object):
     @torchdynamo.optimize("inductor")
     def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
-        return torch.relu(y)
+        return y
 
     # conv
     def conv(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
-        return torch.relu(y)
+        return y
 
     # conv+bias
     @torchdynamo.optimize("inductor")
@@ -40,23 +40,23 @@ class Func(object):
     @torchdynamo.optimize("inductor")
     def conv_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # relu(conv)
     def conv_relu(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # relu(conv+bias)
     @torchdynamo.optimize("inductor")
     def conv_add_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # relu(conv+bias)
     def conv_add_relu(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # bn(conv)
     @torchdynamo.optimize("inductor")
@@ -242,6 +242,8 @@ def bench(layer_params, layer_id, p, fusion_types=[""]):
         else:
             conv_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
             conv = getattr(Func, f"conv_{fusion_type}")
+        print(conv.__name__)
+        print(conv_torchinductor.__name__)
 
         if "add" in fusion_type:
             bias = torch.randn((KERNEL_N,), dtype=dtype, device="cuda")
