@@ -1888,6 +1888,44 @@ class MatrixMultiply(ExternKernelOut):
             inputs=[a, b],
         )
 
+    def map_args(self):
+        # a, b
+        in_args = [x.codegen_reference() for x in self.inputs]
+        const_args = self.constant_args
+        inout_dict = OrderedDict(
+            [
+                ("A", f"{in_args[0]}"),
+                ("B", f"{in_args[1]}"),
+                ("C", f"{self.get_name()}"),
+            ]
+        )
+        args_dict = OrderedDict(
+            [
+                ("stride_am", f"{self.inputs[0].get_stride()[0]}"),
+                ("stride_ak", f"{self.inputs[0].get_stride()[1]}"),
+                ("stride_bk", f"{self.inputs[1].get_stride()[0]}"),
+                ("stride_bn", f"{self.inputs[1].get_stride()[1]}"),
+                ("stride_cm", f"{self.get_stride()[0]}"),
+                ("stride_cn", f"{self.get_stride()[1]}"),
+            ]
+        )
+        # accumulator types
+        ACC_TYPE = (
+            "tl.float32"
+            if self.inputs[0].get_dtype()
+            in [torch.float16, torch.bfloat16, torch.float32]
+            else "tl.int32"
+        )
+        # dict for tl.constexpr
+        const_dict = OrderedDict(
+            [
+                ("ACC_TYPE", ACC_TYPE),
+            ]
+        )
+
+        other_dict = OrderedDict()
+
+        return inout_dict, args_dict, const_dict, other_dict
 
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"

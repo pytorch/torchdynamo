@@ -19,7 +19,7 @@ from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
-template_kernels = [ir.Convolution]
+template_kernels = [ir.Convolution, ir.MatrixMultiply]
 priority_loop_order_kernels = [ir.Convolution]
 
 
@@ -28,12 +28,12 @@ def cmp(a, b):
 
 
 def should_use_template(node: ir.ExternKernel):
-    return (
-        type(node) in template_kernels
-        and ir.is_triton(node.get_device())
-        # TODO(jansel): extend this to other kernels
-        and config.triton.convolution != "aten"
-    )
+    if type(node) in template_kernels and ir.is_triton(node.get_device()):
+        if isinstance(node, ir.Convolution):
+            return config.triton.convolution != "aten"
+        elif isinstance(node, ir.MatrixMultiply):
+            return config.triton.use_mm
+    return False
 
 
 class OutputNode:
