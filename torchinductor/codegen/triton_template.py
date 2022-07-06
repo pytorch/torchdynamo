@@ -11,8 +11,7 @@ from .common import IndentedBuffer
 from .triton import CantSplit
 from .triton import TritonKernel
 
-template_dict = {ir.Convolution: "triton_conv"}
-
+template_dict = {ir.Convolution: "triton_conv", ir.MatrixMultiply: "triton_mm"}
 
 class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
@@ -32,6 +31,8 @@ class TritonTemplateKernel(TritonKernel):
             self.args.output_buffers[v] = k
         if isinstance(self.node, ir.Convolution):
             self.cse.store_cache[self.inout_dict["y"]] = "acc"
+        elif isinstance(self.node, ir.MatrixMultiply):
+            self.cse.store_cache[self.inout_dict["C"]] = "acc"
 
     def assign_block_numel(self):
         code = IndentedBuffer()
@@ -42,6 +43,11 @@ class TritonTemplateKernel(TritonKernel):
                 "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_h)"
             )
             code.writeline("ynumel = KERNEL_N")
+        elif isinstance(self.node, ir.MatrixMultiply):
+            code.writeline("XBLOCK: tl.constexpr = BLOCK_M")
+            code.writeline("YBLOCK: tl.constexpr = BLOCK_N")
+            code.writeline("xnumel = M")
+            code.writeline("ynumel = N")
 
         return code
 
@@ -69,6 +75,8 @@ class TritonTemplateKernel(TritonKernel):
         if could_remove_kernel_buf:
             if isinstance(self.node, ir.Convolution):
                 self.inout_dict.pop("y")
+            elif isinstance(self.node, ir.MatrixMultiply):
+                self.inout_dict.pop("C")
         self.template_inout_argdefs = list(self.inout_dict.keys())
 
         if kernel_buf_replace_name is not None:
@@ -85,9 +93,15 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["extra_argdefs"] = self.extra_argdefs
         render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
         render_dict["out_def"] = (
-            "y" if kernel_buf_replace_name is None else kernel_buf_replace_def
+            self.out_def() if kernel_buf_replace_name is None else kernel_buf_replace_def
         )
         self.body = self.template.render(render_dict) + "\n"
+
+    def out_def(self):
+        if isinstance(self.node, ir.Convolution):
+            return "y"
+        elif isinstance(self.node, ir.MatrixMultiply):
+            return "C"
 
     def codegen_kernel(
         self,

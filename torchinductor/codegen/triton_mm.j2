@@ -107,10 +107,11 @@ def _kernel(
     C_ptrs = {{out_def}} + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
     mask = (rm < M)[:, None] & (rn < N)[None, :]
 
-{% if pointwise_code %}
+{# {% if pointwise_code %}
 if SPLIT_K == 1:
 {{ pointwise_code[0] | indent(4, true) }}
-elif pid_z == 1:
+    {# tl.store(xxx, acc, mask=mask) #}
+elif pid_z == 0:
     {# only do point-wise operation once if SPLIT_K > 1 #}
     {# 
     acc += z
@@ -128,4 +129,11 @@ else:
         tl.store(C, acc, mask=mask)
     else:
         tl.atomic_add(C, acc, mask=mask)
+{% endif %} #}
+
+{% if pointwise_code %}
+{{ pointwise_code | indent(4, true) }}
+{% else %}
+    # handles write-back with reduction-splitting
+    tl.store(C, acc, mask=mask)
 {% endif %}
