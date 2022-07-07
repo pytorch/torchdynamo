@@ -349,6 +349,25 @@ class NNModuleVariable(VariableTracker):
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
+        elif name == "_get_abs_string_index":
+            assert (
+                not kwargs
+                and len(args) == 1
+                and isinstance(args[0], variables.ConstantVariable)
+            )
+            assert type(module) in (
+                torch.nn.ModuleList,
+                torch.nn.ParameterList,
+            ), typestr(module)
+            assert self.source
+
+            len_modules = len(module)
+            idx = args[0].as_python_constant()
+            assert -len_modules <= idx < len_modules
+
+            if idx < 0:
+                idx += len_modules
+            return ConstantVariable(str(idx))
         else:
             return super().call_method(tx, name, args, kwargs)
 
