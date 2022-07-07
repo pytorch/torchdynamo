@@ -14,13 +14,11 @@ from . import config
 from . import dependencies
 from . import ir
 from .codegen.triton_template import template_codegen
-from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
 template_kernels = [ir.Convolution]
-priority_loop_order_kernels = [ir.Convolution]
 
 
 def cmp(a, b):
@@ -144,29 +142,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
-    def update_dep_type(self):
-        assert isinstance(self.node, ir.Convolution)
-        assert len(self.read_writes.writes) == 1
-        write = self.read_writes.writes.pop()
-        if isinstance(write, StarDep):
-            name = write.name
-            canonicalized_index, canonicalized_size = self.node.canonicalize()
-            new_dep = MemoryDep(name, canonicalized_index, canonicalized_size)
-            self.read_writes.writes.add(new_dep)
-        else:
-            self.read_writes.writes.add(write)
-
-    def mark_fusable(self, broadcast_after_reduce=False):
-        self.scheduler.fusable_deps.update(self.read_writes.writes)
-        if broadcast_after_reduce and self.is_reduction():
-            self.scheduler.fusable_deps.update(
-                w.broadcast_extend_sizes(self._sizes[-1])
-                for w in self.read_writes.writes
-            )
-
-    def get_ranges(self):
-        return self._sizes
-
     def run(self, codegen_extern_call):
         self.allocate()
         self.scheduler.run_count += 1
@@ -193,7 +168,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         return 200
 
 
-def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
+def pick_loop_order(stride_lengths, sizes):
     """
     A heuristic to decide loop iteration orders.  This has not been well
     tuned and may be something we should autotune.
@@ -204,13 +179,6 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
         if sizes[a] == 1 or sizes[b] == 1:
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
-
-        # if any input is channel_last aka stride[1] == 1
-        # let the output to be channel_last
-        if len(sizes) == 4 and a == 1 and any(stride_lengths[:, a] == 1):
-            return -1
-        if len(sizes) == 4 and b == 1 and any(stride_lengths[:, b] == 1):
-            return 1
 
         a_first = np.logical_or(
             stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
@@ -228,9 +196,6 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
         return cmp(b, a)
 
     order = list(reversed(range(stride_lengths.shape[1])))
-    if len(priority_idx) > 0:
-        # if we have priority node, only use that node's order
-        stride_lengths = stride_lengths[priority_idx]
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
     return order
@@ -239,39 +204,15 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
 class SchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         super().__init__(scheduler, node)
-        # if high_priority = ir.Convolution out buf is in the reads of current node
-        # force the loop order follows the NHWC order]
-        priority_addrs = []
-        if ir.is_triton(self.get_device()) and config.triton.convolution != "aten":
-            priority_loop_order_nodes = scheduler.collect_priority_loop_order_kernels()
-            for read in self.read_writes.reads:
-                if read.name in priority_loop_order_nodes:
-                    priority_addrs.append(read.index)
-            # currently only support reads from only 1 convolution
-            assert len(priority_addrs) == 1
         (
             self._sizes,
             self._body,
-        ) = node.simplify_reorder_and_tile(priority_addrs=priority_addrs)
+        ) = node.simplify_reorder_and_tile()
 
         self.group = (node.get_device(), group_fn(self._sizes))
         self.set_read_writes(
             dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
         )
-
-    def reorder_channel_last(self):
-        node = self.node
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_reorder_and_tile(channel_last=True)
-
-    def re_simplify_reorder_and_tile(self):
-        node = self.node
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_reorder_and_tile()
 
     def can_remove_buffer(self, check_group):
         if (
@@ -472,10 +413,7 @@ class Scheduler:
             elif isinstance(node, ir.ExternKernel):
                 group_fn = None
                 if should_use_template(node):
-                    if isinstance(node, ir.Convolution):
-                        group_fn = self.get_backend(node.get_device()).group_fn_NHW_C
-                    else:
-                        group_fn = self.get_backend(node.get_device()).group_fn
+                    group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
             else:
                 assert False, node
@@ -642,10 +580,6 @@ class Scheduler:
                 V.kernel.args.output_buffers[name] = "REMOVED"
                 V.graph.removed_buffers.add(name)
 
-    def remove_buffer(self, name):
-        V.kernel.args.output_buffers[name] = "REMOVED"
-        V.graph.removed_buffers.add(name)
-
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
@@ -695,13 +629,7 @@ class Scheduler:
     def iter_runable_groups(self):
         while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
-                runnable_extern_kernel = self.runable_extern_kernels.popleft()
-                try:
-                    self.current_device = runnable_extern_kernel.get_device()
-                except AttributeError:
-                    # 'MultiOutputLayout' object has no attribute 'device'
-                    pass
-                runnable_extern_kernel.run(self.codegen_extern_call)
+                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
             else:
                 group, priority = self.runable_groups.most_common(1)[0]
                 del self.runable_groups[group]
@@ -769,11 +697,3 @@ class Scheduler:
                 self.current_device = device
             self.get_backend(device).codegen(*group)
         self.flush()
-
-    def collect_priority_loop_order_kernels(self):
-        names = []
-        for node in self.nodes:
-            node_type = type(node.node)
-            if node_type in priority_loop_order_kernels:
-                names.append(node.get_name())
-        return names
