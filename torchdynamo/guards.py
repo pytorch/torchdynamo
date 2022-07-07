@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import enum
+import functools
 import logging
 import math
 import os
@@ -28,6 +29,7 @@ from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
 from .exc import unimplemented
+from .utils import ExactWeakKeyDictionary
 from .utils import guard_failures
 from .utils import istype
 from .utils import orig_code_map
@@ -37,6 +39,12 @@ from .utils import tuple_iterator_len
 
 log = logging.getLogger(__name__)
 
+# This is a map from modules, to code. Module code map is keyed on a weakref of a module
+# itself, and is a critical component of observing module changes.
+# torch.nn.Modules are not guarded in the traditional way, but instead are patched with
+# observers to invalidate on change. This is done as an optimization allowing us to guard on modules.
+# see config.guard_nn_modules and guard_is_module_associated
+module_code_map = ExactWeakKeyDictionary()  # {nn.Module: Set[GuardedCode]}
 
 CLOSURE_VARS = collections.OrderedDict(
     [
@@ -50,6 +58,82 @@ CLOSURE_VARS = collections.OrderedDict(
         ("inf", float("inf")),
     ]
 )
+
+
+class NNModuleChangeTrackerUtil:
+    original_register_parameter = None
+    original_add_module = None
+    original_load_state_dict = None
+    original_setattr = None
+
+    @classmethod
+    def register_patches_on_torch_nn_module(cls):
+        if getattr(torch.nn.Module, "_dynamo_module_patch", True):
+            # register_parameter
+            torch.nn.Module._dynamo_module_patch = False
+
+            original_register_parameter = torch.nn.Module.register_parameter
+
+            @functools.wraps(original_register_parameter)
+            def custom_register_parameter(self, key, value):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_register_parameter(self, key, value)
+
+            torch.nn.Module.register_parameter = custom_register_parameter
+
+            # add_module
+            original_add_module = torch.nn.Module.add_module
+
+            @functools.wraps(original_add_module)
+            def custom_add_module(self, name, module):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_add_module(self, name, module)
+
+            torch.nn.Module.add_module = custom_add_module
+
+            # load_state_dict
+            original_load_state_dict = torch.nn.Module.load_state_dict
+
+            @functools.wraps(original_load_state_dict)
+            def custom_load_state_dict(self, state_dict, strict):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_load_state_dict(self, state_dict, strict)
+
+            torch.nn.Module.load_state_dict = custom_load_state_dict
+
+            # __setattr__
+            original_setattr = torch.nn.Module.__setattr__
+
+            @functools.wraps(original_setattr)
+            def custom_setattr(self, key, value):
+                NNModuleChangeTrackerUtil.invalidate_module(self)
+                return original_setattr(self, key, value)
+
+            torch.nn.Module.__setattr__ = custom_setattr
+            cls.original_register_parameter = original_register_parameter
+            cls.original_add_module = original_add_module
+            cls.original_load_state_dict = original_load_state_dict
+            cls.original_setattr = original_setattr
+
+    @classmethod
+    def de_register_patches_on_torch_nn_module(cls):
+        if hasattr(torch.nn.Module, "_dynamo_module_patch"):
+            torch.nn.Module.__setattr__ = cls.original_setattr
+            torch.nn.Module.load_state_dict = cls.original_load_state_dict
+            torch.nn.Module.add_module = cls.original_add_module
+            torch.nn.Module.register_parameter = cls.original_register_parameter
+            delattr(torch.nn.Module, "_dynamo_module_patch")
+
+    @staticmethod
+    def invalidate_module(module):
+        if module not in module_code_map:
+            # Module is out of scope / deleted (weak ref key ref dict)
+            return
+
+        for code in module_code_map[module]:
+            code.valid = False
+
+        del module_code_map[module]
 
 
 class GuardSource(enum.Enum):
@@ -178,6 +262,10 @@ class GuardBuilder:
         self.tensor_check_names = []
         self.tensor_check_examples = []
         self.guarded_code = guarded_code
+        # A set of the ids of all objects tracked for invalidation
+        self.module_associated_guarded_ids = set()
+        # map from module ids to the ids of objects tracked for invalidation
+        self.module_to_guard_ids = ExactWeakKeyDictionary()  # {nn.Module: Set[id]}
 
     def get(self, name: str):
         return eval(name, self.scope, CLOSURE_VARS)
@@ -194,6 +282,9 @@ class GuardBuilder:
         return name
 
     def TYPE_MATCH(self, guard: Guard):
+        if self.guard_is_module_associated(guard):
+            return
+
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
@@ -201,6 +292,9 @@ class GuardBuilder:
         self._produce_guard_code(guard, [code])
 
     def ID_MATCH(self, guard: Guard):
+        if self.guard_is_module_associated(guard):
+            return
+
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
         if m:
@@ -225,6 +319,10 @@ class GuardBuilder:
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
     def EQUALS_MATCH(self, guard: Guard):
+        val = self.get(guard.name)
+        if self.guard_is_module_associated(guard):
+            return
+
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
@@ -290,6 +388,9 @@ class GuardBuilder:
         self._produce_guard_code(guard, code)
 
     def CONSTANT_MATCH(self, guard: Guard):
+        if self.guard_is_module_associated(guard):
+            return
+
         val = self.get(guard.name)
         if istype(val, (bool, type(None))):
             self.ID_MATCH(guard)
@@ -298,21 +399,18 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        ref = self.arg_ref(guard)
+
         val = self.get(guard.name)
-
-        def setup_guard():
-            assert istype(val.training, bool)
-            self.code.append(f"{ref}.training == {val.training}")
-
-        if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
+        if hasattr(val, "training") and config.guard_nn_modules:
+            self.register_module_for_invalidation(val, self.guarded_code)
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
+        if self.guard_is_module_associated(guard):
+            return
+
         if guard.is_local():
             return self.ID_MATCH(guard)
 
@@ -320,6 +418,9 @@ class GuardBuilder:
         return self.FUNCTION_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
+        if self.guard_is_module_associated(guard):
+            return
+
         return self.FUNCTION_MATCH(guard)
 
     def LIST_LENGTH(self, guard):
@@ -355,18 +456,6 @@ class GuardBuilder:
 
         self._produce_guard_code(guard, code)
 
-    def NN_MODULE_PARAM_NAMES(self, guard):
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        t = type(value)
-        keys = {k for k, v in value.named_parameters()}
-
-        code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
-
-        self._produce_guard_code(guard, code)
-
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
@@ -394,6 +483,9 @@ class GuardBuilder:
         self._produce_guard_code(guard, [code])
 
     def TENSOR_MATCH(self, guard: Guard):
+        if self.guard_is_module_associated(guard):
+            return
+
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
@@ -446,6 +538,38 @@ class GuardBuilder:
             obj_ref,
         )
 
+    def register_module_for_invalidation(self, module, guarded_code):
+        NNModuleChangeTrackerUtil.register_patches_on_torch_nn_module()
+        module_id = id(module)
+        if module_id not in self.module_to_guard_ids:
+            self.module_to_guard_ids[module] = set()
+
+        for buffer in module.buffers():
+            buffer_id = id(buffer)
+            self.module_associated_guarded_ids.add(buffer_id)
+            self.module_to_guard_ids[module].add(buffer_id)
+
+        for mod in module.modules():
+            mod_id = id(mod)
+            self.module_associated_guarded_ids.add(mod_id)
+            self.module_to_guard_ids[module].add(mod_id)
+
+        for parameter in module.parameters():
+            parameter_id = id(parameter)
+            self.module_associated_guarded_ids.add(parameter_id)
+            self.module_to_guard_ids[module].add(parameter_id)
+
+        if module not in module_code_map:
+            module_code_map[module] = set()
+        module_code_map[module].add(guarded_code)
+
+    def guard_is_module_associated(self, guard):
+        if config.guard_nn_modules and guard.is_nn_module():
+            val = self.get(guard.name)
+            if id(val) in self.module_associated_guarded_ids:
+                return True
+        return False
+
 
 @dataclasses.dataclass
 class GuardedCode:
@@ -480,6 +604,7 @@ class CheckFunctionManager:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
+
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
