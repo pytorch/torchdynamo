@@ -22,6 +22,7 @@ from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
 from .dependencies import extract_read_writes
+from .dependencies import var_builder
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -36,6 +37,14 @@ def inverse_reorder(order):
     def reindex(index):
         assert len(index) == len(inv_order)
         return [index[inv_order[i]] for i in range(len(index))]
+
+    return reindex
+
+
+def same_reorder(order):
+    def reindex(index):
+        assert len(index) == len(order)
+        return [index[order[i]] for i in range(len(index))]
 
     return reindex
 
@@ -1333,7 +1342,7 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_reorder_and_tile(self):
+    def simplify_reorder_and_tile(self, priority_addrs=[]):
         """
         This is the main place where we do loop transformations in a
         backend-agnostic way.
@@ -1356,6 +1365,21 @@ class ComputedBuffer(Buffer):
         index_formulas = [*body.indexing_exprs.values()]
         memory_addrs = [*body.reads, *body.writes]
 
+        # find the matching idx from priority_addrs in memory_addrs
+        priority_idx = []
+        if len(priority_addrs) > 0:
+            for priority_addr in priority_addrs:
+                map_dict = {
+                    k: v
+                    for k, v in zip(
+                        list(sympy.ordered(priority_addr.free_symbols)),
+                        list(sympy.ordered(args[0])),
+                    )
+                }
+                priority_addr = priority_addr.subs(map_dict)
+                if priority_addr in [*body.reads]:
+                    priority_idx.append([*body.reads].index(priority_addr))
+
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -1371,9 +1395,15 @@ class ComputedBuffer(Buffer):
                 reduce_size.append(s)
 
         def simplify_and_reorder(x_vars, sizes):
-            sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex0, reindex1 = self._apply_loop_reordering(
+                x_vars, sizes, memory_addrs, priority_idx
+            )
+            x_vars = reindex0(x_vars)
+            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
             x_vars = prune(x_vars)
-            sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
+            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            # x_vars = prune(x_vars)
+            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
 
@@ -1506,7 +1536,7 @@ class ComputedBuffer(Buffer):
             return (iter_ranges,), body
 
     @staticmethod
-    def _apply_loop_reordering(index_vars, sizes, memory_addrs):
+    def _apply_loop_reordering(index_vars, sizes, memory_addrs, priority_idx=[]):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -1521,7 +1551,7 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
-            order = list(reversed(pick_loop_order(strides, sizes)))
+            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
                 log.warning(
@@ -1529,7 +1559,7 @@ class ComputedBuffer(Buffer):
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
-        return sizes, inverse_reorder(order)
+        return sizes, same_reorder(order), inverse_reorder(order)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()
@@ -2245,11 +2275,21 @@ class Convolution(ExternKernelAlloc):
         else:
             order = list(reversed(range(len(output_size))))
 
+        channels_last_order = [3, 0, 2, 1]
+        device = x.get_device()
+        if is_triton(device) and config.triton.convolution != "aten":
+            # Force the output layout of conv to be channel last
+            layout = FlexibleLayout.stride_ordered(
+                output_size,
+                channels_last_order[len(channels_last_order) - len(output_size) :],
+            )
+        else:
+            layout = FlexibleLayout.stride_ordered(output_size, order)
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            FlexibleLayout.stride_ordered(output_size, order),
+            layout,
         )
 
         if bias is not None:
@@ -2265,6 +2305,32 @@ class Convolution(ExternKernelAlloc):
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
 
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the conv output index
+        """
+        # manually generate index formula for conv
+        sizes = self.get_size()
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
+        indexer = self.make_indexer()
+        index = indexer(index_vars)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
+
     def map_args(self):
         # x, w, bias
         in_args = [x.codegen_reference() for x in self.inputs]
@@ -2273,43 +2339,45 @@ class Convolution(ExternKernelAlloc):
         if len(in_args) < 3:
             # otherwise, bias=None is the first constant_args
             const_args = const_args[1:]
-        # stride of inputs and outputs
-        stride_x = f"{in_args[0]}.stride()"
-        stride_w = f"{in_args[1]}.stride()"
-        stride_y = f"{self.get_name()}.stride()"
 
-        args_dict = OrderedDict(
+        inout_dict = OrderedDict(
             [
                 ("x", f"{in_args[0]}"),
                 ("w", f"{in_args[1]}"),
                 ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
                 ("y", f"{self.get_name()}"),
-                ("stride_xn", stride_x + "[0]"),
-                ("stride_xc", stride_x + "[1]"),
-                ("stride_xh", stride_x + "[2]"),
-                ("stride_xw", stride_x + "[3]"),
-                ("stride_wn", stride_w + "[0]"),
-                ("stride_wc", stride_w + "[1]"),
-                ("stride_wh", stride_w + "[2]"),
-                ("stride_ww", stride_w + "[3]"),
-                ("stride_yn", stride_y + "[0]"),
-                ("stride_yc", stride_y + "[1]"),
-                ("stride_yh", stride_y + "[2]"),
-                ("stride_yw", stride_y + "[3]"),
+            ]
+        )
+        args_dict = OrderedDict(
+            [
+                ("stride_xn", f"{self.inputs[0].get_stride()[0]}"),
+                ("stride_xc", f"{self.inputs[0].get_stride()[1]}"),
+                ("stride_xh", f"{self.inputs[0].get_stride()[2]}"),
+                ("stride_xw", f"{self.inputs[0].get_stride()[3]}"),
+                ("stride_wn", f"{self.inputs[1].get_stride()[0]}"),
+                ("stride_wc", f"{self.inputs[1].get_stride()[1]}"),
+                ("stride_wh", f"{self.inputs[1].get_stride()[2]}"),
+                ("stride_ww", f"{self.inputs[1].get_stride()[3]}"),
+                ("stride_yn", f"{self.get_stride()[0]}"),
+                ("stride_yc", f"{self.get_stride()[1]}"),
+                ("stride_yh", f"{self.get_stride()[2]}"),
+                ("stride_yw", f"{self.get_stride()[3]}"),
                 (
                     "stride_biasn",
-                    f"{in_args[2]}.stride()[0]" if len(in_args) >= 3 else "None",
+                    f"{self.inputs[0].get_stride()[0]}"
+                    if len(in_args) >= 3
+                    else "None",
                 ),
                 ("delta_x_ptr", "None"),
-                ("BATCH", f"{in_args[0]}.shape[0]"),
-                ("IN_C", f"{in_args[0]}.shape[1]"),
-                ("IN_H", f"{in_args[0]}.shape[2]"),
-                ("IN_W", f"{in_args[0]}.shape[3]"),
-                ("KERNEL_N", f"{in_args[1]}.shape[0]"),
-                ("KERNEL_H", f"{in_args[1]}.shape[2]"),
-                ("KERNEL_W", f"{in_args[1]}.shape[3]"),
-                ("OUT_H", f"{self.get_name()}.shape[2]"),
-                ("OUT_W", f"{self.get_name()}.shape[3]"),
+                ("BATCH", f"{self.inputs[0].get_size()[0]}"),
+                ("IN_C", f"{self.inputs[0].get_size()[1]}"),
+                ("IN_H", f"{self.inputs[0].get_size()[2]}"),
+                ("IN_W", f"{self.inputs[0].get_size()[3]}"),
+                ("KERNEL_N", f"{self.inputs[1].get_size()[0]}"),
+                ("KERNEL_H", f"{self.inputs[1].get_size()[2]}"),
+                ("KERNEL_W", f"{self.inputs[1].get_size()[3]}"),
+                ("OUT_H", f"{self.get_size()[2]}"),
+                ("OUT_W", f"{self.get_size()[3]}"),
                 ("stride_h", f"{const_args[0][0]}"),
                 ("stride_w", f"{const_args[0][1]}"),
                 ("padding_h", f"{const_args[1][0]}"),
@@ -2333,8 +2401,8 @@ class Convolution(ExternKernelAlloc):
         CONV1X1_NHWC = (
             "True"
             if self.inputs[0].get_stride()[1] == 1
-            and self.inputs[1].shape[2] == 1
-            and self.inputs[1].shape[3] == 1
+            and self.inputs[1].get_size()[2] == 1
+            and self.inputs[1].get_size()[3] == 1
             else "False"
         )
         # dict for tl.constexpr
@@ -2352,7 +2420,7 @@ class Convolution(ExternKernelAlloc):
             ]
         )
 
-        return args_dict, const_dict, other_dict
+        return inout_dict, args_dict, const_dict, other_dict
 
 
 @dataclasses.dataclass
