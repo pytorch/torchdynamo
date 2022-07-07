@@ -22,9 +22,9 @@ from ..source import AttrSource
 from ..source import TypeSource
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
-from ..utils import specialize_args_kwargs
 from ..utils import istype
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 

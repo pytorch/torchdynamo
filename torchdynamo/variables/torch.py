@@ -15,10 +15,10 @@ from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
-from ..utils import specialize_args_kwargs
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
 
