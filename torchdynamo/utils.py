@@ -434,7 +434,6 @@ def check_unspec_python_args(args, kwargs):
 
 
 def specialize_args_kwargs(tx, args, kwargs):
-    from .variables.constant import ConstantVariable
     from .variables.tensor import UnspecializedNumpyVariable
     from .variables.tensor import UnspecializedPythonVariable
 
