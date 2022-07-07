@@ -1964,6 +1964,7 @@ class MatrixMultiply(ExternKernelOut):
 
         return inout_dict, args_dict, const_dict, other_dict
 
+
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"
 
@@ -2372,7 +2373,6 @@ class Convolution(ExternKernelAlloc):
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
-
 
     def map_args(self):
         # x, w, bias

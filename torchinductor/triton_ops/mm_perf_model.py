@@ -4,16 +4,25 @@ import triton._C.libtriton.triton as _triton
 from triton.ops.matmul_perf_model import get_dram_gbps as get_dram_gbps
 from triton.ops.matmul_perf_model import get_tflops as get_tflops
 
+
 def estimate_matmul_time(
     # backend, device,
-    num_warps, num_stages,
-    A, B,
-    M, N, K,
-    BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K,
-    debug=False, **kwargs
+    num_warps,
+    num_stages,
+    A,
+    B,
+    M,
+    N,
+    K,
+    BLOCK_M,
+    BLOCK_N,
+    BLOCK_K,
+    SPLIT_K,
+    debug=False,
+    **kwargs,
 ):
-    ''' return estimated running time in ms
-          = max(compute, loading) + store '''
+    """return estimated running time in ms
+    = max(compute, loading) + store"""
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     dtype = A.dtype
@@ -35,9 +44,15 @@ def estimate_matmul_time(
     # time to load data
     num_sm = _triton.runtime.num_sm(backend, device)
     active_cta_ratio = min(1, num_ctas / num_sm)
-    active_cta_ratio_bw1 = min(1, num_ctas / 32)  # 32 active ctas are enough to saturate
-    active_cta_ratio_bw2 = max(min(1, (num_ctas - 32) / (108 - 32)), 0)  # 32-108, remaining 5%
-    dram_bw = get_dram_gbps(backend, device) * (active_cta_ratio_bw1 * 0.95 + active_cta_ratio_bw2 * 0.05)  # in GB/s
+    active_cta_ratio_bw1 = min(
+        1, num_ctas / 32
+    )  # 32 active ctas are enough to saturate
+    active_cta_ratio_bw2 = max(
+        min(1, (num_ctas - 32) / (108 - 32)), 0
+    )  # 32-108, remaining 5%
+    dram_bw = get_dram_gbps(backend, device) * (
+        active_cta_ratio_bw1 * 0.95 + active_cta_ratio_bw2 * 0.05
+    )  # in GB/s
     l2_bw = dram_bw * 4  # rough estimation (should be 4.7 for A100?)
     # assume 80% of (following) loads are in L2 cache
     load_a_dram = M * K * dtsize * (1 + 0.2 * (num_cta_n - 1))
@@ -64,8 +79,9 @@ def estimate_matmul_time(
 
     total_time_ms = max(compute_ms, load_ms) + store_ms
     if debug:
-        print(f'Total time: {total_time_ms}ms, compute time: {compute_ms}ms, '
-              f'loading time: {load_ms}ms, store time: {store_ms}ms, '
-              f'Activate CTAs: {active_cta_ratio*100}%')
+        print(
+            f"Total time: {total_time_ms}ms, compute time: {compute_ms}ms, "
+            f"loading time: {load_ms}ms, store time: {store_ms}ms, "
+            f"Activate CTAs: {active_cta_ratio*100}%"
+        )
     return total_time_ms
-

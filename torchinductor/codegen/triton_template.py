@@ -13,6 +13,7 @@ from .triton import TritonKernel
 
 template_dict = {ir.Convolution: "triton_conv", ir.MatrixMultiply: "triton_mm"}
 
+
 class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
         super(TritonTemplateKernel, self).__init__(*groups)
@@ -93,7 +94,9 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["extra_argdefs"] = self.extra_argdefs
         render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
         render_dict["out_def"] = (
-            self.out_def() if kernel_buf_replace_name is None else kernel_buf_replace_def
+            self.out_def()
+            if kernel_buf_replace_name is None
+            else kernel_buf_replace_def
         )
         self.body = self.template.render(render_dict) + "\n"
 
@@ -241,7 +244,9 @@ def template_codegen(scheduler, scheduler_node):
         # mark node of TritonTemplateKernel as fusable and update fusable_deps
         scheduler_node.mark_fusable()
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
-        if isinstance(kernel.node, ir.Convolution) or isinstance(kernel.node, ir.MatrixMultiply):
+        if isinstance(kernel.node, ir.Convolution) or isinstance(
+            kernel.node, ir.MatrixMultiply
+        ):
             tile1, tile2, _ = groups
             fusable_group = tile1 * tile2
 
@@ -262,7 +267,6 @@ def template_codegen(scheduler, scheduler_node):
                 could_remove_kernel_buf = True
             except CantSplit:
                 reschedule.append(node)
-                
 
         # else:
         #     for node in scheduler.pop_group(group):
