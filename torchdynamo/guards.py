@@ -399,10 +399,17 @@ class GuardBuilder:
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
+        ref = self.arg_ref(guard)
+        def setup_guard():
+            assert istype(val.training, bool)
+            self.code.append(f"{ref}.training == {val.training}")
 
         val = self.get(guard.name)
-        if hasattr(val, "training") and config.guard_nn_modules:
-            self.register_module_for_invalidation(val, self.guarded_code)
+        if hasattr(val, "training"): 
+            if config.guard_nn_modules:
+                self.register_module_for_invalidation(val, self.guarded_code)
+            else:
+                setup_guard()
         else:
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
