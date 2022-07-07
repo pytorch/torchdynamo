@@ -243,11 +243,7 @@ def template_codegen(scheduler, scheduler_node):
                     could_remove_kernel_buf = True
                 except CantSplit:
                     reschedule.append(node)
-                    # if (
-                    #     len(node.node.get_size()) == 4
-                    #     and node.node.get_stride()[1] != 1
-                    # ):
-                    #     node.re_simplify_reorder_and_tile()
+
         else:
             for node in scheduler.pop_group(group):
                 # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)

@@ -2266,7 +2266,9 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
+        if (any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1) or (
+            is_triton(x.get_device()) and config.triton.convolution != "aten"
+        ):
             # channels last format
             order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(order) < len(output_size):
@@ -2275,16 +2277,7 @@ class Convolution(ExternKernelAlloc):
         else:
             order = list(reversed(range(len(output_size))))
 
-        channels_last_order = [3, 0, 2, 1]
-        device = x.get_device()
-        if is_triton(device) and config.triton.convolution != "aten":
-            # Force the output layout of conv to be channel last
-            layout = FlexibleLayout.stride_ordered(
-                output_size,
-                channels_last_order[len(channels_last_order) - len(output_size) :],
-            )
-        else:
-            layout = FlexibleLayout.stride_ordered(output_size, order)
+        layout = FlexibleLayout.stride_ordered(output_size, order)
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
