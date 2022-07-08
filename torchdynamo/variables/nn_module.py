@@ -349,6 +349,14 @@ class NNModuleVariable(VariableTracker):
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
+        elif name == "_get_abs_string_index":
+            # Inline the function
+            fn = getattr(module, name).__func__
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                [self] + args,
+                kwargs,
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
