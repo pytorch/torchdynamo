@@ -54,7 +54,6 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            print("idx")
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
 
@@ -196,7 +195,6 @@ class ListVariable(BaseListVariable):
             and args
             and args[0].is_python_constant()
         ):
-            print(args)
             assert not kwargs
             key, value = args
             items = list(self.items)
