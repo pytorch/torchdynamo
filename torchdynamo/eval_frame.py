@@ -242,10 +242,11 @@ def optimize(backend, nopython=False):
 def export(f, *args, **kwargs):
     from inspect import signature
 
+    import torch.utils._pytree as pytree
+
     in_sig = signature(f)
     graph = None
     out_guards = None
-    input_types = list()
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -255,13 +256,9 @@ def export(f, *args, **kwargs):
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, example_inputs
     ):
-        nonlocal input_types
         nonlocal graph
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        for example_input in example_inputs:
-            input_types.append(example_input.__class__)
-
         return gm.forward
 
     backend_ctx_ctor = null_context
@@ -279,28 +276,21 @@ def export(f, *args, **kwargs):
         out_sig.parameters[k].annotation for k in list(out_sig.parameters)
     ]
 
-    def assert_equal_params(in_types):
-        for idx in range(len(out_sig.parameters)):
-            sig_type = signature_types[idx]
-            in_type = in_types[idx]
-            assert (
-                sig_type == in_type
-            ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+    flat_input_types = []
+    flat_args, _ = pytree.tree_flatten(args, kwargs)
+    for arg in flat_args:
+        flat_input_types.append(arg.__class__)
 
-    if len(in_sig.parameters) == len(out_sig.parameters):
-        assert_equal_params(input_types)
-    else:
-        from functorch._src.aot_autograd import pytree
+    assert len(flat_input_types) == len(
+        out_sig.parameters
+    ), "Flattened inputs length must match out signature parameter lengths."
 
-        flat_input_types = []
-        flat_args, _ = pytree.tree_flatten(args, kwargs)
-        for arg in flat_args:
-            flat_input_types.append(arg.__class__)
-
-        assert len(flat_input_types) == len(
-            out_sig.parameters
-        ), "Flattened inputs length must match out signature parameter lengths."
-        assert_equal_params(flat_input_types)
+    for idx in range(len(out_sig.parameters)):
+        sig_type = signature_types[idx]
+        in_type = in_types[idx]
+        assert (
+            sig_type == in_type
+        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
 
     return (graph, out_guards)
 
