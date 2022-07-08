@@ -290,10 +290,12 @@ def export(f, *args, **kwargs):
     if len(in_sig.parameters) == len(out_sig.parameters):
         assert_equal_params(input_types)
     else:
+        from functorch._src.aot_autograd import pytree
+
         flat_input_types = []
-        flat_args, in_spec = pytree.tree_flatten(inputs)
+        flat_args, _ = pytree.tree_flatten(args, kwargs)
         for arg in flat_args:
-            flat_input_typesg.append(arg.__class__)
+            flat_input_types.append(arg.__class__)
 
         assert len(flat_input_types) == len(
             out_sig.parameters
