@@ -87,6 +87,7 @@ class ConstantVariable(VariableTracker):
             return (
                 isinstance(self.value, num_ty)
                 and name in num_ty.__dict__.keys()
+                and hasattr(operator, name)
                 and len(args) == 1
                 and args[0].is_python_constant()
             )
