@@ -400,6 +400,7 @@ class GuardBuilder:
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
+        
         def setup_guard():
             assert istype(val.training, bool)
             self.code.append(f"{ref}.training == {val.training}")
@@ -453,6 +454,8 @@ class GuardBuilder:
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
+        if guard.name == 'self._modules' and self.guard_is_module_associated(guard):
+            return
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -574,7 +577,9 @@ class GuardBuilder:
         if config.guard_nn_modules and guard.is_nn_module():
             val = self.get(guard.name)
             if id(val) in self.module_associated_guarded_ids:
+                print("Module associated, skipping")
                 return True
+            print("Module associated, but skipping")
         return False
 
 
