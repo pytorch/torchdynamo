@@ -521,6 +521,19 @@ class Scheduler:
                 return rename(self.mutation_renames[n])
             return n
 
+        def dep_closure(node_name):
+            reachable_names = {node_name}
+            node = self.name_to_node[node_name]
+            write_dep = list(node.read_writes.writes)[0]
+            for read_dep in node.read_writes.reads:
+                if (
+                    read_dep.name in self.name_to_node
+                    and read_dep.index == write_dep.index
+                    and read_dep.size == write_dep.size
+                ):
+                    reachable_names.update(dep_closure(read_dep.name))
+            return reachable_names
+
         def add_user(used_by_name, user_node, can_inplace=False):
             name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace))
 
@@ -534,7 +547,10 @@ class Scheduler:
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
-                    if other_name != node.get_name():
+                    known_dep_node_names = dep_closure(node.get_name())
+                    if other_name not in known_dep_node_names:
+                        # If this node alreay directly or indirectly depends on other_node,
+                        # we don't need to insert an extra StarDep.
                         node.add_mutation_dep(other_name)
                         add_user(other_name, node)
 
