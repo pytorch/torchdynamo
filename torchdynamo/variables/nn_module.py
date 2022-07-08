@@ -349,6 +349,14 @@ class NNModuleVariable(VariableTracker):
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
+        elif name == "_get_abs_string_index":
+            # Inline the function
+            fn = getattr(module, name).__func__
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                [self] + args,
+                kwargs,
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -435,6 +443,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if method is torch.nn.Module.parameters:
                 assert not args or kwargs
+                options["guards"].add(
+                    self.source.create_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
+                )
                 items = []
                 for name, value in self.value.named_parameters():
                     items.append(
