@@ -24,8 +24,6 @@ __all__ = [
 
 
 def reset():
-    from torchdynamo.guards import NNModuleChangeTrackerUtil
-
     """Clear all compile caches and restore initial state"""
     for weak_code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
         code = weak_code()
@@ -35,7 +33,6 @@ def reset():
     convert_frame.output_codes.clear()
     orig_code_map.clear()
     guard_failures.clear()
-    NNModuleChangeTrackerUtil.de_register_patches_on_torch_nn_module()
     resume_execution.ContinueExecutionCache.cache.clear()
 
 
