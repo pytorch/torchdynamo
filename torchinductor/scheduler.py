@@ -205,12 +205,24 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        # if any input is channel_last aka stride[1] == 1
-        # let the output to be channel_last
-        if len(sizes) == 4 and a == 1 and any(stride_lengths[:, a] == 1):
-            return -1
-        if len(sizes) == 4 and b == 1 and any(stride_lengths[:, b] == 1):
-            return 1
+        if config.triton.convolution != "aten":
+            decided = True
+            # if any input is channel_last aka stride[1] == 1
+            # let the output to be channel_last
+            if len(sizes) == 4 and a == 1 and any(stride_lengths[:, a] == 1):
+                for i, stride_length in enumerate(stride_lengths[:, a]):
+                    if stride_length == 1 and min(stride_lengths[i, :]) < 1:
+                        # skip the case [0, 1, 0, 0]
+                        decided = False
+                if decided:
+                    return -1
+            if len(sizes) == 4 and b == 1 and any(stride_lengths[:, b] == 1):
+                for i, stride_length in enumerate(stride_lengths[:, b]):
+                    if stride_length == 1 and min(stride_lengths[i, :]) < 1:
+                        # skip the case [0, 1, 0, 0]
+                        decided = False
+                if decided:
+                    return 1
 
         a_first = np.logical_or(
             stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
@@ -258,20 +270,6 @@ class SchedulerNode(BaseSchedulerNode):
         self.set_read_writes(
             dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
         )
-
-    def reorder_channel_last(self):
-        node = self.node
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_reorder_and_tile(channel_last=True)
-
-    def re_simplify_reorder_and_tile(self):
-        node = self.node
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_reorder_and_tile()
 
     def can_remove_buffer(self, check_group):
         if (
@@ -525,6 +523,19 @@ class Scheduler:
                 return rename(self.mutation_renames[n])
             return n
 
+        def dep_closure(node_name):
+            reachable_names = {node_name}
+            node = self.name_to_node[node_name]
+            write_dep = list(node.read_writes.writes)[0]
+            for read_dep in node.read_writes.reads:
+                if (
+                    read_dep.name in self.name_to_node
+                    and read_dep.index == write_dep.index
+                    and read_dep.size == write_dep.size
+                ):
+                    reachable_names.update(dep_closure(read_dep.name))
+            return reachable_names
+
         def add_user(used_by_name, user_node, can_inplace=False):
             name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace))
 
@@ -538,7 +549,10 @@ class Scheduler:
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
-                    if other_name != node.get_name():
+                    known_dep_node_names = dep_closure(node.get_name())
+                    if other_name not in known_dep_node_names:
+                        # If this node alreay directly or indirectly depends on other_node,
+                        # we don't need to insert an extra StarDep.
                         node.add_mutation_dep(other_name)
                         add_user(other_name, node)
 
