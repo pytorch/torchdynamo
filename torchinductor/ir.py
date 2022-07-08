@@ -1893,7 +1893,11 @@ class BatchMatrixMultiply(ExternKernelOut):
             size=[b3, m, n],
         ).as_fixed()
 
-        if b3 == 1:
+        if (
+            b3 == 1
+            and is_contiguous_storage_and_layout(a)
+            and is_contiguous_storage_and_layout(b)
+        ):
             # convert to normal mm
             data = MatrixMultiply(
                 layout=output_layout.as_fixed(),
