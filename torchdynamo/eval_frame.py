@@ -283,16 +283,26 @@ def export(f, *args, **kwargs):
         out_sig.parameters[k].annotation for k in list(out_sig.parameters)
     ]
 
-    # TODO(voz): Add support for flatenning and unflattening via PyTree
-    assert len(in_sig.parameters) == len(
-        out_sig.parameters
-    ), "Exported callable signature must be composed only of torch.Tensors"
-    for idx in range(len(out_sig.parameters)):
-        sig_type = signature_types[idx]
-        in_type = input_types[idx]
-        assert (
-            sig_type == in_type
-        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+    def assert_equal_params(in_types):
+        for idx in range(len(out_sig.parameters)):
+            sig_type = signature_types[idx]
+            in_type = in_types[idx]
+            assert (
+                sig_type == in_type
+            ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+
+    if len(in_sig.parameters) == len(out_sig.parameters):
+        assert_equal_params(input_types)
+    else:
+        flat_input_types = []
+        flat_args, in_spec = pytree.tree_flatten(inputs)
+        for arg in flat_args:
+            flat_input_typesg.append(arg.__class__)
+
+        assert len(flat_input_types) == len(
+            out_sig.parameters
+        ), "Flattened inputs length must match out signature parameter lengths."
+        assert_equal_params(flat_input_types)
 
     return (graph, out_guards)
 
