@@ -2266,9 +2266,9 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        if (any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1) or (
-            is_triton(x.get_device()) and config.triton.convolution != "aten"
-        ):
+        if (
+            any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1
+        ) or (is_triton(x.get_device()) and config.triton.convolution != "aten"):
             # channels last format
             order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(order) < len(output_size):
