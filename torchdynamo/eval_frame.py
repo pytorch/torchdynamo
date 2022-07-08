@@ -1,7 +1,6 @@
 import contextlib
 import copy
 import functools
-import logging
 import threading
 import warnings
 
@@ -16,8 +15,6 @@ from . import skipfiles
 from . import utils
 from .mutation_guard import install_generation_tagging_init
 from .utils import same
-
-log = logging.getLogger(__name__)
 
 try:
     from . import _eval_frame
@@ -146,8 +143,7 @@ def catch_errors_wrapper(callback):
             with compile_lock:
                 return callback(frame, cache_size)
         except Exception:
-            logging.basicConfig()
-            logging.exception("Error while processing frame")
+            warnings.warn("default", "Error while processing frame")
             raise
 
     return catch_errors
@@ -194,7 +190,7 @@ class WrapperBackend:
             return self.gm.forward
 
         except Exception:
-            log.exception("error in verify_correctness")
+            warnings.warn("default", "error in verify_correctness")
             return self.gm.forward
         finally:
             self.restore()
