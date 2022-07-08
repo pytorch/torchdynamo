@@ -64,12 +64,6 @@ LOGGING_CONFIG = {
 }
 
 
-@functools.lru_cache(None)
-def init_logging():
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        logging.config.dictConfig(LOGGING_CONFIG)
-
-
 def count_calls(g: fx.Graph):
     c = 0
     for n in g.nodes:

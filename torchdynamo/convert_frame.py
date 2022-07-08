@@ -1,12 +1,9 @@
 import dis
 import functools
-import itertools
-import logging
-import os
-import sys
 import traceback
 import types
 import typing
+import warnings
 import weakref
 from typing import Callable
 
@@ -14,7 +11,6 @@ import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
-from . import exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
@@ -26,6 +22,8 @@ from .eval_frame import always_optimize_code_objects
 from .eval_frame import skip_code
 from .exc import BackendCompilerFailed
 from .exc import InternalTorchDynamoError
+from .exc import RestartAnalysis
+from .exc import SkipFrame
 from .exc import TorchRuntimeError
 from .exc import Unsupported
 from .exc import unimplemented
@@ -35,37 +33,24 @@ from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
 from .utils import guard_failures
-from .utils import init_logging
 from .utils import is_namedtuple
 from .utils import istype
 from .utils import orig_code_map
 from .utils import troubleshooting_url
 
-log = logging.getLogger(__name__)
 
-
-class Tracker:
-    def __init__(self):
-        self.seen = []
-        self.seen_ids = set()
-
+class _Tracker(dict):
     def add(self, strong_obj):
         idx = id(strong_obj)
-        if idx not in self.seen_ids:
-            obj = weakref.ref(strong_obj, lambda _: self.seen_ids.remove(idx))
-            self.seen.append(obj)
-            self.seen_ids.add(idx)
+        if id(strong_obj) not in self:
+            self[idx] = weakref.ref(strong_obj, lambda _: self.remove(idx))
 
     def __contains__(self, item):
-        return id(item) in self.seen_ids
-
-    def clear(self):
-        self.seen.clear()
-        self.seen_ids.clear()
+        return dict.__contains__(self, id(item))
 
 
-input_codes = Tracker()
-output_codes = Tracker()
+input_codes = _Tracker()
+output_codes = _Tracker()
 
 
 @functools.wraps(original_forward_from_src)
@@ -200,19 +185,12 @@ def has_tensor_in_frame(frame):
 
 def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
     """Fully convert a frame into an FX graph"""
-    init_logging()
-
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
-            return None
-        if (
-            os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")
-            and os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION") != code.co_name
-        ):
             return None
         if code.co_name == "<genexpr>" and code.co_filename.endswith(
             "transformers/file_utils.py"
@@ -251,11 +229,12 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 return f"{str(guard_failures[code][-1])}"
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log.warning(
+            warnings.warn(
+                "default",
                 f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
                 f"   function: {format_func_info(code)}\n"
                 f"   reasons:  {format_guard_failures(code)}\n"
-                f"to diagnose recompilation issues, see {troubleshooting_url}."
+                f"to diagnose recompilation issues, see {troubleshooting_url}.",
             )
             unimplemented("cache_size_limit reached")
         output = None
@@ -299,15 +278,15 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             print(dis.Bytecode(frame.f_code).dis())
 
         try:
-            for attempt in itertools.count():
+            for attempt in range(100):
                 try:
                     code = transform_code_object(frame.f_code, transform)
                     orig_code_map[code] = frame.f_code
                     break
-                except exc.RestartAnalysis:
+                except RestartAnalysis:
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
-                except exc.SkipFrame:
+                except SkipFrame:
                     return None
             output_codes.add(code)
             if config.debug:
@@ -339,15 +318,18 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
         except Exception:
             if config.debug or config.trace or config.print_internal_exceptions:
                 debug_print("WONT CONVERT")
-                sys.stderr.write(
-                    "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+                warnings.warn(
+                    "default", "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
                 )
                 traceback.print_exc()
-                sys.stderr.write(
-                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
+                warnings.warn(
+                    "default",
+                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n",
                 )
                 traceback.print_stack(frame)
-                sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+                warnings.warn(
+                    "default", "=" * 10 + " End debug info " + "=" * 10 + "\n"
+                )
             raise InternalTorchDynamoError()
 
     return wrap_convert_context(_convert_frame_assert)
