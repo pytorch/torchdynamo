@@ -149,8 +149,7 @@ def reduction_heuristics(size_hints):
         return autotune(
             [
                 triton_config_reduction(size_hints, 32, 128, num_stages=2),
-                # Note, we can't do xblock=1 due to https://github.com/openai/triton/issues/574
-                triton_config_reduction(size_hints, 2, 1024, num_stages=1),
+                triton_config_reduction(size_hints, 1, 2048, num_stages=1),
             ],
             key=["xnumel", "rnumel"],
         )
