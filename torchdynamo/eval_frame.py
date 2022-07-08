@@ -243,8 +243,6 @@ def export(f, *args, **kwargs):
     from inspect import signature
 
     import torch.utils._pytree as pytree
-
-    in_sig = signature(f)
     graph = None
     out_guards = None
 
@@ -287,7 +285,7 @@ def export(f, *args, **kwargs):
 
     for idx in range(len(out_sig.parameters)):
         sig_type = signature_types[idx]
-        in_type = in_types[idx]
+        in_type = flat_input_types[idx]
         assert (
             sig_type == in_type
         ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
