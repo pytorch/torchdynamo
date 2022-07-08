@@ -279,3 +279,32 @@ class DataClassVariable(ConstDictVariable):
                 assert variables.ConstantVariable.is_literal(defaults[name])
                 return variables.ConstantVariable(defaults[name]).add_options(self)
         super(DataClassVariable, self).var_getattr(tx, name)
+
+
+class HFPretrainedConfigVariable(VariableTracker):
+    """
+    Hack for HuggingFace PretrainedConfig
+    """
+
+    @staticmethod
+    def is_matching_cls(cls):
+        try:
+            from transformers.configuration_utils import PretrainedConfig
+
+            return issubclass(cls, PretrainedConfig)
+        except ImportError:
+            return False
+
+    @classmethod
+    def is_matching_object(cls, obj):
+        return cls.is_matching_cls(type(obj))
+
+    def __init__(self, obj, **kwargs):
+        super(HFPretrainedConfigVariable, self).__init__(**kwargs)
+        self.obj = obj
+        assert self.is_matching_cls(type(obj))
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from . import ConstantVariable
+
+        return ConstantVariable(getattr(self.obj, name))
