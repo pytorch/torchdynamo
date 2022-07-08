@@ -1188,6 +1188,7 @@ class CommonTemplate:
 
     @requires_cuda()
     @patch.object(config.triton, "convolution", "triton")
+    @patch.object(config.triton, "dense_indexing", "True")
     def test_triton_conv(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def triton_conv(
@@ -1214,6 +1215,7 @@ class CommonTemplate:
 
     @requires_cuda()
     @patch.object(config.triton, "convolution", "autotune")
+    @patch.object(config.triton, "dense_indexing", "True")
     def test_conv_autotune(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def triton_conv(
