@@ -277,7 +277,8 @@ def export(f, *args, **kwargs):
     ]
 
     flat_input_types = []
-    flat_args, in_spec = pytree.tree_flatten(args, kwargs)
+    # TODO(voz): Handle kwargs properly?
+    flat_args, in_spec = pytree.tree_flatten(args)
     for arg in flat_args:
         flat_input_types.append(arg.__class__)
 
