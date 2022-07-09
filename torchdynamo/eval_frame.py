@@ -243,6 +243,7 @@ def export(f, *args, **kwargs):
     from inspect import signature
 
     import torch.utils._pytree as pytree
+
     graph = None
     out_guards = None
 
@@ -261,10 +262,11 @@ def export(f, *args, **kwargs):
 
     backend_ctx_ctor = null_context
 
+    result = None
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
-        f(*args, **kwargs)
+        result = f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
@@ -275,9 +277,11 @@ def export(f, *args, **kwargs):
     ]
 
     flat_input_types = []
-    flat_args, _ = pytree.tree_flatten(args, kwargs)
+    flat_args, in_spec = pytree.tree_flatten(args, kwargs)
     for arg in flat_args:
         flat_input_types.append(arg.__class__)
+
+    _, out_spec = pytree.tree_flatten(result)
 
     assert len(flat_input_types) == len(
         out_sig.parameters
@@ -290,7 +294,11 @@ def export(f, *args, **kwargs):
             sig_type == in_type
         ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
 
-    return (graph, out_guards)
+    # TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
+    # There is currently more work that needs to be done on the fx side before we can support the UX we want.
+    # The future UX here will not return a spec, but will rather return a graph with the original signature
+    # and return type as the passed in callable, `f`.
+    return (graph, out_guards, in_spec, out_spec)
 
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
