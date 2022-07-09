@@ -163,9 +163,9 @@ class VariableBuilder:
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)
-        elif istype(value, (dict, collections.OrderedDict)) and all(
-            map(ConstantVariable.is_literal, value.keys())
-        ):
+        elif istype(
+            value, (dict, collections.OrderedDict, collections.defaultdict)
+        ) and all(map(ConstantVariable.is_literal, value.keys())):
             guards = self.make_guards(GuardBuilder.DICT_KEYS)
             result = dict(
                 (
@@ -176,8 +176,17 @@ class VariableBuilder:
                 )
                 for k in value.keys()
             )
-            result = ConstDictVariable(result, type(value), guards=guards)
-            if istype(value, dict):
+            if istype(value, collections.defaultdict):
+                result = ConstDictVariable(
+                    result,
+                    type(value),
+                    default_factory=value.default_factory,
+                    guards=guards,
+                )
+            else:
+                result = ConstDictVariable(result, type(value), guards=guards)
+
+            if istype(value, (dict, collections.defaultdict)):
                 return self.tx.output.side_effects.track_dict(
                     self.source, value, result
                 )

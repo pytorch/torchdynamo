@@ -123,10 +123,14 @@ class GetItemSource(Source):
     index: Any
 
     def reconstruct(self, codegen):
-        return self.base.reconstruct(codegen) + [
-            codegen.create_load_const(self.index),
-            create_instruction("BINARY_SUBSCR"),
-        ]
+        instrs = self.base.reconstruct(codegen)
+        if isinstance(self.index, Source):
+            instrs.append(self.index.reconstruct(codegen))
+        else:
+            instrs.append(codegen.create_load_const(self.index))
+        instrs.append(create_instruction("BINARY_SUBSCR"))
+
+        return instrs
 
     def guard_source(self):
         return self.base.guard_source()

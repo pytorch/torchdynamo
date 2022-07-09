@@ -4,6 +4,7 @@ import itertools
 import math
 import operator
 import types
+from collections import defaultdict
 from typing import Dict
 from typing import List
 
@@ -11,6 +12,7 @@ import numpy as np
 import torch
 
 from torchdynamo.guards import GuardBuilder
+from torchdynamo.variables.dicts import ConstDictVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
 
 from .. import config
@@ -242,7 +244,11 @@ class BuiltinVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
 
-        if self.can_insert_in_graph() and tensor_args:
+        if (
+            self.can_insert_in_graph()
+            and tensor_args
+            and not isinstance(args[0], ConstDictVariable)
+        ):
             try:
                 fn = self.fn
                 if self.fn is operator.iadd and isinstance(
@@ -250,11 +256,12 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
+
+                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
                 proxy = tx.output.create_proxy(
-                    "call_function",
-                    fn,
-                    *proxy_args_kwargs(args, kwargs),
+                    "call_function", fn, proxy_args, proxy_kwargs
                 )
+
                 if self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)

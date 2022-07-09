@@ -53,7 +53,7 @@ guard_nn_modules = True
 dynamic_propagation = True
 
 # Run the FX graph with FakeTensors
-fake_tensor_propagation = True
+fake_tensor_propagation = False
 
 # run FX normalization passes in optimizer
 normalize_ir = True
@@ -67,10 +67,7 @@ raise_on_backend_error = True
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-}
+skipfiles_inline_module_allowlist = {torch.nn, torch.distributions}
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
         torch._refs,
@@ -92,4 +89,4 @@ allowed_functions_module_string_ignorelist = {
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
-capture_scalar_outputs = False
+capture_scalar_outputs = True

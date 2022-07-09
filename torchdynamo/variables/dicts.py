@@ -5,22 +5,31 @@ import inspect
 from typing import Dict
 from typing import List
 
+import torch
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource
+from ..source import GetItemSource
 from .base import VariableTracker
+from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, **kwargs):
+    def __init__(self, items, user_cls, default_factory=None, **kwargs):
         super(ConstDictVariable, self).__init__(**kwargs)
         self.items = items
         self.user_cls = user_cls
+        self.default_factory = default_factory
 
     def as_proxy(self):
-        return {k: v.as_proxy() for k, v in self.items.items()}
+        proxy_dict = {k: v.as_proxy() for k, v in self.items.items()}
+        if self.default_factory:
+            return collections.defaultdict(self.default_factory, proxy_dict)
+        else:
+            return proxy_dict
 
     def python_type(self):
         return self.user_cls
@@ -28,17 +37,19 @@ class ConstDictVariable(VariableTracker):
     def reconstruct(self, codegen):
         if len(self.items) == 0:
             return [create_instruction("BUILD_MAP", 0)]
-        keys = tuple(self.items.keys())
-        for key in keys:
-            codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-            create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
-        ]
+        instrs = []
+        # for key in keys:
+        #    codegen(self.items[key])
+        #    if isinstance(key, torch.nn.Parameter):
+        #        self.items[key].source.index.reconstruct(codegen)
+        #    else:
+
+        # return [
+        #    create_instruction("BUILD_MAP", len(keys)),
+        # ]
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
-        return self.items[index].add_options(self, arg)
+        return self.items[ConstDictVariable._get_key(arg)].add_options(self, arg)
 
     def call_method(
         self,
@@ -55,7 +66,31 @@ class ConstDictVariable(VariableTracker):
 
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            return self.getitem_const(args[0])
+            try:
+                return self.getitem_const(args[0])
+            except KeyError:
+                from .builder import VariableBuilder
+
+                if self.default_factory:
+                    if isinstance(args[0], TensorVariable):
+                        source = GetItemSource(self.source, args[0].source)
+                    else:
+                        source = GetItemSource(
+                            self.source, ConstDictVariable._get_key(args[0])
+                        )
+
+                    args = tuple(
+                        [
+                            *args,
+                            VariableBuilder(tx, source)(self.default_factory()),
+                        ]
+                    )
+
+                    self.call_method(tx, "__setitem__", args, kwargs)
+                    return args[-1]
+                else:
+                    raise
+
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -81,12 +116,16 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "__setitem__"
             and args
-            and args[0].is_python_constant()
+            and (
+                args[0].is_python_constant()
+                or isinstance(args[0], TensorVariable)
+                and args[0].parameter_value is not None
+            )
             and self.mutable_local
         ):
             assert not kwargs and len(args) == 2
             newval = collections.OrderedDict(val)
-            newval[args[0].as_python_constant()] = args[1]
+            newval[ConstDictVariable._get_key(args[0])] = args[1]
             return tx.replace_all(self, self.modifed(newval, **options))
         elif (
             name in ("pop", "get")
@@ -143,6 +182,13 @@ class ConstDictVariable(VariableTracker):
         val = self.items
         result = [ConstantVariable(k, **options) for k in val.keys()]
         return result
+
+    @classmethod
+    def _get_key(cls, arg: VariableTracker):
+        if isinstance(arg, TensorVariable) and arg.parameter_value is not None:
+            return arg.parameter_value
+        else:
+            return arg.as_python_constant()
 
 
 class DataClassVariable(ConstDictVariable):

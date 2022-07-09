@@ -67,6 +67,7 @@ class Unsupported(RuntimeError):
 
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
+    print("----------------GRAPH BREAK: " + msg + "----------------")
     raise Unsupported(msg)
 
 
