@@ -25,7 +25,6 @@ if [ ! -d "${conda_dir}" ]; then
 fi
 eval "$(${conda_dir}/bin/conda shell.bash hook)"
 
-rm -rf "${env_dir}" "${torchbench_dir}"
 
 if [ ! -d "${env_dir}" ]; then
     printf "* Creating a test environmen at ${env_dir}\n"
@@ -38,10 +37,16 @@ else
     conda activate "${env_dir}"
 fi
 
+rm -rf "${torchbench_dir}"
+
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
     git clone https://github.com/jansel/benchmark "${torchbench_dir}"
     python --version
     git lfs env
-    (cd "${torchbench_dir}" && python install.py)
+    cd "${torchbench_dir}"
+    git lfs install --force
+    git lfs fetch
+    git lfs checkout .
+    python install.py
 fi
