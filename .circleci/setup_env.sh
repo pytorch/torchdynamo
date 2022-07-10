@@ -30,7 +30,6 @@ if [ ! -d "${env_dir}" ]; then
     printf "* Creating a test environmen at ${env_dir}\n"
     conda create --prefix "${env_dir}" -y python=3.8
     conda activate "${env_dir}"
-    conda install -y git-lfs
     conda install -y -c pytorch magma-cuda113
     conda install -y pytorch torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch
 else
@@ -39,11 +38,9 @@ fi
 
 rm -rf "${torchbench_dir}"
 
-ls
-pwd
-
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
+    conda install -y -c conda-forge git-lfs
     git lfs install --force --skip-repo
     git clone --recursive git@github.com:pytorch/benchmark.git "${torchbench_dir}"
     cd "${torchbench_dir}"
