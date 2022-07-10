@@ -44,7 +44,8 @@ pwd
 
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
-    git clone git@github.com:jansel/benchmark.git "${torchbench_dir}"
+    git lfs install --force --skip-repo
+    git clone --recursive git@github.com:pytorch/benchmark.git "${torchbench_dir}"
     cd "${torchbench_dir}"
     git lfs install --force
     git lfs fetch
