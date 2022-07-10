@@ -39,14 +39,11 @@ fi
 
 rm -rf "${torchbench_dir}"
 
+ls
+pwd
+
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
     git clone git@github.com:pytorch/torchdynamo.git "${torchbench_dir}"
-    python --version
-    git lfs env
-    cd "${torchbench_dir}"
-    git lfs install --force
-    git lfs fetch
-    git lfs checkout .
-    python install.py
+    (cd "${torchbench_dir}" && python install.py)
 fi
