@@ -45,5 +45,10 @@ pwd
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
     git clone git@github.com:jansel/benchmark.git "${torchbench_dir}"
-    (cd "${torchbench_dir}" && python install.py)
+    cd "${torchbench_dir}"
+    git lfs install --force
+    git lfs fetch
+    git lfs checkout .
+    python install.py
+    cd "${root_dir}"
 fi
