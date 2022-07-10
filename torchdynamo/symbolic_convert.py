@@ -71,6 +71,7 @@ from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
+from .variables.tensor import UnspecializedPythonVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -543,6 +544,10 @@ class InstructionTranslatorBase(object):
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
+        if isinstance(left, UnspecializedPythonVariable):
+            left = left.convert_to_constant(self)
+        if isinstance(right, UnspecializedPythonVariable):
+            right = right.convert_to_constant(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_is_const = {

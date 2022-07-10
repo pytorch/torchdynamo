@@ -21,8 +21,10 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
 from ..utils import check_constant_args
+from ..utils import check_unspec_python_args
 from ..utils import istype
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 
@@ -181,19 +183,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     def unspec_python_args(self, *args, **kwargs):
-        return all(
-            isinstance(
-                i,
-                (
-                    variables.UnspecializedPythonVariable,
-                    variables.ConstantVariable,
-                ),
-            )
-            for i in itertools.chain(args, kwargs.values())
-        ) and any(
-            isinstance(x, variables.UnspecializedPythonVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
+        return check_unspec_python_args(args, kwargs)
 
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
@@ -228,8 +218,11 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
+        unspec_python_args = self.unspec_python_args(*args, **kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        has_constant_handler = self.can_constant_fold_through() and constant_args
+        has_constant_handler = self.can_constant_fold_through() and (
+            constant_args or unspec_python_args
+        )
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
 
@@ -311,6 +304,7 @@ class BuiltinVariable(VariableTracker):
                 exc.remove_from_stats()
 
         if has_constant_handler:
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return variables.ConstantVariable(
                 self.as_python_constant()(
@@ -382,7 +376,10 @@ class BuiltinVariable(VariableTracker):
     call_max = _call_min_max
 
     def call_range(self, tx, *args, **kwargs):
-        if self.constant_args(*args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs) or self.constant_args(
+            *args, **kwargs
+        ):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             return variables.RangeVariable(
                 value=range(
                     *[x.value for x in args],
