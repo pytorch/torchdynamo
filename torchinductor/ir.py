@@ -2007,7 +2007,8 @@ class FallbackKernel(ExternKernelAlloc):
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
         self.unflatten_args = unflatten_args
-        log.warning(f"Using FallbackKernel: {self.kernel}")
+        if self.kernel not in ("aten.convolution_backward",):
+            log.warning(f"Using FallbackKernel: {self.kernel}")
 
     def codegen_args(self):
         @dataclasses.dataclass

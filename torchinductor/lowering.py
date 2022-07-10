@@ -23,18 +23,34 @@ from .virtualized import ops
 lowerings = {}
 aten = torch.ops.aten
 prims = torch.ops.prims
-needs_realized_inputs = {
-    aten.as_strided,
-    aten.avg_pool2d,
-    aten.bmm,
-    aten.constant_pad_nd,
-    aten.convolution,
-    aten.convolution_backward,
-    aten.max_pool2d_with_indices,
-    aten.mm,
-    aten.reflection_pad2d,
-    aten.upsample_nearest2d,
-}
+needs_realized_inputs = set()
+
+
+def add_needs_realized_inputs(fn):
+    if isinstance(fn, (list, tuple, set)):
+        return [add_needs_realized_inputs(x) for x in fn]
+    needs_realized_inputs.add(fn)
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        for overload in fn.overloads():
+            needs_realized_inputs.add(getattr(fn, overload))
+
+
+add_needs_realized_inputs(
+    [
+        aten.as_strided,
+        aten.avg_pool2d,
+        aten.avg_pool2d_backward,
+        aten.bmm,
+        aten.constant_pad_nd,
+        aten.convolution,
+        aten.convolution_backward,
+        aten.max_pool2d_with_indices,
+        aten.max_pool2d_with_indices_backward,
+        aten.mm,
+        aten.reflection_pad2d,
+        aten.upsample_nearest2d,
+    ]
+)
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
@@ -587,7 +603,7 @@ def _embedding_bag(
 
 
 def make_fallback(kernel):
-    needs_realized_inputs.add(kernel)
+    add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
     def handler(*args):
