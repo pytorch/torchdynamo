@@ -6,6 +6,7 @@ import textwrap
 from typing import List
 
 import torch.fx
+from functorch.compile import min_cut_rematerialization_partition
 
 import torchdynamo.config
 from torchdynamo.optimizations.python_key import python_key_normalize
@@ -254,4 +255,5 @@ def compile_fx_training(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
         decompositions=decompositions,
+        partition_fn=min_cut_rematerialization_partition,
     )

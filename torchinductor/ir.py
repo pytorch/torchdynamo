@@ -2505,9 +2505,8 @@ class LoopBodyBlock:
         self.body = body
 
         def add_index(expr, category):
-            return tracer.create_proxy(
-                "get_attr", self.body.add_index_expr(expr, category), (), {}
-            )
+            name = self.body.add_index_expr(expr, category)
+            return tracer.create_proxy("get_attr", name, (), {})
 
         class CaptureIndexing(V.WrapperHandler):
             def load(self, name: str, index: sympy.Expr, upcast: bool = False):
@@ -2523,6 +2522,8 @@ class LoopBodyBlock:
                 return self._inner.reduction(name, dtype, reduction_type, index, value)
 
             def index_expr(self, index, dtype):
+                if isinstance(index, (int, sympy.Integer)):
+                    return ops.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
@@ -2550,7 +2551,8 @@ class LoopBodyBlock:
                 """
 
                 def set_indirect(new_var):
-                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
+                    new_var_indirect = V.ops.indirect_indexing(new_var)
+                    self.replace_indirect(var, new_var_indirect)
 
                 var = self.body.add_indirect()
                 tracer.create_proxy(
@@ -2574,9 +2576,11 @@ class LoopBodyBlock:
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
         for name in self.body.indexing.keys():
-            expr = getattr(self.gm, name)
-            if old in expr.free_symbols:
+            expr = getattr(self.gm, name, None)
+            if expr is not None and old in expr.free_symbols:
                 setattr(self.gm, name, expr.subs({old: new}))
 
     def __call__(self):
