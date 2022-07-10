@@ -1,0 +1,20 @@
+version: 2.1
+
+jobs:
+  torchbench_linux_gpu:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - run:
+          name: Setup
+          command: |
+            pwd
+            ls
+            nvidia-smi
+
+workflows:
+  torchbench:
+    jobs:
+      - torchbench_linux_gpu
