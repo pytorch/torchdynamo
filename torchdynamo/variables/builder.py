@@ -112,12 +112,19 @@ class VariableBuilder:
             1,
             2,
             3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
             10,
             11,
             12,
             15,
             16,
             20,
+            30,
             32,
             64,
             128,
@@ -126,7 +133,12 @@ class VariableBuilder:
             2048,
             4096,
             0.1,
+            0.01,
             0.5,
+            0.05,
+            352,  # Work around for Super_SloMo
+            800,  # Work around for vision_maskrcnn
+            1.873536229133606,
         }
 
     @staticmethod
@@ -392,11 +404,13 @@ class VariableBuilder:
             GraphArg(self.get_source(), wrapped_value, True)
         )
         if not isinstance(self.get_source(), RandomValueSource):
-            options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
+            guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+            options = {"guards": guards}
         else:
             options = {}
         options.update({"source": self.get_source()})
         options.update({"raw_value": value})
+        options.update({"volatile_guard_name": self.get_source().name()})
 
         proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
