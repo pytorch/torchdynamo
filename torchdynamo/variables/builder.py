@@ -25,6 +25,7 @@ from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..source import GlobalWeakRefSource
+from ..source import GlobalSource
 from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
@@ -105,6 +106,31 @@ class VariableBuilder:
             # TODO(jansel): add guard for alias relationship
             return self.tx.output.side_effects[value]
         return self._wrap(value).clone(**self.options())
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _common_constants():
+        return {
+            0,
+            1,
+            2,
+            3,
+            10,
+            11,
+            12,
+            15,
+            16,
+            20,
+            32,
+            64,
+            128,
+            256,
+            1024,
+            2048,
+            4096,
+            0.1,
+            0.5,
+        }
 
     @staticmethod
     def list_type(value):
@@ -227,11 +253,28 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            # For these, just specialize on exact value
-            return ConstantVariable(
-                value=value,
-                guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-            )
+            if type(value) in (int, float):
+                # should specialize for these conditions
+                if (
+                    value in self._common_constants()
+                    or isinstance(self.source, GlobalSource)
+                    or isinstance(self.source, GetItemSource)
+                    or (
+                        isinstance(self.source, AttrSource)
+                        and isinstance(self.source.base, GlobalSource)
+                    )
+                ):
+                    return ConstantVariable(
+                        value=value,
+                        guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+                else:
+                    return self.wrap_unspecialized_primitive(value)
+            else:
+                return ConstantVariable(
+                    value=value,
+                    guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                )
         elif isinstance(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
@@ -376,9 +419,11 @@ class VariableBuilder:
             GraphArg(self.get_source(), wrapped_value, True)
         )
         if not isinstance(self.get_source(), RandomValueSource):
-            guards_options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
+            options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
         else:
-            guards_options = {}
+            options = {}
+        options.update({"source": self.get_source()})
+        options.update({"raw_value": value})
 
         proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
@@ -389,16 +434,14 @@ class VariableBuilder:
                 tx=self.tx,
                 proxy=proxy,
                 example_value=wrapped_value,
-                raw_value=value,
-                **guards_options,
+                **options,
             )
         else:
             return UnspecializedPythonVariable.create(
                 tx=self.tx,
                 proxy=proxy,
                 example_value=wrapped_value,
-                raw_value=value,
-                **guards_options,
+                **options,
             )
 
 

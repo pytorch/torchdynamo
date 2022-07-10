@@ -38,6 +38,7 @@ from ..utils import proxy_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
+from .constant import ConstantVariable
 from .lists import ShapeVariable
 from .lists import SizeVariable
 
@@ -668,6 +669,17 @@ class UnspecializedPythonVariable(TensorVariable):
             need_unwrap=need_unwrap,
         )
 
+    def convert_to_constant(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+
+        for g in self.guards:
+            if g.name == self.source.name():
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable(value=self.raw_value, guards=self.guards)
+
 
 class FakeItemVariable(UnspecializedPythonVariable):
     """A UnspecializedPythonVariable which prevents access to the underlying raw value.
@@ -681,3 +693,4 @@ class FakeItemVariable(UnspecializedPythonVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
+
