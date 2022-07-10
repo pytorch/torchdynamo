@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 import functools
 from unittest.mock import patch
+from tests import test_unspec
 
 import torchdynamo
 
@@ -43,3 +44,4 @@ DynamicShapesFunctionTests = make_dynamic_cls(test_functions.FunctionTests)
 DynamicShapesMiscTests = make_dynamic_cls(test_misc.MiscTests)
 DynamicShapesReproTests = make_dynamic_cls(test_repros.ReproTests)
 DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
+DynamicShapesUnspecTests = make_dynamic_cls(test_unspec.UnspecTests)

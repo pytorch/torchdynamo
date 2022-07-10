@@ -433,11 +433,11 @@ class VariableBuilder:
         if not isinstance(self.get_source(), RandomValueSource):
             guards = self.make_guards(GuardBuilder.TYPE_MATCH)
             options = {"guards": guards}
+            options.update({"volatile_guard": list(guards)[0]})
         else:
             options = {}
         options.update({"source": self.get_source()})
         options.update({"raw_value": value})
-        options.update({"volatile_guard_name": self.get_source().name()})
 
         proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
