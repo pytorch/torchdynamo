@@ -611,16 +611,28 @@ class PermuteView(BaseView):
 
 class SqueezeView(BaseView):
     @classmethod
-    def create(cls, x):
+    def create(cls, x, *, dim=None):
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
             new_stride = []
-            for size, stride in zip(old_layout.size, old_layout.stride):
-                if size != 1:
-                    new_size.append(size)
-                    new_stride.append(stride)
+            if dim is not None:
+                assert isinstance(dim, int), "expected integer dim argument"
+                assert 0 <= dim and dim < len(old_layout.size)
+
+            for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
+                if dim is None:
+                    if size != 1:
+                        new_size.append(size)
+                        new_stride.append(stride)
+                else:
+                    if i != dim:
+                        new_size.append(size)
+                        new_stride.append(stride)
+                    else:
+                        assert size == 1, "expected squeezed size to be 1"
+
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -1897,7 +1909,7 @@ class BatchMatrixMultiply(ExternKernelOut):
             # convert to normal mm
             data = MatrixMultiply(
                 layout=output_layout.as_fixed(),
-                inputs=[View.create(a, [m, k1]), View.create(b, [k2, n])],
+                inputs=[SqueezeView.create(a, dim=0), SqueezeView.create(b, dim=0)],
             )
             data.output_view = ReinterpretView(
                 data,
