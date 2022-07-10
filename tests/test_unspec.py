@@ -82,7 +82,7 @@ class UnspecTests(torchdynamo.testing.TestCase):
             return (torch.zeros(idx), x[idx])
 
         x = list(range(50))
-        ref = fn(x, 33)  ## 33 is unspecialized
+        ref = fn(x, 33)  # 33 is unspecialized
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
             res = fn(x, 33)
