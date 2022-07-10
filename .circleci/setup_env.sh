@@ -44,6 +44,6 @@ pwd
 
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
-    git clone git@github.com:pytorch/torchdynamo.git "${torchbench_dir}"
+    git clone git@github.com:jansel/benchmark.git "${torchbench_dir}"
     (cd "${torchbench_dir}" && python install.py)
 fi
