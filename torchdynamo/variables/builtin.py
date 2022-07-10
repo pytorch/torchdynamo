@@ -242,6 +242,12 @@ class BuiltinVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
 
+        if self.fn is operator.getitem and not isinstance(
+            args[0], variables.TensorVariable
+        ):
+            tensor_args = False
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
+
         if (
             self.can_insert_in_graph()
             and tensor_args
