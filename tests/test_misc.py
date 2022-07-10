@@ -6,7 +6,6 @@ import dis
 import enum
 import functools
 import math
-import random
 import sys
 import typing
 import unittest
