@@ -7,22 +7,11 @@ jobs:
       image: ubuntu-2004-cuda-11.4:202110-01
     resource_class: gpu.nvidia.large
     steps:
+      - checkout
       - run:
-          name: Setup Conda
+          name: Setup
           command: |
-            export PARAMETERS_PYTHON_VERSION=3.8
             source .circleci/setup_env.sh
-      - run:
-          name: Setup PyTorch
-          command: |
-            conda install -y git-lfs
-            conda install -y -c pytorch magma-cuda113
-            conda install -y pytorch torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch
-      - run:
-          name: Setup TorchBench
-          command: |
-            git clone https://github.com/jansel/benchmark torchbenchmark
-            (cd torchbenchmark && python install.py)
 
 
 workflows:
