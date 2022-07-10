@@ -41,7 +41,7 @@ rm -rf "${torchbench_dir}"
 
 if [ ! -d "${torchbench_dir}" ]; then
     printf "* Installing torchbench at ${torchbench_dir}\n"
-    git clone https://github.com/jansel/benchmark "${torchbench_dir}"
+    git clonegit@github.com:pytorch/torchdynamo.git "${torchbench_dir}"
     python --version
     git lfs env
     cd "${torchbench_dir}"
