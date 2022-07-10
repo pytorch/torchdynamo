@@ -2505,8 +2505,9 @@ class LoopBodyBlock:
         self.body = body
 
         def add_index(expr, category):
-            name = self.body.add_index_expr(expr, category)
-            return tracer.create_proxy("get_attr", name, (), {})
+            return tracer.create_proxy(
+                "get_attr", self.body.add_index_expr(expr, category), (), {}
+            )
 
         class CaptureIndexing(V.WrapperHandler):
             def load(self, name: str, index: sympy.Expr, upcast: bool = False):
@@ -2551,8 +2552,7 @@ class LoopBodyBlock:
                 """
 
                 def set_indirect(new_var):
-                    new_var_indirect = V.ops.indirect_indexing(new_var)
-                    self.replace_indirect(var, new_var_indirect)
+                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
 
                 var = self.body.add_indirect()
                 tracer.create_proxy(
@@ -2579,8 +2579,8 @@ class LoopBodyBlock:
         if str(old) == str(new):
             return
         for name in self.body.indexing.keys():
-            expr = getattr(self.gm, name, None)
-            if expr is not None and old in expr.free_symbols:
+            expr = getattr(self.gm, name)
+            if old in expr.free_symbols:
                 setattr(self.gm, name, expr.subs({old: new}))
 
     def __call__(self):

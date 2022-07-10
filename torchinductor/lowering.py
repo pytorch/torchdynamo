@@ -629,7 +629,7 @@ else:
     def rand(
         *size, dtype=None, layout=0, device=None, pin_memory=False, memory_format=None
     ):
-        logging.warning("using triton random, results to differ from eager")
+        logging.warning("using triton random, expect difference from eager")
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
