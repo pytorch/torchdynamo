@@ -377,7 +377,10 @@ def baselines(models, model_iter_fn, example_inputs, args):
     for rep in range(args.repeat):
         for idx, (name, model) in enumerate(models):
             if model is not None:
-                timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
+                try:
+                    timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
+                except Exception:
+                    pass
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
         for i in range(1, timings.shape[1])
@@ -414,6 +417,17 @@ def speedup_experiment_ts(args, model_iter_fn, model, example_inputs):
 
     Writes to ./baseline_ts.csv
     """
+    if args.training:
+        return baselines(
+            [
+                ("eager", model),
+                ("ts", try_script(model, example_inputs)),
+            ],
+            model_iter_fn,
+            example_inputs,
+            args,
+        )
+
     return baselines(
         [
             ("eager", model),
@@ -816,6 +830,10 @@ def parse_args():
         action="store_true",
         help="Fail a benchmark if backend throws an exception",
     )
+    parser.add_argument(
+        "--output",
+        help="Overides the output filename",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -1209,6 +1227,9 @@ def main(runner, original_dir=None):
     experiment = functools.partial(experiment, args, model_iter_fn)
 
     cos_similarity = args.cosine
+
+    if args.output:
+        output_filename = args.output
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
