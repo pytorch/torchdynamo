@@ -779,7 +779,7 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
-    def test_bmm(self):
+    def test_bmm1(self):
         def fn(a, b):
             return (
                 torch.bmm(a, b),
@@ -799,6 +799,19 @@ class CommonTemplate:
             (
                 torch.randn(1, 16, 8),
                 torch.randn(1, 8, 10),
+            ),
+            check_lowp=False,
+        )
+
+    def test_bmm2(self):
+        def fn(a, b):
+            return torch.bmm(a.permute(0, 2, 1), b)
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, 8, 8),
+                torch.randn(1, 8, 8),
             ),
             check_lowp=False,
         )
