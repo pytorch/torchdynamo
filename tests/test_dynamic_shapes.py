@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 import functools
 from unittest.mock import patch
-from tests import test_unspec
 
 import torchdynamo
 
@@ -9,6 +8,7 @@ from . import test_functions
 from . import test_misc
 from . import test_modules
 from . import test_repros
+from . import test_unspec
 
 
 def make_dynamic_fn(fn):
