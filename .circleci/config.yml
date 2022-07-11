@@ -33,7 +33,6 @@ jobs:
             env
             git clone --recursive --depth=1 --shallow-submodules https://github.com/jansel/benchmark.git torchbenchmark
             cd torchbenchmark
-            git config 
             git lfs install
             env GIT_TRACE=1 git lfs fetch
             git lfs checkout .
