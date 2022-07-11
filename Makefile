@@ -8,7 +8,7 @@ CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
 
 # versions used in CI
-PYTORCH_VERSION ?= 1.13.0.dev20220710
+PYTORCH_VERSION ?= dev20220710
 FUNCTORCH_VERSION ?= 9b96f14e65ffdf64a28416054fe536ed14297fe9
 TRITON_VERSION ?= 90fcb586f2433e04a1424e1f9b19100b0f809170
 
@@ -49,18 +49,22 @@ setup:
 
 setup_nightly:
 	pip install ninja
-	pip install --pre torch==$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install -v git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)
+	pip install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
 	pip install -r requirements.txt
 	python setup.py develop
 
 setup_nightly_gpu:
-	conda install -y -c pytorch magma-cuda113
-	conda install -y pytorch==$(PYTORCH_VERSION) torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch-nightly
+	conda install -y -c pytorch magma-cuda113 cudatoolkit=11.3
+	pip install --pre torch==1.13.0.$(PYTORCH_VERSION) \
+                      torchvision==0.14.0.$(PYTORCH_VERSION) \
+                      torchaudio==0.13.0.$(PYTORCH_VERSION) \
+                      torchtext==0.14.0.$(PYTORCH_VERSION) \
+                      --extra-index-url https://download.pytorch.org/whl/nightly/cu113
 	pip install ninja
-	pip install -v git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)
-	pip install -r requirements.txt
+	pip install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
 	pip install -U "git+https://github.com/jansel/triton@$(TRITON_VERSION)#subdirectory=python"
+	pip install -r requirements.txt
 	python setup.py develop
 
 clean:
