@@ -2058,6 +2058,33 @@ class CommonTemplate:
             ],
         )
 
+    def test_scatter_add1(self):
+        def fn(a, b, dim, index):
+            return aten.scatter_add(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.randn(2, 3),
+                torch.randn(2, 3),
+                0,
+                torch.tensor([[1]]),
+            ],
+        )
+
+        # FIXIT: The following input causes a crash on the cpp backend.
+        """
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+            ],
+        )
+        """
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)

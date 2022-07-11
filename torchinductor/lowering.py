@@ -1313,6 +1313,55 @@ def index_select(x, dim, indices):
     )
 
 
+@register_lowering(aten.scatter_add, type_promote=False)
+def scatter_add(x, dim: int, index, src):
+    assert isinstance(x, TensorBox)
+    assert isinstance(dim, int)
+    assert "int" in str(index.get_dtype())
+    assert 0 <= dim < len(x.get_size())
+
+    index_loader = index.make_loader()
+    src_loader = src.make_loader()
+
+    def output_indexer(idx):
+        indirect_idx = list(idx)
+        indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
+        return indirect_idx
+
+    def fn(idx):
+        for i in range(len(idx)):
+            boundary_check = ops.lt(
+                ops.index_expr(idx[i], torch.int64),
+                ops.index_expr(index.get_size()[i], torch.int64),
+            )
+            if i == 0:
+                condition = boundary_check
+            else:
+                condition = ops.and_(condition, boundary_check)
+        return ops.where(
+            condition,
+            src_loader(idx),
+            ops.constant(0, x.get_dtype()),
+        )
+
+    result = clone(x)
+    scatter = ir.Scatter(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=x.get_size(),
+        output_indexer=output_indexer,
+        scatter_mode="atomic_add",
+    )
+    buffer = ir.ComputedBuffer(
+        None,
+        ir.MutationLayout(result),
+        scatter,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    return result
+
+
 @register_lowering(aten.upsample_nearest2d)
 def upsample_nearest2d(x, output_size=None, scale_factors=None):
     x.realize()  # elements are reused
