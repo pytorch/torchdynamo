@@ -12,13 +12,12 @@ jobs:
           name: Setup
           command: |
             source .circleci/setup_env.sh
+            make setup
+            python setup.py develop
       - run:
           name: Tests
           command: |
             source .circleci/setup_env.sh
-            make setup
-            python -c "import torch; print(torch.cuda.is_available())"
-            python setup.py develop
             pytest
 
 
