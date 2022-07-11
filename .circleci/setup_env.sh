@@ -25,7 +25,7 @@ if [ ! -d "${env_dir}" ]; then
     printf "* Creating a test environmen at ${env_dir}\n"
     conda create --prefix "${env_dir}" -y python=3.8
     conda activate "${env_dir}"
-    conda install pip
+    conda install -y pip
     conda install -y -c pytorch magma-cuda113
     conda install -y pytorch torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch
 else
