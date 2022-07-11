@@ -23,7 +23,6 @@ cuda,maml_omniglot,1,1,15,15,1.0000,0.9913
 cuda,mnasnet1_0,1,1,153,153,1.0000,0.9989
 cuda,mobilenet_v2,1,1,154,154,1.0000,0.9989
 cuda,mobilenet_v3_large,1,1,188,188,1.0000,0.9991
-cuda,moco,9,7,0,-4,0.0000,0.0000
 cuda,nvidia_deeprecommender,1,1,14,14,1.0000,0.9878
 cuda,opacus_cifar10,1,1,70,70,1.0000,0.9972
 cuda,pyhpc_equation_of_state,1,1,373,373,1.0000,0.9975

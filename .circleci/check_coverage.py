@@ -31,7 +31,7 @@ def main():
             textwrap.dedent(
                 f"""
                 Error {len(failed)} models below expected coverage:
-                    {' '.join(failed)}")
+                    {' '.join(failed)}
 
                 If this coverage drop is expected, then you can update targets
                 by downloading `coverage.csv` from the artifacts tab in CircleCI
