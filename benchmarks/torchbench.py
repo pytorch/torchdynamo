@@ -22,6 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 for torchbench_dir in (
+    "./torchbenchmark",
     "../torchbenchmark",
     "../torchbench",
     "../benchmark",

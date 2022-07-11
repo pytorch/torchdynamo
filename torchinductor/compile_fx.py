@@ -6,11 +6,15 @@ import textwrap
 from typing import List
 
 import torch.fx
+from functorch.compile import min_cut_rematerialization_partition
 
 import torchdynamo.config
+from torchdynamo.optimizations.backends import aot_autograd
+from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
+from torchdynamo.utils import init_logging
 
 from . import config
 from .decomposition import decompositions
@@ -125,6 +129,8 @@ def compile_fx_inner(
     cudagraphs=None,
     num_fixed=0,
 ):
+    init_logging()
+
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
@@ -237,7 +243,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 def compile_fx_training(
     model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
 ):
-    from torchdynamo.optimizations.backends import aot_autograd
+    model_ = normalize_ir(model_, example_inputs_)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         # model.graph.print_tabular()
@@ -254,4 +260,5 @@ def compile_fx_training(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
         decompositions=decompositions,
+        partition_fn=min_cut_rematerialization_partition,
     )

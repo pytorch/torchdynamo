@@ -170,6 +170,10 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
         for x, y in zip(actual_flat, correct_flat)
     )
     correct = tree_unflatten(correct_flat, correct_spec)
+
+    # print(correct)
+    # print(actual)
+    # print(correct - actual)
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
@@ -779,7 +783,7 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
-    def test_bmm(self):
+    def test_bmm1(self):
         def fn(a, b):
             return (
                 torch.bmm(a, b),
@@ -799,6 +803,19 @@ class CommonTemplate:
             (
                 torch.randn(1, 16, 8),
                 torch.randn(1, 8, 10),
+            ),
+            check_lowp=False,
+        )
+
+    def test_bmm2(self):
+        def fn(a, b):
+            return torch.bmm(a.permute(0, 2, 1), b)
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, 8, 8),
+                torch.randn(1, 8, 8),
             ),
             check_lowp=False,
         )
@@ -2101,7 +2118,7 @@ class CommonTemplate:
                 a, b, [2, 2], [2, 2], [0, 0], [1, 1], False, c
             )
 
-        x = torch.randn([2, 4, 14, 14])
+        x = torch.randn([2, 4, 18, 14])
         result, indices = aten.max_pool2d_with_indices(
             x,
             [2, 2],
@@ -2126,7 +2143,7 @@ class CommonTemplate:
                 a, b, [3, 3], [2, 2], [1, 1], [1, 1], True, c
             )
 
-        x = torch.randn([2, 4, 56, 56])
+        x = torch.randn([2, 4, 40, 56])
         result, indices = aten.max_pool2d_with_indices(
             x,
             [3, 3],
@@ -2142,6 +2159,48 @@ class CommonTemplate:
                 torch.randn_like(result),
                 x,
                 indices,
+            ],
+        )
+
+    def test_avg_pool2d_backward(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [2, 2],
+                [2, 2],
+                [0, 0],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([2, 4, 7, 7]),
+                torch.randn([2, 4, 14, 14]),
+            ],
+        )
+
+    def test_avg_pool2d_backward2(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [3, 3],
+                [1, 1],
+                [1, 1],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 1, 20, 15]),
+                torch.randn([1, 1, 20, 15]),
             ],
         )
 

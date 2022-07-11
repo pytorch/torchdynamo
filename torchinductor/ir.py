@@ -611,16 +611,28 @@ class PermuteView(BaseView):
 
 class SqueezeView(BaseView):
     @classmethod
-    def create(cls, x):
+    def create(cls, x, *, dim=None):
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
             new_stride = []
-            for size, stride in zip(old_layout.size, old_layout.stride):
-                if size != 1:
-                    new_size.append(size)
-                    new_stride.append(stride)
+            if dim is not None:
+                assert isinstance(dim, int), "expected integer dim argument"
+                assert 0 <= dim and dim < len(old_layout.size)
+
+            for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
+                if dim is None:
+                    if size != 1:
+                        new_size.append(size)
+                        new_stride.append(stride)
+                else:
+                    if i != dim:
+                        new_size.append(size)
+                        new_stride.append(stride)
+                    else:
+                        assert size == 1, "expected squeezed size to be 1"
+
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -1773,35 +1785,6 @@ class ExternKernelAlloc(ExternKernel):
         return False
 
 
-class IndexPutFallback(ExternKernel):
-    # TODO(jansel): delete this when this is fixed:
-    # https://github.com/openai/triton/issues/558
-    kernel = "aten.index_put_"
-
-    def codegen(self, wrapper):
-        x, *indices, values = [t.codegen_reference() for t in self.inputs]
-        (accumulate,) = self.constant_args
-        wrapper.writeline(
-            f"{self.kernel}({x}, [{', '.join(indices)}], {values}, {accumulate!r})"
-        )
-
-    def should_allocate(self):
-        return False
-
-    def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
-
-    def __init__(self, x, indices, values, accumulate=False):
-        super().__init__(
-            None,
-            MutationLayout(x),
-            self.unwrap_storage([x, *indices, values]),
-            [accumulate],
-        )
-        self.name = V.graph.register_buffer(self)
-
-
 class InplaceBernoulliFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -1897,7 +1880,7 @@ class BatchMatrixMultiply(ExternKernelOut):
             # convert to normal mm
             data = MatrixMultiply(
                 layout=output_layout.as_fixed(),
-                inputs=[View.create(a, [m, k1]), View.create(b, [k2, n])],
+                inputs=[SqueezeView.create(a, dim=0), SqueezeView.create(b, dim=0)],
             )
             data.output_view = ReinterpretView(
                 data,
@@ -2007,7 +1990,8 @@ class FallbackKernel(ExternKernelAlloc):
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
         self.unflatten_args = unflatten_args
-        log.warning(f"Using FallbackKernel: {self.kernel}")
+        if self.kernel not in ("aten.convolution_backward",):
+            log.warning(f"Using FallbackKernel: {self.kernel}")
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -2523,6 +2507,8 @@ class LoopBodyBlock:
                 return self._inner.reduction(name, dtype, reduction_type, index, value)
 
             def index_expr(self, index, dtype):
+                if isinstance(index, (int, sympy.Integer)):
+                    return ops.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
@@ -2574,6 +2560,8 @@ class LoopBodyBlock:
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
         for name in self.body.indexing.keys():
             expr = getattr(self.gm, name)
             if old in expr.free_symbols:
