@@ -24,6 +24,7 @@ jobs:
           name: TorchBench Install
           command: |
             source .circleci/setup_env.sh
+            export GIT_LFS_SKIP_SMUDGE=1
             curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
             # The latest git-lfs doesn't work with torchbench, need to use an old one
             sudo apt-get install git-lfs=2.13.2
