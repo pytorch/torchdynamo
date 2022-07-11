@@ -6,6 +6,9 @@ PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
+PYTORCH_VERSION ?= 1.13.0.dev20220710
+FUNCTORCH_VERSION ?= 9b96f14e65ffdf64a28416054fe536ed14297fe9
+TRITON_VERSION ?= 2.0.0.dev20220706
 
 default: develop
 
@@ -44,9 +47,18 @@ setup:
 
 setup_nightly:
 	pip install ninja
-	pip install --pre torch==1.13.0.dev20220701+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install -v git+https://github.com/pytorch/functorch.git@6dfa19e61e27012be87c49a249633a58f0cdd024
+	pip install --pre torch==$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	pip install -v git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)
 	pip install -r requirements.txt
+	python setup.py develop
+
+setup_nightly_conda_gpu:
+	conda install -y -c pytorch magma-cuda113
+	conda install -y pytorch==$(PYTORCH_VERSION) torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch-nightly
+	pip install ninja
+	pip install -v git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)
+	pip install -r requirements.txt
+	pip install -U --pre triton==$(TRITON_VERSION)
 	python setup.py develop
 
 clean:

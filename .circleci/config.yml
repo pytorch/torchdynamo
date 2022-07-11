@@ -1,7 +1,7 @@
 version: 2.1
 
 jobs:
-  torchbench_linux_gpu:
+  gpu_linux:
     machine:
       # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
       image: ubuntu-2004-cuda-11.4:202110-01
@@ -12,16 +12,14 @@ jobs:
           name: Setup
           command: |
             source .circleci/setup_env.sh
-            make setup
-            python setup.py develop
       - run:
           name: Tests
           command: |
             source .circleci/setup_env.sh
-            pytest
+            pytest -v
 
 
 workflows:
-  torchbench:
+  gpu:
     jobs:
-      - torchbench_linux_gpu
+      - gpu_linux

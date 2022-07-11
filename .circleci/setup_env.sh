@@ -22,22 +22,20 @@ fi
 eval "$(${conda_dir}/bin/conda shell.bash hook)"
 
 if [ ! -d "${env_dir}" ]; then
-    printf "* Creating a test environmen at ${env_dir}\n"
-    conda create --prefix "${env_dir}" -y python=3.8
+    printf "* Creating a test environment at ${env_dir}\n"
+    conda create --prefix "${env_dir}" -y python=3.8 pip
     conda activate "${env_dir}"
-    conda install -y pip
-    conda install -y -c pytorch magma-cuda113
-    conda install -y pytorch torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch
+    make setup_nightly_conda_gpu
 else
     conda activate "${env_dir}"
 fi
 
-# rm -rf "${torchbench_dir}"
+# TODO(jansel): need to debug issue with git-lfs
 #
 # if [ ! -d "${torchbench_dir}" ]; then
 #     printf "* Installing torchbench at ${torchbench_dir}\n"
-#     # conda install -y -c conda-forge git-lfs
-#     # git lfs install --force --skip-repo
+#     conda install -y -c conda-forge git-lfs
+#     git lfs install --force --skip-repo
 #     git clone --recursive git@github.com:pytorch/benchmark.git "${torchbench_dir}"
 #     cd "${torchbench_dir}"
 #     git lfs install --force
