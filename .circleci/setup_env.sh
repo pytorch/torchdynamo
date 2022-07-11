@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # based on https://github.com/pytorch/functorch/blob/main/.circleci/unittest/linux/scripts/setup_env.sh
-set -x
-set -e
-
+set -ex
 root_dir="$(git rev-parse --show-toplevel)"
 conda_dir="${root_dir}/conda"
 env_dir="${root_dir}/env"
@@ -29,9 +27,3 @@ if [ ! -d "${env_dir}" ]; then
 else
     conda activate "${env_dir}"
 fi
-
-# TODO(jansel): need to debug issue with git-lfs
-#
-# if [ ! -d "${torchbench_dir}" ]; then
-cd "${root_dir}"
-# fi
