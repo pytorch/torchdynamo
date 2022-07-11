@@ -11,7 +11,6 @@ import torchdynamo
 
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
-from .bytecode_transformation import unique_id
 from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
