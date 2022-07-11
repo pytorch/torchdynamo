@@ -25,7 +25,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             export GIT_LFS_SKIP_SMUDGE=1
-            conda install -c conda-forge git-lfs
+            conda install -y -c conda-forge git-lfs
             git lfs install --skip-repo
             git lfs env
             env
