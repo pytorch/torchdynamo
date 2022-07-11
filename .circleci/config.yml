@@ -12,36 +12,35 @@ jobs:
           name: Setup
           command: |
             source .circleci/setup_env.sh
+      - run:
+          name: Tests
+          command: |
+            source .circleci/setup_env.sh
+            mkdir test-results
+            pytest -v --junitxml=test-results/junit.xml
+      - store_test_results:
+          path: test-results
+      # This fails with a git-lfs error
       # - run:
-      #     name: Tests
+      #     name: TorchBench install
       #     command: |
       #       source .circleci/setup_env.sh
-      #       mkdir test-results
-      #       pytest -v --junitxml=test-results/junit.xml
-      # - store_test_results:
-      #     path: test-results
-      - run:
-          name: TorchBench install
-          command: |
-            source .circleci/setup_env.sh
-            export GIT_LFS_SKIP_SMUDGE=1
-            unset GIT_ASKPASS
-            unset GIT_EXEC_PATH
-            conda install -y -c conda-forge git-lfs
-            git clone --recursive --depth=1 --shallow-submodules https://github.com/pytorch/benchmark.git torchbenchmark
-            cd torchbenchmark
-            git lfs install
-            env GIT_TRACE=1 git lfs fetch
-            git lfs checkout .
-            python install.py
-            cd ..
-      - run:
-          name: TorchBench run
-          command: |
-            source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error
-      - store_artifacts:
-          path: coverage.csv
+      #       export GIT_LFS_SKIP_SMUDGE=1
+      #       conda install -y -c conda-forge git-lfs
+      #       git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+      #       cd torchbenchmark
+      #       git lfs install
+      #       env GIT_TRACE=1 git lfs fetch
+      #       git lfs checkout .
+      #       python install.py
+      #       cd ..
+      # - run:
+      #     name: TorchBench run
+      #     command: |
+      #       source .circleci/setup_env.sh
+      #       python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error
+      # - store_artifacts:
+      #     path: coverage.csv
 
 workflows:
   gpu:
