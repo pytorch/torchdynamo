@@ -28,13 +28,11 @@ jobs:
             unset GIT_ASKPASS
             unset GIT_EXEC_PATH
             conda install -y -c conda-forge git-lfs
-            git lfs install --skip-repo
-            git lfs env
-            env
-            git clone --recursive --depth=1 --shallow-submodules https://github.com/jansel/benchmark.git torchbenchmark
+            git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git torchbenchmark
             cd torchbenchmark
             git lfs install
-            env GIT_TRACE=1 git -c lfs.concurrenttransfers=1 lfs fetch || (sleep 60 && env GIT_TRACE=1 git -c lfs.concurrenttransfers=1 lfs fetch)
+            git lfs env
+            env GIT_TRACE=1 git -c lfs.concurrenttransfers=1 lfs fetch
             git lfs checkout .
             python install.py
             cd ..
