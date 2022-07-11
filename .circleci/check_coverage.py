@@ -17,7 +17,7 @@ def main():
             print(f"{name:34} MISSING")
             failed.append(name)
             continue
-        if actual_ops >= max(1, min(expected_ops - 10, expected_ops * 0.95)):
+        if actual_ops >= max(1, min(expected_ops - 10, expected_ops * 0.9)):
             status = "PASS"
         else:
             status = "FAIL"
