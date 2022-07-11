@@ -25,7 +25,7 @@ if [ ! -d "${env_dir}" ]; then
     printf "* Creating a test environment at ${env_dir}\n"
     conda create --prefix "${env_dir}" -y python=3.8 pip
     conda activate "${env_dir}"
-    make setup_nightly_conda_gpu
+    make setup_nightly_gpu
 else
     conda activate "${env_dir}"
 fi

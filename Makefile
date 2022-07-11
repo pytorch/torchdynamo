@@ -8,7 +8,7 @@ CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
 PYTORCH_VERSION ?= 1.13.0.dev20220710
 FUNCTORCH_VERSION ?= 9b96f14e65ffdf64a28416054fe536ed14297fe9
-TRITON_VERSION ?= 2.0.0.dev20220706
+TRITON_VERSION ?= 4a399a7e4058f8f54f4d2c6812462b3eb2bf2c9e
 
 default: develop
 
@@ -52,13 +52,13 @@ setup_nightly:
 	pip install -r requirements.txt
 	python setup.py develop
 
-setup_nightly_conda_gpu:
+setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda113
 	conda install -y pytorch==$(PYTORCH_VERSION) torchvision torchaudio torchtext cudatoolkit=11.3 -c pytorch-nightly
 	pip install ninja
 	pip install -v git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)
 	pip install -r requirements.txt
-	pip install -U --pre triton==$(TRITON_VERSION)
+	pip install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	python setup.py develop
 
 clean:

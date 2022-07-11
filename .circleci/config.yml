@@ -17,6 +17,11 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             pytest -v
+      # - run:
+      #     name: TorchBench
+      #     command: |
+      #       source .circleci/setup_env.sh
+      #       python benchmarks/torchbench.py -d cuda --raise
 
 
 workflows:
