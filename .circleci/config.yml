@@ -25,14 +25,17 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             export GIT_LFS_SKIP_SMUDGE=1
+            unset GIT_ASKPASS
+            unset GIT_EXEC_PATH
             conda install -y -c conda-forge git-lfs
             git lfs install --skip-repo
             git lfs env
             env
             git clone --recursive --depth=1 --shallow-submodules https://github.com/jansel/benchmark.git torchbenchmark
             cd torchbenchmark
+            git config 
             git lfs install
-            git lfs fetch
+            env GIT_TRACE=1 git lfs fetch
             git lfs checkout .
             python install.py
             cd ..
