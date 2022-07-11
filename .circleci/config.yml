@@ -32,6 +32,7 @@ jobs:
             cd torchbenchmark
             git lfs install
             git lfs env
+            echo "url=$(git remote get-url origin)" | git credential erase
             env GIT_TRACE=1 git -c lfs.concurrenttransfers=1 lfs fetch
             git lfs checkout .
             python install.py
