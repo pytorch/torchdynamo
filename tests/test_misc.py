@@ -1677,7 +1677,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         def fn(x):
             r1 = random.random()
             y = x + random.uniform(10, 20)
-            r2 = random.randint(2, 18)
+            y.sum().item()
+            r2 = random.randint(2, 18)  # no graph output in this frame
+            y.sum().item()
             return y + r1, r2
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
