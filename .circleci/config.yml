@@ -25,12 +25,11 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             export GIT_LFS_SKIP_SMUDGE=1
-            curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-            sudo apt-get install git-lfs=2.13.2
-            git lfs install
+            conda install -c conda-forge git-lfs
+            git lfs install --skip-repo
             git lfs env
             env
-            git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+            git clone --recursive --depth=1 --shallow-submodules https://github.com/jansel/benchmark.git torchbenchmark
             cd torchbenchmark
             git lfs install
             git lfs fetch
