@@ -2506,6 +2506,8 @@ class LoopBodyBlock:
                 return self._inner.reduction(name, dtype, reduction_type, index, value)
 
             def index_expr(self, index, dtype):
+                if isinstance(index, (int, sympy.Integer)):
+                    return ops.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
@@ -2557,6 +2559,8 @@ class LoopBodyBlock:
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
         for name in self.body.indexing.keys():
             expr = getattr(self.gm, name)
             if old in expr.free_symbols:
