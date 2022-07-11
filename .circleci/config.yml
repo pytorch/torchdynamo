@@ -12,22 +12,24 @@ jobs:
           name: Setup
           command: |
             source .circleci/setup_env.sh
+      # - run:
+      #     name: Tests
+      #     command: |
+      #       source .circleci/setup_env.sh
+      #       mkdir test-results
+      #       pytest -v --junitxml=test-results/junit.xml
+      # - store_test_results:
+      #     path: test-results
       - run:
-          name: Tests
-          command: |
-            source .circleci/setup_env.sh
-            mkdir test-results
-            pytest -v --junitxml=test-results/junit.xml
-      - store_test_results:
-          path: test-results
-      - run:
-          name: TorchBench Install
+          name: TorchBench install
           command: |
             source .circleci/setup_env.sh
             export GIT_LFS_SKIP_SMUDGE=1
             curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-            # The latest git-lfs doesn't work with torchbench, need to use an old one
             sudo apt-get install git-lfs=2.13.2
+            git lfs install
+            git lfs env
+            env
             git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
             cd torchbenchmark
             git lfs install
@@ -36,10 +38,10 @@ jobs:
             python install.py
             cd ..
       - run:
-          name: TorchBench Run
+          name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --coverage -dcuda --raise-on-backend-error
+            python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error
       - store_artifacts:
           path: coverage.csv
 
