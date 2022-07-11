@@ -6,6 +6,8 @@ PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
+
+# versions used in CI
 PYTORCH_VERSION ?= 1.13.0.dev20220710
 FUNCTORCH_VERSION ?= 9b96f14e65ffdf64a28416054fe536ed14297fe9
 TRITON_VERSION ?= 4a399a7e4058f8f54f4d2c6812462b3eb2bf2c9e
