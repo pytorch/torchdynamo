@@ -20,27 +20,23 @@ jobs:
             pytest -v --junitxml=test-results/junit.xml
       - store_test_results:
           path: test-results
-      # This fails with a git-lfs error
-      # - run:
-      #     name: TorchBench install
-      #     command: |
-      #       source .circleci/setup_env.sh
-      #       export GIT_LFS_SKIP_SMUDGE=1
-      #       conda install -y -c conda-forge git-lfs
-      #       git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
-      #       cd torchbenchmark
-      #       git lfs install
-      #       env GIT_TRACE=1 git lfs fetch
-      #       git lfs checkout .
-      #       python install.py
-      #       cd ..
-      # - run:
-      #     name: TorchBench run
-      #     command: |
-      #       source .circleci/setup_env.sh
-      #       python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error
-      # - store_artifacts:
-      #     path: coverage.csv
+      - run:
+          name: TorchBench install
+          command: |
+            source .circleci/setup_env.sh
+            conda install -y -c conda-forge git-lfs
+            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+            # git doesn't work due to git-lfs auth issues, workaround:
+            wget -O torchbenchmark.tar.bz2 https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t
+            tar jxvf torchbenchmark.tar.bz2
+            (cd torchbenchmark && python install.py)
+      - run:
+          name: TorchBench run
+          command: |
+            source .circleci/setup_env.sh
+            python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error
+      - store_artifacts:
+          path: coverage.csv
 
 workflows:
   gpu:
