@@ -34,7 +34,7 @@ jobs:
             git clone --recursive --depth=1 --shallow-submodules https://github.com/jansel/benchmark.git torchbenchmark
             cd torchbenchmark
             git lfs install
-            env GIT_TRACE=1 git lfs fetch
+            env GIT_TRACE=1 git -c lfs.concurrenttransfers=1 lfs fetch || (sleep 60 && env GIT_TRACE=1 git -c lfs.concurrenttransfers=1 lfs fetch)
             git lfs checkout .
             python install.py
             cd ..
