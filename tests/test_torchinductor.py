@@ -2136,8 +2136,8 @@ class CommonTemplate:
         self.common(
             fn,
             [
-                torch.randn([1, 1, 15, 15]),
-                torch.randn([1, 1, 15, 15]),
+                torch.randn([1, 1, 20, 15]),
+                torch.randn([1, 1, 20, 15]),
             ],
         )
 
