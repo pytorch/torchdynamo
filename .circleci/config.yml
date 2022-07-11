@@ -19,6 +19,7 @@ jobs:
             make setup
             python -c "import torch; print(torch.cuda.is_available())"
             python setup.py develop
+            pytest
 
 
 workflows:
