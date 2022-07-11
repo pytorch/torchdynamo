@@ -10,7 +10,7 @@ CLANG_FORMAT ?= clang-format-10
 # versions used in CI
 PYTORCH_VERSION ?= 1.13.0.dev20220710
 FUNCTORCH_VERSION ?= 9b96f14e65ffdf64a28416054fe536ed14297fe9
-TRITON_VERSION ?= 4a399a7e4058f8f54f4d2c6812462b3eb2bf2c9e
+TRITON_VERSION ?= 90fcb586f2433e04a1424e1f9b19100b0f809170
 
 default: develop
 
@@ -60,7 +60,7 @@ setup_nightly_gpu:
 	pip install ninja
 	pip install -v git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)
 	pip install -r requirements.txt
-	pip install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
+	pip install -U "git+https://github.com/jansel/triton@$(TRITON_VERSION)#subdirectory=python"
 	python setup.py develop
 
 clean:
