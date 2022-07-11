@@ -38,6 +38,11 @@ jobs:
             python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error -x Super_SloMo
       - store_artifacts:
           path: coverage.csv
+      - run:
+          name: TorchBench coverage
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_coverage.py
 
 workflows:
   gpu:
