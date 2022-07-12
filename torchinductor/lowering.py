@@ -1314,11 +1314,13 @@ def index_select(x, dim, indices):
 
 
 @register_lowering(aten.scatter_add_, type_promote=False)
-def scatter_add_(x, dim: int, index, src):
-    assert isinstance(x, TensorBox)
-    assert isinstance(dim, int)
+def scatter_add_(self, dim: int, index, src):
+    assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(x.get_size())
+    assert 0 <= dim < len(self.get_size())
+    src = to_dtype(src, self.get_dtype())
+    self.realize()
+    V.graph.realize_users_of(self.get_name())
 
     index_loader = index.make_loader()
 
@@ -1331,8 +1333,8 @@ def scatter_add_(x, dim: int, index, src):
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
     # self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
     scatter = ir.Scatter(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
+        device=self.get_device(),
+        dtype=self.get_dtype(),
         inner_fn=src.make_loader(),
         ranges=index.get_size(),
         output_indexer=output_indexer,
@@ -1340,11 +1342,11 @@ def scatter_add_(x, dim: int, index, src):
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(x),
+        ir.MutationLayout(self),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
-    return x
+    return self
 
 
 @register_lowering(aten.upsample_nearest2d)
