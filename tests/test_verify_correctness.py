@@ -136,10 +136,10 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         def incorrect_compile_fn(gm, example_inputs):
             return transform(gm).forward
 
-        r1 = toy_example(i1, i2)
+        toy_example(i1, i2)
         try:
             with torchdynamo.optimize(incorrect_compile_fn):
-                r2 = toy_example(i1, i2)
+                toy_example(i1, i2)
         except RuntimeError:
             pass
         else:
