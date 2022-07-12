@@ -371,6 +371,11 @@ def index_put(self, indices, values, accumulate=False):
     return torch.index_put_(self.clone(), indices, values, accumulate)
 
 
+@register_decomposition([aten.scatter_add])
+def scatter_add(self, dim, index, src):
+    return self.clone().scatter_add_(dim, index, src)
+
+
 @register_decomposition([aten.narrow])
 def narrow(self, dim, start, length):
     return aten.slice(self, dim, start, start + length)
