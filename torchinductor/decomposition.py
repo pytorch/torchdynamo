@@ -25,6 +25,7 @@ decompositions = get_decompositions(
         aten.clamp_min,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
+        aten.detach,
         aten.elu_backward,
         aten._embedding_bag,
         aten.embedding_dense_backward,
@@ -368,6 +369,11 @@ def nll_loss_forward(
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
     return torch.index_put_(self.clone(), indices, values, accumulate)
+
+
+@register_decomposition([aten.scatter_add])
+def scatter_add(self, dim, index, src):
+    return self.clone().scatter_add_(dim, index, src)
 
 
 @register_decomposition([aten.narrow])
