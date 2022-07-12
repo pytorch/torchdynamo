@@ -15,8 +15,8 @@ from ..utils import fake_tensors_available
 if fake_tensors_available:
     from torch._subclasses import FakeTensorMode  # noqa: F401
 
-    from ..utils import wrap_to_fake_tensor
     from ..utils import deepcopy_to_fake_tensor
+    from ..utils import wrap_to_fake_tensor
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
