@@ -9,7 +9,9 @@ from typing import List
 import torchdynamo
 from torchdynamo.optimizations import BACKENDS
 
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+
+from functorch.compile import aot_module, clear_compile_cache
 
 class ToyModel(nn.Module):
     def __init__(self):
@@ -22,33 +24,22 @@ class ToyModel(nn.Module):
 
     def forward(self, x):
         output1 = self.relu(self.net1(x))
-        print()
         output2 = self.relu(self.net2(output1))
-        print()
         output3 = self.relu(self.net3(output2))
-        print()
         return self.net4(output3)
-
-def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-    print("my_compiler() called with FX graph:")
-    gm.graph.print_tabular()
-
-    compiled = BACKENDS["aot_autograd"](gm, example_inputs)
-    if compiled is not None:
-        print("aot compiled")
-        return compiled
-
-    return gm.forward  # return a python callable
 
 def hook(grad):
   print("gradient hook fired")
-  grad + 1
-  return grad
+  return grad + 1
 
-# An example to demonstrate manual graph break works: print() in the above forward function.
+def compiler_fn(fx_module: torch.fx.GraphModule, _):
+    # fx_module.graph.print_tabular()
+    return fx_module
+
+# A basic AOT example to demonstrate that gradient hooks are all
+# fired after the compiled aot module.
 def demo_basic():
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-      with torchdynamo.optimize(my_compiler):
         device = "cuda"
 
         # create model and move it to the device with id rank
@@ -58,10 +49,11 @@ def demo_basic():
 
         loss_fn = nn.MSELoss()
         optimizer = optim.SGD(model.parameters(), lr=0.001)
+        aot_print_module = aot_module(model, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
 
         for i in range(1):
             optimizer.zero_grad()
-            outputs = model(torch.randn(20, 10).to(device))
+            outputs = aot_print_module(torch.randn(20, 10).to(device))
             labels = torch.randn(20, 5).to(device)
             loss = loss_fn(outputs, labels)
             loss.backward()
@@ -69,7 +61,9 @@ def demo_basic():
 
             print(f"{os.getpid()}: iteration {i}, loss {loss}")
 
-    prof.export_chrome_trace("manual.json")
+        clear_compile_cache()
+
+    prof.export_chrome_trace("aot_1.json")
 
 if __name__ == "__main__":
     demo_basic()

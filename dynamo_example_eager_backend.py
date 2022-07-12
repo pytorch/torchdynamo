@@ -21,22 +21,13 @@ class ToyModel(nn.Module):
         self.net4 = nn.Linear(10000, 5)
 
     def forward(self, x):
-        output1 = self.relu(self.net1(x))
-        print()
-        output2 = self.relu(self.net2(output1))
-        print()
-        output3 = self.relu(self.net3(output2))
-        print()
-        return self.net4(output3)
+        return self.net4(self.relu(self.net3(self.relu(self.net2(self.relu(self.net1(x)))))))
 
-def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-    print("my_compiler() called with FX graph:")
+
+def graph_break_compiler(gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
+    print("graph_break_compiler() called with FX graph:")
     gm.graph.print_tabular()
-
-    compiled = BACKENDS["aot_autograd"](gm, example_inputs)
-    if compiled is not None:
-        print("aot compiled")
-        return compiled
+    print()
 
     return gm.forward  # return a python callable
 
@@ -45,11 +36,13 @@ def hook(grad):
   grad + 1
   return grad
 
-# An example to demonstrate manual graph break works: print() in the above forward function.
+# An example to demonstrate that gradient hooks are fired correctly
+# for dynamo eager backend.
 def demo_basic():
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-      with torchdynamo.optimize(my_compiler):
+      with torchdynamo.optimize(graph_break_compiler):
         device = "cuda"
+        # device = "cpu"
 
         # create model and move it to the device with id rank
         model = ToyModel().to(device)
@@ -69,7 +62,7 @@ def demo_basic():
 
             print(f"{os.getpid()}: iteration {i}, loss {loss}")
 
-    prof.export_chrome_trace("manual.json")
+    prof.export_chrome_trace("eager_backend.json")
 
 if __name__ == "__main__":
     demo_basic()

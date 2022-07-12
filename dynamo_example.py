@@ -128,6 +128,7 @@ def demo_basic():
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
       with torchdynamo.optimize(graph_break_compiler):
         device = "cuda"
+        # device = "cpu"
 
         # create model and move it to the device with id rank
         model = ToyModel().to(device)
