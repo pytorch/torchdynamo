@@ -251,8 +251,8 @@ class RangeTreeRoot(RangeTree):
         return list(reversed(itervars))
 
     def ranges_code(self):
-        size = self.kernel.reshape_size_str(self.index, self.prefix)
-        return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+        # generate 1-dim range, reshape when use
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK)"
 
     def codegen_header(self, code):
         x = self.prefix
@@ -484,7 +484,9 @@ class TritonKernel(Kernel):
         Compute the index and mask to pass to tl.load() or tl.store()
         """
         index_vars = set(index.free_symbols)
-        index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
+        expr = self.rename_indexing(self.simplify_indexing(index))
+        expr = self.reshape_indexing(expr)
+        index_str = texpr(expr)
 
         need_dense = (
             config.triton.dense_indexing
@@ -498,6 +500,10 @@ class TritonKernel(Kernel):
         have_loop_vars = False
         mask = []
         dense_mask = []
+        # keep track the tree from which the mask code gens
+        # mask_tree = []
+        # non_reshape_mask = []
+        data_shape = None
 
         for tree in self.range_trees:
             if tree.prefix == "r" and not self.inside_reduction:
@@ -506,6 +512,7 @@ class TritonKernel(Kernel):
                 have_loop_vars = True
                 have_dense = False
                 mask.append(f"{tree.prefix}mask")
+                # mask_tree.append(tree)
             dense_mask.append(f"{tree.prefix}mask")
 
         if need_dense and not have_dense:
@@ -517,10 +524,32 @@ class TritonKernel(Kernel):
 
         if self._load_mask:
             mask.append(self._load_mask)
-        elif not mask:
+
+        # Change from
+        # ==========
+        # acc = tl.zeros((BLOCK_M, BLOCK_N))
+        # x1 = tl.reshape(tl.arange(0, BLOCK_M), [BLOCK_M, 1])
+        # mask_x = x1 < xnumel
+        # tmp = tl.load(in_ptr + x1 + tl.zeros([BLOCK_M, BLOCK_N]), tl.int32), mask_x)
+        # acc += tmp
+        # ==========
+        # to
+        # ==========
+        # acc = tl.zeros((BLOCK_M, BLOCK_N))
+        # x1 = tl.arange(0, BLOCK_M)
+        # mask_x = x1 < xnumel
+        # tmp = tl.load(in_ptr + x1), mask_x)[:, None]
+        # acc += tmp
+        mask = list(map(str, (map(self.reshape_indexing, mask))))
+
+        dim_wo_reduction = len(self.range_trees) - int(self.numels[-1] == 1)
+        if copy_shape is None and dim_wo_reduction < len(mask):
+            data_shape = self.reshape_vars(mask)
+
+        if not mask:
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        return index_str, " & ".join(mask), data_shape
 
     def var_ranges(self):
         return (
@@ -530,6 +559,35 @@ class TritonKernel(Kernel):
                 )
             ),
         )
+
+    def reshape_indexing(self, index: sympy.Expr):
+        if isinstance(index, str):
+            index = sympy.Symbol(index)
+        index_vars = set(index.free_symbols)
+        dict = {
+            index_var: sympy.Symbol(f"{index_var}{self.reshape_vars([index_var])}")
+            for index_var in index_vars
+        }
+        return index.subs(dict)
+
+    def reshape_vars(self, index_vars: List[sympy.Symbol]):
+        # if no reduction (self.numels[-1]==1), do not consider the reduction dimension
+        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+        # get prefix of range trees
+        prefix_tree = [range_tree.prefix for range_tree in self.range_trees]
+        # do not reshape if range tree size is 1
+        if len(sizes) <= 1:
+            return ""
+        for index_var in index_vars:
+            prefix_index_var = str(index_var)[0]
+            if prefix_index_var in prefix_tree:
+                idx = prefix_tree.index(prefix_index_var)
+                sizes[idx] = ":"
+        if ":" in sizes:
+            return f"[{', '.join(sizes)}]"
+        else:
+            # if sizes are ["None", "None"], shouldn't reshape
+            return ""
 
     def simplify_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -561,10 +619,12 @@ class TritonKernel(Kernel):
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         var = self.args.input(name)
-        index, mask = self.indexing(index)
+        index, mask, data_shape = self.indexing(index)
         line = f"tl.load({var} + {index}, {mask})"
         if upcast:
             line += ".to(tl.float32)"
+        if data_shape is not None:
+            line = f"{line}{data_shape}"
 
         if self.inside_reduction and "rmask" not in mask:
             # can lift a common load outside of reduction loop
@@ -579,7 +639,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value)
+        index, mask, _ = self.indexing(index, value)
         if mode is None:
             line = f"tl.store({var} + {index}, {value}, {mask})"
         elif mode == "atomic_add":
@@ -596,6 +656,8 @@ class TritonKernel(Kernel):
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
+        # reshape mask to match rank
+        masks = list(map(str, (map(self.reshape_indexing, masks))))
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
         sizes[-1] = "1"
         if reduction_type == "any":
@@ -632,7 +694,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        index, mask = self.indexing(index, result_var)
+        index, mask, _ = self.indexing(index, result_var)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
