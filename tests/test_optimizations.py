@@ -192,5 +192,6 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
