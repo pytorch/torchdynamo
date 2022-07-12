@@ -190,12 +190,12 @@ class WrapperBackend:
             if same(correct, result):
                 return self.candidate
 
-            print(f"incorrect results of backend {self}")
+            raise RuntimeError(f"incorrect results of backend {self}")
             return self.gm.forward
 
         except Exception:
             log.exception("error in verify_correctness")
-            return self.gm.forward
+            raise
         finally:
             self.restore()
 
