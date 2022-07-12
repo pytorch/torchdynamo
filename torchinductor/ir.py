@@ -451,22 +451,24 @@ def is_contiguous_storage_and_layout(x):
         return False
 
 
-def as_storage_and_layout(x, freeze=True, want_contiguous=False):
+def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=None):
     """Try to simplify x into a StorageBox and a Layout"""
     if isinstance(x, TensorBox):
         return as_storage_and_layout(
-            x.data, freeze=freeze, want_contiguous=want_contiguous
+            x.data, freeze=freeze, want_contiguous=want_contiguous, stride_order=stride_order
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
             if want_contiguous:
                 x.data.freeze_layout()
+            elif stride_order is not None:
+                x.data.freeze_layout_with_stride_order(stride_order)
             else:
                 x.data.decide_layout()
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
         buffer, _ = as_storage_and_layout(
-            x.data, freeze=freeze, want_contiguous=want_contiguous
+            x.data, freeze=freeze, want_contiguous=want_contiguous, stride_order=stride_order
         )
         return buffer, x.layout
     raise NotImplementedError
@@ -475,6 +477,13 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False):
 as_contiguous_storage_and_layout = functools.partial(
     as_storage_and_layout, want_contiguous=True
 )
+
+def is_stride_order_storage_and_layout(x, stride_order):
+    try:
+        buffer, layout = as_storage_and_layout(x, freeze=False)
+        return layout.is_stride_ordered(stride_order)
+    except NotImplementedError:
+        return False
 
 
 @dataclasses.dataclass
@@ -1014,6 +1023,18 @@ class Layout(IRNode):
                 return False
         return True
 
+    def is_stride_ordered(self, order):
+        assert len(self.stride) == len(order)
+        # reorder the stride given order
+        stride_ordered = [None] * len(order)
+        for i in range(len(order)):
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+        # check if it is in ascending order
+        for i in range(len(order) - 1):
+            if stride_ordered[i] > stride_ordered[i + 1]:
+                return False
+        return True
+
     def as_fixed(self):
         return FixedLayout(
             self.device,
@@ -1091,6 +1112,19 @@ class FlexibleLayout(Layout):
         fill_order = [lookup[i] for i in range(len(order))]
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
+    @staticmethod
+    def same_ordered(sizes, stride):
+        """
+        Create a stride that has the same stride order as given stride
+
+        For example, if given stride is [1000, 1, 100, 10],
+        the fill order should be [1, 3, 2, 0]
+        """
+        assert len(sizes) == len(stride)
+        fill_order = sorted(range(len(stride)), key=stride.__getitem__)
+        return FlexibleLayout.fill_ordered(sizes, fill_order)
+
+
     def as_stride_order(self, order):
         return FixedLayout(
             self.device,
@@ -1109,10 +1143,20 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def __init__(self, device, dtype, size):
+    def as_same_order(self, stride):
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            self.same_ordered(self.size, stride),
+            self.offset,
+        )
+
+    def __init__(self, device, dtype, size, stride_order=None):
         super(FlexibleLayout, self).__init__(
             device, dtype, size, FlexibleLayout.contiguous_strides(size)
         )
+        self.preferred_stride_order = stride_order
 
 
 class AliasedLayout(Layout):
@@ -1223,6 +1267,10 @@ class Buffer(IRNode):
     def freeze_layout_with_fill_order(self, order):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_fill_order(order)
+
+    def freeze_layout_with_same_order(self, stride):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_same_order(stride)
 
     def make_loader(self):
         def loader(index):
@@ -1676,6 +1724,8 @@ class ExternKernel(InputsKernel):
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
+        if isinstance(self.layout, FlexibleLayout):
+            self.apply_constraint()
         self.freeze_layout()
 
     @staticmethod
@@ -1725,6 +1775,23 @@ class ExternKernel(InputsKernel):
         assert is_contiguous_storage_and_layout(x)
         as_contiguous_storage_and_layout(x, freeze=True)
         return x
+    
+    @classmethod
+    def require_stride_order(cls, x, order):
+        # require x to have the layout as strided_ordered as order
+        if isinstance(x.get_layout(), FlexibleLayout) and is_stride_order_storage_and_layout(x, order):
+            # fix flexiblelayout to be FixedLayout with stride_order
+            as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
+            return x
+        elif isinstance(x.get_layout(), FixedLayout) and x.layout.is_stride_ordered(order):
+            return x
+        x = cls.copy_input(x)
+        as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
+        assert is_stride_order_storage_and_layout(x, order)
+        return x
+
+    def apply_constraint(self):
+        pass
 
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
@@ -1783,6 +1850,9 @@ class ExternKernelAlloc(ExternKernel):
 
     def should_allocate(self):
         return False
+
+    def apply_constraint(self):
+        raise NotImplementedError
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -1950,22 +2020,36 @@ class AdaptiveAvgPool2d(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, target_size):
-        x = cls.require_stride1(cls.realize_input(x))
+        # x = cls.require_stride1(cls.realize_input(x))
+        x = cls.realize_input(x)
         output_size = [
             *x.get_size()[: -len(target_size)],
             *map(sympy.Integer, target_size),
         ]
+        # contigouse stride order
+        stride_order = list(reversed(range(len(output_size))))
         return cls(
-            FixedLayout(
+            FlexibleLayout(
                 x.get_device(),
                 x.get_dtype(),
                 output_size,
                 # TODO(jansel): fix channels last case
-                FlexibleLayout.contiguous_strides(output_size),
+                # FlexibleLayout.contiguous_strides(output_size),
+                stride_order,
             ),
             (x,),
             (tuple(target_size),),
         )
+
+    def apply_constraint(self):
+        x = self.intput[0]
+        if isinstance(x, FixedLayout):
+            # fix self's layout to be the same order as x
+            self.freeze_layout_with_same_order(x.stride)
+        else:
+            x = self.require_stride_order(x, self.layout.preferred_stride_order)
+            self.input[0] = x
+            self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
 @dataclasses.dataclass
@@ -2086,6 +2170,8 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             )
 
+    def apply_constraint(self):
+        return super().apply_constraint()
 
 class MultiOutputLayout(IRNode):
     pass
@@ -2220,20 +2306,21 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
+        # if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
+        if (is_triton(x.get_device()) and config.triton.convolution != "aten"):
             # channels last format
-            order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
-            if len(order) < len(output_size):
+            stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+            if len(stride_order) < len(output_size):
                 # add batch dim if it exists
-                order = [len(order)] + order
+                stride_order = [len(stride_order)] + stride_order
         else:
-            order = list(reversed(range(len(output_size))))
+            stride_order = list(reversed(range(len(output_size))))
 
-        output_layout = FixedLayout(
+        output_layout = FlexibleLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            FlexibleLayout.stride_ordered(output_size, order),
+            stride_order,
         )
 
         if bias is not None:
@@ -2248,6 +2335,13 @@ class Convolution(ExternKernelAlloc):
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
             )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
     def map_args(self):
         # x, w, bias
