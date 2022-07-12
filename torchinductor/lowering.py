@@ -1321,34 +1321,20 @@ def scatter_add_(x, dim: int, index, src):
     assert 0 <= dim < len(x.get_size())
 
     index_loader = index.make_loader()
-    src_loader = src.make_loader()
 
     def output_indexer(idx):
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
         return indirect_idx
 
-    def fn(idx):
-        for i in range(len(idx)):
-            boundary_check = ops.lt(
-                ops.index_expr(idx[i], torch.int64),
-                ops.index_expr(index.get_size()[i], torch.int64),
-            )
-            if i == 0:
-                condition = boundary_check
-            else:
-                condition = ops.and_(condition, boundary_check)
-        return ops.where(
-            condition,
-            src_loader(idx),
-            ops.constant(0, x.get_dtype()),
-        )
-
+    # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
+    # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
+    # self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
     scatter = ir.Scatter(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=x.get_size(),
+        inner_fn=src.make_loader(),
+        ranges=index.get_size(),
         output_indexer=output_indexer,
         scatter_mode="atomic_add",
     )
