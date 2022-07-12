@@ -1313,8 +1313,8 @@ def index_select(x, dim, indices):
     )
 
 
-@register_lowering(aten.scatter_add, type_promote=False)
-def scatter_add(x, dim: int, index, src):
+@register_lowering(aten.scatter_add_, type_promote=False)
+def scatter_add_(x, dim: int, index, src):
     assert isinstance(x, TensorBox)
     assert isinstance(dim, int)
     assert "int" in str(index.get_dtype())
@@ -1344,7 +1344,6 @@ def scatter_add(x, dim: int, index, src):
             ops.constant(0, x.get_dtype()),
         )
 
-    result = clone(x)
     scatter = ir.Scatter(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -1355,11 +1354,11 @@ def scatter_add(x, dim: int, index, src):
     )
     buffer = ir.ComputedBuffer(
         None,
-        ir.MutationLayout(result),
+        ir.MutationLayout(x),
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
-    return result
+    return x
 
 
 @register_lowering(aten.upsample_nearest2d)
