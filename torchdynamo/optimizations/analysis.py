@@ -121,11 +121,13 @@ def has_mutation(gm, example_inputs):
         fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
+        with fake_mode:
+            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         new_gm = copy.deepcopy(gm)
         example_inputs = copy.deepcopy(example_inputs)
+        ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
 
-    ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     for node in new_gm.graph.nodes:
         if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
             return True
