@@ -25,6 +25,7 @@ decompositions = get_decompositions(
         aten.clamp_min,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
+        aten.detach,
         aten.elu_backward,
         aten._embedding_bag,
         aten.embedding_dense_backward,
