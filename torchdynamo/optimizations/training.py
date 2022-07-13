@@ -75,11 +75,7 @@ class AOTAutogradStrategy(object):
         else:
             mutated = has_mutation(self.gm, self.example_inputs)
 
-        if (
-            mutated
-            or len(gm_inputs) == 0
-            or has_set_grad_enabled
-        ):
+        if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
             self.use_fallback = True
 
     @property
