@@ -1706,8 +1706,6 @@ class MiscTests(torchdynamo.testing.TestCase):
             random.seed(1)
             res2 = fn(shape)
 
-        print(res1)
-        print(res2)
         self.assertTrue(same(res1, res2))
 
     def test_side_effects_codegen_update_mutated(self):
