@@ -115,15 +115,15 @@ class VariableBuilder:
             1,
             2,
             3,
-            4,
-            5,
-            6,
-            7,
+            # 4,
+            # 5,
+            # 6,
+            # 7,
             8,
-            9,
+            # 9,
             10,
-            11,
-            12,
+            # 11,
+            # 12,
             15,
             16,
             20,
@@ -139,9 +139,9 @@ class VariableBuilder:
             0.01,
             0.5,
             0.05,
-            352,  # Work around for Super_SloMo
-            800,  # Work around for vision_maskrcnn
-            1.873536229133606,
+            # 352,  # Work around for Super_SloMo
+            # 800,  # Work around for vision_maskrcnn
+            # 1.873536229133606,
         }
 
     @staticmethod
