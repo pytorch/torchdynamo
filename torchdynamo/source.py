@@ -2,10 +2,13 @@ import collections
 import dataclasses
 from typing import Any
 
+from torch.nn import Parameter
+
 from . import utils
 from .bytecode_transformation import create_instruction
 from .guards import Guard
 from .guards import GuardSource
+from .utils import global_key_name
 from .utils import rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {
@@ -123,16 +126,26 @@ class GetItemSource(Source):
     index: Any
 
     def reconstruct(self, codegen):
-        return self.base.reconstruct(codegen) + [
-            codegen.create_load_const(self.index),
-            create_instruction("BINARY_SUBSCR"),
-        ]
+        instrs = self.base.reconstruct(codegen)
+
+        if isinstance(self.index, Parameter):
+            instrs.append(
+                codegen.create_load_global(global_key_name(self.index), add=True)
+            )
+        else:
+            instrs.append(codegen.create_load_const(self.index))
+        instrs.append(create_instruction("BINARY_SUBSCR"))
+
+        return instrs
 
     def guard_source(self):
         return self.base.guard_source()
 
     def name(self):
-        return f"{self.base.name()}[{self.index!r}]"
+        if isinstance(self.index, Parameter):
+            return f"{self.base.name()}[{global_key_name(self.index)}]"
+        else:
+            return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass

@@ -30,6 +30,8 @@ from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
 from .exc import unimplemented
 from .utils import ExactWeakKeyDictionary
+from .utils import dict_const_keys
+from .utils import dict_param_key_ids
 from .utils import guard_failures
 from .utils import istype
 from .utils import orig_code_map
@@ -52,6 +54,8 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___check_obj_id", check_obj_id),
         ("___is_grad_enabled", torch.is_grad_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
+        ("___dict_param_key_ids", dict_param_key_ids),
+        ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
@@ -452,7 +456,8 @@ class GuardBuilder:
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"{ref}.keys() == {set(value.keys())!r}")
+        code.append(f"___dict_param_key_ids({ref}) == {set(dict_param_key_ids(value))}")
+        code.append(f"___dict_const_keys({ref}) == {set(dict_const_keys(value))!r}")
 
         self._produce_guard_code(guard, code)
 

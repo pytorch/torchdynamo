@@ -760,8 +760,8 @@ class InstructionTranslatorBase(object):
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable)
-            result[k.value] = v
+            assert ConstDictVariable.is_valid_key(k)
+            result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
             ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
@@ -1131,6 +1131,9 @@ class InstructionTranslatorBase(object):
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
         )
+
+    def store_dict_key(self, name, value):
+        self.f_globals[name] = value
 
     @property
     def fake_mode(self):

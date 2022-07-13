@@ -5,40 +5,53 @@ import inspect
 from typing import Dict
 from typing import List
 
+import torch
+
+from torchdynamo.variables.constant import ConstantVariable
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource
+from ..source import GetItemSource
+from ..source import GlobalSource
+from ..utils import global_key_name
 from .base import VariableTracker
+from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, **kwargs):
+    def __init__(self, items, user_cls, default_factory=None, **kwargs):
         super(ConstDictVariable, self).__init__(**kwargs)
         self.items = items
         self.user_cls = user_cls
+        self.default_factory = default_factory
 
     def as_proxy(self):
-        return {k: v.as_proxy() for k, v in self.items.items()}
+        proxy_dict = {k: v.as_proxy() for k, v in self.items.items()}
+        if self.default_factory:
+            return collections.defaultdict(self.default_factory, proxy_dict)
+        else:
+            return proxy_dict
 
     def python_type(self):
         return self.user_cls
 
     def reconstruct(self, codegen):
-        if len(self.items) == 0:
-            return [create_instruction("BUILD_MAP", 0)]
-        keys = tuple(self.items.keys())
-        for key in keys:
+        for key, value in self.items.items():
+            if isinstance(key, torch.nn.Parameter):
+                codegen.append_output(
+                    codegen.create_load_global(global_key_name(key), add=True)
+                )
+            else:
+                codegen.append_output(codegen.create_load_const(key))
             codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-            create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
-        ]
+
+        return [create_instruction("BUILD_MAP", len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
-        return self.items[index].add_options(self, arg)
+        return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
 
     def call_method(
         self,
@@ -55,12 +68,45 @@ class ConstDictVariable(VariableTracker):
 
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            return self.getitem_const(args[0])
+            try:
+                return self.getitem_const(args[0])
+            except KeyError:
+                from .builder import VariableBuilder
+
+                if self.default_factory:
+                    if isinstance(args[0], TensorVariable):
+                        index = GetItemSource(self.source, args[0])
+                    else:
+                        index = ConstDictVariable.get_key(args[0])
+
+                    args = tuple(
+                        [
+                            *args,
+                            VariableBuilder(tx, GetItemSource(self.source, index))(
+                                self.default_factory()
+                            ),
+                        ]
+                    )
+
+                    self.call_method(tx, "__setitem__", args, kwargs)
+                    return args[-1]
+                else:
+                    raise
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
                 [
-                    TupleVariable([ConstantVariable(k, **options), v], **options)
+                    TupleVariable(
+                        [
+                            ConstDictVariable._key_to_var(
+                                tx,
+                                k,
+                                **options,
+                            ),
+                            v,
+                        ],
+                        **options,
+                    )
                     for k, v in val.items()
                 ],
                 **options,
@@ -68,7 +114,14 @@ class ConstDictVariable(VariableTracker):
         elif name == "keys":
             assert not (args or kwargs)
             return TupleVariable(
-                [ConstantVariable(k, **options) for k in val.keys()],
+                [
+                    ConstDictVariable._key_to_var(
+                        tx,
+                        k,
+                        **options,
+                    )
+                    for k in enumerate(val.keys())
+                ],
                 **options,
             )
 
@@ -81,18 +134,23 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "__setitem__"
             and args
-            and args[0].is_python_constant()
+            and ConstDictVariable.is_valid_key(args[0])
             and self.mutable_local
         ):
             assert not kwargs and len(args) == 2
+            k = ConstDictVariable.get_key(args[0])
+            from .builder import VariableBuilder
+
+            if isinstance(k, torch.nn.Parameter):
+                tx.store_dict_key(global_key_name(k), name)
             newval = collections.OrderedDict(val)
-            newval[args[0].as_python_constant()] = args[1]
+            newval[k] = args[1]
             return tx.replace_all(self, self.modifed(newval, **options))
         elif (
             name in ("pop", "get")
             and args
-            and args[0].is_python_constant()
-            and args[0].as_python_constant() not in self.items
+            and ConstDictVariable.is_valid_key(args[0])
+            and ConstDictVariable.get_key(args[0]) not in self.items
             and len(args) == 2
         ):
             # missing item, return the default value
@@ -100,11 +158,11 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "pop"
             and args
-            and args[0].is_python_constant()
+            and ConstDictVariable.is_valid_key(args[0])
             and self.mutable_local
         ):
             newval = collections.OrderedDict(val)
-            result = newval.pop(args[0].as_python_constant())
+            result = newval.pop(ConstDictVariable.get_key(args[0]))
             tx.replace_all(self, self.modifed(newval, **options))
             return result.add_options(options)
         elif (
@@ -120,14 +178,16 @@ class ConstDictVariable(VariableTracker):
         elif (
             name in ("get", "__getattr__")
             and args
-            and args[0].is_python_constant()
-            and args[0].as_python_constant() in self.items
+            and ConstDictVariable.is_valid_key(args[0])
+            and ConstDictVariable.get_key(args[0]) in self.items
         ):
-            result = self.items[args[0].as_python_constant()]
+            result = self.items[ConstDictVariable.get_key(args[0])]
             return result.add_options(options)
-        elif name == "__contains__" and args and args[0].is_python_constant():
+        elif (
+            name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
+        ):
             return ConstantVariable(
-                args[0].as_python_constant() in self.items, **options
+                ConstDictVariable.get_key(args[0]) in self.items, **options
             )
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -143,6 +203,31 @@ class ConstDictVariable(VariableTracker):
         val = self.items
         result = [ConstantVariable(k, **options) for k in val.keys()]
         return result
+
+    @classmethod
+    def get_key(cls, arg: VariableTracker):
+        if isinstance(arg, TensorVariable) and arg.parameter_value is not None:
+            return arg.parameter_value
+        else:
+            return arg.as_python_constant()
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return (
+            key.is_python_constant()
+            or isinstance(key, TensorVariable)
+            and key.parameter_value is not None
+        )
+
+    @classmethod
+    def _key_to_var(cls, tx, key, **options):
+        from .builder import VariableBuilder
+
+        if isinstance(key, torch.nn.Parameter):
+            return VariableBuilder(tx, GlobalSource(global_key_name(key)))(key)
+        else:
+            assert ConstantVariable.is_literal(key)
+            return ConstantVariable(key, **options)
 
 
 class DataClassVariable(ConstDictVariable):

@@ -282,6 +282,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
 
+    @make_test
+    def test_is_sparse(x):
+        if not x.is_sparse:
+            return x + 1
+
     @requires_static_shapes
     @make_test
     def test_shape1(x):
@@ -419,6 +424,13 @@ class FunctionTests(torchdynamo.testing.TestCase):
         tmp["c"] = v + tmp["d"]
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
+
+    @make_test
+    def test_dict_param_keys(a, b):
+        a_param = torch.nn.Parameter(a)
+        tmp = {"a": b, a_param: 3}
+
+        return tmp["a"] + tmp[a_param]
 
     @make_test
     def test_min_max(a, b):
