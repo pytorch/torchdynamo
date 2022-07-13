@@ -1705,7 +1705,10 @@ class ConcatKernel(NopKernel):
             return cls.realize_into(src.data, dst)
         if isinstance(src, StorageBox):
             src.realize()
-            if isinstance(src.data.layout, FlexibleLayout):
+            # ExternKernelAlloc has specific requirements for output layout, should create a copy
+            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
+                src.data, ExternKernelAlloc
+            ):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
         # introduce a copy
