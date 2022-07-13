@@ -1,5 +1,6 @@
 import functools
 import operator
+import os
 
 import sympy
 import torch
@@ -32,7 +33,7 @@ def has_triton_libdevice():
     try:
         from triton.language import libdevice
 
-        return libdevice is not None
+        return os.path.exists(libdevice.LIBDEVICE_PATH)
     except (ImportError, ModuleNotFoundError):
         return False
 
