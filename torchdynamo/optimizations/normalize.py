@@ -430,6 +430,7 @@ def normalize_ir(gm, example_inputs):
             # log.exception("NormalizeOperators() failed")
             pass
         import functorch._src.config
+
         if not functorch._src.config.use_functionalize:
             ShapeAliasingAndMutationProp(gm).run(*example_inputs)
             gm = Functionalization(gm).transform()
