@@ -2057,13 +2057,13 @@ class AdaptiveAvgPool2d(ExternKernelAlloc):
         )
 
     def apply_constraint(self):
-        x = self.intput[0]
+        x = self.inputs[0]
         if isinstance(x, FixedLayout):
             # fix self's layout to be the same order as x
             self.freeze_layout_with_same_order(x.stride)
         else:
             x = self.require_stride_order(x, self.layout.preferred_stride_order)
-            self.input[0] = x
+            self.inputs[0] = x
             self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
@@ -2427,8 +2427,8 @@ class Convolution(ExternKernelAlloc):
         CONV1X1_NHWC = (
             "True"
             if self.inputs[0].get_stride()[1] == 1
-            and self.inputs[1].shape[2] == 1
-            and self.inputs[1].shape[3] == 1
+            and self.inputs[1].get_size()[2] == 1
+            and self.inputs[1].get_size()[3] == 1
             else "False"
         )
         # dict for tl.constexpr
