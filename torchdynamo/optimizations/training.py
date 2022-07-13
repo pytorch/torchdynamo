@@ -60,8 +60,23 @@ class AOTAutogradStrategy(object):
             if node.target == torch._C._set_grad_enabled:
                 has_set_grad_enabled = True
 
+        import functorch._src.config
+
+        if functorch._src.config.use_functionalize:
+            # There are two problematic classes we still exclude for now with
+            # functionalization:
+            #   - data mutation of inputs (fixed when we stop recording the
+            #   copy_ directly into the graph)
+            #   - metadata mutation of inputs (fixed if we do an extra partition
+            #   to avoid AOTAutograd on the mutated inputs, or if we some how
+            #   get custom autograd function to reflect metadata changes to the
+            #   original tensor)
+            mutated = has_mutation(self.gm, self.example_inputs, inputs_only=True)
+        else:
+            mutated = has_mutation(self.gm, self.example_inputs)
+
         if (
-            has_mutation(self.gm, self.example_inputs)
+            mutated
             or len(gm_inputs) == 0
             or has_set_grad_enabled
         ):
