@@ -57,6 +57,7 @@ class WrapperCodeGen(CodeGen):
         self._names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
+        self.kernels = {}
         self.lines = []
         self.header.splice(
             f"""

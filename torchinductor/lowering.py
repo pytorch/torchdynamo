@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 from typing import List
 
 import sympy
@@ -23,18 +24,34 @@ from .virtualized import ops
 lowerings = {}
 aten = torch.ops.aten
 prims = torch.ops.prims
-needs_realized_inputs = {
-    aten.as_strided,
-    aten.avg_pool2d,
-    aten.bmm,
-    aten.constant_pad_nd,
-    aten.convolution,
-    aten.convolution_backward,
-    aten.max_pool2d_with_indices,
-    aten.mm,
-    aten.reflection_pad2d,
-    aten.upsample_nearest2d,
-}
+needs_realized_inputs = set()
+
+
+def add_needs_realized_inputs(fn):
+    if isinstance(fn, (list, tuple, set)):
+        return [add_needs_realized_inputs(x) for x in fn]
+    needs_realized_inputs.add(fn)
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        for overload in fn.overloads():
+            needs_realized_inputs.add(getattr(fn, overload))
+
+
+add_needs_realized_inputs(
+    [
+        aten.as_strided,
+        aten.avg_pool2d,
+        aten.avg_pool2d_backward,
+        aten.bmm,
+        aten.constant_pad_nd,
+        aten.convolution,
+        aten.convolution_backward,
+        aten.max_pool2d_with_indices,
+        aten.max_pool2d_with_indices_backward,
+        aten.mm,
+        aten.reflection_pad2d,
+        aten.upsample_nearest2d,
+    ]
+)
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 # based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
@@ -587,7 +604,7 @@ def _embedding_bag(
 
 
 def make_fallback(kernel):
-    needs_realized_inputs.add(kernel)
+    add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
     def handler(*args):
@@ -628,6 +645,7 @@ else:
     def rand(
         *size, dtype=None, layout=0, device=None, pin_memory=False, memory_format=None
     ):
+        logging.warning("using triton random, expect difference from eager")
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
@@ -675,7 +693,6 @@ if has_torchvision_roi_align():
 
 # TODO(jansel): we should implement decomps for these
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.avg_pool2d_backward)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -1232,15 +1249,6 @@ def index_put_(self, indices, values, accumulate=False):
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    if ir.is_triton(self.get_device()) and accumulate:
-        # Workaround broken tl.atomic_add
-        # https://gist.github.com/jansel/dcb795f8594689aad87b967d40e9bf5d
-        for idx in indices:
-            idx.realize()
-        values.realize()
-        ir.IndexPutFallback(self, indices, values, accumulate)
-        return self
-
     iter_ranges = []
     index_loaders = []
 
@@ -1303,6 +1311,42 @@ def index_select(x, dim, indices):
         inner_fn=fn,
         ranges=sizes,
     )
+
+
+@register_lowering(aten.scatter_add_, type_promote=False)
+def scatter_add_(self, dim: int, index, src):
+    assert isinstance(self, TensorBox)
+    assert "int" in str(index.get_dtype())
+    assert 0 <= dim < len(self.get_size())
+    src = to_dtype(src, self.get_dtype())
+    self.realize()
+    V.graph.realize_users_of(self.get_name())
+
+    index_loader = index.make_loader()
+
+    def output_indexer(idx):
+        indirect_idx = list(idx)
+        indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
+        return indirect_idx
+
+    # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
+    # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
+    # self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
+    scatter = ir.Scatter(
+        device=self.get_device(),
+        dtype=self.get_dtype(),
+        inner_fn=src.make_loader(),
+        ranges=index.get_size(),
+        output_indexer=output_indexer,
+        scatter_mode="atomic_add",
+    )
+    buffer = ir.ComputedBuffer(
+        None,
+        ir.MutationLayout(self),
+        scatter,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    return self
 
 
 @register_lowering(aten.upsample_nearest2d)
@@ -1530,7 +1574,7 @@ def max_pool2d_with_indices(
     return r1, r2
 
 
-@register_lowering(aten.avg_pool2d)
+@register_lowering(aten.avg_pool2d, type_promote=False)
 def avg_pool2d(
     x,
     kernel_size,
@@ -1603,6 +1647,155 @@ def avg_pool2d(
         ranges=new_size,
     )
     # TODO(jansel): should we force these to be realized?
+    return rv
+
+
+@register_lowering(aten.avg_pool2d_backward, type_promote=False)
+def avg_pool2d_backward(
+    grad_output,
+    x,
+    kernel_size,
+    stride,
+    padding,
+    ceil_mode,
+    count_include_pad,
+    divisor_override=None,
+):
+
+    assert not divisor_override
+    if not stride:
+        stride = kernel_size
+    if not padding:
+        padding = [0, 0]
+
+    assert isinstance(grad_output, TensorBox)
+    assert isinstance(x, TensorBox)
+    assert len(kernel_size) == 2
+    assert len(stride) == 2
+    assert len(padding) == 2
+    assert len(x.get_size()) in (3, 4)
+
+    grad_output.realize()  # we will read this many times, so make sure it is computed
+
+    *batch, height, width = x.get_size()
+
+    h_out, ceil_mode1 = pooling_size(height, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
+
+    grad_loader = grad_output.make_loader()
+
+    had_padding = padding[0] or padding[1] or ceil_mode1 or ceil_mode2
+
+    *_, pooled_height, pooled_width = grad_output.get_size()
+    new_size = list(x.get_size())
+    dtype = x.get_dtype()
+
+    h_window_size = max(
+        [
+            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            for h in range(kernel_size[0] * 2)
+        ]
+    )
+    w_window_size = max(
+        [
+            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            for w in range(kernel_size[1] * 2)
+        ]
+    )
+
+    def compute_pool_size_without_padding(ph, pw):
+        """
+        This computes the scaling factor that we will divide an element
+        by when `count_include_pad=False`
+        """
+        stride_h = ops.constant(stride[0], torch.int32)
+        stride_w = ops.constant(stride[1], torch.int32)
+        pad_h = ops.constant(padding[0], torch.int32)
+        pad_w = ops.constant(padding[1], torch.int32)
+        kernel_h = ops.constant(kernel_size[0], torch.int32)
+        kernel_w = ops.constant(kernel_size[1], torch.int32)
+        hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
+        wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
+        hend = ops.minimum(
+            ops.add(hstart, kernel_h),
+            ops.add(ops.index_expr(height, torch.int32), pad_h),
+        )
+        wend = ops.minimum(
+            ops.add(wstart, kernel_w),
+            ops.add(ops.index_expr(width, torch.int32), pad_w),
+        )
+        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
+        divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
+        return divide_factor
+
+    def fn(idx):
+        *prefix, h, w = idx
+        h = h + padding[0]
+        w = w + padding[1]
+        phstart = ops.index_expr(
+            ir.IndexingDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+        )
+        pwstart = ops.index_expr(
+            ir.IndexingDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+        )
+        phend = ops.index_expr(ir.IndexingDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(ir.IndexingDiv(w, stride[1]) + 1, torch.int32)
+
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+
+        gradient = None
+        for ph_ in range(h_window_size):
+            for pw_ in range(w_window_size):
+                ph = ops.add(phstart, ops.constant(ph_, torch.int32))
+                pw = ops.add(pwstart, ops.constant(pw_, torch.int32))
+
+                if count_include_pad or not had_padding:
+                    scale = kernel_size[0] * kernel_size[1]
+                else:
+                    scale = compute_pool_size_without_padding(ph, pw)
+
+                part = ops.truediv(
+                    grad_loader(
+                        [
+                            *prefix,
+                            ops.indirect_indexing(
+                                ops.minimum(
+                                    ph, ops.sub(phend, ops.constant(1, torch.int32))
+                                )
+                            ),
+                            ops.indirect_indexing(
+                                ops.minimum(
+                                    pw, ops.sub(pwend, ops.constant(1, torch.int32))
+                                )
+                            ),
+                        ]
+                    ),
+                    scale,
+                )
+
+                if gradient is None:
+                    # don't need mask for 0, 0
+                    gradient = part
+                else:
+                    mask = ops.and_(
+                        ops.lt(ph, phend),
+                        ops.lt(pw, pwend),
+                    )
+                    gradient = ops.where(mask, ops.add(gradient, part), gradient)
+        return gradient
+
+    rv = Pointwise.create(
+        device=grad_output.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
     return rv
 
 

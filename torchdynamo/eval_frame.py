@@ -190,12 +190,12 @@ class WrapperBackend:
             if same(correct, result):
                 return self.candidate
 
-            print(f"incorrect results of backend {self}")
+            raise RuntimeError(f"incorrect results of backend {self}")
             return self.gm.forward
 
         except Exception:
             log.exception("error in verify_correctness")
-            return self.gm.forward
+            raise
         finally:
             self.restore()
 
@@ -242,10 +242,10 @@ def optimize(backend, nopython=False):
 def export(f, *args, **kwargs):
     from inspect import signature
 
-    in_sig = signature(f)
+    import torch.utils._pytree as pytree
+
     graph = None
     out_guards = None
-    input_types = list()
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -255,21 +255,18 @@ def export(f, *args, **kwargs):
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, example_inputs
     ):
-        nonlocal input_types
         nonlocal graph
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        for example_input in example_inputs:
-            input_types.append(example_input.__class__)
-
         return gm.forward
 
     backend_ctx_ctor = null_context
 
+    result = None
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
-        f(*args, **kwargs)
+        result = f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
@@ -279,18 +276,30 @@ def export(f, *args, **kwargs):
         out_sig.parameters[k].annotation for k in list(out_sig.parameters)
     ]
 
-    # TODO(voz): Add support for flatenning and unflattening via PyTree
-    assert len(in_sig.parameters) == len(
+    flat_input_types = []
+    # TODO(voz): Handle kwargs properly?
+    flat_args, in_spec = pytree.tree_flatten(args)
+    for arg in flat_args:
+        flat_input_types.append(arg.__class__)
+
+    _, out_spec = pytree.tree_flatten(result)
+
+    assert len(flat_input_types) == len(
         out_sig.parameters
-    ), "Exported callable signature must be composed only of torch.Tensors"
+    ), "Flattened inputs length must match out signature parameter lengths."
+
     for idx in range(len(out_sig.parameters)):
         sig_type = signature_types[idx]
-        in_type = input_types[idx]
+        in_type = flat_input_types[idx]
         assert (
             sig_type == in_type
         ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
 
-    return (graph, out_guards)
+    # TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
+    # There is currently more work that needs to be done on the fx side before we can support the UX we want.
+    # The future UX here will not return a spec, but will rather return a graph with the original signature
+    # and return type as the passed in callable, `f`.
+    return (graph, out_guards, in_spec, out_spec)
 
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):

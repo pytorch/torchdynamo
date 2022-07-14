@@ -857,11 +857,19 @@ class TritonScheduling:
                         except CantSplit:
                             reschedule.append(node)
 
-        kernel_name = wrapper.next_kernel_name()
         if config.triton.many_files:
+            kernel_name = wrapper.next_kernel_name()
             wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
         else:
-            wrapper.header.splice(kernel.codegen_kernel(kernel_name))
+            src_code = kernel.codegen_kernel("{kernel_name}")
+            if src_code in wrapper.kernels:
+                kernel_name = wrapper.kernels[src_code]
+            else:
+                kernel_name = wrapper.next_kernel_name()
+                wrapper.kernels[src_code] = kernel_name
+                code = src_code.format(kernel_name=kernel_name)
+                wrapper.header.splice(code)
+
         kernel.call_kernel(wrapper, kernel_name)
 
         scheduler.enqueue(reschedule)
