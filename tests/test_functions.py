@@ -3,7 +3,6 @@ import functools
 import inspect
 import itertools
 import operator
-from typing import DefaultDict
 
 import torch
 from torch import sub
@@ -431,19 +430,6 @@ class FunctionTests(torchdynamo.testing.TestCase):
         a_param = torch.nn.Parameter(a)
         tmp = {"a": b, a_param: 3}
         return tmp["a"] + tmp[a_param]
-
-    def test_default_dict(self):
-        tmp = DefaultDict(lambda: 3, {"a": torch.ones([3, 3])})
-
-        def fn(x):
-            a_param = torch.nn.Parameter(torch.ones([3, 3]))
-            return tmp["a"] + tmp[a_param]
-
-        torchdynamo.config.debug = True
-        torchdynamo.config.trace = True
-
-        torchdynamo.testing.standard_test(self, fn, 1)
-        return
 
     @make_test
     def test_min_max(a, b):
