@@ -165,9 +165,7 @@ class VariableBuilder:
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)
-        elif istype(
-            value, (dict, collections.OrderedDict, collections.defaultdict)
-        ) and all(
+        elif istype(value, (dict, collections.OrderedDict)) and all(
             map(
                 lambda k: ConstantVariable.is_literal(k)
                 or isinstance(k, torch.nn.Parameter),
@@ -193,14 +191,9 @@ class VariableBuilder:
                 ]
             )
 
-            result = ConstDictVariable(
-                result,
-                type(value),
-                default_factory=getattr(value, "default_factory", None),
-                guards=guards,
-            )
+            result = ConstDictVariable(result, type(value), guards=guards)
 
-            if istype(value, (dict, collections.defaultdict)):
+            if istype(value, dict):
                 return self.tx.output.side_effects.track_dict(
                     self.source, value, result
                 )

@@ -112,6 +112,7 @@ class TensorVariable(VariableTracker):
             def wrap_fake_exception(func):
                 return func()
 
+        initial_example_value = example_value
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
@@ -148,7 +149,7 @@ class TensorVariable(VariableTracker):
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
-            parameter_value = example_value if is_parameter else None
+            parameter_value = initial_example_value if is_parameter else None
 
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(example_value, FakeTensor):
