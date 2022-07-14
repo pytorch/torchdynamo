@@ -7,6 +7,7 @@ import torch
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
 
 from .. import config
@@ -23,18 +24,16 @@ class ShapeAliasingAndMutationProp(ShapeProp):
     def __init__(self, *args, **kwargs):
         super(ShapeAliasingAndMutationProp, self).__init__(*args, **kwargs)
         self.input_alias_groups = set()
-        self.data_ptr_to_alias_group = dict()
-        self.storage_keepalive = []
+        self.storage_to_alias_group = dict()
         self.make_alias_group = itertools.count(1)
 
     def tensor_alias_group(self, value: torch.Tensor):
         """Assign a unique identifier to the storage of a given tensor"""
-        storage_data_ptr = value.storage().data_ptr()
-        alias_group = self.data_ptr_to_alias_group.get(storage_data_ptr)
+        storage = StorageWeakRef(value.storage())
+        alias_group = self.storage_to_alias_group.get(storage)
         if alias_group is None:
             alias_group = next(self.make_alias_group)
-            self.data_ptr_to_alias_group[storage_data_ptr] = alias_group
-            self.storage_keepalive.append(value.storage())
+            self.storage_to_alias_group[storage] = alias_group
         return alias_group
 
     def placeholder(self, target, args, kwargs):
@@ -108,12 +107,12 @@ class ShapeAliasingAndMutationProp(ShapeProp):
             super().run(*args)
         finally:
             # cleanup
-            self.storage_keepalive.clear()
             self.env.clear()
 
 
-def has_mutation(gm, example_inputs):
-    """Check if the graph module has any form of mutation"""
+def has_mutation(gm, example_inputs, inputs_only=False):
+    """Check if the graph module has any form of mutation.  If inputs_only is
+    true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
     if fake_tensors_available and config.fake_tensor_propagation:
@@ -121,12 +120,18 @@ def has_mutation(gm, example_inputs):
         fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
+        with fake_mode:
+            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         new_gm = copy.deepcopy(gm)
         example_inputs = copy.deepcopy(example_inputs)
+        ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
 
-    ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     for node in new_gm.graph.nodes:
         if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
-            return True
+            if inputs_only:
+                if node.meta["is_input_alias"]:
+                    return True
+            else:
+                return True
     return False

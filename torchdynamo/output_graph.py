@@ -38,6 +38,13 @@ from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
 
 
+def _get_gen_rand_values_fn(random_calls):
+    def _gen_rand_values():
+        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+
+    return _gen_rand_values
+
+
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
@@ -242,8 +249,22 @@ class OutputGraph(fx.Tracer):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
+        # to handle random calls
         if len(tx.random_calls) > 0:
+            random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
+            rand_fn_name = unique_id("__gen_rand_values")
+            rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(tx.random_calls))
+            self.install_global(rand_fn_name, rand_fn)
+            codegen = PyCodegen(tx, root)
+            random_calls_instructions.extend(codegen.load_function_name(rand_fn_name))
+            random_calls_instructions.extend(
+                [
+                    create_instruction("CALL_FUNCTION", 0),
+                    codegen.create_store(tx.output.random_values_var),
+                ]
+            )
+            self.add_output_instructions(random_calls_instructions)
 
         if (
             stack_values
