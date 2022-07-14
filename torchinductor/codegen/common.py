@@ -598,7 +598,5 @@ class Kernel(CodeGen):
         index = sympy.expand(index)
         index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
-        subs = {
-            x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")
-        }
+        subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)
