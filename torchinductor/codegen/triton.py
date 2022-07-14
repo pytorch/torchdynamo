@@ -150,14 +150,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def isinf(x):
         if has_triton_libdevice():
-            return f"tl.libdevice.isinfd({x}) if {x}.dtype is tl.float64 else tl.libdevice.isinf({x})"
+            return f"tl.libdevice.isinfd({x}) if {x}.dtype is tl.float64 else tl.libdevice.isinff({x})"
         else:
             return f"{x}+1 == {x}"
 
     @staticmethod
     def isnan(x):
         if has_triton_libdevice():
-            return f"tl.libdevice.isnand({x}) if {x}.dtype is tl.float64 else tl.libdevice.isnan({x})"
+            return f"tl.libdevice.isnand({x}) if {x}.dtype is tl.float64 else tl.libdevice.isnanf({x})"
         else:
             return f"{x} != {x}"
 
