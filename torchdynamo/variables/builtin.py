@@ -256,11 +256,9 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
 
-                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, proxy_args, proxy_kwargs
+                    "call_function", fn, *proxy_args_kwargs(args, kwargs)
                 )
-
                 if self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
