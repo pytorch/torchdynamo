@@ -597,7 +597,6 @@ class Kernel(CodeGen):
             return [self.rename_indexing(x) for x in index]
         index = sympy.expand(index)
         index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
-        subs = {
-            x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
-        }
+        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+        subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)
