@@ -55,6 +55,15 @@ def fuse_reindexing(reindex1, reindex2):
 
     return reindex
 
+def stride_order2fill_order(order):
+    """
+    Convert stride order to fill order
+    For channel last format,
+    stride order = [3, 0, 2, 1] and fill order = [1, 3, 2, 0]
+    """
+    lookup = {pos: idx for idx, pos in enumerate(order)}
+    fill_order = [lookup[i] for i in range(len(order))]
+    return fill_order
 
 class ModularIndexing(sympy.Function):
     """
@@ -1124,8 +1133,7 @@ class FlexibleLayout(Layout):
             [3, 0, 2, 1]
         """
         assert set(range(len(sizes))) == set(order)
-        lookup = {pos: idx for idx, pos in enumerate(order)}
-        fill_order = [lookup[i] for i in range(len(order))]
+        fill_order = stride_order2fill_order(order)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
     @staticmethod
@@ -1388,12 +1396,22 @@ class ComputedBuffer(Buffer):
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
+            reads_bufs = [
+                V.graph.name_to_buffer[r.name]
+                if r.name in V.graph.name_to_buffer.keys() else None
+                for r in reads
+            ]
+            priority_idx = []
+            for i, reads_buf in enumerate(reads_bufs):
+                if isinstance(reads_buf, Convolution):
+                    # prioritize Conv layout order
+                    priority_idx.append(i)
             # only consider reads to buffer of same size
             reads = [
                 r.index.subs({v: sympy.Integer(0) for v in reduction_vars})
                 for r in reads
             ]
-
+            
             if reads:
                 stride_lengths = numpy.array(
                     [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
@@ -1402,13 +1420,13 @@ class ComputedBuffer(Buffer):
                 from .scheduler import pick_loop_order
 
                 self.freeze_layout_with_fill_order(
-                    pick_loop_order(stride_lengths, self.get_size())
+                    pick_loop_order(stride_lengths, self.get_size(), priority_idx)
                 )
 
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_reorder_and_tile(self, priority_addrs=[]):
+    def simplify_reorder_and_tile(self):
         """
         This is the main place where we do loop transformations in a
         backend-agnostic way.
@@ -1429,22 +1447,19 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
         index_formulas = [*body.indexing_exprs.values()]
-        memory_addrs = [*body.reads, *body.writes]
-
-        # find the matching idx from priority_addrs in memory_addrs
-        priority_idx = []
-        if len(priority_addrs) > 0:
-            for priority_addr in priority_addrs:
-                map_dict = {
-                    k: v
-                    for k, v in zip(
-                        list(sympy.ordered(priority_addr.free_symbols)),
-                        list(sympy.ordered(args[0])),
-                    )
-                }
-                priority_addr = priority_addr.subs(map_dict)
-                if priority_addr in [*body.reads]:
-                    priority_idx.append([*body.reads].index(priority_addr))
+        memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
+        preferred_order = None
+        if config.triton.convolution != "aten":
+            reads_bufs = [
+                V.graph.name_to_buffer[reads_name]
+                if reads_name in V.graph.name_to_buffer.keys() else None
+                for reads_name in body.reads_name2expr.keys()
+            ]
+            for reads_buf in reads_bufs:
+                if isinstance(reads_buf, Convolution):
+                    # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
+                    preferred_stride_order = reads_buf.preferred_stride_order
+                    preferred_order = stride_order2fill_order(preferred_stride_order)
 
         index_vars = []
         reduce_vars = []
@@ -1462,7 +1477,7 @@ class ComputedBuffer(Buffer):
 
         def simplify_and_reorder(x_vars, sizes):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, sizes, memory_addrs, priority_idx
+                x_vars, sizes, memory_addrs, preferred_order
             )
             x_vars = reindex0(x_vars)
             sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
@@ -1602,7 +1617,7 @@ class ComputedBuffer(Buffer):
             return (iter_ranges,), body
 
     @staticmethod
-    def _apply_loop_reordering(index_vars, sizes, memory_addrs, priority_idx=[]):
+    def _apply_loop_reordering(index_vars, sizes, memory_addrs, preferred_order=None):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -1617,7 +1632,10 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
+            if preferred_order is None or len(preferred_order) != len(index_vars):
+                order = list(reversed(pick_loop_order(strides, sizes)))
+            else:
+                order = list(reversed(preferred_order))
         except Exception:
             if config.debug:
                 log.warning(
@@ -2249,6 +2267,10 @@ class Convolution(ExternKernelAlloc):
         assert config_conv == "autotune"
         kernel = "tuned_conv"
 
+    def __init__(self, layout, inputs, constant_args=(), preferred_stride_order=None):
+        super().__init__(layout, inputs, constant_args)
+        self.preferred_stride_order = preferred_stride_order
+
     def codegen(self, wrapper):
         if self.kernel == "triton_ops_conv":
             wrapper.header.writeline(
@@ -2374,12 +2396,14 @@ class Convolution(ExternKernelAlloc):
                 output_layout,
                 (x, weight, bias),
                 (stride, padding, dilation, transposed, output_padding, groups),
+                stride_order,
             )
         else:
             return Convolution(
                 output_layout,
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
+                stride_order,
             )
 
     def apply_constraint(self):
@@ -2388,6 +2412,32 @@ class Convolution(ExternKernelAlloc):
         x = self.require_stride_order(x, self.layout.preferred_stride_order)
         self.inputs[0] = x
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the conv output index
+        """
+        # manually generate index formula for conv
+        sizes = self.get_size()
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
+        indexer = self.make_indexer()
+        index = indexer(index_vars)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
 
     def map_args(self):
         # x, w, bias
@@ -2575,6 +2625,8 @@ class LoopBody:
         self.indexing_exprs_name = {}
         self.reads = []
         self.writes = []
+        self.reads_name2expr = {}
+        self.writes_name2expr = {}
         self.other = []
         self.submodules = {}
         self.subblocks = {}
@@ -2582,8 +2634,10 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
-    def add_index_expr(self, expr: sympy.Expr, category):
+    def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
+        if buf_name is not None:
+            getattr(self, f"{category}_name2expr")[buf_name] = expr
         if expr not in self.indexing_exprs_name:
             name = f"index{len(self.indexing_exprs)}"
             self.indexing_exprs_name[expr] = name
@@ -2630,22 +2684,22 @@ class LoopBodyBlock:
         self.gm = None
         self.body = body
 
-        def add_index(expr, category):
+        def add_index(expr, category, buf_name=None):
             return tracer.create_proxy(
-                "get_attr", self.body.add_index_expr(expr, category), (), {}
+                "get_attr", self.body.add_index_expr(expr, category, buf_name), (), {}
             )
 
         class CaptureIndexing(V.WrapperHandler):
             def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-                index = add_index(index, "reads")
+                index = add_index(index, "reads", name)
                 return self._inner.load(name, index, upcast)
 
             def store(self, name, index, value, mode=None):
-                index = add_index(index, "writes")
+                index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
             def reduction(self, name, dtype, reduction_type, index, value):
-                index = add_index(index, "writes")
+                index = add_index(index, "writes", name)
                 return self._inner.reduction(name, dtype, reduction_type, index, value)
 
             def index_expr(self, index, dtype):
