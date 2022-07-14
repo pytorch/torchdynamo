@@ -33,7 +33,7 @@ def has_triton_libdevice():
     try:
         from triton.language import libdevice
 
-        return os.path.exists(libdevice.LIBDEVICE_PATH)
+        return libdevice is not None
     except (ImportError, ModuleNotFoundError):
         return False
 
