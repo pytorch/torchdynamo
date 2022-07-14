@@ -11,6 +11,7 @@ import sys
 import traceback
 import types
 import typing
+import weakref
 from typing import Any
 from typing import Dict
 from typing import Iterable
@@ -1133,7 +1134,7 @@ class InstructionTranslatorBase(object):
         )
 
     def store_dict_key(self, name, value):
-        self.f_globals[name] = value
+        self.f_globals[name] = weakref.ref(value)
 
     @property
     def fake_mode(self):

@@ -129,8 +129,11 @@ class GetItemSource(Source):
         instrs = self.base.reconstruct(codegen)
 
         if isinstance(self.index, Parameter):
-            instrs.append(
-                codegen.create_load_global(global_key_name(self.index), add=True)
+            instrs.extend(
+                [
+                    codegen.create_load_global(global_key_name(self.index), add=True),
+                    create_instruction("CALL_FUNCTION", 0),
+                ]
             )
         else:
             instrs.append(codegen.create_load_const(self.index))
@@ -143,7 +146,7 @@ class GetItemSource(Source):
 
     def name(self):
         if isinstance(self.index, Parameter):
-            return f"{self.base.name()}[{global_key_name(self.index)}]"
+            return f"{self.base.name()}[{global_key_name(self.index)}()]"
         else:
             return f"{self.base.name()}[{self.index!r}]"
 

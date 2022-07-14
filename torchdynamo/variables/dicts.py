@@ -14,7 +14,6 @@ from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource
-from ..source import GetItemSource
 from ..source import GlobalSource
 from ..utils import global_key_name
 from .base import VariableTracker
@@ -22,18 +21,13 @@ from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, default_factory=None, **kwargs):
+    def __init__(self, items, user_cls, **kwargs):
         super(ConstDictVariable, self).__init__(**kwargs)
         self.items = items
         self.user_cls = user_cls
-        self.default_factory = default_factory
 
     def as_proxy(self):
-        proxy_dict = {k: v.as_proxy() for k, v in self.items.items()}
-        if self.default_factory:
-            return collections.defaultdict(self.default_factory, proxy_dict)
-        else:
-            return proxy_dict
+        return {k: v.as_proxy() for k, v in self.items.items()}
 
     def python_type(self):
         return self.user_cls
@@ -41,8 +35,11 @@ class ConstDictVariable(VariableTracker):
     def reconstruct(self, codegen):
         for key, value in self.items.items():
             if isinstance(key, torch.nn.Parameter):
-                codegen.append_output(
-                    codegen.create_load_global(global_key_name(key), add=True)
+                codegen.extend_output(
+                    [
+                        codegen.create_load_global(global_key_name(key), add=True),
+                        create_instruction("CALL_FUNCTION", 0),
+                    ]
                 )
             else:
                 codegen.append_output(codegen.create_load_const(key))
@@ -67,31 +64,8 @@ class ConstDictVariable(VariableTracker):
         val = self.items
 
         if name == "__getitem__":
-            assert not kwargs and len(args) == 1
-            try:
-                return self.getitem_const(args[0])
-            except KeyError:
-                from .builder import VariableBuilder
+            return self.getitem_const(args[0])
 
-                if self.default_factory:
-                    if isinstance(args[0], TensorVariable):
-                        index = GetItemSource(self.source, args[0])
-                    else:
-                        index = ConstDictVariable.get_key(args[0])
-
-                    args = tuple(
-                        [
-                            *args,
-                            VariableBuilder(tx, GetItemSource(self.source, index))(
-                                self.default_factory()
-                            ),
-                        ]
-                    )
-
-                    self.call_method(tx, "__setitem__", args, kwargs)
-                    return args[-1]
-                else:
-                    raise
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -139,10 +113,9 @@ class ConstDictVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(args[0])
-            from .builder import VariableBuilder
 
             if isinstance(k, torch.nn.Parameter):
-                tx.store_dict_key(global_key_name(k), name)
+                tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
             return tx.replace_all(self, self.modifed(newval, **options))
