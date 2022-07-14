@@ -616,7 +616,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [torch.arange(-10, 10, 0.1, dtype=torch.float32)],
+            [torch.arange(-10, 10, 0.1, dtype=torch.float64)],
             check_lowp=False,
         )
 
