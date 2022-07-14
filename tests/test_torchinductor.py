@@ -614,7 +614,11 @@ class CommonTemplate:
         def fn(a):
             return torch.round(a)
 
-        self.common(fn, [torch.arange(-10, 10, 0.1, dtype=torch.float32)])
+        self.common(
+            fn,
+            [torch.arange(-10, 10, 0.1, dtype=torch.float32)],
+            check_lowp=False,
+        )
 
     def test_silu(self):
         def fn(a):
