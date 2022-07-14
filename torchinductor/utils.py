@@ -1,6 +1,5 @@
 import functools
 import operator
-import os
 
 import sympy
 import torch
