@@ -533,16 +533,18 @@ class TritonKernel(Kernel):
 
     def simplify_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
+        sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
         nodes = [
             self.range_tree_nodes[sym]
-            for sym in expr.free_symbols
+            for sym in sorted_expr_symbols
             if sym in self.range_tree_nodes
         ]
         if nodes:
             nodes.sort(key=lambda x: x.depth)
             expr = nodes[-1].simplify(expr)
+            sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
 
-        for sym in expr.free_symbols:
+        for sym in sorted_expr_symbols:
             if sym in self.range_tree_nodes:
                 self.range_tree_nodes[sym].codegen()
 
@@ -574,7 +576,6 @@ class TritonKernel(Kernel):
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(tmp)
-
         return tmp
 
     def store(self, name, index, value, mode=None):
