@@ -109,6 +109,16 @@ def ofi(subgraph):
 
 
 @create_backend
+def nebullvm(subgraph):
+    from nebullvm import optimize_torch_model
+    model = subgraph.model
+    inputs = subgraph.example_inputs
+    bs = len(inputs)
+    input_sizes = [tuple(x.shape) for x in inputs[0]]
+    return optimize_torch_model(model=model, save_dir='.', batch_size=bs, input_sizes=input_sizes)
+
+
+@create_backend
 def static_runtime(subgraph):
     scripted = subgraph.scripted
     if hasattr(scripted, "_c"):
