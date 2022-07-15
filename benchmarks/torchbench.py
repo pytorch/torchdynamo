@@ -224,12 +224,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def failing_dynamic_shape_models(self):
         return DYNAMIC_SHAPES_NOT_YET_WORKING
 
-    def load_model(self, device, model_name, is_training, use_eval_mode):
+    def load_model(
+        self, device, model_name, is_training, use_eval_mode, batch_size=None
+    ):
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
-        batch_size = None
         if is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
@@ -259,7 +260,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             for device in args.devices:
                 try:
                     yield self.load_model(
-                        device, model_name, args.training, args.use_eval_mode
+                        device,
+                        model_name,
+                        args.training,
+                        args.use_eval_mode,
+                        args.batch_size,
                     )
                 except NotImplementedError:
                     continue  # bad benchmark implementation
