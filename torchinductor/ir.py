@@ -1150,6 +1150,7 @@ class FlexibleLayout(Layout):
         the fill order should be [1, 3, 2, 0]
         """
         assert len(sizes) == len(stride)
+        stride = [V.graph.sizevars.size_hint(x) for x in stride]
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -2380,12 +2381,14 @@ class Convolution(ExternKernelAlloc):
             )
 
         # if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
-        if is_triton(x.get_device()) and config.triton.convolution != "aten":
-            # channels last format
+        # if is_triton(x.get_device()) and config.triton.convolution != "aten":
+        # for conv2d or conv3d, prefer channels last format
+        if len(kernel_size) > 1:
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
+        # for conv1d, output layout is not preserved with inputs
         else:
             stride_order = list(reversed(range(len(output_size))))
 
