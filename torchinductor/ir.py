@@ -738,7 +738,8 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
-        if is_contiguous_storage_and_layout(x):
+        # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
+        if is_contiguous_storage_and_layout(x) and not isinstance(x.data, ExternKernelAlloc):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -2104,9 +2105,9 @@ class AdaptiveAvgPool2d(ExternKernelAlloc):
 
     def apply_constraint(self):
         x = self.inputs[0]
-        if isinstance(x, FixedLayout):
+        if isinstance(x.get_layout(), FixedLayout):
             # fix self's layout to be the same order as x
-            self.freeze_layout_with_same_order(x.stride)
+            self.freeze_layout_with_same_order(x.get_layout().stride)
         else:
             x = self.require_stride_order(x, self.layout.preferred_stride_order)
             self.inputs[0] = x
