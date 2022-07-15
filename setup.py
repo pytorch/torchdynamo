@@ -25,9 +25,11 @@ setup(
     license="BSD-3",
     keywords="pytorch machine learning compilers",
     python_requires=">=3.7, <3.11",
-    install_requires=["torch>=1.12.0", "numpy", "tabulate", "pyyaml", "sympy"],
+    install_requires=["torch>=1.12.0", "numpy", "tabulate", "sympy"],
     packages=find_packages(
         include=[
+            "towhee",
+            "towhee.compiler",
             "torchdynamo",
             "torchdynamo.*",
             "torchinductor",
