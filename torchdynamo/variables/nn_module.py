@@ -226,7 +226,9 @@ class NNModuleVariable(VariableTracker):
         ):
             return ConstantVariable(True, **options)
 
-        if not all(x.is_python_constant() for x in itertools.chain(args, kwargs)):
+        if not all(
+            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+        ):
             raise unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
@@ -256,9 +258,37 @@ class NNModuleVariable(VariableTracker):
                 )
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
 
+        def named_embed(name, obj):
+            return TupleVariable(
+                [
+                    ConstantVariable(name, **options),
+                    tx.output.add_submodule(
+                        obj,
+                        key,
+                        name,
+                        source=NNModuleSource(GetItemSource(self.source, name)),
+                        **options,
+                    ),
+                ]
+            )
+
         if name == "children":
             assert not (args or kwargs)
             return wrap_values(module.named_children())
+        elif name == "named_parameters":
+            result = []
+            for name, param in module.named_parameters(
+                **get_kwargs("prefix", "recurse")
+            ):
+                result.append(named_embed(name, param))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "named_modules":
+            result = []
+            for name, submod in module.named_modules(
+                **get_kwargs("memo", "prefix", "remove_duplicate")
+            ):
+                result.append(named_embed(name, submod))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
@@ -268,20 +298,7 @@ class NNModuleVariable(VariableTracker):
             assert not (args or kwargs)
             result = []
             for name, submod in module.items():
-                result.append(
-                    TupleVariable(
-                        [
-                            ConstantVariable(name, **options),
-                            tx.output.add_submodule(
-                                submod,
-                                key,
-                                name,
-                                source=NNModuleSource(GetItemSource(self.source, name)),
-                                **options,
-                            ),
-                        ]
-                    )
-                )
+                result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "__len__":
             assert not (args or kwargs)
@@ -331,6 +348,14 @@ class NNModuleVariable(VariableTracker):
                 args[0].as_python_constant(),
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
+            )
+        elif name == "_get_abs_string_index":
+            # Inline the function
+            fn = getattr(module, name).__func__
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                [self] + args,
+                kwargs,
             )
         else:
             return super().call_method(tx, name, args, kwargs)

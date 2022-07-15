@@ -68,6 +68,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return b - a
 
     @make_test
+    def test_finfo(a, b):
+        if torch.iinfo(torch.int32).bits == 32:
+            return torch.finfo(a.dtype).min * b
+
+    @make_test
     def test_globalfn(a, b):
         return sub(a, b)
 

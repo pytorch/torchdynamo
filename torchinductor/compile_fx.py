@@ -6,12 +6,15 @@ import textwrap
 from typing import List
 
 import torch.fx
+from functorch.compile import min_cut_rematerialization_partition
 
 import torchdynamo.config
-from torchdynamo.optimizations.backends import cudagraphs_inner
+from torchdynamo.optimizations.backends import aot_autograd
+from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
+from torchdynamo.utils import init_logging
 
 from . import config
 from .decomposition import decompositions
@@ -124,7 +127,10 @@ def compile_fx_inner(
     example_inputs: List[torch.Tensor],
     wrap=identity,
     cudagraphs=None,
+    num_fixed=0,
 ):
+    init_logging()
+
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
@@ -142,7 +148,9 @@ def compile_fx_inner(
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphs_inner(compiled_fn, example_inputs, copy_outputs=False)
+            return cudagraphify(
+                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+            )
         else:
             return compiled_fn
     except Exception:
@@ -152,14 +160,105 @@ def compile_fx_inner(
         raise
 
 
-def compile_fx_training(
-    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+def no_compile(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
 ):
-    from torchdynamo.optimizations.backends import aot_autograd
+    return gm.forward
+
+
+def cudagraphify(model, inputs, static_input_idxs=()):
+    """
+    Assumes inputs[static_input_idxs[i]] are always the same memory address
+    """
+    assert isinstance(inputs, (list, tuple))
+    static_inputs = [
+        torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx]
+        for idx, x in enumerate(inputs)
+    ]
+
+    # warmup
+    torch.cuda.synchronize()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        model(*inputs)
+    stream.synchronize()
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
+
+    # record
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        static_outputs = model(*static_inputs)
+    if not isinstance(static_outputs, (list, tuple)):
+        static_outputs = (static_outputs,)
+
+    if config.size_asserts:
+
+        def run(*new_inputs):
+            assert len(static_inputs) == len(new_inputs)
+            for idx, (dst, src) in enumerate(zip(static_inputs, new_inputs)):
+                if idx in static_input_idxs:
+                    assert dst.data_ptr() == src.data_ptr()
+                else:
+                    dst.copy_(src)
+            graph.replay()
+            return static_outputs
+
+    else:
+        copy_indices = [
+            idx for idx in range(len(static_inputs)) if idx not in static_input_idxs
+        ]
+
+        def run(*new_inputs):
+            for idx in copy_indices:
+                static_inputs[idx].copy_(new_inputs[idx])
+            graph.replay()
+            return static_outputs
+
+    return run
+
+
+def count_tangents(fx_g: torch.fx.GraphModule):
+    """
+    Infers which inputs are static for a backwards graph
+    """
+
+    def is_not_gradout(x):
+        return "tangents" not in x.name
+
+    arg_count = 0
+    static_arg_idxs = []
+    for n in fx_g.graph.nodes:
+        if n.op == "placeholder":
+            if is_not_gradout(n):
+                static_arg_idxs.append(arg_count)
+            arg_count += 1
+
+    assert static_arg_idxs == list(range(len(static_arg_idxs)))
+    return len(static_arg_idxs)
+
+
+def compile_fx_training(
+    model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
+):
+    model_ = normalize_ir(model_, example_inputs_)
+
+    def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        # model.graph.print_tabular()
+        fixed = len(example_inputs) - len(example_inputs_)
+        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+
+    def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+        fixed = count_tangents(model)
+        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
     return aot_autograd(
-        model,
-        example_inputs,
-        fw_compiler=compile_fx_inner,
+        model_,
+        example_inputs_,
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
         decompositions=decompositions,
+        partition_fn=min_cut_rematerialization_partition,
     )

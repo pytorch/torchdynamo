@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import random
 import unittest
 from unittest.mock import patch
 
@@ -150,6 +151,8 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
         if hasattr(model, "to"):
             model = model.to(torch.half)
 
+    torchinductor.metrics.reset()
+
     @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
     def run(*ex):
         return model(*ex)
@@ -167,6 +170,10 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
         for x, y in zip(actual_flat, correct_flat)
     )
     correct = tree_unflatten(correct_flat, correct_spec)
+
+    # print(correct)
+    # print(actual)
+    # print(correct - actual)
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
@@ -409,6 +416,7 @@ class CommonTemplate:
                 torch.randn(26),
             ),
         )
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
 
     def test_sum1(self):
         def fn(a, b):
@@ -452,6 +460,16 @@ class CommonTemplate:
             return (f,)
 
         self.common(fn, (torch.randn(1, 17, 8, 9),))
+
+    def test_multilayer_low_prec(self):
+        # fp16 nyi for cpu
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(a):
+            return torch.mean(a)
+
+        self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -765,7 +783,7 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
-    def test_bmm(self):
+    def test_bmm1(self):
         def fn(a, b):
             return (
                 torch.bmm(a, b),
@@ -785,6 +803,19 @@ class CommonTemplate:
             (
                 torch.randn(1, 16, 8),
                 torch.randn(1, 8, 10),
+            ),
+            check_lowp=False,
+        )
+
+    def test_bmm2(self):
+        def fn(a, b):
+            return torch.bmm(a.permute(0, 2, 1), b)
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, 8, 8),
+                torch.randn(1, 8, 8),
             ),
             check_lowp=False,
         )
@@ -1094,6 +1125,24 @@ class CommonTemplate:
     def test_tanh(self):
         def fn(x):
             return aten.tanh(x) + 2, aten.tanh(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_cos(self):
+        def fn(x):
+            return aten.cos(x) + 2, aten.cos(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_sin(self):
+        def fn(x):
+            return aten.sin(x) + 2, aten.sin(x + 1)
 
         self.common(
             fn,
@@ -1540,6 +1589,8 @@ class CommonTemplate:
             ),
         )
 
+    # https://github.com/pytorch/torchdynamo/issues/467
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1945,6 +1996,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(not config.fallback_random, "requires config.fallback_random")
     def test_bernoulli(self):
         def fn(a):
             b = torch.empty_like(a)
@@ -2003,11 +2055,206 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter2(self):
+        def fn(a, b):
+            return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
+
+        self.common(
+            fn,
+            [
+                torch.randn([8, 197, 384]),
+                torch.randn([8, 197, 384]),
+            ],
+        )
+
+    @unittest.skip("Triton kernel fails when xnumel == 1")
+    def test_scatter_add1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_add(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.randn(2, 3),
+                0,
+                torch.tensor([[0]]),
+                torch.randn(2, 3),
+            ],
+        )
+
+    def test_scatter_add2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_add(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.randn(2, 3),
+                0,
+                torch.tensor([[0, 0, 0], [1, 1, 1]]),
+                torch.randn(2, 3),
+            ],
+        )
+
+    def test_scatter_add3(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_add(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                torch.randn(1, 1, 10),
+            ],
+        )
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
 
         self.common(fn, [torch.randn(55)])
+
+    @patch.object(torchinductor.config.triton, "cudagraphs", True)
+    def test_dropout(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.nn.functional.dropout(a, 0.5, True)
+
+        x = torch.ones(1000, device=self.device, dtype=torch.float32)
+        result = fn(x)
+        self.assertTrue(400 < result.nonzero().shape[0] < 600)
+        self.assertTrue(0.9 < result.mean().item() < 1.1)
+
+    def test_dropout_deterministic(self):
+        if self.device == "cpu":
+            # TODO(jansel): CPU RNG is not yet deterministic
+            raise unittest.SkipTest("CPU currently nondeterministic")
+
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.nn.functional.dropout(a, 0.55, True)
+
+        for cg in (False, True):
+            with patch.object(torchinductor.config.triton, "cudagraphs", cg):
+                torchdynamo.reset()
+
+                x = torch.ones(1024, device=self.device, dtype=torch.float16)
+
+                torch.cuda.manual_seed(1234)
+                a0 = fn(x).clone()
+                a1 = fn(x).clone()
+                a2 = fn(x).clone()
+
+                torch.cuda.manual_seed(1234)
+                b0 = fn(x).clone()
+                b1 = fn(x).clone()
+                b2 = fn(x).clone()
+
+                # same seed, same values
+                self.assertTrue(torch.allclose(a0, b0))
+                self.assertTrue(torch.allclose(a1, b1))
+                self.assertTrue(torch.allclose(a2, b2))
+
+                # different calls, different values
+                self.assertFalse(torch.allclose(a0, a1))
+                self.assertFalse(torch.allclose(a1, a2))
+
+    def test_max_pool2d_with_indices_backward(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [2, 2], [2, 2], [0, 0], [1, 1], False, c
+            )
+
+        x = torch.randn([2, 4, 18, 14])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [2, 2],
+            [2, 2],
+            [0, 0],
+            [1, 1],
+            False,
+        )
+
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
+    def test_max_pool2d_with_indices_backward2(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [3, 3], [2, 2], [1, 1], [1, 1], True, c
+            )
+
+        x = torch.randn([2, 4, 40, 56])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [3, 3],
+            [2, 2],
+            [1, 1],
+            [1, 1],
+            True,
+        )
+
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
+    def test_avg_pool2d_backward(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [2, 2],
+                [2, 2],
+                [0, 0],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([2, 4, 7, 7]),
+                torch.randn([2, 4, 14, 14]),
+            ],
+        )
+
+    def test_avg_pool2d_backward2(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [3, 3],
+                [1, 1],
+                [1, 1],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 1, 20, 15]),
+                torch.randn([1, 1, 20, 15]),
+            ],
+        )
 
 
 if HAS_CPU:

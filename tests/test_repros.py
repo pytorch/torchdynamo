@@ -785,6 +785,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             torchdynamo.utils.counters["frames"]["ok"],
         )
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
             Boxes(torch.arange(0, 8).reshape((2, 4))),
@@ -1006,6 +1007,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_nn_parameter(self):
         def test_fn():
             a = torch.nn.Parameter(torch.randn(5, 5))
@@ -1417,3 +1419,21 @@ class ReproTests(torchdynamo.testing.TestCase):
         fn()
         with torchdynamo.optimize("eager"):
             fn()
+
+    def test_slice_into_list_mutable(self):
+        class Mod(torch.nn.Module):
+            def forward(self, listy):
+                x = listy[3:5]
+                for i in range(10):
+                    z = torch.abs(torch.randn(10)) + 1
+                    x[0] = z
+                return x
+
+        m = Mod()
+        listy = [torch.randn(10)] * 10
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt, nopython=True):
+            m.forward(listy)
+
+        self.assertEqual(cnt.frame_count, 1)

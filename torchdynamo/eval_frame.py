@@ -24,6 +24,11 @@ try:
 except (ModuleNotFoundError, ImportError) as e:
     raise RuntimeError("run `python setup.py develop` to compile C extensions") from e
 
+try:
+    from torch.fx.experimental import proxy_tensor
+except (ModuleNotFoundError, ImportError):
+    proxy_tensor = None
+
 set_eval_frame = _eval_frame.set_eval_frame
 reset_code = _eval_frame.reset_code
 unsupported = _eval_frame.unsupported
@@ -185,12 +190,12 @@ class WrapperBackend:
             if same(correct, result):
                 return self.candidate
 
-            print(f"incorrect results of backend {self}")
+            raise RuntimeError(f"incorrect results of backend {self}")
             return self.gm.forward
 
         except Exception:
             log.exception("error in verify_correctness")
-            return self.gm.forward
+            raise
         finally:
             self.restore()
 
@@ -228,18 +233,81 @@ def optimize(backend, nopython=False):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor)
+        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn=None)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
     )
 
 
-def optimize_assert(backend, backend_ctx_ctor=null_context):
+def export(f, *args, **kwargs):
+    from inspect import signature
+
+    import torch.utils._pytree as pytree
+
+    graph = None
+    out_guards = None
+
+    def guard_export_print(guards):
+        nonlocal out_guards
+        assert out_guards is None, "whole graph export entails exactly one guard export"
+        out_guards = guards
+
+    def dynamo_normalization_capturing_compiler(
+        gm: torch.fx.GraphModule, example_inputs
+    ):
+        nonlocal graph
+        assert graph is None, "whole graph export entails exactly one graph"
+        graph = gm
+        return gm.forward
+
+    backend_ctx_ctor = null_context
+
+    result = None
+    with optimize_assert(
+        dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
+    ):
+        result = f(*args, **kwargs)
+
+    assert graph is not None, "whole graph export entails exactly one call"
+    assert out_guards is not None, "whole graph export entails exactly one guard export"
+
+    out_sig = signature(graph.forward)
+    signature_types = [
+        out_sig.parameters[k].annotation for k in list(out_sig.parameters)
+    ]
+
+    flat_input_types = []
+    # TODO(voz): Handle kwargs properly?
+    flat_args, in_spec = pytree.tree_flatten(args)
+    for arg in flat_args:
+        flat_input_types.append(arg.__class__)
+
+    _, out_spec = pytree.tree_flatten(result)
+
+    assert len(flat_input_types) == len(
+        out_sig.parameters
+    ), "Flattened inputs length must match out signature parameter lengths."
+
+    for idx in range(len(out_sig.parameters)):
+        sig_type = signature_types[idx]
+        in_type = flat_input_types[idx]
+        assert (
+            sig_type == in_type
+        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+
+    # TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
+    # There is currently more work that needs to be done on the fx side before we can support the UX we want.
+    # The future UX here will not return a spec, but will rather return a graph with the original signature
+    # and return type as the passed in callable, `f`.
+    return (graph, out_guards, in_spec, out_spec)
+
+
+def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
     )
 
 
@@ -288,6 +356,9 @@ class TorchPatcher:
 
         torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
         torch.distributions.Distribution.set_default_validate_args(False)
+
+        if proxy_tensor is not None:
+            proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

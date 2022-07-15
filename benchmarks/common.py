@@ -573,12 +573,72 @@ def cast_to_fp32(model, inputs):
     return model, inputs
 
 
+class DummyGradScaler:
+    def scale(self, loss):
+        return loss
+
+
 class BenchmarkRunner:
+    def __init__(self):
+        self.use_amp = False
+        self.grad_scaler = DummyGradScaler()
+        self.autocast = NullContext
+        self._args = None
+
+    def setup_amp(self):
+        if self.args.amp and self.args.training:
+            assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
+            self.grad_scaler = torch.cuda.amp.GradScaler()
+            self.autocast = torch.cuda.amp.autocast
+            # TODO - Debug whats going wrong with the numerics
+            self.args.cosine = True
+
+    @property
+    def args(self):
+        return self._args
+
+    @args.setter
+    def args(self, args):
+        self._args = args
+
+    @property
+    def skip_models(self):
+        return set()
+
+    @property
+    def slow_models(self):
+        return set()
+
+    @property
+    def very_slow_models(self):
+        return set()
+
     @property
     def non_deterministic_models(self):
         return set()
 
-    def set_tolerance(self, is_training, current_device, name):
+    @property
+    def skip_not_suitable_for_training_models(self):
+        return set()
+
+    @property
+    def failing_python_key_models(self):
+        return set()
+
+    @property
+    def failing_torchinductor_models(self):
+        return set()
+
+    @property
+    def failing_fx2trt_models(self):
+        return set()
+
+    @property
+    def failing_dynamic_shape_models(self):
+        return set()
+
+    @property
+    def get_tolerance(self, is_training, current_device, name):
         raise NotImplementedError()
 
     def run_one_model(
@@ -594,7 +654,7 @@ class BenchmarkRunner:
         skip_accuracy_check=False,
     ):
         t0 = time.perf_counter()
-        tolerance = self.set_tolerance(is_training, current_device, name)
+        tolerance = self.get_tolerance(is_training, current_device, name)
         with self.pick_grad(name, is_training):
             mode = "train" if is_training else "eval"
             sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
@@ -603,12 +663,14 @@ class BenchmarkRunner:
                 assert not torchdynamo.utils.is_jit_model(submod)
 
             torch.manual_seed(1337)
-            correct_result = model_iter_fn(copy.deepcopy(model), example_inputs)
+            correct_result = model_iter_fn(
+                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+            )
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), example_inputs
+                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
                 if not same(correct_result, correct_rerun_result):
                     print("INCORRECT - Variation in Eager runs itself")
@@ -712,6 +774,9 @@ def parse_args():
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
     parser.add_argument("--float32", action="store_true", help="cast model to fp32")
+    parser.add_argument(
+        "--amp", action="store_true", help="use automatic mixed precision"
+    )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
@@ -878,8 +943,11 @@ def parse_args():
     return args
 
 
-def main(runner):
+def main(runner, original_dir=None):
     args = parse_args()
+
+    # Pass the parsed args object to benchmark runner object
+    runner.args = args
 
     # defaults
     args.devices = args.devices or ["cpu"]
@@ -951,10 +1019,22 @@ def main(runner):
         if not (args.float16 or args.float32):
             # https://github.com/openai/triton/issues/543 causes only 98.8% similarity
             runner.non_deterministic_models.add("pyhpc_equation_of_state")
+        if args.training:
+            # dropout,etc makes results not match
+            args.skip_accuracy_check = True
 
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update({"demucs", "pyhpc_equation_of_state"})
+        runner.non_deterministic_models.update(
+            {
+                "demucs",
+                "pyhpc_equation_of_state",
+                "timm_efficientdet",
+                "pyhpc_isoneutral_mixing",
+                "pyhpc_turbulent_kinetic_energy",
+                "shufflenet_v2_x1_0",
+            }
+        )
 
     if args.no_skip:
         runner.skip_models.clear()
@@ -973,7 +1053,7 @@ def main(runner):
         )
         experiment = cold_start_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = "cold_start_{backend_str}.csv"
+        output_filename = f"cold_start_{backend_str}.csv"
         args.isolate = True
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -1135,6 +1215,8 @@ def main(runner):
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 
+    runner.setup_amp()
+
     experiment = functools.partial(experiment, args, model_iter_fn)
 
     cos_similarity = args.cosine
@@ -1184,7 +1266,8 @@ def main(runner):
     elif args.isolate:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
-        os.chdir(torchdynamo.config.base_dir + "/model_benchmark")
+        if original_dir:
+            os.chdir(original_dir)
         for name in runner.iter_model_names(args):
             current_name = name
             try:

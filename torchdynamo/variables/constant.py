@@ -1,3 +1,4 @@
+import operator
 from typing import Dict
 from typing import List
 
@@ -82,10 +83,22 @@ class ConstantVariable(VariableTracker):
         except NotImplementedError:
             return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
 
+        def has_arith_binop(num_ty):
+            return (
+                isinstance(self.value, num_ty)
+                and name in num_ty.__dict__.keys()
+                and hasattr(operator, name)
+                and len(args) == 1
+                and args[0].is_python_constant()
+            )
+
         if isinstance(self.value, str) and name in str.__dict__.keys():
             assert not kwargs
             method = getattr(self.value, name)
             return ConstantVariable(method(*const_args, **const_kwargs), **options)
+        elif has_arith_binop(int) or has_arith_binop(float):
+            op = getattr(operator, name)
+            return ConstantVariable(op(self.value, const_args[0]), **options)
         elif name == "__len__" and not (args or kwargs):
             return ConstantVariable(len(self.value), **options)
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():

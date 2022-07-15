@@ -1,16 +1,20 @@
 import torch
-import torchdynamo
-import torchinductor.config as inductor_config
 from benchmark_helper import time_with_torch_timer
 
+import torchdynamo
+import torchinductor.config as inductor_config
+
 inductor_config.triton.use_mm = True
+
 
 @torchdynamo.optimize("inductor", nopython=True)
 def inductor_mm(a, b):
     return torch.mm(a, b)
 
+
 def torch_mm_relu(a, b):
     return torch.nn.functional.relu(torch.mm(a, b))
+
 
 def torch_mm(a, b):
     return torch.mm(a, b)
@@ -18,8 +22,24 @@ def torch_mm(a, b):
 
 if __name__ == "__main__":
     # Real shapes from torchbench
-    a_shapes = [ [2048, 768], [64, 1280], [2048, 768], [32, 2048], [1, 39200], [128, 3072], [16, 1280]]
-    b_shapes = [ [768, 3072], [1280, 1000], [768, 768], [2048, 1000], [39200, 50], [3072, 1000], [1280, 1000]]
+    a_shapes = [
+        [2048, 768],
+        [64, 1280],
+        [2048, 768],
+        [32, 2048],
+        [1, 39200],
+        [128, 3072],
+        [16, 1280],
+    ]
+    b_shapes = [
+        [768, 3072],
+        [1280, 1000],
+        [768, 768],
+        [2048, 1000],
+        [39200, 50],
+        [3072, 1000],
+        [1280, 1000],
+    ]
 
     # Artificial larger shapes
     a_shapes += [[10240, 512], [10240, 1024]]
@@ -28,22 +48,19 @@ if __name__ == "__main__":
     for i in range(len(a_shapes)):
         a_shape = a_shapes[i]
         b_shape = b_shapes[i]
-        print("Shape:", a_shape, 'x', b_shape)
-        a = torch.randn(a_shape, device='cuda', dtype=torch.float16)
-        b = torch.randn(b_shape, device='cuda', dtype=a.dtype)
+        print("Shape:", a_shape, "x", b_shape)
+        a = torch.randn(a_shape, device="cuda", dtype=torch.float16)
+        b = torch.randn(b_shape, device="cuda", dtype=a.dtype)
 
         time_with_torch_timer(torch_mm, (a, b), string_id="torch mm")
         time_with_torch_timer(torch_mm_relu, (a, b), string_id="torch mm + relu")
         time_with_torch_timer(inductor_mm, (a, b), string_id="inductor mm")
-        
 
 
-
-
-# Results obtained on the AWS AI cluster 
+# Results obtained on the AWS AI cluster
 # CPU: Intel(R) Xeon(R) Platinum 8275CL CPU @ 3.00GHz
 # GPU: NVIDIA A100-SXM 40GB memory
-'''
+"""
 Shape: [2048, 768] x [768, 3072]
 torch mm         mean: 0.0592 ms
 torch mm + relu  mean: 0.0759 ms
@@ -80,4 +97,4 @@ Shape: [10240, 1024] x [1024, 10240]
 torch mm         mean: 0.9152 ms
 torch mm + relu  mean: 1.2124 ms
 inductor mm      mean: 0.9462 ms
-'''
+"""

@@ -9,6 +9,7 @@ import torch
 
 import torchdynamo
 from torchdynamo.optimizations import backends
+from torchdynamo.optimizations.analysis import has_mutation
 from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.normalize import Inplacifier
@@ -74,6 +75,33 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         code = gm.code.replace(" ", "")
         self.assertIn("inplace=True", code)
         self.assertIn("out=linear_1", code)
+
+    def test_has_mutation(self):
+        gm = torch.fx.symbolic_trace(Seq())
+        self.assertFalse(has_mutation(gm, torch.rand([10, 10])))
+
+        class Mutating(torch.nn.Module):
+            def __init__(self):
+                super(Mutating, self).__init__()
+
+            def forward(self, arg):
+                return arg.add_(1)
+
+        gm = torch.fx.symbolic_trace(Mutating())
+        self.assertTrue(has_mutation(gm, torch.rand([10, 1, 1, 1])))
+
+    def test_has_mutation_factory(self):
+        def fn():
+            x = torch.empty(2)
+            x.fill_(2)
+            return x
+
+        def compiler_fn(graph, example_inputs):
+            self.assertTrue(has_mutation(graph, example_inputs))
+            return graph
+
+        with torchdynamo.optimize(compiler_fn):
+            fn()
 
     def test_example_inputs(self):
         def fn(a, bc, d):
@@ -163,3 +191,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
             r2 = model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
+
+
+if __name__ == "__main__":
+    unittest.main()

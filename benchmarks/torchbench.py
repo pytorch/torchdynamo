@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import gc
 import importlib
 import logging
@@ -12,7 +13,6 @@ import torch
 from common import BenchmarkRunner
 from common import main
 
-import torchdynamo
 from torchdynamo.testing import collect_results
 from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.utils import clone_inputs
@@ -22,6 +22,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 for torchbench_dir in (
+    "./torchbenchmark",
+    "../torchbenchmark",
+    "../torchbench",
+    "../benchmark",
     "../../torchbenchmark",
     "../../torchbench",
     "../../benchmark",
@@ -29,6 +33,7 @@ for torchbench_dir in (
     if exists(torchbench_dir):
         break
 assert exists(torchbench_dir), "../../torchbenchmark does not exist"
+original_dir = abspath(os.getcwd())
 torchbench_dir = abspath(torchbench_dir)
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
@@ -95,10 +100,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = {
-    "pyhpc_turbulent_kinetic_energy",
-    "pyhpc_isoneutral_mixing",
-}
+NONDETERMINISTIC = set()
 
 
 # These benchmarks took >600s on an i9-11900K CPU
@@ -152,6 +154,10 @@ TORCHINDUCTOR_NOT_YET_WORKING = {
     # LLVM ERROR: Broken function found, compilation aborted!
     # torch.randn missing
     "hf_Reformer",
+    # as_strided issue
+    "hf_Longformer",
+    # out of memory
+    "timm_efficientdet",
 }
 
 
@@ -182,9 +188,6 @@ SKIP = {
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
-    def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
-
     @property
     def skip_models(self):
         return SKIP
@@ -281,7 +284,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
-    def set_tolerance(self, is_training, current_device, name):
+    def get_tolerance(self, is_training, current_device, name):
         tolerance = 1e-4
         # Increase the tolerance for torch allclose
         if (
@@ -301,17 +304,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def compute_loss(self, pred):
         return reduce_to_scalar_loss(pred)
 
-    @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
 
-    @torchdynamo.skip
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)
-        pred = mod(*cloned_inputs)
-        loss = self.compute_loss(pred)
-        loss.backward()
+        with self.autocast():
+            pred = mod(*cloned_inputs)
+            loss = self.compute_loss(pred)
+        self.grad_scaler.scale(loss).backward()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None
@@ -321,4 +323,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TorchBenchmarkRunner())
+    main(TorchBenchmarkRunner(), original_dir)

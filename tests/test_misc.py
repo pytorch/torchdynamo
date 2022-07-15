@@ -1410,6 +1410,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(
@@ -1676,7 +1677,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         def fn(x):
             r1 = random.random()
             y = x + random.uniform(10, 20)
-            r2 = random.randint(2, 18)
+            y.sum().item()
+            r2 = random.randint(2, 18)  # no graph output in this frame
+            y.sum().item()
             return y + r1, r2
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
@@ -1686,6 +1689,23 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             random.seed(1)
             res2 = fn(x)
+        self.assertTrue(same(res1, res2))
+
+    def test_unspecialized_primitive_variable5(self):
+        # test inserting random output into graph only
+        def fn(shape):
+            torch.manual_seed(123)
+            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
+            return x
+
+        shape = [2, 3]
+        random.seed(1)
+        res1 = fn(shape)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(shape)
+
         self.assertTrue(same(res1, res2))
 
     def test_side_effects_codegen_update_mutated(self):
@@ -1869,6 +1889,140 @@ class MiscTests(torchdynamo.testing.TestCase):
             torchdynamo.exc.BackendCompilerFailed,
             lambda: fn(torch.randn(10), torch.randn(10)),
         )
+
+    def test_named_parameters(self):
+        n_embd = 768
+        block_size = 128
+        vocab_size = 65
+        embd_pdrop = 0.1
+
+        class MyModel2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+
+            def forward(self, x):
+                return x
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.submod2 = MyModel2()
+
+            def forward(self, x):
+                return x
+
+        # Regular
+        params = []
+        mod = MyModel()
+        actual_params = list(mod.named_parameters())
+
+        with torchdynamo.optimize("eager", nopython=True):
+            params = list(mod.named_parameters())
+
+        self.assertEqual(len(actual_params), len(params))
+        for idx in range(len(params)):
+            k_a, v_a = actual_params[idx]
+            k, v = params[idx]
+            self.assertEqual(k_a, k)
+            self.assertTrue(torch.allclose(v_a, v))
+
+        # Prefix
+        params = []
+        mod = MyModel()
+        actual_params = list(mod.named_parameters(prefix="foo"))
+
+        with torchdynamo.optimize("eager", nopython=True):
+            params = list(mod.named_parameters(prefix="foo"))
+
+        self.assertEqual(len(actual_params), len(params))
+        for idx in range(len(params)):
+            k_a, v_a = actual_params[idx]
+            k, v = params[idx]
+            self.assertEqual(k_a, k)
+            self.assertTrue(torch.allclose(v_a, v))
+
+    def test_module_complex_iter(self):
+        n_embd = 768
+        block_size = 128
+        vocab_size = 65
+        embd_pdrop = 0.1
+
+        class FakeGPT(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
+                self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
+                self.drop = torch.nn.Dropout(embd_pdrop)
+                self.ln_f = torch.nn.LayerNorm(n_embd)
+                self.head = torch.nn.Linear(n_embd, vocab_size, bias=False)
+
+                self.block_size = block_size
+                self.names = []
+
+            def forward(self, idx, targets=None):
+                from torch.nn import functional as F
+
+                b, t = idx.size()
+                assert (
+                    t <= self.block_size
+                ), "Cannot forward, model block size is exhausted."
+
+                # forward the GPT model
+                token_embeddings = self.tok_emb(
+                    idx
+                )  # each index maps to a (learnable) vector
+                position_embeddings = self.pos_emb[
+                    :, :t, :
+                ]  # each position maps to a (learnable) vector
+                x = self.drop(token_embeddings + position_embeddings)
+                x = self.blocks(x)
+                x = self.ln_f(x)
+                logits = self.head(x)
+
+                # if we are given some desired targets also calculate the loss
+                loss = None
+                if targets is not None:
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)), targets.view(-1)
+                    )
+
+                return logits, loss
+
+            def foo(self, memo=None, prefix="", remove_duplicate=False):
+                for mn, m in self.named_modules(
+                    memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
+                ):
+                    for pn, p in self.named_parameters():
+                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        self.names.append(fpn)
+
+        # Test plain recurse
+        model_a = FakeGPT()
+        model_a.foo()
+        a_names = model_a.names
+
+        model_b = FakeGPT()
+        with torchdynamo.optimize("eager", nopython=True):
+            model_b.foo()
+
+        self.assertEqual(a_names, model_b.names)
+
+        # Test with prefix
+        model_a = FakeGPT()
+        model_a.foo(prefix="abc")
+        a_names = model_a.names
+
+        model_b = FakeGPT()
+        with torchdynamo.optimize("eager", nopython=True):
+            model_b.foo(prefix="abc")
+
+        self.assertEqual(a_names, model_b.names)
 
 
 class TestTracer(JitTestCase):

@@ -57,11 +57,13 @@ class WrapperCodeGen(CodeGen):
         self._names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
+        self.kernels = {}
         self.lines = []
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
+                import random
                 from torch import empty_strided, as_strided
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache
 
@@ -97,6 +99,10 @@ class WrapperCodeGen(CodeGen):
             ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
         )
         with self.prefix.indent():
+            for name in V.graph.randomness_seeds:
+                self.prefix.writeline(
+                    f"torch.randint(2**31, size=(), dtype=torch.int32, out={name})"
+                )
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
 
         for name, value in V.graph.constants.items():
@@ -215,7 +221,7 @@ class WrapperCodeGen(CodeGen):
             output.splice(
                 """
                 from torchdynamo.testing import rand_strided
-                from microbenchmarks.microbench import print_performance
+                from benchmarks.microbenchmarks.microbench import print_performance
                 """,
                 strip=True,
             )

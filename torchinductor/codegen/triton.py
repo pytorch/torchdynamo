@@ -145,6 +145,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    def cos(x):
+        return f"tl.cos({x})"
+
+    @staticmethod
+    def sin(x):
+        return f"tl.sin({x})"
+
+    @staticmethod
     def index_expr(expr, dtype):
         return V.kernel.indexing(expr)[0]
 
@@ -155,6 +163,10 @@ class TritonOverrides(OpOverrides):
         return ops.where(
             new_mask, result, TritonOverrides.constant(other, torch.float32)
         )
+
+    @staticmethod
+    def rand(seed, offset):
+        return f"tl.rand({seed}, {offset})"
 
 
 @dataclasses.dataclass
@@ -478,11 +490,14 @@ class TritonKernel(Kernel):
         index_vars = set(index.free_symbols)
         index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
 
-        need_dense = config.triton.dense_indexing or any(
-            # tmpX  means indirect indexing
-            str(v).startswith("tmp")
-            for v in index_vars
-        )
+        need_dense = (
+            config.triton.dense_indexing
+            or any(
+                # tmpX  means indirect indexing
+                str(v).startswith("tmp")
+                for v in index_vars
+            )
+        ) and index != 0
         have_dense = True
         have_loop_vars = False
         mask = []
@@ -522,16 +537,18 @@ class TritonKernel(Kernel):
 
     def simplify_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
+        sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
         nodes = [
             self.range_tree_nodes[sym]
-            for sym in expr.free_symbols
+            for sym in sorted_expr_symbols
             if sym in self.range_tree_nodes
         ]
         if nodes:
             nodes.sort(key=lambda x: x.depth)
             expr = nodes[-1].simplify(expr)
+            sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
 
-        for sym in expr.free_symbols:
+        for sym in sorted_expr_symbols:
             if sym in self.range_tree_nodes:
                 self.range_tree_nodes[sym].codegen()
 
@@ -563,7 +580,6 @@ class TritonKernel(Kernel):
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(tmp)
-
         return tmp
 
     def store(self, name, index, value, mode=None):
@@ -592,29 +608,34 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        accumulator = f"_{result_var}"
-        self.body.writeline(
-            f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
-        )
+        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
+            accumulator = f"_{result_var}"
+            self.body.writeline(
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
+            )
 
-        updated = value
-        if reduction_type == "min":
-            masks.append(f"({accumulator} > {value})")
-        elif reduction_type == "max":
-            masks.append(f"({accumulator} < {value})")
-        elif reduction_type == "sum":
-            updated = f"{accumulator} + {value}"
+            updated = value
+            if reduction_type == "min":
+                masks.append(f"({accumulator} > {value})")
+            elif reduction_type == "max":
+                masks.append(f"({accumulator} < {value})")
+            elif reduction_type == "sum":
+                updated = f"{accumulator} + {value}"
+            else:
+                raise NotImplementedError(f"reduction_type {reduction_type}")
+
+            cond = " & ".join(masks)
+            self.compute.writeline(
+                f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
+            )
+
+            self.suffix.writeline(
+                f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+            )
         else:
-            raise NotImplementedError(f"reduction_type {reduction_type}")
-
-        cond = " & ".join(masks)
-        self.compute.writeline(
-            f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
-        )
-
-        self.suffix.writeline(
-            f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
-        )
+            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
+            self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)
         assert "rmask" not in index
@@ -828,11 +849,19 @@ class TritonScheduling:
                         except CantSplit:
                             reschedule.append(node)
 
-        kernel_name = wrapper.next_kernel_name()
         if config.triton.many_files:
+            kernel_name = wrapper.next_kernel_name()
             wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
         else:
-            wrapper.header.splice(kernel.codegen_kernel(kernel_name))
+            src_code = kernel.codegen_kernel("{kernel_name}")
+            if src_code in wrapper.kernels:
+                kernel_name = wrapper.kernels[src_code]
+            else:
+                kernel_name = wrapper.next_kernel_name()
+                wrapper.kernels[src_code] = kernel_name
+                code = src_code.format(kernel_name=kernel_name)
+                wrapper.header.splice(code)
+
         kernel.call_kernel(wrapper, kernel_name)
 
         scheduler.enqueue(reschedule)

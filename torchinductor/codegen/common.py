@@ -11,6 +11,7 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from .. import metrics
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -330,6 +331,8 @@ class KernelArgs:
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
+        if name.startswith("seed"):
+            return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
@@ -345,6 +348,9 @@ class KernelArgs:
         self.inplace_buffers[output_name] = buf
 
     def size(self, name):
+        if str(name) == "seed":
+            self.sizevars["seed"] = "seed"
+            return "seed"
         return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):
@@ -428,18 +434,22 @@ class CSE:
         name_prefix="tmp",
         iter_buffers=None,
         store_cache=None,
+        reduction_cache=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
+        self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
+        self.invalidated_stores = set()
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
+                self.invalidated_stores.add(name)
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
@@ -488,11 +498,13 @@ class Kernel(CodeGen):
 
     def __init__(self, args=None):
         super().__init__()
+        metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = DeferredIndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
+        self.must_keep_buffers = set()
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
@@ -548,6 +560,10 @@ class Kernel(CodeGen):
 
             @staticmethod
             def load(name: str, index: sympy.Expr, upcast: bool = False):
+                if name in self.cse.invalidated_stores:
+                    # A load from an invalidated store requires us to
+                    # keep the actual buffer around
+                    V.kernel.must_keep_buffers.add(name)
                 if "tmp" in str(index):
                     return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
@@ -581,7 +597,6 @@ class Kernel(CodeGen):
             return [self.rename_indexing(x) for x in index]
         index = sympy.expand(index)
         index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
-        subs = {
-            x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
-        }
+        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+        subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)
