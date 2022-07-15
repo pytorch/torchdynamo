@@ -14,7 +14,7 @@ from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource
-from ..source import GlobalSource
+from ..source import GlobalWeakRefSource
 from ..utils import global_key_name
 from .base import VariableTracker
 from .tensor import TensorVariable
@@ -170,11 +170,9 @@ class ConstDictVariable(VariableTracker):
         return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
-        from . import ConstantVariable
-
         options = VariableTracker.propagate([self])
         val = self.items
-        result = [ConstantVariable(k, **options) for k in val.keys()]
+        result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val.keys()]
         return result
 
     @classmethod
@@ -197,7 +195,7 @@ class ConstDictVariable(VariableTracker):
         from .builder import VariableBuilder
 
         if isinstance(key, torch.nn.Parameter):
-            return VariableBuilder(tx, GlobalSource(global_key_name(key)))(key)
+            return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
             return ConstantVariable(key, **options)
