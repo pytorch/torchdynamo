@@ -33,6 +33,7 @@ from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
 from torchdynamo.optimizations.training import aot_autograd_nnc_strategy
 from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
+from torchdynamo.optimizations.training import aot_autograd_prims_nvfuser_strategy
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
@@ -703,6 +704,9 @@ def parse_args():
         "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
     parser.add_argument(
+        "--prims-nvfuser", action="store_true", help="user prims + nvfuser backend"
+    )
+    parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
     )
 
@@ -1087,6 +1091,13 @@ def main(runner):
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
+    elif args.prims_nvfuser:
+        optimize_ctx=torchdynamo.optimize(
+            aot_autograd_prims_nvfuser_strategy, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        backend_str = "prims_nvfuser"
+        output_filename = f"accuracy_aot_{backend_str}.csv"
     elif args.print_fx:
         optimize_ctx = torchdynamo.optimize(
             print_fx,
