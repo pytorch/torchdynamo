@@ -32,6 +32,7 @@ from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
 from torchdynamo.optimizations.training import aot_autograd_nnc_strategy
+from torchdynamo.optimizations.training import aot_autograd_prims_nvfuser_strategy
 from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
@@ -533,15 +534,14 @@ def cast_to_fp16(model, inputs):
     # cast model and inputs to fp16
     model = model.half()
 
-    inputs = tuple(
-        tree_map(
-            lambda x: x.to(torch.float16)
-            if getattr(x, "dtype", None) == torch.float32
-            or getattr(x, "dtype", None) == torch.float64
-            else x,
-            inputs,
-        )
+    inputs = tree_map(
+        lambda x: x.to(torch.float16)
+        if getattr(x, "dtype", None) == torch.float32
+        or getattr(x, "dtype", None) == torch.float64
+        else x,
+        inputs,
     )
+
     # Disable this part temporarily. Further evaluation needed
     # TRT does not support int64. Some model does need it like Super_SloMo
     # if current_name != "Super_SloMo" and current_name != "fastNLP_Bert":
@@ -560,15 +560,14 @@ def cast_to_fp32(model, inputs):
     # cast model and inputs to fp16
     model = model.to(torch.float32)
 
-    inputs = tuple(
-        tree_map(
-            lambda x: x.to(torch.float32)
-            if getattr(x, "dtype", None) == torch.float16
-            or getattr(x, "dtype", None) == torch.float64
-            else x,
-            inputs,
-        )
+    inputs = tree_map(
+        lambda x: x.to(torch.float32)
+        if getattr(x, "dtype", None) == torch.float16
+        or getattr(x, "dtype", None) == torch.float64
+        else x,
+        inputs,
     )
+
     return model, inputs
 
 
@@ -660,7 +659,6 @@ class BenchmarkRunner:
             sys.stdout.flush()
             for submod in itertools.chain([model], model.modules()):
                 assert not torchdynamo.utils.is_jit_model(submod)
-
             torch.manual_seed(1337)
             correct_result = model_iter_fn(
                 copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
@@ -678,7 +676,6 @@ class BenchmarkRunner:
 
             torch.manual_seed(1337)
             torchdynamo.reset()
-
             if experiment.func is cold_start_experiment:
                 results = []
                 results.append(experiment(model, example_inputs, optimize_ctx))
@@ -765,11 +762,15 @@ def parse_args():
         "--nvfuser", action="store_true", help="enable nvfuser globally"
     )
     parser.add_argument(
+        "--prims-nvfuser", action="store_true", help="user prims + nvfuser backend"
+    )
+    parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
     )
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
     parser.add_argument("--float32", action="store_true", help="cast model to fp32")
+    parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
     parser.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
     )
@@ -1167,6 +1168,13 @@ def main(runner, original_dir=None):
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
+    elif args.prims_nvfuser:
+        optimize_ctx = torchdynamo.optimize(
+            aot_autograd_prims_nvfuser_strategy, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        backend_str = "prims_nvfuser"
+        output_filename = f"accuracy_aot_{backend_str}.csv"
     elif args.print_fx:
         optimize_ctx = torchdynamo.optimize(
             print_fx,
@@ -1222,7 +1230,11 @@ def main(runner, original_dir=None):
         for device in args.devices:
             try:
                 device, name, model, example_inputs = runner.load_model(
-                    device, args.only, args.training, args.use_eval_mode
+                    device,
+                    args.only,
+                    args.training,
+                    args.use_eval_mode,
+                    args.batch_size,
                 )
             except NotImplementedError:
                 continue  # bad benchmark implementation

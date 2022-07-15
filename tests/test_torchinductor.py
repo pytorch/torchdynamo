@@ -1140,6 +1140,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_sin(self):
+        def fn(x):
+            return aten.sin(x) + 2, aten.sin(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_repeat(self):
         def fn(x):
             return (

@@ -9,6 +9,7 @@ from torchdynamo.testing import same
 
 try:
     from transformers import modeling_outputs
+    from transformers.configuration_utils import PretrainedConfig
     from transformers.file_utils import ModelOutput
     from transformers.modeling_outputs import BaseModelOutput
 except ImportError:
@@ -19,6 +20,22 @@ def maybe_skip(fn):
     if modeling_outputs is None:
         return unittest.skip("requires HuggingFace")(fn)
     return fn
+
+
+class TestHFPretrained(torchdynamo.testing.TestCase):
+    @maybe_skip
+    def test_pretrained(self):
+        def fn(a, tmp):
+            if tmp.return_dict:
+                return a + torch.ones(2) * tmp.max_length
+            return a
+
+        x = torch.randn(2)
+        tmp = PretrainedConfig(return_dict=True, max_length=20)
+        ref = fn(x, tmp)
+        with torchdynamo.optimize("eager", nopython=True):
+            res = fn(x, tmp)
+        self.assertTrue(same(ref, res))
 
 
 class TestModelOutput(torchdynamo.testing.TestCase):
