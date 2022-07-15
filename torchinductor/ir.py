@@ -2380,10 +2380,12 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        # if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
-        # if is_triton(x.get_device()) and config.triton.convolution != "aten":
         # for conv2d or conv3d, prefer channels last format
-        if len(kernel_size) > 1:
+        if (
+            len(kernel_size) > 1
+            and is_triton(x.get_device())
+            and config.triton.convolution != "aten"
+        ):
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
