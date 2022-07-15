@@ -8,21 +8,18 @@ The script works on manually written TABLE (see below). We can add more commands
 in the future.
 
 One example usage is
--> python benchmarks/helper.py --e2e --modes=training --devices=cuda --suites=torchbench --dtypes=float32 --nightly
+-> python benchmarks/helper.py --suites=torchbench --inference
+This command will generate the commands for the default compilers (see DEFAULTS
+below) for inference, run them and visualize the logs.
 
-where
-    e2e - generates the commands, runs the benchmarks, parse the results (other options - commands/parse)
-    nightly - Looks at the nightly field in the training/inferece field of TABLE to choose most relevant compilers.
-    models - either training or inference
-    suites - benchmark suite
+If you want to just run the commands, you could use the following command
+-> python benchmarks/helper.py --print_run_commands --suites=torchbench --inference
 
-In case, you just need to get the commands, you can replace e2e with commands
--> python benchmarks/helper.py --commands --modes=training --devices=cuda --suites=torchbench --dtypes=float32 --nightly
+Similarly, if you want to just visualize the already run logs
+-> python benchmarks/helper.py --visualize_logs --suites=torchbench --inference
 
-The commands are written in file run.sh.
-
-In case, you just want to parse the logs once you have run the commands manually, you can use this command
--> python benchmarks/helper.py --parse --modes=training --devices=cuda --suites=torchbench --dtypes=float32 --nightly
+If you want to test float16
+-> python benchmarks/helper.py --suites=torchbench --inference --dtypes=float16
 
 """
 
@@ -42,65 +39,91 @@ DEFAULT_OUTPUT_DIR = "benchmark_logs"
 
 
 TABLE = {
-    "suites": ["torchbench", "huggingface"],
-    "dtypes": ["float32", "float16", "amp"],
-    "devices": ["cuda", "cpu"],
-    "modes": ["inference", "training"],
-    # Dict of name to base_command. nightly is a special field to tell which compilers are relevant.
     "training": {
         "ts_nnc": "--training --speedup-ts --use-eval-mode --isolate",
         "ts_nvfuser": "--training --nvfuser --speedup-ts --use-eval-mode --isolate",
         "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode --isolate",
         "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode --isolate",
         "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate",
-        "nightly": ["ts_nvfuser", "aot_nvfuser"],
     },
-    # Dict of name to base_command. nightly is a special field to tell which compilers are relevant.
     "inference": {
         "ts_nnc": "-dcuda --isolate --speedup-ts",
         "ts_nvfuser": "-dcuda --isolate -n100 --speedup-ts --nvfuser",
         "trt": "-dcuda --isolate -n100 --speedup-trt",
         "eager_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs",
         "nnc_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
-        "nvfuser_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts",
+        "ts_nvfuser_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts",
         "inductor_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --inductor",
-        "nightly": ["nvfuser_cudagraphs", "inductor_cudagraphs"],
     },
+}
+
+INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
+TRAINING_COMPILERS = tuple(TABLE["training"].keys())
+
+DEFAULTS = {
+    "training": ["ts_nvfuser", "aot_nvfuser"],
+    "inference": ["ts_nvfuser_cudagraphs", "inductor_cudagraphs"],
+    "dtypes": [
+        "float32",
+    ],
+    "suites": ["torchbench", "huggingface"],
+    "devices": [
+        "cuda",
+    ],
 }
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--filter", "-k", action="append", help="filter benchmarks with regexp"
-    )
     parser.add_argument("--devices", action="append", help="cpu or cuda")
-    parser.add_argument("--modes", action="append", help="inference or training")
     parser.add_argument("--dtypes", action="append", help="float16/float32/amp")
-    parser.add_argument("--suites", action="append", help="huggingface/torchbench")
-    parser.add_argument("--quick", action="store_true", help="Just runs one model")
+    parser.add_argument("--suites", action="append", help="huggingface/torchbench/timm")
     parser.add_argument(
-        "--nightly",
-        action="store_true",
-        help="Use only compilers mentioned in nightly field",
+        "--compilers",
+        action="append",
+        help=f"For --inference, options are {INFERENCE_COMPILERS}. For --training, options are {TRAINING_COMPILERS}",
+    )
+    parser.add_argument(
+        "--quick", action="store_true", help="Just runs one model. Helps in debugging"
     )
     parser.add_argument(
         "--output-dir", help="Choose the output directory to save the logs"
     )
 
     # Choose either generation of commands, pretty parsing or e2e runs
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--commands", action="store_true", help="Generate commands")
-    group.add_argument("--parse", action="store_true", help="Parse the files")
+    group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
-        "--e2e", action="store_true", help="Generate commands, run and parse the files"
+        "--print_run_commands",
+        action="store_true",
+        help="Generate commands and saves them to run.sh",
+    )
+    group.add_argument(
+        "--visualize_logs",
+        action="store_true",
+        help="Pretty print the log files and draw graphs",
+    )
+    group.add_argument(
+        "--run",
+        action="store_true",
+        default=True,
+        help="Generate commands, run and parses the files",
+    )
+
+    # Choose either inference or training
+    group_mode = parser.add_mutually_exclusive_group(required=True)
+    group_mode.add_argument(
+        "--inference", action="store_true", help="Only run inference related tasks"
+    )
+    group_mode.add_argument(
+        "--training", action="store_true", help="Only run training related tasks"
     )
 
     args = parser.parse_args()
     return args
 
 
-def generate_commands(args, dtypes, suites, modes, devices, output_dir):
+def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
+    mode = "inference" if args.inference else "training"
     with open("run.sh", "w") as runfile:
         lines = []
 
@@ -109,17 +132,13 @@ def generate_commands(args, dtypes, suites, modes, devices, output_dir):
         lines.append(f"mkdir {output_dir}")
         lines.append("")
 
-        for iter in itertools.product(modes, suites, devices, dtypes):
-            mode, suite, device, dtype = iter
+        for iter in itertools.product(suites, devices, dtypes):
+            suite, device, dtype = iter
             lines.append(
                 f"# Commands for {suite} for device={device}, dtype={dtype} for {mode}"
             )
 
             info = TABLE[mode]
-            compilers = list(info.keys())
-            compilers.remove("nightly")
-            if args.nightly:
-                compilers = info["nightly"]
             for compiler in compilers:
                 base_cmd = info[compiler]
                 output_filename = (
@@ -158,20 +177,17 @@ def pp_dataframe(df, title, output_dir):
         ylabel="Speedeup over eager",
         xlabel="",
         grid=True,
-        figsize=(max(len(df.index) / 3, 10), 10),
+        figsize=(max(len(df.index) / 4, 5), 10),
+        edgecolor="black",
     )
     plt.tight_layout()
     plt.savefig(f"{output_dir}/{title}.png")
 
 
-def parse_logs(args, dtypes, suites, modes, devices, output_dir):
-    for iter in itertools.product(modes, suites, devices, dtypes):
-        mode, suite, device, dtype = iter
-        info = TABLE[mode]
-        compilers = list(info.keys())
-        compilers.remove("nightly")
-        if args.nightly:
-            compilers = info["nightly"]
+def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
+    mode = "inference" if args.inference else "training"
+    for iter in itertools.product(suites, devices, dtypes):
+        suite, device, dtype = iter
         frames = []
         best_compiler = compilers[-1]
         # Collect results from all the files
@@ -202,21 +218,24 @@ if __name__ == "__main__":
     args = parse_args()
 
     def extract(key):
-        value = getattr(args, key, None)
-        return value if value is not None else TABLE[key]
+        return DEFAULTS[key] if getattr(args, key, None) is None else getattr(args, key)
 
     dtypes = extract("dtypes")
     suites = extract("suites")
-    modes = extract("modes")
     devices = extract("devices")
+
+    if args.inference:
+        compilers = DEFAULTS["inference"] if args.compilers is None else args.compilers
+    else:  # args.training
+        compilers = DEFAULTS["training"] if args.compilers is None else args.compilers
 
     output_dir = args.output_dir if args.output_dir is not None else DEFAULT_OUTPUT_DIR
 
-    if args.commands:
-        generate_commands(args, dtypes, suites, modes, devices, output_dir)
-    elif args.parse:
-        parse_logs(args, dtypes, suites, modes, devices, output_dir)
-    elif args.e2e:
-        generate_commands(args, dtypes, suites, modes, devices, output_dir)
+    if args.print_run_commands:
+        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+    elif args.visualize_logs:
+        parse_logs(args, dtypes, suites, devices, compilers, output_dir)
+    elif args.run:
+        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
         os.system("bash run.sh")
-        parse_logs(args, dtypes, suites, modes, devices, output_dir)
+        parse_logs(args, dtypes, suites, devices, compilers, output_dir)
