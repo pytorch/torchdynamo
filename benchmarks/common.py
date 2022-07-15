@@ -85,6 +85,8 @@ def print_summary(filename):
         try:
             if col in ("dev", "name"):
                 continue
+            elif col.startswith('_'):
+                continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
             elif col in ("graphs", "graph_calls", "captured_ops", "total_ops"):
@@ -323,10 +325,12 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
+    if args.dump_raw_metrics:
+        np.save(f'{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy', timings)
     output_csv(
         output_filename,
-        ("dev", "name", "speedup"),
-        [current_device, current_name, float(speedup)],
+        ("dev", "name", "speedup", "_base", "_test"),
+        [current_device, current_name, float(speedup), float(median[0]), float(median[1])],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -766,6 +770,12 @@ def parse_args():
     )
     parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
+    )
+    parser.add_argument(
+        "--output", type=str, help="Specify output file name. Must end with .csv"
+    )
+    parser.add_argument(
+        "--dump-raw-metrics", action="store_true", help="dump raw timing metrics from speedup experiment"
     )
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
@@ -1218,6 +1228,9 @@ def main(runner, original_dir=None):
 
     cos_similarity = args.cosine
 
+    if args.output:
+        assert str(args.output).endswith(".csv"), "--output must be a filename that ends with '.csv'"
+        output_filename = str(args.output)
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
 
