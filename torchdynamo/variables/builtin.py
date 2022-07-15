@@ -97,6 +97,12 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
+    def _allowed_without_tensor_args():
+        fns = {operator.getitem}
+        return fns
+
+    @staticmethod
+    @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
             operator.pos,
@@ -242,7 +248,15 @@ class BuiltinVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
 
-        if self.can_insert_in_graph() and tensor_args:
+        # The code below checks if self.fn can be called with args that are not tensors.
+        # For example, list's operator.getitem - will be invoked without a tensor arg,
+        # but should still be captured for a fuller, more correct graph.
+        # For these cases, we defer to self.can_insert_in_graph as good enough, which checks fx.
+        # TODO(voz): Remove the allowlist, and maybe just let it all through? Perhaps config driven?
+        should_check_tensor_args = self.fn not in self._allowed_without_tensor_args()
+        correct_args = True if not should_check_tensor_args else tensor_args
+
+        if self.can_insert_in_graph() and correct_args:
             try:
                 fn = self.fn
                 if self.fn is operator.iadd and isinstance(
