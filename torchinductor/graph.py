@@ -78,6 +78,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_inputs = set()
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
+        self.name_to_buffer = {}
 
     def random_seed_buffer(self, device: torch.device):
         """
@@ -111,6 +112,7 @@ class GraphLowering(torch.fx.Interpreter):
     def register_buffer(self, buffer: ir.ComputedBuffer):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
+        self.name_to_buffer[name] = buffer
         return name
 
     def realize_users_of(self, name: str):

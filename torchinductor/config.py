@@ -33,7 +33,7 @@ realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
 
-# fallback to eager for random/dropout, this is slow bug useful for debugging
+# fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
 

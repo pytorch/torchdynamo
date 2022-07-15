@@ -90,6 +90,19 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         gm = torch.fx.symbolic_trace(Mutating())
         self.assertTrue(has_mutation(gm, torch.rand([10, 1, 1, 1])))
 
+    def test_has_mutation_factory(self):
+        def fn():
+            x = torch.empty(2)
+            x.fill_(2)
+            return x
+
+        def compiler_fn(graph, example_inputs):
+            self.assertTrue(has_mutation(graph, example_inputs))
+            return graph
+
+        with torchdynamo.optimize(compiler_fn):
+            fn()
+
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
@@ -178,3 +191,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
             r2 = model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
+
+
+if __name__ == "__main__":
+    unittest.main()

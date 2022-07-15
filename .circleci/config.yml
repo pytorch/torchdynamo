@@ -1,0 +1,50 @@
+version: 2.1
+
+jobs:
+  gpu_linux:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - run:
+          name: Setup
+          command: |
+            source .circleci/setup_env.sh
+      - run:
+          name: Tests
+          command: |
+            source .circleci/setup_env.sh
+            mkdir test-results
+            pytest -v --junitxml=test-results/junit.xml
+      - store_test_results:
+          path: test-results
+      - run:
+          name: TorchBench install
+          command: |
+            source .circleci/setup_env.sh
+            conda install -y -c conda-forge git-lfs
+            git lfs install --skip-repo
+            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+            # above doesn't work due to git-lfs auth issues, workaround with a tarball:
+            wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+            tar jxvf torchbenchmark.tar.bz2
+            (cd torchbenchmark && python install.py)
+      - run:
+          name: TorchBench run
+          command: |
+            source .circleci/setup_env.sh
+            python benchmarks/torchbench.py --coverage -d cuda --raise-on-backend-error -x Super_SloMo -x moco
+      - store_artifacts:
+          path: coverage.csv
+      - run:
+          name: TorchBench coverage
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_coverage.py
+
+workflows:
+  gpu:
+    jobs:
+      - gpu_linux

@@ -125,11 +125,10 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
     @patch.object(config, "verify_correctness", True)
     def test_incorrect_verify_true(self):
         """
-        Even the bad optimization return a graph that
+        If a bad optimization return a graph that
         is not functionally equal to the original graph;
         When config.verify_correctness=True, it will
-        check the correctness of outputs and fallback using
-        the original graph
+        check the correctness of outputs and raise an error
         """
         i1 = torch.randn(10)
         i2 = torch.randn(10)
@@ -137,10 +136,14 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         def incorrect_compile_fn(gm, example_inputs):
             return transform(gm).forward
 
-        r1 = toy_example(i1, i2)
-        with torchdynamo.optimize(incorrect_compile_fn):
-            r2 = toy_example(i1, i2)
-        self.assertTrue(same(r1, r2))
+        toy_example(i1, i2)
+        try:
+            with torchdynamo.optimize(incorrect_compile_fn):
+                toy_example(i1, i2)
+        except RuntimeError:
+            pass
+        else:
+            self.fail("expected failure")
 
     @patch.object(config, "verify_correctness", False)
     def test_incorrect_verify_false(self):

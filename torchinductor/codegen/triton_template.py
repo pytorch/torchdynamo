@@ -228,7 +228,7 @@ def template_codegen(scheduler, scheduler_node):
     scheduler_node: ExternKernelSchedulerNode
     """
     wrapper = V.graph.wrapper_code
-    deivce, groups = scheduler_node.group
+    _, groups = scheduler_node.group
 
     reschedule = []
     fuse = False
@@ -268,11 +268,11 @@ def template_codegen(scheduler, scheduler_node):
             except CantSplit:
                 reschedule.append(node)
 
-        # else:
-        #     for node in scheduler.pop_group(group):
-        #         # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
-        #         node.run(*kernel.set_ranges(*node.get_ranges()))
-        #         node.mark_fusable()
+        else:
+            for node in scheduler.pop_group(groups):
+                # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
+                node.run(*kernel.set_ranges(*node.get_ranges()))
+                node.mark_fusable()
 
         # TODO: reduction
 
