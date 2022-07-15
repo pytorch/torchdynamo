@@ -360,6 +360,9 @@ class GuardBuilder:
 
         self._produce_guard_code(guard, code)
 
+    def WEAKREF_ALIVE(self, guard):
+        self._produce_guard_code(guard, [f"{self.arg_ref(guard)} is not None"])
+
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)

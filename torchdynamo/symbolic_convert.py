@@ -22,9 +22,11 @@ import torch
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
+from torchdynamo import guards
 from torchdynamo.source import AttrSource
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import GlobalSource
+from torchdynamo.source import GlobalWeakRefSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
@@ -761,7 +763,9 @@ class InstructionTranslatorBase(object):
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert ConstDictVariable.is_valid_key(k)
+            assert isinstance(k, ConstantVariable) or (
+                isinstance(k, TensorVariable) and k.parameter_value is not None
+            )
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
@@ -1134,6 +1138,9 @@ class InstructionTranslatorBase(object):
         )
 
     def store_dict_key(self, name, value):
+        self.output.guards.add(
+            GlobalWeakRefSource(name).create_guard(GuardBuilder.WEAKREF_ALIVE)
+        )
         self.f_globals[name] = weakref.ref(value)
 
     @property

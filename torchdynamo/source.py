@@ -94,6 +94,23 @@ class GlobalSource(Source):
 
 
 @dataclasses.dataclass
+class GlobalWeakRefSource(Source):
+    global_name: str
+
+    def reconstruct(self, codegen):
+        return [
+            codegen.create_load_global(self.global_name, add=True),
+            create_instruction("CALL_FUNCTION", 0),
+        ]
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return f"{self.global_name}()"
+
+
+@dataclasses.dataclass
 class AttrSource(Source):
     base: Source
     member: str
@@ -128,13 +145,8 @@ class GetItemSource(Source):
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
 
-        if isinstance(self.index, Parameter):
-            instrs.extend(
-                [
-                    codegen.create_load_global(global_key_name(self.index), add=True),
-                    create_instruction("CALL_FUNCTION", 0),
-                ]
-            )
+        if isinstance(self.index, Source):
+            instrs.extend(self.index.reconstruct(codegen))
         else:
             instrs.append(codegen.create_load_const(self.index))
         instrs.append(create_instruction("BINARY_SUBSCR"))
@@ -145,8 +157,8 @@ class GetItemSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        if isinstance(self.index, Parameter):
-            return f"{self.base.name()}[{global_key_name(self.index)}()]"
+        if isinstance(self.index, Source):
+            return f"{self.base.name()}[{self.index.name()}]"
         else:
             return f"{self.base.name()}[{self.index!r}]"
 
