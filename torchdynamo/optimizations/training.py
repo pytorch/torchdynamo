@@ -169,8 +169,8 @@ class AOTAutogradPrimsNvFuser(AOTAutogradStrategy):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
         super(AOTAutogradPrimsNvFuser, self).__init__(gm, example_inputs)
 
-        from torch.fx.passes.backends.nvfuser import NvFuserBackend
         from functorch.compile import min_cut_rematerialization_partition
+        from torch.fx.passes.backends.nvfuser import NvFuserBackend
 
         self.nvfuser = NvFuserBackend()
         self.min_cut_rematerialization_partition = min_cut_rematerialization_partition
@@ -208,10 +208,14 @@ class AOTAutogradPrimsNvFuser(AOTAutogradStrategy):
         self.aten2aten_decompositions = get_decompositions(default_decompositions)
 
     def candidate(self):
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs,
-                                        fw_compiler=self.nvfuser,
-                                        partition_fn=self.min_cut_rematerialization_partition,
-                                        hasher_type="StaticShapeHasher",
-                                        decompositions=self.aten2aten_decompositions)
+        return BACKENDS["aot_autograd"](
+            self.gm,
+            self.example_inputs,
+            fw_compiler=self.nvfuser,
+            partition_fn=self.min_cut_rematerialization_partition,
+            hasher_type="StaticShapeHasher",
+            decompositions=self.aten2aten_decompositions,
+        )
+
 
 aot_autograd_prims_nvfuser_strategy = AOTAutogradPrimsNvFuser.compile_fn

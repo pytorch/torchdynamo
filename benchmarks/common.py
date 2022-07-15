@@ -32,8 +32,8 @@ from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
 from torchdynamo.optimizations.training import aot_autograd_nnc_strategy
-from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.optimizations.training import aot_autograd_prims_nvfuser_strategy
+from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
@@ -1172,7 +1172,7 @@ def main(runner, original_dir=None):
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
     elif args.prims_nvfuser:
-        optimize_ctx=torchdynamo.optimize(
+        optimize_ctx = torchdynamo.optimize(
             aot_autograd_prims_nvfuser_strategy, nopython=args.nopython
         )
         experiment = speedup_experiment
