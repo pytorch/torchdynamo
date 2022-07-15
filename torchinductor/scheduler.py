@@ -737,4 +737,3 @@ class Scheduler:
                 self.current_device = device
             self.get_backend(device).codegen(*group)
         self.flush()
-
