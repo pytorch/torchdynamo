@@ -1,4 +1,4 @@
-from benchmarks.microbenchmarks import model as model
+from benchmarks_.microbenchmarks import model as model
 import torch
 import torchdynamo
 import torchinductor.config
@@ -9,6 +9,11 @@ torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
 class Func(object):
+    @torchdynamo.optimize("inductor")
+    def mm(x, w, bias):
+        y =  torch.mm(x, w)
+        return y
+
     # mm+bias
     @torchdynamo.optimize("inductor")
     def mm_add(x, w, bias):
@@ -37,7 +42,10 @@ def test(shape, fusion_type="add"):
     b = torch.randn(shape[1], device="cuda", dtype=dtype)
     bias = torch.randn((shape[0][0],shape[1][1]), dtype=dtype, device='cuda')
 
-    mm_fusion = getattr(Func, f"mm_{fusion_type}")
+    if fusion_type == "":
+        mm_fusion = getattr(Func, f"mm")
+    else:
+        mm_fusion = getattr(Func, f"mm_{fusion_type}")
     # torchinductor from template
     torchinductor.config.triton.use_mm = True
     torchinductor.metrics.reset()
@@ -52,7 +60,7 @@ def test(shape, fusion_type="add"):
     # print("y_correct", y[0,:,0,0])
     assert(same(y, y_correct, cos_similarity=True))
 
-fusion_types = ["add", "relu", "add_relu"]
+fusion_types = ["", "add", "relu", "add_relu"]
 shapes = [
     # alexnet
     ([128, 9216], [9216, 4096]),
