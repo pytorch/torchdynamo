@@ -55,6 +55,7 @@ def fuse_reindexing(reindex1, reindex2):
 
     return reindex
 
+
 def stride_order2fill_order(order):
     """
     Convert stride order to fill order
@@ -64,6 +65,7 @@ def stride_order2fill_order(order):
     lookup = {pos: idx for idx, pos in enumerate(order)}
     fill_order = [lookup[i] for i in range(len(order))]
     return fill_order
+
 
 class ModularIndexing(sympy.Function):
     """
@@ -739,7 +741,9 @@ class View(BaseView):
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        if is_contiguous_storage_and_layout(x) and not isinstance(x.data, ExternKernelAlloc):
+        if is_contiguous_storage_and_layout(x) and not isinstance(
+            x.data, ExternKernelAlloc
+        ):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -1399,7 +1403,8 @@ class ComputedBuffer(Buffer):
             reads = self.get_read_writes().reads
             reads_bufs = [
                 V.graph.name_to_buffer[r.name]
-                if r.name in V.graph.name_to_buffer.keys() else None
+                if r.name in V.graph.name_to_buffer.keys()
+                else None
                 for r in reads
             ]
             priority_idx = []
@@ -1412,7 +1417,7 @@ class ComputedBuffer(Buffer):
                 r.index.subs({v: sympy.Integer(0) for v in reduction_vars})
                 for r in reads
             ]
-            
+
             if reads:
                 stride_lengths = numpy.array(
                     [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
@@ -1453,7 +1458,8 @@ class ComputedBuffer(Buffer):
         if config.triton.convolution != "aten":
             reads_bufs = [
                 V.graph.name_to_buffer[reads_name]
-                if reads_name in V.graph.name_to_buffer.keys() else None
+                if reads_name in V.graph.name_to_buffer.keys()
+                else None
                 for reads_name in body.reads_name2expr.keys()
             ]
             for i, reads_buf in enumerate(reads_bufs):
