@@ -117,107 +117,128 @@ ALL_MODELS = {
     "BertForPreTraining_P1_bert": (
         BertConfig.from_pretrained("bert-large-uncased"),
         BertForPreTraining,
-        partial(bert_input_func, batch_size=64, seq_len=128),
+        64,
+        partial(bert_input_func, seq_len=128),
     ),
     "BertForPreTraining_P2_bert": (
         BertConfig.from_pretrained("bert-large-uncased"),
         BertForPreTraining,
-        partial(bert_input_func, batch_size=16, seq_len=512),
+        16,
+        partial(bert_input_func, seq_len=512),
     ),
     "GPT2LMHeadModel_gpt2": (
         GPT2Config.from_pretrained("gpt2-large"),
         GPT2LMHeadModel,
-        partial(hf_general_inputs, batch_size=2, seq_len=1024),
+        2,
+        partial(hf_general_inputs, seq_len=1024),
     ),
     "RobertaForMaskedLM_roberta": (
         RobertaConfig.from_pretrained("roberta-large"),
         RobertaForMaskedLM,
-        partial(hf_general_inputs, batch_size=64, seq_len=128),
+        64,
+        partial(hf_general_inputs, seq_len=128),
     ),
     "AlbertForPreTraining_albert": (
         AlbertConfig.from_pretrained("albert-xxlarge-v2"),
         AlbertForPreTraining,
+        8,
         albert_input_func,
     ),
     "T5ForConditionalGeneration_t5": (
         T5Config.from_pretrained("t5-large"),
         T5ForConditionalGeneration,
-        partial(hf_general_inputs, batch_size=8, seq_len=512, tgt_seq_len=128),
+        8,
+        partial(hf_general_inputs, seq_len=512, tgt_seq_len=128),
     ),
     "BartForConditionalGeneration_bart": (
         BartConfig.from_pretrained("facebook/bart-large"),
         BartForConditionalGeneration,
-        partial(hf_general_inputs, batch_size=8, seq_len=1024, tgt_seq_len=128),
+        8,
+        partial(hf_general_inputs, seq_len=1024, tgt_seq_len=128),
     ),
     "DebertaForMaskedLM_deberata": (
         DebertaConfig.from_pretrained("microsoft/deberta-large"),
         DebertaForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512),
+        8,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "XLNetLMHeadModel_xlnet": (
         XLNetConfig.from_pretrained("xlnet-large-cased"),
         XLNetLMHeadModel,
-        partial(hf_general_inputs, batch_size=16, seq_len=512),
+        16,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "allenai-longformer-base-4096": (
         AutoConfig.from_pretrained("allenai/longformer-base-4096"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=2, seq_len=1024),
+        2,
+        partial(hf_general_inputs, seq_len=1024),
     ),
     "Reformer": (
         ReformerConfig(),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=4096),
+        8,
+        partial(hf_general_inputs, seq_len=4096),
     ),
     "t5-small": (
         AutoConfig.from_pretrained("t5-small"),
         AutoModelForSeq2SeqLM,
-        partial(hf_general_inputs, batch_size=1, seq_len=1024),
+        1,
+        partial(hf_general_inputs, seq_len=1024),
     ),
     "distilbert-base-uncased": (
         AutoConfig.from_pretrained("distilbert-base-uncased"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512),
+        8,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "bigbird": (
         BigBirdConfig(attention_type="block_sparse"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=2, seq_len=1024),
+        2,
+        partial(hf_general_inputs, seq_len=1024),
     ),
     "distilgpt2": (
         AutoConfig.from_pretrained("distilgpt2"),
         AutoModelForCausalLM,
-        partial(hf_general_inputs, batch_size=16, seq_len=512),
+        16,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "google-electra-base-discriminator": (
         AutoConfig.from_pretrained("google/electra-base-discriminator"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512),
+        8,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "google-fnet-base": (
         AutoConfig.from_pretrained("google/fnet-base"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512, no_attention_mask=True),
+        8,
+        partial(hf_general_inputs, seq_len=512, no_attention_mask=True),
     ),
     "YituTech-conv-bert-base": (
         AutoConfig.from_pretrained("YituTech/conv-bert-base"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512),
+        8,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "google-mobilebert-uncased": (
         AutoConfig.from_pretrained("google/mobilebert-uncased"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=4, seq_len=512),
+        4,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "camembert-base": (
         AutoConfig.from_pretrained("camembert-base"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512),
+        8,
+        partial(hf_general_inputs, seq_len=512),
     ),
     "microsoft-layoutlm-base-uncased": (
         AutoConfig.from_pretrained("microsoft/layoutlm-base-uncased"),
         AutoModelForMaskedLM,
-        partial(hf_general_inputs, batch_size=8, seq_len=512),
+        8,
+        partial(hf_general_inputs, seq_len=512),
     ),
 }
 
@@ -226,9 +247,12 @@ class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
         super(HuggingfaceRunner, self).__init__()
 
-    def load_model(self, device, model_name, is_training, use_eval_mode):
+    def load_model(
+        self, device, model_name, is_training, use_eval_mode, batch_size=None
+    ):
         dtype = torch.float32
-        config, model_cls, input_fn = ALL_MODELS[model_name]
+        config, model_cls, batch_size_default, input_fn = ALL_MODELS[model_name]
+        batch_size = batch_size or batch_size_default
 
         if "auto" in model_cls.__module__:
             # Handle auto classes
@@ -248,7 +272,10 @@ class HuggingfaceRunner(BenchmarkRunner):
 
         # Prepare inputs
         example_inputs = input_fn(
-            dtype=dtype, device=device, vocab_size=config.vocab_size
+            dtype=dtype,
+            device=device,
+            vocab_size=config.vocab_size,
+            batch_size=batch_size,
         )
         return device, model_name, model, example_inputs
 
@@ -257,7 +284,11 @@ class HuggingfaceRunner(BenchmarkRunner):
             for device in args.devices:
                 try:
                     yield self.load_model(
-                        device, model_name, args.training, args.use_eval_mode
+                        device,
+                        model_name,
+                        args.training,
+                        args.use_eval_mode,
+                        args.batch_size,
                     )
                 except NotImplementedError:
                     continue  # bad benchmark implementation
