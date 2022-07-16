@@ -253,10 +253,9 @@ class BuiltinVariable(VariableTracker):
         # but should still be captured for a fuller, more correct graph.
         # For these cases, we defer to self.can_insert_in_graph as good enough, which checks fx.
         # TODO(voz): Remove the allowlist, and maybe just let it all through? Perhaps config driven?
-        should_check_tensor_args = self.fn not in self._allowed_without_tensor_args()
-        correct_args = True if not should_check_tensor_args else tensor_args
+        allowed_without_tensor_args = self.fn in self._allowed_without_tensor_args()
 
-        if self.can_insert_in_graph() and correct_args:
+        if self.can_insert_in_graph() and tensor_args:
             try:
                 fn = self.fn
                 if self.fn is operator.iadd and isinstance(
@@ -298,6 +297,21 @@ class BuiltinVariable(VariableTracker):
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+
+        if self.can_insert_in_graph() and allowed_without_tensor_args:
+            try:
+                fn = self.fn
+                if (
+                    fn is operator.getitem
+                    and len(args) == 2
+                    and isinstance(args[0], variables.BaseListVariable)
+                    and isinstance(args[1], variables.ConstantVariable)
+                ):
+                    collection = args[0]
+                    index = args[1]
+                    return collection.getitem_const(index)
+            except NotImplementedError:
+                unimplemented(f"partial non-tensor op: {self} {args} {kwargs}")
 
         # Handle cases like int(torch.seed())
         if self.fn is int and isinstance(args[0], DynamicShapeVariable):
