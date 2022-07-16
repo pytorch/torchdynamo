@@ -1364,6 +1364,11 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class NoneAsConstantBuffer(IRNode):
+    def codegen_reference(self):
+        return "None"
+
+
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops
@@ -1805,7 +1810,7 @@ class ExternKernel(InputsKernel):
     @classmethod
     def realize_input(cls, x):
         if x is None:
-            return V.graph.add_tensor_constant(torch.tensor(()))
+            return NoneAsConstantBuffer()
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())

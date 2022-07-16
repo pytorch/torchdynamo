@@ -540,8 +540,9 @@ class Scheduler:
 
         # make sure outputs aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
-            name = node.get_name()
-            add_user(node.get_name(), OutputNode(StarDep(name)))
+            if not isinstance(node, ir.NoneAsConstantBuffer):
+                name = node.get_name()
+                add_user(node.get_name(), OutputNode(StarDep(name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
