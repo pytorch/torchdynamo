@@ -104,7 +104,7 @@ def bert_input_func(device, dtype, vocab_size, batch_size, seq_len, tgt_seq_len=
     return res
 
 
-def albert_input_func(device, dtype, vocab_size, batch_size, seq_len, tgt_seq_len=None):
+def albert_input_func(device, dtype, vocab_size):
     batch_size = 8
     seq_len = 512
     res = hf_general_inputs(dtype, device, vocab_size, batch_size, seq_len)

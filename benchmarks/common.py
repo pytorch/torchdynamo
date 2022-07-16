@@ -382,7 +382,10 @@ def baselines(models, model_iter_fn, example_inputs, args):
     for rep in range(args.repeat):
         for idx, (name, model) in enumerate(models):
             if model is not None:
-                timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
+                try:
+                    timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
+                except Exception:
+                    pass
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
         for i in range(1, timings.shape[1])
@@ -419,6 +422,17 @@ def speedup_experiment_ts(args, model_iter_fn, model, example_inputs):
 
     Writes to ./baseline_ts.csv
     """
+    if args.training:
+        return baselines(
+            [
+                ("eager", model),
+                ("ts", try_script(model, example_inputs)),
+            ],
+            model_iter_fn,
+            example_inputs,
+            args,
+        )
+
     return baselines(
         [
             ("eager", model),
@@ -772,9 +786,6 @@ def parse_args():
         "--isolate", action="store_true", help="run each model in its own process"
     )
     parser.add_argument(
-        "--output", type=str, help="Specify output file name. Must end with .csv"
-    )
-    parser.add_argument(
         "--dump-raw-metrics", action="store_true", help="dump raw timing metrics from speedup experiment"
     )
 
@@ -826,6 +837,10 @@ def parse_args():
         "--raise-on-backend-error",
         action="store_true",
         help="Fail a benchmark if backend throws an exception",
+    )
+    parser.add_argument(
+        "--output",
+        help="Overides the output filename",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1229,8 +1244,8 @@ def main(runner, original_dir=None):
     cos_similarity = args.cosine
 
     if args.output:
-        assert str(args.output).endswith(".csv"), "--output must be a filename that ends with '.csv'"
-        output_filename = str(args.output)
+        output_filename = args.output
+
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
 

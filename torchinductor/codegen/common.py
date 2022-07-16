@@ -22,6 +22,7 @@ def _simplify_loops(index_vars, sizes, index_formulas):
     Try to remove as many axis from loop iterations as possible, by:
         1) removing size==1 dimensions
         2) fuse contiguous dimensions into a single loop
+        If channel_last = True, we will prevent the last dim fused with other dims
     """
     sizes = list(sizes)
 
