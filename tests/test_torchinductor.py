@@ -608,7 +608,11 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_round_correctness(self):
-        if self.device == "cuda" and not torchinductor.utils.has_triton_libdevice():
+        if self.device == "cuda" and (
+            not torchinductor.utils.has_triton_libdevice()
+            # TODO(jansel): need to debug issue on V100 cards
+            or torch.cuda.get_device_capability() < (8,)
+        ):
             raise unittest.SkipTest("requires triton.language.libdevice")
 
         def fn(a):
