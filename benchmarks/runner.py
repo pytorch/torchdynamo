@@ -1,25 +1,25 @@
 #!/usr/bin/env python
 
 """
-A wrapper over the benchmark infrastructure to generate commonly use commands,
+A wrapper over the benchmark infrastructure to generate commonly used commands,
 parse results and generate csv/graphs.
 
 The script works on manually written TABLE (see below). We can add more commands
 in the future.
 
 One example usage is
--> python benchmarks/helper.py --suites=torchbench --inference
+-> python benchmarks/runner.py --suites=torchbench --inference
 This command will generate the commands for the default compilers (see DEFAULTS
 below) for inference, run them and visualize the logs.
 
-If you want to just run the commands, you could use the following command
--> python benchmarks/helper.py --print_run_commands --suites=torchbench --inference
+If you want to just print the commands, you could use the following command
+-> python benchmarks/runner.py --print_run_commands --suites=torchbench --inference
 
-Similarly, if you want to just visualize the already run logs
--> python benchmarks/helper.py --visualize_logs --suites=torchbench --inference
+Similarly, if you want to just visualize the already finished logs
+-> python benchmarks/runner.py --visualize_logs --suites=torchbench --inference
 
 If you want to test float16
--> python benchmarks/helper.py --suites=torchbench --inference --dtypes=float16
+-> python benchmarks/runner.py --suites=torchbench --inference --dtypes=float16
 
 """
 
@@ -174,7 +174,7 @@ def pp_dataframe(df, title, output_dir):
         y=labels,
         kind="bar",
         title=title,
-        ylabel="Speedeup over eager",
+        ylabel="Speedup over eager",
         xlabel="",
         grid=True,
         figsize=(max(len(df.index) / 4, 5), 10),
@@ -237,5 +237,12 @@ if __name__ == "__main__":
         parse_logs(args, dtypes, suites, devices, compilers, output_dir)
     elif args.run:
         generate_commands(args, dtypes, suites, devices, compilers, output_dir)
-        os.system("bash run.sh")
+        # TODO - Do we need to worry about segfaults
+        try:
+            os.system("bash run.sh")
+        except Exception as e:
+            print(
+                "Running commands failed. Please run manually (bash run.sh) and inspect the errors."
+            )
+            raise e
         parse_logs(args, dtypes, suites, devices, compilers, output_dir)
