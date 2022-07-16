@@ -85,8 +85,6 @@ def print_summary(filename):
         try:
             if col in ("dev", "name"):
                 continue
-            elif col.startswith('_'):
-                continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
             elif col in ("graphs", "graph_calls", "captured_ops", "total_ops"):
@@ -329,8 +327,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         np.save(f'{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy', timings)
     output_csv(
         output_filename,
-        ("dev", "name", "speedup", "_base", "_test"),
-        [current_device, current_name, float(speedup), float(median[0]), float(median[1])],
+        ("dev", "name", "speedup"),
+        [current_device, current_name, float(speedup)],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
