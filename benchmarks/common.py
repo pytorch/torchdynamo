@@ -817,11 +817,6 @@ def parse_args():
         help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
     )
     parser.add_argument(
-        "--disable-functionalization",
-        action="store_true",
-        help="Disables functionalization",
-    )
-    parser.add_argument(
         "--inductor-settings",
         action="store_true",
         help="Use same settings as --inductor for baseline comparisons",
@@ -1250,9 +1245,6 @@ def main(runner, original_dir=None):
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
-
-    if args.disable_functionalization:
-        torchdynamo.config.normalize_ir = False
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
