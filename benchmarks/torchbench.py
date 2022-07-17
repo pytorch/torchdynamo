@@ -49,6 +49,20 @@ USE_SMALL_BATCH_SIZE = {
 }
 
 
+DETECTRON2_MODELS = {
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+}
+
+
 # Additional models that are skipped in training
 SKIP_TRAIN = {
     # not designed for training
@@ -59,6 +73,8 @@ SKIP_TRAIN = {
     "opacus_cifar10",
     "maml",
 }
+SKIP_TRAIN.update(DETECTRON2_MODELS)
+
 
 # Some models have bad train dataset. We read eval dataset.
 # yolov3 - seems to have different number of inputs between eval and train
@@ -69,7 +85,7 @@ ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
 ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
-
+ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
 REQUIRE_HIGHER_TOLERANCE = {

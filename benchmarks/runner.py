@@ -41,7 +41,7 @@ DEFAULT_OUTPUT_DIR = "benchmark_logs"
 TABLE = {
     "training": {
         "ts_nnc": "--training --speedup-ts --use-eval-mode --isolate",
-        "ts_nvfuser": "--training --nvfuser --speedup-ts --use-eval-mode --isolate",
+        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate",
         "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode --isolate",
         "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode --isolate",
         "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate",
@@ -184,6 +184,24 @@ def pp_dataframe(df, title, output_dir):
     plt.savefig(f"{output_dir}/{title}.png")
 
 
+def read_csv(output_filename):
+    has_header = False
+    n_cols = 3
+    with open(output_filename, "r") as f:
+        line = f.readline()
+        if "dev" in line:
+            has_header = True
+            n_cols = len(line.rstrip().split())
+
+    if has_header:
+        return pd.read_csv(output_filename)
+    else:
+        assert n_cols == 3
+        return pd.read_csv(
+            output_filename, names=["dev", "name", "speedup"], header=None
+        )
+
+
 def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
     mode = "inference" if args.inference else "training"
     for iter in itertools.product(suites, devices, dtypes):
@@ -195,7 +213,8 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
             output_filename = (
                 f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
             )
-            df = pd.read_csv(output_filename)
+
+            df = read_csv(output_filename)
             df.rename(
                 columns={"speedup": compiler, "ts": compiler, "ofi": f"ofi_{compiler}"},
                 inplace=True,
@@ -203,7 +222,10 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
             frames.append(df)
 
         # Merge the results
-        df = pd.merge(*frames, on=["dev", "name"])
+        if len(compilers) == 1:
+            df = frames[0]
+        else:
+            df = pd.merge(*frames, on=["dev", "name"])
 
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"

@@ -54,7 +54,17 @@ finally:
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
 
-SKIP = {}
+SKIP = {
+    # Difficult to run and compare
+    "Reformer"
+}
+
+# TODO - Fails even after fake tensors
+USE_SMALL_BATCH_SIZE = {
+    "GPT2LMHeadModel_gpt2": 1,
+    "AlbertForPreTraining_albert": 4,
+    "XLNetLMHeadModel_xlnet": 8,
+}
 
 
 def rand_int_tensor(device, low, high, shape):
@@ -104,8 +114,7 @@ def bert_input_func(device, dtype, vocab_size, batch_size, seq_len, tgt_seq_len=
     return res
 
 
-def albert_input_func(device, dtype, vocab_size):
-    batch_size = 8
+def albert_input_func(device, dtype, vocab_size, batch_size):
     seq_len = 512
     res = hf_general_inputs(dtype, device, vocab_size, batch_size, seq_len)
     sentence_order_label = rand_int_tensor(device, 0, 2, (batch_size,))
@@ -254,6 +263,9 @@ class HuggingfaceRunner(BenchmarkRunner):
         config, model_cls, batch_size_default, input_fn = ALL_MODELS[model_name]
         batch_size = batch_size or batch_size_default
 
+        if model_name in USE_SMALL_BATCH_SIZE:
+            batch_size = USE_SMALL_BATCH_SIZE[model_name]
+
         if "auto" in model_cls.__module__:
             # Handle auto classes
             model = model_cls.from_config(config).to(device, dtype=dtype)
@@ -311,6 +323,8 @@ class HuggingfaceRunner(BenchmarkRunner):
             return torch.no_grad()
 
     def get_tolerance(self, is_training, current_device, name):
+        if is_training:
+            return 1e-2
         return 1e-3
 
     def compute_loss(self, pred):
