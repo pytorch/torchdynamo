@@ -321,10 +321,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and not callable(value)
         ):
             if not source:
-                assert getattr(
-                    importlib.import_module(type(value).__module__),
-                    type(value).__name__,
-                ) is type(value)
+                assert (
+                    getattr(
+                        importlib.import_module(type(value).__module__),
+                        type(value).__name__,
+                    )
+                    is type(value)
+                )
                 source = AttrSource(
                     AttrSource(
                         tx.import_source(type(value).__module__), type(value).__name__

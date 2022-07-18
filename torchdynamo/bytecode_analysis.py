@@ -25,6 +25,7 @@ if sys.version_info < (3, 8):
             return 0
         return dis.stack_effect(opcode, arg)
 
+
 else:
     stack_effect = dis.stack_effect
 

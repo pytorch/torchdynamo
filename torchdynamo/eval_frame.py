@@ -244,6 +244,8 @@ def export(f, *args, **kwargs):
 
     import torch.utils._pytree as pytree
 
+    from .spec import Spec
+
     graph = None
     out_guards = None
 
@@ -270,6 +272,9 @@ def export(f, *args, **kwargs):
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
+    assert (
+        graph._dynamo_out_spec is not None
+    ), "Graph computed without outspec cannot be confirmed as valid for export"
 
     out_sig = signature(graph.forward)
     signature_types = [
@@ -282,7 +287,10 @@ def export(f, *args, **kwargs):
     for arg in flat_args:
         flat_input_types.append(arg.__class__)
 
-    _, out_spec = pytree.tree_flatten(result)
+    traced_out_spec = Spec.describe_spec(result)
+    assert (
+        f"{traced_out_spec}" == f"{graph._dynamo_out_spec}"
+    ), f"Mismatched specs. Traced out spec {traced_spec} must match dynamo out spec {gm._dynamo_out_spec}"
 
     assert len(flat_input_types) == len(
         out_sig.parameters
@@ -299,7 +307,7 @@ def export(f, *args, **kwargs):
     # There is currently more work that needs to be done on the fx side before we can support the UX we want.
     # The future UX here will not return a spec, but will rather return a graph with the original signature
     # and return type as the passed in callable, `f`.
-    return (graph, out_guards, in_spec, out_spec)
+    return (graph, out_guards, in_spec, graph._dynamo_out_spec)
 
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):

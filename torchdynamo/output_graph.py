@@ -150,6 +150,7 @@ class OutputGraph(fx.Tracer):
                     break
         print("PLACEHOLDERS", placeholders)
         import traceback
+
         traceback.print_stack()
         if placeholders:
             ctx = self.graph.inserting_after(placeholders[-1])
@@ -279,15 +280,13 @@ class OutputGraph(fx.Tracer):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
-            print("OPTIMAL CASE")
             # optimization to generate better code in a common case
+            # TODO(voz): Add spec here too before land
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
             )
         else:
-            print("NONOPTIMAL CASE")
-            print(stack_values)
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_save_tempvars(pass1)
@@ -303,7 +302,7 @@ class OutputGraph(fx.Tracer):
             )
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
-            print("SPEC:", pass2.spec)
+            self.out_spec = pass2.spec
             self.side_effects.codegen_update_mutated(pass2)
 
             output = []
@@ -333,11 +332,6 @@ class OutputGraph(fx.Tracer):
         for output in rv:
             self.guards.update(output.guards)
 
-
-        # self.create_arg(tuple(x.as_proxy() for x in rv))
-        
-        for x in rv:
-            x_as_proxy = x.as_proxy()
         self.create_node(
             "output", "output", (self.create_arg(tuple(x.as_proxy() for x in rv)),), {}
         )
@@ -369,6 +363,8 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
+            # Not amazing, but feels better than breaking the compiler_fn contract
+            gm._dynamo_out_spec = self.out_spec
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:

@@ -14,6 +14,7 @@ from .bytecode_transformation import create_instruction
 from .exc import unimplemented
 from .source import AttrSource
 from .source import Source
+from .spec import Spec
 from .utils import is_safe_constant
 from .utils import istype
 from .utils import rot_n_helper
@@ -23,7 +24,7 @@ from .variables.tensor import TensorVariable
 from .variables.tensor import TensorWithTFOverrideVariable
 from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
-from .spec import Spec
+
 
 @dataclasses.dataclass
 class GraphOutputEntry:
@@ -46,7 +47,7 @@ class PyCodegen(object):
         root: torch.nn.Module = None,
         graph_output_var: str = None,
         tempvars=None,
-        spec: Spec = None
+        spec: Spec = None,
     ):
         self.root = root
         self.top_of_stack = None
@@ -108,7 +109,6 @@ class PyCodegen(object):
                 UnspecializedPythonVariable,
             ),
         ):
-            print("VALUE IS TENSOR")
             if isinstance(value, TensorWithTFOverrideVariable):
                 # unwrap back to tensor
                 value = value.tensor_variable
@@ -350,8 +350,7 @@ class PyCodegen(object):
     def load_import_from(self, module_name, object_name):
         self.extend_output(
             AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self,
-                self.spec
+                self, self.spec
             )
         )
 

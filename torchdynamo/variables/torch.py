@@ -225,11 +225,15 @@ class TorchVariable(VariableTracker):
     def is_dynamic_shapes(self, args, kwargs):
         """Check for dynamic shapes when shape specialization is enabled"""
         # TODO(jansel): need to get a complete list
-        if self.value in (
-            torch.nonzero,
-            torch.unique,
-            torch.unique_consecutive,
-        ) or self.value.__name__ in ("nms",):
+        if (
+            self.value
+            in (
+                torch.nonzero,
+                torch.unique,
+                torch.unique_consecutive,
+            )
+            or self.value.__name__ in ("nms",)
+        ):
             return True
 
         if self.value is torch.where and len(args) + len(kwargs) == 1:

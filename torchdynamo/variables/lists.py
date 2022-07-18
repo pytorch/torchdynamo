@@ -7,11 +7,12 @@ from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
+from ..spec import Spec
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
 from .constant import ConstantVariable
-from ..spec import Spec
+
 
 class BaseListVariable(VariableTracker):
     @staticmethod
