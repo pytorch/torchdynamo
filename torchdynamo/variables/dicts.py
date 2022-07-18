@@ -32,7 +32,7 @@ class ConstDictVariable(VariableTracker):
         # here and instead custom-handle key:value
         spec.add_element(Spec.Element.OPEN_DICT)
         if len(self.items) == 0:
-            empty_map[create_instruction("BUILD_MAP", 0)]
+            empty_map = [create_instruction("BUILD_MAP", 0)]
             spec.add_element(Spec.Element.CLOSE_DICT)
             return empty_map
 

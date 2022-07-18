@@ -290,7 +290,7 @@ def export(f, *args, **kwargs):
     traced_out_spec = Spec.describe_spec(result)
     assert (
         f"{traced_out_spec}" == f"{graph._dynamo_out_spec}"
-    ), f"Mismatched specs. Traced out spec {traced_spec} must match dynamo out spec {gm._dynamo_out_spec}"
+    ), f"Mismatched specs. Traced out spec {traced_out_spec} must match dynamo out spec {graph._dynamo_out_spec}"
 
     assert len(flat_input_types) == len(
         out_sig.parameters

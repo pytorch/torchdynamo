@@ -28,6 +28,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import LocalSource
 from .source import Source
+from .spec import Spec
 from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters

@@ -7,7 +7,6 @@ from torchdynamo.spec import Spec
 class ExportTests(torchdynamo.testing.TestCase):
     def test_export_spec_capture(self):
         def pre_attention_state_ops(input, mems, state):
-            pre_mems = state[0]
             lc_key = state[1]
             lc_val = state[2]
             bar = []
@@ -30,7 +29,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
     def test_non_export_spec_capture(self):
         def pre_attention_state_ops(input, mems, state):
-            pre_mems = state[0]
             lc_key = state[1]
             lc_val = state[2]
             bar = []
