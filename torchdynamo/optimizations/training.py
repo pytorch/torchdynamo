@@ -24,12 +24,15 @@ class AOTAutogradStrategy(object):
         return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+        import functorch.compile
+
         super(AOTAutogradStrategy, self).__init__()
         counters["aot_autograd"]["total"] += 1
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         self.gm = gm
-        if config.normalize_ir:
+
+        if not functorch.compile.config.use_functionalize and config.normalize_ir:
             try:
                 self.gm = normalize_ir(gm, self.example_inputs)
             except Exception:
@@ -39,30 +42,18 @@ class AOTAutogradStrategy(object):
 
         gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
 
-        # TODO - AOT Autograd has some know issues. Here, we check for those and
-        # use fallback when necessary.
-        # 1) gather_backward (pytorch_struct) - https://github.com/pytorch/functorch/issues/591
-        for node in self.gm.graph.nodes:
-            if node.target == torch.gather:
-                log.debug(
-                    "Graph has gather op. AOT Autograd does not handle gather correctly. Using fallback."
-                )
-                self.use_fallback = True
-
-        # 2) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+        # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
         for submod in self.gm.modules():
             if submod.__class__.__name__ == "LSTM":
                 self.use_fallback = True
 
-        # 3) set_grad_enabled
+        # 2) set_grad_enabled
         has_set_grad_enabled = False
         for node in self.gm.graph.nodes:
             if node.target == torch._C._set_grad_enabled:
                 has_set_grad_enabled = True
 
-        import functorch._src.config
-
-        if functorch._src.config.use_functionalize:
+        if functorch.compile.config.use_functionalize:
             # There are two problematic classes we still exclude for now with
             # functionalization:
             #   - data mutation of inputs (fixed when we stop recording the

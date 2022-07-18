@@ -817,11 +817,6 @@ def parse_args():
         help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
     )
     parser.add_argument(
-        "--disable-functionalization",
-        action="store_true",
-        help="Disables functionalization",
-    )
-    parser.add_argument(
         "--inductor-settings",
         action="store_true",
         help="Use same settings as --inductor for baseline comparisons",
@@ -882,6 +877,11 @@ def parse_args():
     )
     group.add_argument(
         "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
+    )
+    group.add_argument(
+        "--speedup-dynamo-ts",
+        action="store_true",
+        help="TorchDynamo frontend with torchscript backend",
     )
     group.add_argument("--python-key", action="store_true")
     group.add_argument(
@@ -1147,6 +1147,10 @@ def main(runner, original_dir=None):
     elif args.speedup_trt:
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
+    elif args.speedup_dynamo_ts:
+        optimize_ctx = torchdynamo.optimize(backends.ts, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "speedup_dynamo_ts.csv"
     elif args.speedup_fx2trt:
         optimize_ctx = torchdynamo.optimize(
             backends.fx2trt_compiler, nopython=args.nopython
@@ -1241,9 +1245,6 @@ def main(runner, original_dir=None):
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
-
-    if args.disable_functionalization:
-        torchdynamo.config.normalize_ir = False
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
