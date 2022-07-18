@@ -469,7 +469,6 @@ try:
         with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
             return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
-
 except ImportError:
     fake_tensors_available = False
 
