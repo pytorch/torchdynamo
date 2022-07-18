@@ -1466,8 +1466,8 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randint(0, 2 ** 30, [64], dtype=torch.int32),
-                torch.randint(0, 2 ** 30, [64], dtype=torch.int32),
+                torch.randint(0, 2**30, [64], dtype=torch.int32),
+                torch.randint(0, 2**30, [64], dtype=torch.int32),
             ),
         )
 
