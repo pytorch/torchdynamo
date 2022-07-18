@@ -283,7 +283,7 @@ class OutputGraph(fx.Tracer):
             # optimization to generate better code in a common case
             spec = Spec()
             for x in stack_values:
-                spec.add_element(Spec.Element.Tensor)
+                spec.add_element(Spec.Element.TENSOR)
             self.out_spec = spec
 
             self.add_output_instructions(
