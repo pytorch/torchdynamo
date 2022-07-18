@@ -23,7 +23,7 @@ from .variables.tensor import TensorVariable
 from .variables.tensor import TensorWithTFOverrideVariable
 from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
-
+from .spec import Spec
 
 @dataclasses.dataclass
 class GraphOutputEntry:
@@ -46,6 +46,7 @@ class PyCodegen(object):
         root: torch.nn.Module = None,
         graph_output_var: str = None,
         tempvars=None,
+        spec: Spec = None
     ):
         self.root = root
         self.top_of_stack = None
@@ -58,6 +59,7 @@ class PyCodegen(object):
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
+        self.spec = Spec() if spec is None else spec
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
@@ -76,6 +78,7 @@ class PyCodegen(object):
         graph_outputs = self.graph_outputs
 
         if self.top_of_stack is value:
+            print("VALUE IS TOP OF STACK")
             output.append(create_instruction("DUP_TOP"))
             return
 
@@ -90,7 +93,8 @@ class PyCodegen(object):
                 return
 
         if value.source is not None and allow_cache:
-            output.extend(value.source.reconstruct(self))
+            print("VALUE HAS SOURCE AND CACHE")
+            output.extend(value.source.reconstruct(self, self.spec))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
@@ -104,9 +108,13 @@ class PyCodegen(object):
                 UnspecializedPythonVariable,
             ),
         ):
+            print("VALUE IS TENSOR")
             if isinstance(value, TensorWithTFOverrideVariable):
                 # unwrap back to tensor
                 value = value.tensor_variable
+            if isinstance(value, TensorVariable):
+                self.spec.add_element(Spec.Element.TENSOR)
+
             graph_outputs_key = id(value.proxy)
             if graph_outputs_key not in graph_outputs:
                 graph_outputs[graph_outputs_key] = GraphOutputEntry(
@@ -154,7 +162,7 @@ class PyCodegen(object):
         else:
             self.uses[value] += 1
             try:
-                output.extend(value.reconstruct(self))
+                output.extend(value.reconstruct(self, self.spec))
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
@@ -342,7 +350,8 @@ class PyCodegen(object):
     def load_import_from(self, module_name, object_name):
         self.extend_output(
             AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self
+                self,
+                self.spec
             )
         )
 

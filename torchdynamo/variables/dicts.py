@@ -25,16 +25,22 @@ class ConstDictVariable(VariableTracker):
     def python_type(self):
         return self.user_cls
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen, spec=None):
+        spec.add_element(Spec.Element.OPEN_DICT)
         if len(self.items) == 0:
-            return [create_instruction("BUILD_MAP", 0)]
+            empty_map [create_instruction("BUILD_MAP", 0)]
+            spec.add_element(Spec.Element.CLOSE_DICT)
+            return empty_map
+
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        return [
+        built_map = [
             codegen.create_load_const(keys),
             create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
         ]
+        spec.add_element(Spec.Element.CLOSE_DICT)
+        return built_map
 
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
@@ -235,7 +241,7 @@ class DataClassVariable(ConstDictVariable):
     def as_proxy(self):
         raise NotImplementedError()
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen, spec=None):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
         result = list(super().reconstruct(codegen))
         assert result[-1].opname == "BUILD_CONST_KEY_MAP"

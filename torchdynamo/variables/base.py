@@ -192,7 +192,7 @@ class VariableTracker:
     def as_proxy(self):
         raise NotImplementedError(str(self))
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen, spec=None):
         raise NotImplementedError()
 
     def unpack_var_sequence(self, tx):
