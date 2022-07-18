@@ -280,7 +280,11 @@ class OutputGraph(fx.Tracer):
             and self.side_effects.is_empty()
         ):
             # optimization to generate better code in a common case
-            # TODO(voz): Add spec here too before land
+            spec = Spec()
+            for x in stack_values:
+                spec.add_element(Spec.Element.Tensor)
+            self.out_spec = spec
+
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]

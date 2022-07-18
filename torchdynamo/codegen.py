@@ -79,7 +79,6 @@ class PyCodegen(object):
         graph_outputs = self.graph_outputs
 
         if self.top_of_stack is value:
-            print("VALUE IS TOP OF STACK")
             output.append(create_instruction("DUP_TOP"))
             return
 
