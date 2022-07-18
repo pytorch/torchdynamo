@@ -1,4 +1,4 @@
-from benchmarks.microbenchmarks import model as model
+from benchmarks_.microbenchmarks import model as model
 import torch
 import torchdynamo
 import torchinductor.config
@@ -101,7 +101,10 @@ def test(layer_params, fusion_type="add"):
 
     conv_fusion_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
     conv_fusion = getattr(Func, f"conv_{fusion_type}")
+    torchinductor.metrics.reset()
     y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    # 1 kernel(optional) for change input layout to NHWC, 1 kernel for conv+fusion
+    assert torchinductor.metrics.generated_kernel_count <= 2, f"codegen #kernel > 2"
     y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
     # print("y", y[0,:,0,0])
     # print("y_correct", y[0,:,0,0])
