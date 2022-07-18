@@ -1438,7 +1438,7 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_reorder_and_tile(self, priority_addrs=[]):
+    def simplify_reorder_and_tile(self):
         """
         This is the main place where we do loop transformations in a
         backend-agnostic way.
@@ -1474,21 +1474,6 @@ class ComputedBuffer(Buffer):
                     # preferred_stride_order = reads_buf.preferred_stride_order
                     # preferred_order = stride_order2fill_order(preferred_stride_order)
                     priority_idx.append(i)
-
-        # find the matching idx from priority_addrs in memory_addrs
-        priority_idx = []
-        if len(priority_addrs) > 0:
-            for priority_addr in priority_addrs:
-                map_dict = {
-                    k: v
-                    for k, v in zip(
-                        list(sympy.ordered(priority_addr.free_symbols)),
-                        list(sympy.ordered(args[0])),
-                    )
-                }
-                priority_addr = priority_addr.subs(map_dict)
-                if priority_addr in [*body.reads]:
-                    priority_idx.append([*body.reads].index(priority_addr))
 
         index_vars = []
         reduce_vars = []
