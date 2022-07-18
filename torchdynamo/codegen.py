@@ -94,8 +94,7 @@ class PyCodegen(object):
                 return
 
         if value.source is not None and allow_cache:
-            print("VALUE HAS SOURCE AND CACHE")
-            output.extend(value.source.reconstruct(self, self.spec))
+            output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
@@ -350,7 +349,7 @@ class PyCodegen(object):
     def load_import_from(self, module_name, object_name):
         self.extend_output(
             AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self, self.spec
+                self
             )
         )
 

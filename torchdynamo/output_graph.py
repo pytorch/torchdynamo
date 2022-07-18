@@ -80,6 +80,7 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
+        self.out_spec = None
 
         # Not checkpointed
         self.compiler_fn = compiler_fn
@@ -106,6 +107,7 @@ class OutputGraph(fx.Tracer):
             copy.deepcopy(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
+            self.out_spec.clone() if self.out_spec else None,
         )
 
     def restore_graphstate(self, state):
@@ -116,6 +118,7 @@ class OutputGraph(fx.Tracer):
             self.guards,
             self.nn_modules,
             self.side_effects,
+            self.out_spec,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
@@ -148,10 +151,6 @@ class OutputGraph(fx.Tracer):
                 if f"{name}_{i}" not in used_names:
                     name = f"{name}_{i}"
                     break
-        print("PLACEHOLDERS", placeholders)
-        import traceback
-
-        traceback.print_stack()
         if placeholders:
             ctx = self.graph.inserting_after(placeholders[-1])
         else:

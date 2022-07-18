@@ -10,6 +10,7 @@ from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource
+from ..spec import Spec
 from .base import VariableTracker
 
 
@@ -26,6 +27,9 @@ class ConstDictVariable(VariableTracker):
         return self.user_cls
 
     def reconstruct(self, codegen, spec=None):
+        # TODO(voz): ATM we do not capture dict keys elegantly, just through codegen,
+        # which means either Tensor or nothing. We need to probably disable codegen->spec
+        # here and instead custom-handle key:value
         spec.add_element(Spec.Element.OPEN_DICT)
         if len(self.items) == 0:
             empty_map[create_instruction("BUILD_MAP", 0)]
