@@ -24,12 +24,15 @@ class AOTAutogradStrategy(object):
         return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+        import functorch.compile
+
         super(AOTAutogradStrategy, self).__init__()
         counters["aot_autograd"]["total"] += 1
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         self.gm = gm
-        if config.normalize_ir:
+
+        if not functorch.compile.config.use_functionalize and config.normalize_ir:
             try:
                 self.gm = normalize_ir(gm, self.example_inputs)
             except Exception:
@@ -39,32 +42,31 @@ class AOTAutogradStrategy(object):
 
         gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
 
-        # TODO - AOT Autograd has some know issues. Here, we check for those and
-        # use fallback when necessary.
-        # 1) gather_backward (pytorch_struct) - https://github.com/pytorch/functorch/issues/591
-        for node in self.gm.graph.nodes:
-            if node.target == torch.gather:
-                log.debug(
-                    "Graph has gather op. AOT Autograd does not handle gather correctly. Using fallback."
-                )
-                self.use_fallback = True
-
-        # 2) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+        # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
         for submod in self.gm.modules():
             if submod.__class__.__name__ == "LSTM":
                 self.use_fallback = True
 
-        # 3) set_grad_enabled
+        # 2) set_grad_enabled
         has_set_grad_enabled = False
         for node in self.gm.graph.nodes:
             if node.target == torch._C._set_grad_enabled:
                 has_set_grad_enabled = True
 
-        if (
-            has_mutation(self.gm, self.example_inputs)
-            or len(gm_inputs) == 0
-            or has_set_grad_enabled
-        ):
+        if functorch.compile.config.use_functionalize:
+            # There are two problematic classes we still exclude for now with
+            # functionalization:
+            #   - data mutation of inputs (fixed when we stop recording the
+            #   copy_ directly into the graph)
+            #   - metadata mutation of inputs (fixed if we do an extra partition
+            #   to avoid AOTAutograd on the mutated inputs, or if we some how
+            #   get custom autograd function to reflect metadata changes to the
+            #   original tensor)
+            mutated = has_mutation(self.gm, self.example_inputs, inputs_only=True)
+        else:
+            mutated = has_mutation(self.gm, self.example_inputs)
+
+        if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
             self.use_fallback = True
 
     @property
@@ -148,3 +150,63 @@ class AOTAutogradMemoryEfficientFusionWithContext:
 
 
 aot_autograd_speedup_strategy = AOTAutogradMemoryEfficientFusionWithContext()
+
+
+class AOTAutogradPrimsNvFuser(AOTAutogradStrategy):
+    """
+    Use FX graph partitioner + Aten2Prims ref + trace executor + nvFuser
+    """
+
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+        super(AOTAutogradPrimsNvFuser, self).__init__(gm, example_inputs)
+
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch.fx.passes.backends.nvfuser import NvFuserBackend
+
+        self.nvfuser = NvFuserBackend()
+        self.min_cut_rematerialization_partition = min_cut_rematerialization_partition
+        self.populate_aten2aten_decomps()
+
+    def populate_aten2aten_decomps(self):
+        from torch._decomp import get_decompositions
+
+        aten = torch.ops.aten
+        default_decompositions = {
+            aten.detach,
+            aten.gelu_backward,
+            aten.leaky_relu_backward,
+            aten.sigmoid_backward,
+            aten.threshold_backward,
+            aten.hardtanh_backward,
+            aten.hardsigmoid_backward,
+            aten.hardswish_backward,
+            aten.tanh_backward,
+            aten.silu_backward,
+            aten.elu_backward,
+            aten.cudnn_batch_norm,
+            aten.cudnn_batch_norm_backward,
+            aten.masked_fill.Scalar,
+            aten.masked_fill.Tensor,
+            aten.elu,
+            aten.leaky_relu,
+            aten.hardtanh,
+            aten.hardswish,
+            aten.hardsigmoid,
+            aten.rsub,
+            aten.native_batch_norm_backward,
+        }
+
+        self.aten2aten_decompositions = get_decompositions(default_decompositions)
+
+    def candidate(self):
+        return BACKENDS["aot_autograd"](
+            self.gm,
+            self.example_inputs,
+            fw_compiler=self.nvfuser,
+            partition_fn=self.min_cut_rematerialization_partition,
+            hasher_type="StaticShapeHasher",
+            decompositions=self.aten2aten_decompositions,
+        )
+
+
+aot_autograd_prims_nvfuser_strategy = AOTAutogradPrimsNvFuser.compile_fn

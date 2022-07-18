@@ -22,6 +22,7 @@ from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
 from .dependencies import extract_read_writes
+from .dependencies import var_builder
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -40,11 +41,30 @@ def inverse_reorder(order):
     return reindex
 
 
+def same_reorder(order):
+    def reindex(index):
+        assert len(index) == len(order)
+        return [index[order[i]] for i in range(len(index))]
+
+    return reindex
+
+
 def fuse_reindexing(reindex1, reindex2):
     def reindex(index):
         return reindex1(reindex2(index))
 
     return reindex
+
+
+def stride_order2fill_order(order):
+    """
+    Convert stride order to fill order
+    For channel last format,
+    stride order = [3, 0, 2, 1] and fill order = [1, 3, 2, 0]
+    """
+    lookup = {pos: idx for idx, pos in enumerate(order)}
+    fill_order = [lookup[i] for i in range(len(order))]
+    return fill_order
 
 
 class ModularIndexing(sympy.Function):
@@ -451,22 +471,30 @@ def is_contiguous_storage_and_layout(x):
         return False
 
 
-def as_storage_and_layout(x, freeze=True, want_contiguous=False):
+def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=None):
     """Try to simplify x into a StorageBox and a Layout"""
     if isinstance(x, TensorBox):
         return as_storage_and_layout(
-            x.data, freeze=freeze, want_contiguous=want_contiguous
+            x.data,
+            freeze=freeze,
+            want_contiguous=want_contiguous,
+            stride_order=stride_order,
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
             if want_contiguous:
                 x.data.freeze_layout()
+            elif stride_order is not None:
+                x.data.freeze_layout_with_stride_order(stride_order)
             else:
                 x.data.decide_layout()
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
         buffer, _ = as_storage_and_layout(
-            x.data, freeze=freeze, want_contiguous=want_contiguous
+            x.data,
+            freeze=freeze,
+            want_contiguous=want_contiguous,
+            stride_order=stride_order,
         )
         return buffer, x.layout
     raise NotImplementedError
@@ -475,6 +503,14 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False):
 as_contiguous_storage_and_layout = functools.partial(
     as_storage_and_layout, want_contiguous=True
 )
+
+
+def is_stride_order_storage_and_layout(x, stride_order):
+    try:
+        buffer, layout = as_storage_and_layout(x, freeze=False)
+        return layout.is_stride_ordered(stride_order)
+    except NotImplementedError:
+        return False
 
 
 @dataclasses.dataclass
@@ -611,16 +647,28 @@ class PermuteView(BaseView):
 
 class SqueezeView(BaseView):
     @classmethod
-    def create(cls, x):
+    def create(cls, x, *, dim=None):
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
             new_stride = []
-            for size, stride in zip(old_layout.size, old_layout.stride):
-                if size != 1:
-                    new_size.append(size)
-                    new_stride.append(stride)
+            if dim is not None:
+                assert isinstance(dim, int), "expected integer dim argument"
+                assert 0 <= dim and dim < len(old_layout.size)
+
+            for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
+                if dim is None:
+                    if size != 1:
+                        new_size.append(size)
+                        new_stride.append(stride)
+                else:
+                    if i != dim:
+                        new_size.append(size)
+                        new_stride.append(stride)
+                    else:
+                        assert size == 1, "expected squeezed size to be 1"
+
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -692,7 +740,10 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
-        if is_contiguous_storage_and_layout(x):
+        # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
+        if is_contiguous_storage_and_layout(x) and not isinstance(
+            x.data, ExternKernelAlloc
+        ):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -1002,6 +1053,18 @@ class Layout(IRNode):
                 return False
         return True
 
+    def is_stride_ordered(self, order):
+        assert len(self.stride) == len(order)
+        # reorder the stride given order
+        stride_ordered = [None] * len(order)
+        for i in range(len(order)):
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+        # check if it is in ascending order
+        for i in range(len(order) - 1):
+            if stride_ordered[i] > stride_ordered[i + 1]:
+                return False
+        return True
+
     def as_fixed(self):
         return FixedLayout(
             self.device,
@@ -1075,8 +1138,20 @@ class FlexibleLayout(Layout):
             [3, 0, 2, 1]
         """
         assert set(range(len(sizes))) == set(order)
-        lookup = {pos: idx for idx, pos in enumerate(order)}
-        fill_order = [lookup[i] for i in range(len(order))]
+        fill_order = stride_order2fill_order(order)
+        return FlexibleLayout.fill_ordered(sizes, fill_order)
+
+    @staticmethod
+    def same_ordered(sizes, stride):
+        """
+        Create a stride that has the same stride order as given stride
+
+        For example, if given stride is [1000, 1, 100, 10],
+        the fill order should be [1, 3, 2, 0]
+        """
+        assert len(sizes) == len(stride)
+        stride = [V.graph.sizevars.size_hint(x) for x in stride]
+        fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
     def as_stride_order(self, order):
@@ -1097,10 +1172,20 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def __init__(self, device, dtype, size):
+    def as_same_order(self, stride):
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            self.same_ordered(self.size, stride),
+            self.offset,
+        )
+
+    def __init__(self, device, dtype, size, stride_order=None):
         super(FlexibleLayout, self).__init__(
             device, dtype, size, FlexibleLayout.contiguous_strides(size)
         )
+        self.preferred_stride_order = stride_order
 
 
 class AliasedLayout(Layout):
@@ -1212,6 +1297,10 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_fill_order(order)
 
+    def freeze_layout_with_same_order(self, stride):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_same_order(stride)
+
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
@@ -1275,6 +1364,11 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class NoneAsConstantBuffer(IRNode):
+    def codegen_reference(self):
+        return "None"
+
+
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops
@@ -1313,6 +1407,17 @@ class ComputedBuffer(Buffer):
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
+            reads_bufs = [
+                V.graph.name_to_buffer[r.name]
+                if r.name in V.graph.name_to_buffer.keys()
+                else None
+                for r in reads
+            ]
+            priority_idx = []
+            for i, reads_buf in enumerate(reads_bufs):
+                if isinstance(reads_buf, Convolution):
+                    # prioritize Conv layout order
+                    priority_idx.append(i)
             # only consider reads to buffer of same size
             reads = [
                 r.index.subs({v: sympy.Integer(0) for v in reduction_vars})
@@ -1327,7 +1432,7 @@ class ComputedBuffer(Buffer):
                 from .scheduler import pick_loop_order
 
                 self.freeze_layout_with_fill_order(
-                    pick_loop_order(stride_lengths, self.get_size())
+                    pick_loop_order(stride_lengths, self.get_size(), priority_idx)
                 )
 
         if isinstance(self.layout, FlexibleLayout):
@@ -1354,7 +1459,21 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
         index_formulas = [*body.indexing_exprs.values()]
-        memory_addrs = [*body.reads, *body.writes]
+        memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
+        priority_idx = []
+        if config.triton.convolution != "aten":
+            reads_bufs = [
+                V.graph.name_to_buffer[reads_name]
+                if reads_name in V.graph.name_to_buffer.keys()
+                else None
+                for reads_name in body.reads_name2expr.keys()
+            ]
+            for i, reads_buf in enumerate(reads_bufs):
+                if isinstance(reads_buf, Convolution):
+                    # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
+                    # preferred_stride_order = reads_buf.preferred_stride_order
+                    # preferred_order = stride_order2fill_order(preferred_stride_order)
+                    priority_idx.append(i)
 
         index_vars = []
         reduce_vars = []
@@ -1371,9 +1490,15 @@ class ComputedBuffer(Buffer):
                 reduce_size.append(s)
 
         def simplify_and_reorder(x_vars, sizes):
-            sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex0, reindex1 = self._apply_loop_reordering(
+                x_vars, sizes, memory_addrs, priority_idx
+            )
+            x_vars = reindex0(x_vars)
+            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
             x_vars = prune(x_vars)
-            sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
+            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            # x_vars = prune(x_vars)
+            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex
 
@@ -1506,7 +1631,7 @@ class ComputedBuffer(Buffer):
             return (iter_ranges,), body
 
     @staticmethod
-    def _apply_loop_reordering(index_vars, sizes, memory_addrs):
+    def _apply_loop_reordering(index_vars, sizes, memory_addrs, priority_idx=[]):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -1521,7 +1646,7 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
-            order = list(reversed(pick_loop_order(strides, sizes)))
+            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
                 log.warning(
@@ -1529,7 +1654,7 @@ class ComputedBuffer(Buffer):
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
-        return sizes, inverse_reorder(order)
+        return sizes, same_reorder(order), inverse_reorder(order)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()
@@ -1639,7 +1764,10 @@ class ConcatKernel(NopKernel):
             return cls.realize_into(src.data, dst)
         if isinstance(src, StorageBox):
             src.realize()
-            if isinstance(src.data.layout, FlexibleLayout):
+            # ExternKernelAlloc has specific requirements for output layout, should create a copy
+            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
+                src.data, ExternKernelAlloc
+            ):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
         # introduce a copy
@@ -1664,6 +1792,8 @@ class ExternKernel(InputsKernel):
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
+        if isinstance(self.layout, FlexibleLayout):
+            self.apply_constraint()
         self.freeze_layout()
 
     @staticmethod
@@ -1680,7 +1810,7 @@ class ExternKernel(InputsKernel):
     @classmethod
     def realize_input(cls, x):
         if x is None:
-            return V.graph.add_tensor_constant(torch.tensor(()))
+            return NoneAsConstantBuffer()
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -1713,6 +1843,29 @@ class ExternKernel(InputsKernel):
         assert is_contiguous_storage_and_layout(x)
         as_contiguous_storage_and_layout(x, freeze=True)
         return x
+
+    @classmethod
+    def require_stride_order(cls, x, order):
+        # require x to have the layout as strided_ordered as order
+        if isinstance(
+            x.get_layout(), FlexibleLayout
+        ) and is_stride_order_storage_and_layout(x, order):
+            # fix flexiblelayout to be FixedLayout with stride_order
+            as_storage_and_layout(
+                x, freeze=True, want_contiguous=False, stride_order=order
+            )
+            return x
+        elif isinstance(x.get_layout(), FixedLayout) and x.layout.is_stride_ordered(
+            order
+        ):
+            return x
+        x = cls.copy_input(x)
+        as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
+        assert is_stride_order_storage_and_layout(x, order)
+        return x
+
+    def apply_constraint(self):
+        pass
 
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
@@ -1772,34 +1925,8 @@ class ExternKernelAlloc(ExternKernel):
     def should_allocate(self):
         return False
 
-
-class IndexPutFallback(ExternKernel):
-    # TODO(jansel): delete this when this is fixed:
-    # https://github.com/openai/triton/issues/558
-    kernel = "aten.index_put_"
-
-    def codegen(self, wrapper):
-        x, *indices, values = [t.codegen_reference() for t in self.inputs]
-        (accumulate,) = self.constant_args
-        wrapper.writeline(
-            f"{self.kernel}({x}, [{', '.join(indices)}], {values}, {accumulate!r})"
-        )
-
-    def should_allocate(self):
-        return False
-
-    def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
-
-    def __init__(self, x, indices, values, accumulate=False):
-        super().__init__(
-            None,
-            MutationLayout(x),
-            self.unwrap_storage([x, *indices, values]),
-            [accumulate],
-        )
-        self.name = V.graph.register_buffer(self)
+    def apply_constraint(self):
+        raise NotImplementedError
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -1897,7 +2024,7 @@ class BatchMatrixMultiply(ExternKernelOut):
             # convert to normal mm
             data = MatrixMultiply(
                 layout=output_layout.as_fixed(),
-                inputs=[View.create(a, [m, k1]), View.create(b, [k2, n])],
+                inputs=[SqueezeView.create(a, dim=0), SqueezeView.create(b, dim=0)],
             )
             data.output_view = ReinterpretView(
                 data,
@@ -1967,22 +2094,36 @@ class AdaptiveAvgPool2d(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, target_size):
-        x = cls.require_stride1(cls.realize_input(x))
+        # x = cls.require_stride1(cls.realize_input(x))
+        x = cls.realize_input(x)
         output_size = [
             *x.get_size()[: -len(target_size)],
             *map(sympy.Integer, target_size),
         ]
+        # contigouse stride order
+        stride_order = list(reversed(range(len(output_size))))
         return cls(
-            FixedLayout(
+            FlexibleLayout(
                 x.get_device(),
                 x.get_dtype(),
                 output_size,
                 # TODO(jansel): fix channels last case
-                FlexibleLayout.contiguous_strides(output_size),
+                # FlexibleLayout.contiguous_strides(output_size),
+                stride_order,
             ),
             (x,),
             (tuple(target_size),),
         )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        if isinstance(x.get_layout(), FixedLayout):
+            # fix self's layout to be the same order as x
+            self.freeze_layout_with_same_order(x.get_layout().stride)
+        else:
+            x = self.require_stride_order(x, self.layout.preferred_stride_order)
+            self.inputs[0] = x
+            self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
 @dataclasses.dataclass
@@ -2007,7 +2148,8 @@ class FallbackKernel(ExternKernelAlloc):
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
         self.unflatten_args = unflatten_args
-        log.warning(f"Using FallbackKernel: {self.kernel}")
+        if self.kernel not in ("aten.convolution_backward",):
+            log.warning(f"Using FallbackKernel: {self.kernel}")
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -2102,6 +2244,9 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             )
 
+    def apply_constraint(self):
+        return super().apply_constraint()
+
 
 class MultiOutputLayout(IRNode):
     pass
@@ -2132,6 +2277,10 @@ class Convolution(ExternKernelAlloc):
     else:
         assert config_conv == "autotune"
         kernel = "tuned_conv"
+
+    def __init__(self, layout, inputs, constant_args=(), preferred_stride_order=None):
+        super().__init__(layout, inputs, constant_args)
+        self.preferred_stride_order = preferred_stride_order
 
     def codegen(self, wrapper):
         if self.kernel == "triton_ops_conv":
@@ -2236,20 +2385,25 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        if any(k != 1 for k in output_size[-len(stride) :]) and in_channels_stride == 1:
-            # channels last format
-            order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
-            if len(order) < len(output_size):
+        # for conv2d or conv3d, prefer channels last format
+        if (
+            len(kernel_size) > 1
+            and is_triton(x.get_device())
+            and config.triton.convolution != "aten"
+        ):
+            stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+            if len(stride_order) < len(output_size):
                 # add batch dim if it exists
-                order = [len(order)] + order
+                stride_order = [len(stride_order)] + stride_order
+        # for conv1d, output layout is not preserved with inputs
         else:
-            order = list(reversed(range(len(output_size))))
+            stride_order = list(reversed(range(len(output_size))))
 
-        output_layout = FixedLayout(
+        output_layout = FlexibleLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            FlexibleLayout.stride_ordered(output_size, order),
+            stride_order,
         )
 
         if bias is not None:
@@ -2257,13 +2411,48 @@ class Convolution(ExternKernelAlloc):
                 output_layout,
                 (x, weight, bias),
                 (stride, padding, dilation, transposed, output_padding, groups),
+                stride_order,
             )
         else:
             return Convolution(
                 output_layout,
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
+                stride_order,
             )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the conv output index
+        """
+        # manually generate index formula for conv
+        sizes = self.get_size()
+        strides = self.get_stride()
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
+        indexer = self.make_indexer()
+        index = indexer(index_vars)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
 
     def map_args(self):
         # x, w, bias
@@ -2273,43 +2462,45 @@ class Convolution(ExternKernelAlloc):
         if len(in_args) < 3:
             # otherwise, bias=None is the first constant_args
             const_args = const_args[1:]
-        # stride of inputs and outputs
-        stride_x = f"{in_args[0]}.stride()"
-        stride_w = f"{in_args[1]}.stride()"
-        stride_y = f"{self.get_name()}.stride()"
 
-        args_dict = OrderedDict(
+        inout_dict = OrderedDict(
             [
                 ("x", f"{in_args[0]}"),
                 ("w", f"{in_args[1]}"),
                 ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
                 ("y", f"{self.get_name()}"),
-                ("stride_xn", stride_x + "[0]"),
-                ("stride_xc", stride_x + "[1]"),
-                ("stride_xh", stride_x + "[2]"),
-                ("stride_xw", stride_x + "[3]"),
-                ("stride_wn", stride_w + "[0]"),
-                ("stride_wc", stride_w + "[1]"),
-                ("stride_wh", stride_w + "[2]"),
-                ("stride_ww", stride_w + "[3]"),
-                ("stride_yn", stride_y + "[0]"),
-                ("stride_yc", stride_y + "[1]"),
-                ("stride_yh", stride_y + "[2]"),
-                ("stride_yw", stride_y + "[3]"),
+            ]
+        )
+        args_dict = OrderedDict(
+            [
+                ("stride_xn", f"{self.inputs[0].get_stride()[0]}"),
+                ("stride_xc", f"{self.inputs[0].get_stride()[1]}"),
+                ("stride_xh", f"{self.inputs[0].get_stride()[2]}"),
+                ("stride_xw", f"{self.inputs[0].get_stride()[3]}"),
+                ("stride_wn", f"{self.inputs[1].get_stride()[0]}"),
+                ("stride_wc", f"{self.inputs[1].get_stride()[1]}"),
+                ("stride_wh", f"{self.inputs[1].get_stride()[2]}"),
+                ("stride_ww", f"{self.inputs[1].get_stride()[3]}"),
+                ("stride_yn", f"{self.get_stride()[0]}"),
+                ("stride_yc", f"{self.get_stride()[1]}"),
+                ("stride_yh", f"{self.get_stride()[2]}"),
+                ("stride_yw", f"{self.get_stride()[3]}"),
                 (
                     "stride_biasn",
-                    f"{in_args[2]}.stride()[0]" if len(in_args) >= 3 else "None",
+                    f"{self.inputs[0].get_stride()[0]}"
+                    if len(in_args) >= 3
+                    else "None",
                 ),
                 ("delta_x_ptr", "None"),
-                ("BATCH", f"{in_args[0]}.shape[0]"),
-                ("IN_C", f"{in_args[0]}.shape[1]"),
-                ("IN_H", f"{in_args[0]}.shape[2]"),
-                ("IN_W", f"{in_args[0]}.shape[3]"),
-                ("KERNEL_N", f"{in_args[1]}.shape[0]"),
-                ("KERNEL_H", f"{in_args[1]}.shape[2]"),
-                ("KERNEL_W", f"{in_args[1]}.shape[3]"),
-                ("OUT_H", f"{self.get_name()}.shape[2]"),
-                ("OUT_W", f"{self.get_name()}.shape[3]"),
+                ("BATCH", f"{self.inputs[0].get_size()[0]}"),
+                ("IN_C", f"{self.inputs[0].get_size()[1]}"),
+                ("IN_H", f"{self.inputs[0].get_size()[2]}"),
+                ("IN_W", f"{self.inputs[0].get_size()[3]}"),
+                ("KERNEL_N", f"{self.inputs[1].get_size()[0]}"),
+                ("KERNEL_H", f"{self.inputs[1].get_size()[2]}"),
+                ("KERNEL_W", f"{self.inputs[1].get_size()[3]}"),
+                ("OUT_H", f"{self.get_size()[2]}"),
+                ("OUT_W", f"{self.get_size()[3]}"),
                 ("stride_h", f"{const_args[0][0]}"),
                 ("stride_w", f"{const_args[0][1]}"),
                 ("padding_h", f"{const_args[1][0]}"),
@@ -2333,8 +2524,8 @@ class Convolution(ExternKernelAlloc):
         CONV1X1_NHWC = (
             "True"
             if self.inputs[0].get_stride()[1] == 1
-            and self.inputs[1].shape[2] == 1
-            and self.inputs[1].shape[3] == 1
+            and self.inputs[1].get_size()[2] == 1
+            and self.inputs[1].get_size()[3] == 1
             else "False"
         )
         # dict for tl.constexpr
@@ -2352,7 +2543,7 @@ class Convolution(ExternKernelAlloc):
             ]
         )
 
-        return args_dict, const_dict, other_dict
+        return inout_dict, args_dict, const_dict, other_dict
 
 
 @dataclasses.dataclass
@@ -2449,6 +2640,8 @@ class LoopBody:
         self.indexing_exprs_name = {}
         self.reads = []
         self.writes = []
+        self.reads_name2expr = {}
+        self.writes_name2expr = {}
         self.other = []
         self.submodules = {}
         self.subblocks = {}
@@ -2456,8 +2649,10 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
-    def add_index_expr(self, expr: sympy.Expr, category):
+    def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
+        if buf_name is not None:
+            getattr(self, f"{category}_name2expr")[buf_name] = expr
         if expr not in self.indexing_exprs_name:
             name = f"index{len(self.indexing_exprs)}"
             self.indexing_exprs_name[expr] = name
@@ -2504,25 +2699,27 @@ class LoopBodyBlock:
         self.gm = None
         self.body = body
 
-        def add_index(expr, category):
+        def add_index(expr, category, buf_name=None):
             return tracer.create_proxy(
-                "get_attr", self.body.add_index_expr(expr, category), (), {}
+                "get_attr", self.body.add_index_expr(expr, category, buf_name), (), {}
             )
 
         class CaptureIndexing(V.WrapperHandler):
             def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-                index = add_index(index, "reads")
+                index = add_index(index, "reads", name)
                 return self._inner.load(name, index, upcast)
 
             def store(self, name, index, value, mode=None):
-                index = add_index(index, "writes")
+                index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
             def reduction(self, name, dtype, reduction_type, index, value):
-                index = add_index(index, "writes")
+                index = add_index(index, "writes", name)
                 return self._inner.reduction(name, dtype, reduction_type, index, value)
 
             def index_expr(self, index, dtype):
+                if isinstance(index, (int, sympy.Integer)):
+                    return ops.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
@@ -2574,6 +2771,8 @@ class LoopBodyBlock:
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
         for name in self.body.indexing.keys():
             expr = getattr(self.gm, name)
             if old in expr.free_symbols:

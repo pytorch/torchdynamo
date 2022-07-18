@@ -7,6 +7,7 @@ import torch
 import torchdynamo.testing
 from torchdynamo import config
 from torchdynamo.testing import unsupported
+from torchdynamo.utils import disable_cache_limit
 
 globalmod = torch.nn.ReLU()
 
@@ -343,6 +344,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
 
         self._common(fn, 2, 6)
 
+    @disable_cache_limit()
     def test_dynamic_shapes(self):
         def fn(a, b):
             return a - b * 10

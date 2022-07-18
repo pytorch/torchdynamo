@@ -48,6 +48,8 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1):
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
     """
+    # Ideally we want to read this from some device config
+    maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
     if conditional_product(*size_hints) < target:
@@ -60,12 +62,27 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1):
     if z:
         z = min(z, size_hints[2])
 
-    # if we are below original block size, scale up where we can
-    while x < size_hints[0] and conditional_product(x, y, z) < target:
+    # if we are below original block size, scale up where we can;
+    # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
+    while x < size_hints[0] and (
+        x * maxGridSize[0] < size_hints[0] or conditional_product(x, y, z) < target
+    ):
         x *= 2
-    while y and y < size_hints[1] and conditional_product(x, y, z) < target:
+    while (
+        y
+        and y < size_hints[1]
+        and (
+            y * maxGridSize[1] < size_hints[1] or conditional_product(x, y, z) < target
+        )
+    ):
         y *= 2
-    while z and z < size_hints[2] and conditional_product(x, y, z) < target:
+    while (
+        z
+        and z < size_hints[2]
+        and (
+            z * maxGridSize[2] < size_hints[2] or conditional_product(x, y, z) < target
+        )
+    ):
         z *= 2
 
     cfg = {"XBLOCK": x}
@@ -149,8 +166,7 @@ def reduction_heuristics(size_hints):
         return autotune(
             [
                 triton_config_reduction(size_hints, 32, 128, num_stages=2),
-                # Note, we can't do xblock=1 due to https://github.com/openai/triton/issues/574
-                triton_config_reduction(size_hints, 2, 1024, num_stages=1),
+                triton_config_reduction(size_hints, 1, 2048, num_stages=1),
             ],
             key=["xnumel", "rnumel"],
         )

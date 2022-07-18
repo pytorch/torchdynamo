@@ -1419,3 +1419,21 @@ class ReproTests(torchdynamo.testing.TestCase):
         fn()
         with torchdynamo.optimize("eager"):
             fn()
+
+    def test_slice_into_list_mutable(self):
+        class Mod(torch.nn.Module):
+            def forward(self, listy):
+                x = listy[3:5]
+                for i in range(10):
+                    z = torch.abs(torch.randn(10)) + 1
+                    x[0] = z
+                return x
+
+        m = Mod()
+        listy = [torch.randn(10)] * 10
+
+        cnt = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnt, nopython=True):
+            m.forward(listy)
+
+        self.assertEqual(cnt.frame_count, 1)

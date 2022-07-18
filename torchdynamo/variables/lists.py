@@ -46,11 +46,12 @@ class BaseListVariable(VariableTracker):
                 return self.clone(
                     items=self.items[index],
                     source=GetItemSource(self.source, index),
-                    mutable_local=None,
+                    mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
             else:
                 return self.clone(
-                    items=self.items[index], mutable_local=None
+                    items=self.items[index],
+                    mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
             assert isinstance(index, int)

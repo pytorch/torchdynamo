@@ -22,6 +22,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 for torchbench_dir in (
+    "./torchbenchmark",
     "../torchbenchmark",
     "../torchbench",
     "../benchmark",
@@ -48,6 +49,20 @@ USE_SMALL_BATCH_SIZE = {
 }
 
 
+DETECTRON2_MODELS = {
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+}
+
+
 # Additional models that are skipped in training
 SKIP_TRAIN = {
     # not designed for training
@@ -58,6 +73,8 @@ SKIP_TRAIN = {
     "opacus_cifar10",
     "maml",
 }
+SKIP_TRAIN.update(DETECTRON2_MODELS)
+
 
 # Some models have bad train dataset. We read eval dataset.
 # yolov3 - seems to have different number of inputs between eval and train
@@ -68,7 +85,7 @@ ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
 ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
-
+ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
 REQUIRE_HIGHER_TOLERANCE = {
@@ -223,12 +240,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def failing_dynamic_shape_models(self):
         return DYNAMIC_SHAPES_NOT_YET_WORKING
 
-    def load_model(self, device, model_name, is_training, use_eval_mode):
+    def load_model(
+        self, device, model_name, is_training, use_eval_mode, batch_size=None
+    ):
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
-        batch_size = None
         if is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
@@ -258,7 +276,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             for device in args.devices:
                 try:
                     yield self.load_model(
-                        device, model_name, args.training, args.use_eval_mode
+                        device,
+                        model_name,
+                        args.training,
+                        args.use_eval_mode,
+                        args.batch_size,
                     )
                 except NotImplementedError:
                     continue  # bad benchmark implementation

@@ -22,6 +22,7 @@ def _simplify_loops(index_vars, sizes, index_formulas):
     Try to remove as many axis from loop iterations as possible, by:
         1) removing size==1 dimensions
         2) fuse contiguous dimensions into a single loop
+        If channel_last = True, we will prevent the last dim fused with other dims
     """
     sizes = list(sizes)
 
@@ -597,7 +598,6 @@ class Kernel(CodeGen):
             return [self.rename_indexing(x) for x in index]
         index = sympy.expand(index)
         index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
-        subs = {
-            x: self.args.size(x) for x in index.free_symbols if str(x).startswith("s")
-        }
+        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+        subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)

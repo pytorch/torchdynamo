@@ -14,6 +14,7 @@ from . import config
 from . import dependencies
 from . import ir
 from .codegen.triton_template import template_codegen
+from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
@@ -142,6 +143,29 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def can_remove_buffer(self, **kwargs):
         return False
 
+    def update_dep_type(self):
+        assert isinstance(self.node, ir.Convolution)
+        assert len(self.read_writes.writes) == 1
+        write = self.read_writes.writes.pop()
+        if isinstance(write, StarDep):
+            name = write.name
+            canonicalized_index, canonicalized_size = self.node.canonicalize()
+            new_dep = MemoryDep(name, canonicalized_index, canonicalized_size)
+            self.read_writes.writes.add(new_dep)
+        else:
+            self.read_writes.writes.add(write)
+
+    def mark_fusable(self, broadcast_after_reduce=False):
+        self.scheduler.fusable_deps.update(self.read_writes.writes)
+        if broadcast_after_reduce and self.is_reduction():
+            self.scheduler.fusable_deps.update(
+                w.broadcast_extend_sizes(self._sizes[-1])
+                for w in self.read_writes.writes
+            )
+
+    def get_ranges(self):
+        return self._sizes
+
     def run(self, codegen_extern_call):
         self.allocate()
         self.scheduler.run_count += 1
@@ -168,7 +192,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         return 200
 
 
-def pick_loop_order(stride_lengths, sizes):
+def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
     """
     A heuristic to decide loop iteration orders.  This has not been well
     tuned and may be something we should autotune.
@@ -196,6 +220,9 @@ def pick_loop_order(stride_lengths, sizes):
         return cmp(b, a)
 
     order = list(reversed(range(stride_lengths.shape[1])))
+    if len(priority_idx) > 0:
+        # if we have priority node, only use that node's order
+        stride_lengths = stride_lengths[priority_idx]
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
     return order
@@ -413,7 +440,10 @@ class Scheduler:
             elif isinstance(node, ir.ExternKernel):
                 group_fn = None
                 if should_use_template(node):
-                    group_fn = self.get_backend(node.get_device()).group_fn
+                    if isinstance(node, ir.Convolution):
+                        group_fn = self.get_backend(node.get_device()).group_fn_NHW_C
+                    else:
+                        group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
             else:
                 assert False, node
@@ -461,6 +491,19 @@ class Scheduler:
                 return rename(self.mutation_renames[n])
             return n
 
+        def dep_closure(node_name):
+            reachable_names = {node_name}
+            node = self.name_to_node[node_name]
+            write_dep = list(node.read_writes.writes)[0]
+            for read_dep in node.read_writes.reads:
+                if (
+                    read_dep.name in self.name_to_node
+                    and read_dep.index == write_dep.index
+                    and read_dep.size == write_dep.size
+                ):
+                    reachable_names.update(dep_closure(read_dep.name))
+            return reachable_names
+
         def add_user(used_by_name, user_node, can_inplace=False):
             name_to_users[rename(used_by_name)].append(NodeUser(user_node, can_inplace))
 
@@ -474,7 +517,10 @@ class Scheduler:
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
-                    if other_name != node.get_name():
+                    known_dep_node_names = dep_closure(node.get_name())
+                    if other_name not in known_dep_node_names:
+                        # If this node alreay directly or indirectly depends on other_node,
+                        # we don't need to insert an extra StarDep.
                         node.add_mutation_dep(other_name)
                         add_user(other_name, node)
 
@@ -494,8 +540,9 @@ class Scheduler:
 
         # make sure outputs aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
-            name = node.get_name()
-            add_user(node.get_name(), OutputNode(StarDep(name)))
+            if not isinstance(node, ir.NoneAsConstantBuffer):
+                name = node.get_name()
+                add_user(node.get_name(), OutputNode(StarDep(name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -564,6 +611,10 @@ class Scheduler:
                 V.kernel.args.output_buffers[name] = "REMOVED"
                 V.graph.removed_buffers.add(name)
 
+    def remove_buffer(self, name):
+        V.kernel.args.output_buffers[name] = "REMOVED"
+        V.graph.removed_buffers.add(name)
+
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
@@ -613,7 +664,13 @@ class Scheduler:
     def iter_runable_groups(self):
         while self.runable_groups or self.runable_extern_kernels:
             if self.runable_extern_kernels:
-                self.runable_extern_kernels.popleft().run(self.codegen_extern_call)
+                runnable_extern_kernel = self.runable_extern_kernels.popleft()
+                try:
+                    self.current_device = runnable_extern_kernel.get_device()
+                except AttributeError:
+                    # 'MultiOutputLayout' object has no attribute 'device'
+                    pass
+                runnable_extern_kernel.run(self.codegen_extern_call)
             else:
                 group, priority = self.runable_groups.most_common(1)[0]
                 del self.runable_groups[group]

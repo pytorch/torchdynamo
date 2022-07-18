@@ -1677,7 +1677,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         def fn(x):
             r1 = random.random()
             y = x + random.uniform(10, 20)
-            r2 = random.randint(2, 18)
+            y.sum().item()
+            r2 = random.randint(2, 18)  # no graph output in this frame
+            y.sum().item()
             return y + r1, r2
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
@@ -1687,6 +1689,23 @@ class MiscTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             random.seed(1)
             res2 = fn(x)
+        self.assertTrue(same(res1, res2))
+
+    def test_unspecialized_primitive_variable5(self):
+        # test inserting random output into graph only
+        def fn(shape):
+            torch.manual_seed(123)
+            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
+            return x
+
+        shape = [2, 3]
+        random.seed(1)
+        res1 = fn(shape)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(shape)
+
         self.assertTrue(same(res1, res2))
 
     def test_side_effects_codegen_update_mutated(self):

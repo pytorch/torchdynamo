@@ -33,7 +33,7 @@ realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
 
-# fallback to eager for random/dropout, this is slow bug useful for debugging
+# fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
 
@@ -67,7 +67,11 @@ class triton:
     convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
-    dense_indexing = False
+    # Set default as True because otherwise will encouter `map::at` error
+    # in triton if loading from 1-dim tensor using 2-dim pointer offset
+    # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
+    # could be set as False if triton fixes the bug later
+    dense_indexing = True if convolution != "aten" else False
 
     # limit tiling dimensions
     # Disable tiling until we figure out how tiling and fusion work together
