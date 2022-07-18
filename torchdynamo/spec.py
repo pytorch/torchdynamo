@@ -8,6 +8,11 @@ import torch
 # This means we can describe the spec, but not turn a flat list of Tensors into a materialized spec.
 class Spec:
     @staticmethod
+    def safe_add_element(spec, element):
+        if spec is not None:
+            spec.add_element(element)
+
+    @staticmethod
     def describe_spec(t):
         spec = Spec()
 

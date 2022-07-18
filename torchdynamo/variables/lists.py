@@ -132,10 +132,10 @@ class ListVariable(BaseListVariable):
         return list
 
     def reconstruct(self, codegen, spec=None):
-        spec.add_element(Spec.Element.OPEN_LIST)
+        Spec.safe_add_element(spec, Spec.Element.OPEN_LIST)
         codegen.foreach(self.items)
         list_instructions = [create_instruction("BUILD_LIST", len(self.items))]
-        spec.add_element(Spec.Element.CLOSE_LIST)
+        Spec.safe_add_element(spec, Spec.Element.CLOSE_LIST)
         return list_instructions
 
     def call_method(
@@ -214,10 +214,10 @@ class TupleVariable(BaseListVariable):
         return tuple
 
     def reconstruct(self, codegen, spec=None):
-        spec.add_element(Spec.Element.OPEN_TUPLE)
+        Spec.safe_add_element(spec, Spec.Element.OPEN_TUPLE)
         codegen.foreach(self.items)
         tuple_instructions = [create_instruction("BUILD_TUPLE", len(self.items))]
-        spec.add_element(Spec.Element.CLOSE_TUPLE)
+        Spec.safe_add_element(spec, Spec.Element.CLOSE_TUPLE)
         return tuple_instructions
 
     def call_method(
@@ -281,7 +281,7 @@ class NamedTupleVariable(TupleVariable):
         return self.tuple_cls
 
     def reconstruct(self, codegen, spec=None):
-        spec.add_element(Spec.Element.OPEN_TUPLE)
+        Spec.safe_add_element(spec, Spec.Element.OPEN_TUPLE)
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
@@ -289,7 +289,7 @@ class NamedTupleVariable(TupleVariable):
             create_instruction("BUILD_TUPLE", len(self.items)),
             create_instruction("CALL_FUNCTION", 1),
         ]
-        spec.add_element(Spec.Element.CLOSE_TUPLE)
+        Spec.safe_add_element(spec, Spec.Element.CLOSE_TUPLE)
         return tuple_instructions
 
     def var_getattr(self, tx, name):

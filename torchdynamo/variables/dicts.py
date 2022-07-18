@@ -30,10 +30,10 @@ class ConstDictVariable(VariableTracker):
         # TODO(voz): ATM we do not capture dict keys elegantly, just through codegen,
         # which means either Tensor or nothing. We need to probably disable codegen->spec
         # here and instead custom-handle key:value
-        spec.add_element(Spec.Element.OPEN_DICT)
+        Spec.safe_add_element(spec, Spec.Element.OPEN_DICT)
         if len(self.items) == 0:
             empty_map = [create_instruction("BUILD_MAP", 0)]
-            spec.add_element(Spec.Element.CLOSE_DICT)
+            Spec.safe_add_element(spec, Spec.Element.CLOSE_DICT)
             return empty_map
 
         keys = tuple(self.items.keys())
@@ -43,7 +43,7 @@ class ConstDictVariable(VariableTracker):
             codegen.create_load_const(keys),
             create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
         ]
-        spec.add_element(Spec.Element.CLOSE_DICT)
+        Spec.safe_add_element(spec, Spec.Element.CLOSE_DICT)
         return built_map
 
     def getitem_const(self, arg: VariableTracker):
