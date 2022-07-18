@@ -3,6 +3,7 @@ import torch
 import torchdynamo
 import torchinductor.config
 from torchdynamo.testing import same
+from torchdynamo.testing import rand_strided
 
 torchinductor.config.debug = True
 torchinductor.config.triton.dense_indexing = True
@@ -38,8 +39,8 @@ def test(shape, fusion_type="add"):
     dtype=torch.float32
     torch.manual_seed(0)
     # allocate inputs, nchw
-    a = torch.randn(shape[0], device="cuda", dtype=dtype)
-    b = torch.randn(shape[1], device="cuda", dtype=dtype)
+    a = rand_strided((128, 9216), (9216, 1), device='cuda', dtype=dtype)
+    b = rand_strided((9216, 4096), (4096, 1), device='cuda', dtype=dtype)
     bias = torch.randn((shape[0][0],shape[1][1]), dtype=dtype, device='cuda')
 
     if fusion_type == "":
@@ -56,8 +57,8 @@ def test(shape, fusion_type="add"):
     torchdynamo.reset()
     torchinductor.config.triton.use_mm = False
     y_correct = mm_fusion(a, b, bias)
-    # print("y", y[0,:,0,0])
-    # print("y_correct", y[0,:,0,0])
+    # print("y", y[0,0:128])
+    # print("y_correct", y_correct[0,0:128])
     assert(same(y, y_correct, cos_similarity=True))
 
 fusion_types = ["", "add", "relu", "add_relu"]
