@@ -47,6 +47,10 @@ class _Tracker(dict):
 
     def __contains__(self, item):
         return dict.__contains__(self, id(item))
+    
+    @property
+    def seen(self):
+        return list(self.values())
 
 
 input_codes = _Tracker()

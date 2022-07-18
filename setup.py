@@ -36,6 +36,7 @@ setup(
             "torchinductor.*",
         ]
     ),
+    namespace_package = ['towhee'],
     zip_safe=False,
     ext_modules=[
         Extension(

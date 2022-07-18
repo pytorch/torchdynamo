@@ -111,11 +111,23 @@ def ofi(subgraph):
 @create_backend
 def nebullvm(subgraph):
     from nebullvm import optimize_torch_model
+
     model = subgraph.model
     inputs = subgraph.example_inputs
-    bs = len(inputs)
-    input_sizes = [tuple(x.shape) for x in inputs[0]]
-    return optimize_torch_model(model=model, save_dir='.', batch_size=bs, input_sizes=input_sizes)
+    bs = inputs[0].shape[0]
+    input_sizes = [inputs[0].shape[1:]]
+
+    from towhee.functional import param_scope
+
+    with param_scope() as ps:
+        perf_loss_ths = ps().towhee.compiler.perf_loss_ths(None)
+    return optimize_torch_model(
+        model=model,
+        save_dir=".",
+        batch_size=bs,
+        input_sizes=input_sizes,
+        perf_loss_ths=perf_loss_ths,
+    )
 
 
 @create_backend
