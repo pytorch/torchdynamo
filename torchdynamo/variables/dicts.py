@@ -26,14 +26,12 @@ class ConstDictVariable(VariableTracker):
     def python_type(self):
         return self.user_cls
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         # TODO(voz): ATM we do not capture dict keys elegantly, just through codegen,
         # which means either Tensor or nothing. We need to probably disable codegen->spec
         # here and instead custom-handle key:value
-        Spec.safe_add_element(spec, Spec.Element.OPEN_DICT)
         if len(self.items) == 0:
             empty_map = [create_instruction("BUILD_MAP", 0)]
-            Spec.safe_add_element(spec, Spec.Element.CLOSE_DICT)
             return empty_map
 
         keys = tuple(self.items.keys())
@@ -43,8 +41,13 @@ class ConstDictVariable(VariableTracker):
             codegen.create_load_const(keys),
             create_instruction("BUILD_CONST_KEY_MAP", len(keys)),
         ]
-        Spec.safe_add_element(spec, Spec.Element.CLOSE_DICT)
         return built_map
+
+    def open_spec(self):
+        return Spec.Element.OPEN_DICT
+
+    def close_spec(self):
+        return Spec.Element.CLOSE_DICT
 
     def getitem_const(self, arg: VariableTracker):
         index = arg.as_python_constant()
@@ -245,7 +248,7 @@ class DataClassVariable(ConstDictVariable):
     def as_proxy(self):
         raise NotImplementedError()
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
         result = list(super().reconstruct(codegen))
         assert result[-1].opname == "BUILD_CONST_KEY_MAP"

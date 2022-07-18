@@ -294,7 +294,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             if var in child.symbolic_locals:
                 parent.symbolic_locals[var] = child.symbolic_locals[var]
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         flags = 0x00
         if self.defaults:
             flags |= 0x01

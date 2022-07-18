@@ -19,6 +19,9 @@ from .utils import is_safe_constant
 from .utils import istype
 from .utils import rot_n_helper
 from .variables.base import VariableTracker
+from .variables.dicts import ConstDictVariable
+from .variables.lists import ListVariable
+from .variables.lists import TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import TensorWithTFOverrideVariable
@@ -160,7 +163,9 @@ class PyCodegen(object):
         else:
             self.uses[value] += 1
             try:
-                output.extend(value.reconstruct(self, self.spec))
+                self._add_to_spec(value, True)  # Add open
+                output.extend(value.reconstruct(self))
+                self._add_to_spec(value, False)  # Add close
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
@@ -168,6 +173,13 @@ class PyCodegen(object):
                 self.add_cache(value)
 
         self.top_of_stack = value
+
+    def _add_to_spec(self, value, add_open):
+        if isinstance(value, (ListVariable, TupleVariable, ConstDictVariable)):
+            if add_open:
+                self.spec.add_element(value.open_spec())
+            else:
+                self.spec.add_element(value.close_spec())
 
     def add_cache(self, value):
         var = self.new_var()

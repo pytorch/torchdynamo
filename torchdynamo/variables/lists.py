@@ -102,7 +102,7 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self):
         return self.value
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
         range_fn = codegen.create_load_global("range", add=True)
         if self.value.step == 1:
@@ -131,12 +131,16 @@ class ListVariable(BaseListVariable):
     def python_type(self):
         return list
 
-    def reconstruct(self, codegen, spec=None):
-        Spec.safe_add_element(spec, Spec.Element.OPEN_LIST)
+    def reconstruct(self, codegen):
         codegen.foreach(self.items)
         list_instructions = [create_instruction("BUILD_LIST", len(self.items))]
-        Spec.safe_add_element(spec, Spec.Element.CLOSE_LIST)
         return list_instructions
+
+    def open_spec(self):
+        return Spec.Element.OPEN_LIST
+
+    def close_spec(self):
+        return Spec.Element.CLOSE_LIST
 
     def call_method(
         self,
@@ -213,12 +217,16 @@ class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
 
-    def reconstruct(self, codegen, spec=None):
-        Spec.safe_add_element(spec, Spec.Element.OPEN_TUPLE)
+    def reconstruct(self, codegen):
         codegen.foreach(self.items)
         tuple_instructions = [create_instruction("BUILD_TUPLE", len(self.items))]
-        Spec.safe_add_element(spec, Spec.Element.CLOSE_TUPLE)
         return tuple_instructions
+
+    def open_spec(self):
+        return Spec.Element.OPEN_TUPLE
+
+    def close_spec(self):
+        return Spec.Element.CLOSE_TUPLE
 
     def call_method(
         self,
@@ -253,7 +261,7 @@ class SizeVariable(TupleVariable):
     def python_type(self):
         return torch.Size
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
@@ -280,8 +288,7 @@ class NamedTupleVariable(TupleVariable):
     def python_type(self):
         return self.tuple_cls
 
-    def reconstruct(self, codegen, spec=None):
-        Spec.safe_add_element(spec, Spec.Element.OPEN_TUPLE)
+    def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
@@ -289,7 +296,6 @@ class NamedTupleVariable(TupleVariable):
             create_instruction("BUILD_TUPLE", len(self.items)),
             create_instruction("CALL_FUNCTION", 1),
         ]
-        Spec.safe_add_element(spec, Spec.Element.CLOSE_TUPLE)
         return tuple_instructions
 
     def var_getattr(self, tx, name):
@@ -326,7 +332,7 @@ class SliceVariable(BaseListVariable):
     def as_python_constant(self):
         return slice(*[x.as_python_constant() for x in self.items])
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         codegen.foreach(self.items)
         return [create_instruction("BUILD_SLICE", len(self.items))]
 
@@ -364,7 +370,7 @@ class ListIteratorVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         return [x.add_options(self) for x in self.items[self.index :]]
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         return [

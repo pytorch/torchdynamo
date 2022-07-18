@@ -149,7 +149,7 @@ class BuiltinVariable(VariableTracker):
     def as_python_constant(self):
         return self.fn
 
-    def reconstruct(self, codegen, spec=None):
+    def reconstruct(self, codegen):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
