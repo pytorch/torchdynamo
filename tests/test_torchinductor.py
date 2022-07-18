@@ -607,6 +607,23 @@ class CommonTemplate:
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
+    def test_round_correctness(self):
+        if self.device == "cuda" and (
+            not torchinductor.utils.has_triton_libdevice()
+            # TODO(jansel): need to debug issue on V100 cards
+            or torch.cuda.get_device_capability() < (8,)
+        ):
+            raise unittest.SkipTest("requires triton.language.libdevice")
+
+        def fn(a):
+            return torch.round(a)
+
+        self.common(
+            fn,
+            [torch.arange(-10, 10, 0.1, dtype=torch.float64)],
+            check_lowp=False,
+        )
+
     def test_silu(self):
         def fn(a):
             return (torch.nn.functional.silu(a),)
@@ -1454,6 +1471,15 @@ class CommonTemplate:
             (torch.randn([8, 8]) + 10,),
         )
 
+    def test_log_fp64(self):
+        def fn(x):
+            return torch.log(x), torch.log2(x)
+
+        self.common(
+            fn,
+            (torch.randn([1024], dtype=torch.float64) + 10,),
+        )
+
     def test_bitwise(self):
         def fn(x, y):
             return (
@@ -1904,6 +1930,15 @@ class CommonTemplate:
 
         self.common(
             fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
+        )
+        self.common(
+            fn,
+            [
+                torch.tensor(
+                    [1, float("inf"), 2, float("-inf"), float("nan")],
+                    dtype=torch.float64,
+                )
+            ],
         )
 
     def test_any(self):
