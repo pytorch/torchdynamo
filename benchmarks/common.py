@@ -378,7 +378,10 @@ def baselines(models, model_iter_fn, example_inputs, args):
     for rep in range(args.repeat):
         for idx, (name, model) in enumerate(models):
             if model is not None:
-                timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
+                try:
+                    timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
+                except Exception:
+                    pass
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
         for i in range(1, timings.shape[1])
@@ -415,6 +418,17 @@ def speedup_experiment_ts(args, model_iter_fn, model, example_inputs):
 
     Writes to ./baseline_ts.csv
     """
+    if args.training:
+        return baselines(
+            [
+                ("eager", model),
+                ("ts", try_script(model, example_inputs)),
+            ],
+            model_iter_fn,
+            example_inputs,
+            args,
+        )
+
     return baselines(
         [
             ("eager", model),
@@ -803,11 +817,6 @@ def parse_args():
         help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
     )
     parser.add_argument(
-        "--disable-functionalization",
-        action="store_true",
-        help="Disables functionalization",
-    )
-    parser.add_argument(
         "--inductor-settings",
         action="store_true",
         help="Use same settings as --inductor for baseline comparisons",
@@ -816,6 +825,10 @@ def parse_args():
         "--raise-on-backend-error",
         action="store_true",
         help="Fail a benchmark if backend throws an exception",
+    )
+    parser.add_argument(
+        "--output",
+        help="Overides the output filename",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -864,6 +877,11 @@ def parse_args():
     )
     group.add_argument(
         "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
+    )
+    group.add_argument(
+        "--speedup-dynamo-ts",
+        action="store_true",
+        help="TorchDynamo frontend with torchscript backend",
     )
     group.add_argument("--python-key", action="store_true")
     group.add_argument(
@@ -1129,6 +1147,10 @@ def main(runner, original_dir=None):
     elif args.speedup_trt:
         experiment = speedup_experiment_trt
         output_filename = "baseline_trt.csv"
+    elif args.speedup_dynamo_ts:
+        optimize_ctx = torchdynamo.optimize(backends.ts, nopython=args.nopython)
+        experiment = speedup_experiment
+        output_filename = "speedup_dynamo_ts.csv"
     elif args.speedup_fx2trt:
         optimize_ctx = torchdynamo.optimize(
             backends.fx2trt_compiler, nopython=args.nopython
@@ -1218,11 +1240,11 @@ def main(runner, original_dir=None):
 
     cos_similarity = args.cosine
 
+    if args.output:
+        output_filename = args.output
+
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
-
-    if args.disable_functionalization:
-        torchdynamo.config.normalize_ir = False
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count

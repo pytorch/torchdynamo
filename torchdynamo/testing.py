@@ -68,7 +68,7 @@ def reduce_to_scalar_loss(out):
         return sum([reduce_to_scalar_loss(value) for value in out.values()]) / len(
             out.keys()
         )
-    raise NotImplementedError("Don't know how to reduce")
+    raise NotImplementedError("Don't know how to reduce", type(out))
 
 
 def debug_dir():
