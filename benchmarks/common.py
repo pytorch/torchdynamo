@@ -298,6 +298,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
 
     Writes to ./speedups.csv
     """
+    if args.dynamic_shapes:
+        return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
+
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
@@ -331,6 +334,66 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
 
+def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
+    """
+    Measure speedups over eager using the autotuning inference backend.  To use this:
+        1) First run once to record graphs that need autotuning
+        2) Next run ./autotune.py to select the right backend for each recorded graph
+        3) Finally, run this target again to measure speedups
+
+    Writes to ./speedups.csv
+    """
+    # TODO something is wrong with the dynamic inputs since i have to do this
+    example_inputs = example_inputs[0]
+    timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
+
+    # if dynamo is not reset between 'repeats', subsequent repeats won't be fair
+    # but currently warmup for first shape is done outside speedup, and it is fair
+    # to allow one warmup.  So, probably move warmup to inside this loop using just 
+    # the first shape in the sequence, enable repeat, and switch from first_run_speedups
+    # to median_speedups to reduce measurement variance
+    assert args.repeat == 1, "TODO: to enable repeat>1, but ensure dynamo is reset"
+    for rep in range(args.repeat):
+        for input_idx, inputs in enumerate(example_inputs):
+            # interleave the runs to handle frequency scaling and load changes
+            timings[rep, input_idx, 0], expected_output = timed(
+                model, model_iter_fn, (inputs,), return_result=True
+            )
+            # different from regular speedup_experiment, we _DO_ want to allow recompilation
+            with optimize_ctx:
+                timings[rep, input_idx, 1], actual_output = timed(
+                    model, model_iter_fn, (inputs,), return_result=True
+                )
+    # medians = np.median(timings, axis=0)
+    # median_speedups = speedups = list(medians[:, 0] / medians[:, 1])
+    speedups = list(timings[0,:,0] / timings[0,:,1])
+    speedups_mean = np.mean(speedups)
+    speedups_median = np.median(speedups)
+    speedups_var = np.var(speedups)
+
+    shapes = [x.shape for x in example_inputs]
+    shape_keys = sorted(set(shapes))
+    shape_speedups = {
+        shape: list(map(lambda it: it[1], filter(lambda it: it[0] == shape, zip(shapes, speedups))))
+        for shape in shape_keys
+    }
+    output_str = f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}" + \
+        "\nSpeedups by shape: " + \
+        "\n".join([
+        f"{shape}: " + ", ".join(
+        [
+            f"{speedup: .3g}" for speedup in shape_speedups[shape]
+        ])
+        for shape in shape_keys
+    ])
+    output_csv(
+        output_filename,
+        ("dev", "name", "speedup mean", "speedup median", "speedup var"),
+        [current_device, current_name, speedups_mean, speedups_median, speedups_var],
+    )
+    return output_str
+
+
 def overhead_experiment(*args, model_iter_fn):
     """
     Measure overheads of TorchDynamo by running with no backend (only
@@ -360,6 +423,12 @@ def baselines(models, model_iter_fn, example_inputs, args):
     """
     Common measurement code across all baseline experiments.
     """
+
+    if args.dynamic_shapes:
+        # TODO possibly merge ds logic back to main baselines fn, but kept it separate
+        # during exploration phase
+        return baselines_ds(models, model_iter_fn, example_inputs, args)
+
     models = list(models)
     for idx, (name, model) in enumerate(models):
         if idx == 0:
@@ -403,7 +472,6 @@ def baselines(models, model_iter_fn, example_inputs, args):
         [current_device, current_name] + [f"{x:.4f}" for x in speedup],
     )
     return result
-
 
 def try_script(model, example_inputs):
     try:
@@ -668,6 +736,7 @@ class BenchmarkRunner:
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             is_training, current_device, name
         )
+        static_inputs = (example_inputs[0][0], *example_inputs[1:])
         with self.pick_grad(name, is_training):
             mode = "train" if is_training else "eval"
             sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
@@ -676,13 +745,13 @@ class BenchmarkRunner:
                 assert not torchdynamo.utils.is_jit_model(submod)
             torch.manual_seed(1337)
             correct_result = model_iter_fn(
-                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+                copy.deepcopy(model), torchdynamo.utils.clone_inputs(static_inputs)
             )
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(static_inputs)
                 )
                 if not same(correct_result, correct_rerun_result):
                     print("INCORRECT - Variation in Eager runs itself")
@@ -693,13 +762,13 @@ class BenchmarkRunner:
             torchdynamo.reset()
             if experiment.func is cold_start_experiment:
                 results = []
-                results.append(experiment(model, example_inputs, optimize_ctx))
+                results.append(experiment(model, static_inputs, optimize_ctx))
                 print(" ".join(map(str, results)))
                 return 0
 
             try:
                 with optimize_ctx:
-                    new_result = model_iter_fn(model, example_inputs)
+                    new_result = model_iter_fn(model, static_inputs)
             except Exception:
                 logging.exception("unhandled error")
                 print("ERROR")
@@ -718,12 +787,12 @@ class BenchmarkRunner:
 
             # run one more time to see if we reached a fixed point
             with optimize_ctx:
-                model_iter_fn(model, example_inputs)
+                model_iter_fn(model, static_inputs)
             _, frames_second_pass = Stats.reset_counters()  # should be 0
 
             if frames_second_pass > 0:
                 with optimize_ctx:
-                    model_iter_fn(model, example_inputs)
+                    model_iter_fn(model, static_inputs)
                 _, frames_third_pass = Stats.reset_counters()  # should be 0
             else:
                 frames_third_pass = 0
@@ -801,6 +870,11 @@ def parse_args():
         "--training",
         action="store_true",
         help="Performs training",
+    )
+    parser.add_argument(
+        "--dynamic_shapes",
+        action="store_true",
+        help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
         "--use-eval-mode",
@@ -1059,8 +1133,8 @@ def main(runner, original_dir=None):
         runner.skip_models.clear()
 
     experiment = null_experiment
+    global current_name, current_device, output_filename, optimize_ctx
     optimize_ctx = NullContext()
-    global current_name, current_device, output_filename
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
@@ -1252,6 +1326,7 @@ def main(runner, original_dir=None):
                     args.training,
                     args.use_eval_mode,
                     args.batch_size,
+                    args.dynamic_shapes,
                 )
             except NotImplementedError:
                 continue  # bad benchmark implementation
