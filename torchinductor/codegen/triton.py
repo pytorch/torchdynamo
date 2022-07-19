@@ -591,8 +591,11 @@ class TritonKernel(Kernel):
         if upcast:
             line += ".to(tl.float32)"
 
-        if self.inside_reduction and "rmask" not in mask:
+        if self.inside_reduction and "rmask" not in mask and self.loads != self.compute:
             # can lift a common load outside of reduction loop
+            # One exception is when this is invoked inside of an indirect_load,
+            # because there may be dependency, Kernel.indirect_load sets self.loads
+            # to self.compute which we can use as a checking here.
             tmp = self.cse.generate(self.body, line)
         else:
             tmp = self.cse.generate(self.loads, line)
