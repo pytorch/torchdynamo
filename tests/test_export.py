@@ -21,7 +21,7 @@ class ExportTests(torchdynamo.testing.TestCase):
             rhs_keys = set(rhs.keys())
             if lhs_keys != rhs_keys:
                 return False
-            return all(allclose(lhs[k], rhs[k], rtol, atol) for k in lhs)
+            return all(ExportTests.allclose(lhs[k], rhs[k], rtol, atol) for k in lhs)
         else:
             raise RuntimeError(
                 f"Unexpected types: lhs type {type(lhs)}, rhs type {type(rhs)}"
