@@ -1500,7 +1500,6 @@ def grid_sampler_2d(
         return ops.indirect_indexing(ops.to_dtype(v, torch.int64))
 
     def fn(index):
-        # CHECK x/y
         n, c, y, x = index
         ix = optical_loader([n, y, x, sympy.Integer(0)])
         iy = optical_loader([n, y, x, sympy.Integer(1)])
