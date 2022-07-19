@@ -127,15 +127,3 @@ def exp(x_mask: RaggedFormat, x_data):
     y_mask.default = 1
     return (y_mask, y_data)
 
-
-
-# def sum_kernel(a, default_value):
-#     m = ...
-#     num_zeros = N - nnz_of_the_row * block_dim
-#     tl.sum(row) + default_value * num_of_zeros
-
-#     if (n >= col_end) | (n < col_start):
-#         return [BLOCK_N,
-#             BLOCK_N,
-#             ...
-#         ]
