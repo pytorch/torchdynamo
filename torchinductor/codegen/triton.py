@@ -149,6 +149,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.cos({x})"
 
     @staticmethod
+    def sin(x):
+        return f"tl.sin({x})"
+
+    @staticmethod
     def index_expr(expr, dtype):
         return V.kernel.indexing(expr)[0]
 
@@ -788,6 +792,19 @@ class TritonScheduling:
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
+
+    def group_fn_NHW_C(self, sizes):
+        # group to size of NHW, C for 4d tensor
+        group = ()
+        for s in sizes:
+            if len(s) == 4:
+                group += (
+                    V.graph.sizevars.simplify(sympy_product([s[0], s[2], s[3]])),
+                    s[1],
+                )
+            else:
+                group += (V.graph.sizevars.simplify(sympy_product(s)),)
+        return group
 
     def codegen(self, *groups):
         wrapper = V.graph.wrapper_code

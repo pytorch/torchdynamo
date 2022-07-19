@@ -43,6 +43,7 @@ from .constant import ConstantVariable
 from .constant import EnumVariable
 from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
+from .dicts import HFPretrainedConfigVariable
 from .functions import UserFunctionVariable
 from .lists import ListIteratorVariable
 from .lists import ListVariable
@@ -312,6 +313,10 @@ class VariableBuilder:
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
                 make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif HFPretrainedConfigVariable.is_matching_object(value):
+            return HFPretrainedConfigVariable(
+                value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, slice):
             start = ConstantVariable(value.start)

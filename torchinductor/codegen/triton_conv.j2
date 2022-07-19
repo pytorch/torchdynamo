@@ -60,11 +60,7 @@ from torchinductor.triton_ops.conv_perf_model import estimate_conv_time
 )
 @triton.jit
 def {{kernel_name}}(
-    x,
-    w,
-    bias,
-    y,
-    {% for i in extra_args %}
+    {% for i in template_inout_argdefs %}
     {{i}},
     {% endfor %}
     # stride of tensor
@@ -94,15 +90,19 @@ def {{kernel_name}}(
     OUT_H,
     OUT_W,
     # parameters of conv
-    stride_h,
-    stride_w,
-    padding_h,
-    padding_w,
-    dilation_h,
-    dilation_w,
-    output_padding_h,
-    output_padding_w,
-    groups,
+    stride_h: tl.constexpr,
+    stride_w: tl.constexpr,
+    padding_h: tl.constexpr,
+    padding_w: tl.constexpr,
+    dilation_h: tl.constexpr,
+    dilation_w: tl.constexpr,
+    output_padding_h: tl.constexpr,
+    output_padding_w: tl.constexpr,
+    groups: tl.constexpr,
+    # fusable kernels args
+    {% for i in extra_argdefs %}
+    {{i}},
+    {% endfor %}
     # Metaparameters
     ACC_TYPE: tl.constexpr,
     CONV1X1_NHWC: tl.constexpr,
@@ -196,12 +196,6 @@ def {{kernel_name}}(
         # ------ load w ------
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
-    {{ pointwise_computation }}
-    {# 
-    z = tl.load(z_ptrs, mask=mask_z)
-    acc += z
-    #}
-
     # add bias if is not None
     if bias is not None:
         off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -211,7 +205,7 @@ def {{kernel_name}}(
         acc += _bias[None, :]
 
 
-    acc = acc.to(y.dtype.element_ty)
+    acc = acc.to({{out_def}}.dtype.element_ty)
 
     # rematerialize -- this saves some registers
     # offset for output y
@@ -225,7 +219,7 @@ def {{kernel_name}}(
 
     # y ptrs in the block of [BLOCK_M, BLOCK_N]
     y_ptrs = (
-        y
+        {{out_def}}
         + off_y_n[:, None] * stride_yn
         + off_y_h[:, None] * stride_yh
         + off_y_w[:, None] * stride_yw
@@ -240,7 +234,19 @@ def {{kernel_name}}(
         & (off_y_k < KERNEL_N)[None, :]
     )
 
+{% if pointwise_code %}
+{{ pointwise_code | indent(4, true) }}
+    {# 
+    z = tl.load(z_ptrs, mask=mask_z)
+    acc += z
+    #}
+{% else %}
+    {#
+    if pointwise_code is empty, we need to code-gen
+    the final store explicitly
     tl.store(y_ptrs, acc, mask=mask_y)
+    #}
+    tl.store(y_ptrs, acc, mask=mask_y)
+{% endif %}
 
     return
-

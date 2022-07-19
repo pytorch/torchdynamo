@@ -1,11 +1,14 @@
 import os
 
+import sympy
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
+from jinja2 import StrictUndefined
 
 from .. import ir
 from ..virtualized import V
 from .common import IndentedBuffer
+from .triton import CantSplit
 from .triton import TritonKernel
 
 template_dict = {ir.Convolution: "triton_conv"}
@@ -20,31 +23,83 @@ class TritonTemplateKernel(TritonKernel):
             loader=FileSystemLoader(os.path.dirname(__file__)),
             trim_blocks=True,
             lstrip_blocks=True,
+            undefined=StrictUndefined,
         )
         self.template = env.get_template(template_name + ".j2")
-        self.pointwise_compute = None
 
-    def codegen_body(self, name, extra_argdefs):
+    def rename_vars(self):
+        for k, v in self.inout_dict.items():
+            self.args.output_buffers[v] = k
+        if isinstance(self.node, ir.Convolution):
+            self.cse.store_cache[self.inout_dict["y"]] = "acc"
+
+    def assign_block_numel(self):
+        code = IndentedBuffer()
+        if isinstance(self.node, ir.Convolution):
+            code.writeline("XBLOCK: tl.constexpr = BLOCK_M")
+            code.writeline("YBLOCK: tl.constexpr = BLOCK_N")
+            code.writeline(
+                "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_h)"
+            )
+            code.writeline("ynumel = KERNEL_N")
+
+        return code
+
+    def codegen_body(
+        self, name, fuse, could_remove_kernel_buf, kernel_buf_replace_name
+    ):
         """
-        get render_variables that to be put into the template
+        put render_variables into the template
         to generate the final code
         """
-        # TODO: codegen_body
+        # get extra_argdefs from fusable triton kernels
+        self.extra_argdefs = []
+        self.extra_call_args = []
+        argdefs, call_args = self.args.python_argdefs()
+        # add extra args if it is different from
+        # current TritonTemplateKernel args
+        for (argdef, call_arg) in zip(argdefs, call_args):
+            if (
+                call_arg not in self.inout_dict.values()
+                and call_arg not in self.args_dict.values()
+            ):
+                self.extra_argdefs.append(argdef)
+                self.extra_call_args.append(call_arg)
+
+        if could_remove_kernel_buf:
+            if isinstance(self.node, ir.Convolution):
+                self.inout_dict.pop("y")
+        self.template_inout_argdefs = list(self.inout_dict.keys())
+
+        if kernel_buf_replace_name is not None:
+            idx = self.extra_call_args.index(kernel_buf_replace_name)
+            kernel_buf_replace_def = self.extra_argdefs[idx]
+
+        super().codegen_body()
+        self.pointwise_code = IndentedBuffer()
+        self.pointwise_code.splice(self.assign_block_numel())
+        self.pointwise_code.splice(self.body)
         render_dict = {}
         render_dict["kernel_name"] = name
-        render_dict["extra_args"] = extra_argdefs
-        render_dict["pointwise_computation"] = self.pointwise_compute
+        render_dict["template_inout_argdefs"] = self.template_inout_argdefs
+        render_dict["extra_argdefs"] = self.extra_argdefs
+        render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
+        render_dict["out_def"] = (
+            "y" if kernel_buf_replace_name is None else kernel_buf_replace_def
+        )
         self.body = self.template.render(render_dict) + "\n"
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(
+        self,
+        name=None,
+        fuse=False,
+        could_remove_kernel_buf=False,
+        kernel_buf_replace_name=None,
+    ):
 
         code = IndentedBuffer()
 
-        # self.args is the args for pointwise or reduction that will be fused
-        # with the current TritonTemplateKernel
-        extra_argdefs, _ = self.args.python_argdefs()
-
-        self.codegen_body(name, extra_argdefs)
+        self.codegen_body(name, fuse, could_remove_kernel_buf, kernel_buf_replace_name)
         code.splice(self.body)
 
         if name is not None:
@@ -62,7 +117,12 @@ class TritonTemplateKernel(TritonKernel):
         map the constant args or
         kernel[grid](..., IN_C, IN_H, IN_W, strides,...)
         """
-        self.args_dict, self.const_dict, self.other_dict = self.node.map_args()
+        (
+            self.inout_dict,
+            self.args_dict,
+            self.const_dict,
+            self.other_dict,
+        ) = self.node.map_args()
 
     def precompute(self, wrapper, kernel_name):
         """
@@ -120,45 +180,104 @@ class TritonTemplateKernel(TritonKernel):
         # def grid(META):
         #     return (...)
         # kernel1[grid](arg0, arg1, ...)
-        extra_arg_defs, extra_call_args = self.args.python_argdefs()
-        extra_args = ", ".join(extra_call_args)
-        self_args = ", ".join({**self.args_dict, **self.const_dict}.values())
+        extra_args = ", ".join(self.extra_call_args)
+        self_args = ", ".join({**self.inout_dict, **self.args_dict}.values())
+        self_const_kwargs = ", ".join(f"{k}={v}" for k, v in self.const_dict.items())
         args = self_args + (
             ", " + extra_args if extra_args and len(extra_args) > 0 else ""
         )
+        args_kwargs = args + ", " + self_const_kwargs
         wrapper.writeline(self.gen_grid(name))
-        wrapper.writeline(f"{name}[grid_{name}]({args})")
+        wrapper.writeline(f"{name}[grid_{name}]({args_kwargs})")
 
 
-def template_codegen(scheduler, node):
+def template_codegen(scheduler, scheduler_node):
     """
     codegen function for triton templates
     scheduler: Scheduler
-    node: ExternKernelSchedulerNode
+    scheduler_node: ExternKernelSchedulerNode
     """
     wrapper = V.graph.wrapper_code
-    deivce, group = node.group
+    deivce, group = scheduler_node.group
 
     reschedule = []
-    with scheduler.kernel(TritonTemplateKernel(node.node, *group)) as kernel:
+    fuse = False
+    could_remove_kernel_buf = False
+    fusable_nodes = []
+    with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *group)) as kernel:
+        # map const args/ shape/ strides to kernel args
+        kernel.map_args()
+        # set self.args name to match the TritonTemplateKernel's args names
+        kernel.rename_vars()
+        # update node dep from StarDep to MemoryDep
+        scheduler_node.update_dep_type()
+        # mark node of TritonTemplateKernel as fusable and update fusable_deps
+        scheduler_node.mark_fusable()
+        # enqueue any nodes that became runable after this node is run
+        # otherwise, relu after conv is in blocked_nodes that could not be in
+        # runable_groups to be fused to conv
+        # scheduler.barrier()
+        tile1, tile2, _ = group
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
-        for node in scheduler.pop_group(group):
-            # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
-            node.run(*kernel.set_ranges(*node.get_ranges()))
-            node.mark_fusable()
+        if isinstance(kernel.node, ir.Convolution):
+            # Add pointwise with compatible dimensions
+            for node in scheduler.pop_group(
+                (tile1 * tile2, sympy.Integer(1)),
+            ):
+                # if not channel_last layout (data.get_stride()[1] != 1),
+                # reorder node loop ordering to channel last
+                # so that it could be fused with convolution and
+                # have correct results of split_and_set_ranges()
+                # if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
+                #     node.reorder_channel_last()
+                # make sure we force the reads of conv are channel_last layout
+                if len(node.node.get_size()) == 4:
+                    assert node.node.get_stride()[1] == 1
+                try:
+                    node.run(*kernel.split_and_set_ranges(node.get_ranges()))
+                    node.mark_fusable()
+                    fuse = True
+                    fusable_nodes.append(node)
+                    # if node.output buffer has the same stride/size as kernel output buffer
+                    # replace kernel output buffer name as node.output buffer
+                    could_remove_kernel_buf = True
+                except CantSplit:
+                    reschedule.append(node)
+
+        else:
+            for node in scheduler.pop_group(group):
+                # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
+                node.run(*kernel.set_ranges(*node.get_ranges()))
+                node.mark_fusable()
 
         # TODO: reduction
 
-    kernel_name = wrapper.next_kernel_name()
-    # code gen kernel
-    wrapper.header.splice(kernel.codegen_kernel(kernel_name))
-    # map const args/ shape/ strides to kernel args
-    kernel.map_args()
-    # gen precompute tensor (like delta_x_ptr) if needed
-    kernel.precompute(wrapper, kernel_name)
-    # code gen call to kernel
-    kernel.call_kernel(wrapper, kernel_name)
+        kernel_buf_replace_name = None
+        if fuse and could_remove_kernel_buf:
+            writes = scheduler_node.read_writes.writes
+            assert len(writes) == 1
+            # if all users of buf0 are in fusable groups
+            # safe to remove buf0
+            for user in scheduler_node.users:
+                if user.node not in fusable_nodes or not user.can_inplace:
+                    could_remove_kernel_buf = False
+                    break
+            if could_remove_kernel_buf:
+                scheduler.remove_buffer(writes.pop().name)
+            kernel_buf_replace_name = fusable_nodes[0].get_name()
 
-    scheduler.enqueue(reschedule)  # TODO: consider reschedule
-    scheduler.barrier()
-    scheduler.maybe_free_buffers()
+        kernel_name = wrapper.next_kernel_name()
+        # code gen kernel
+        wrapper.header.splice(
+            kernel.codegen_kernel(
+                kernel_name, fuse, could_remove_kernel_buf, kernel_buf_replace_name
+            )
+        )
+        # gen precompute tensor (like delta_x_ptr) if needed
+        kernel.precompute(wrapper, kernel_name)
+        # code gen call to kernel
+        kernel.call_kernel(wrapper, kernel_name)
+
+        scheduler.enqueue(reschedule)  # TODO: consider reschedule
+        scheduler.barrier()  # enqueue any nodes that became runable after this node is run
+        scheduler.maybe_free_buffers()
