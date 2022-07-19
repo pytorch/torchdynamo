@@ -495,7 +495,7 @@ class CheckFunctionManager:
             if right is None:
                 return left
 
-            return left | right
+            return {**left, **right}
 
         local_builder = GuardBuilder(
             self.id_ref, combine_scopes(f_globals, f_locals), self, renames=True
