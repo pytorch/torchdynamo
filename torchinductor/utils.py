@@ -27,6 +27,16 @@ def has_torchvision_roi_align():
         return False
 
 
+@functools.lru_cache(None)
+def has_triton_libdevice():
+    try:
+        from triton.language import libdevice
+
+        return libdevice is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
 

@@ -14,6 +14,7 @@ import torch
 from .. import codecache
 from .. import config
 from .. import ir
+from ..utils import has_triton_libdevice
 from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
@@ -92,34 +93,8 @@ class TritonOverrides(OpOverrides):
         return f"tl.sqrt({x})"
 
     @staticmethod
-    def log(x):
-        # workaround https://github.com/openai/triton/issues/543
-        return f"tl.log({x}.to(tl.float32))"
-
-    @staticmethod
-    def isinf(x):
-        return f"{x}+1 == {x}"
-
-    @staticmethod
-    def isnan(x):
-        return f"{x} != {x}"
-
-    @staticmethod
     def relu(x):
         return ops.maximum("0", x)
-
-    @staticmethod
-    def round(x):
-        return f"tl.where({x}<0, {x}-0.5, {x}+0.5).to(tl.int32).to(tl.float32)"
-
-    @staticmethod
-    def floor(x):
-        tmp = ops.trunc(x)
-        return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
-
-    @staticmethod
-    def trunc(x):
-        return f"{x}.to(tl.int32).to(tl.float32)"
 
     @staticmethod
     def minimum(a, b):
@@ -167,6 +142,50 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def rand(seed, offset):
         return f"tl.rand({seed}, {offset})"
+
+    @staticmethod
+    def log(x):
+        if has_triton_libdevice():
+            return f"tl.libdevice.log({x}) if {x}.dtype is tl.float64 else tl.log({x})"
+        else:
+            # workaround https://github.com/openai/triton/issues/543
+            return f"tl.log({x}.to(tl.float32))"
+
+    @staticmethod
+    def isinf(x):
+        if has_triton_libdevice():
+            return f"tl.libdevice.isinfd({x}) if {x}.dtype is tl.float64 else tl.libdevice.isinff({x})"
+        else:
+            return f"{x}+1 == {x}"
+
+    @staticmethod
+    def isnan(x):
+        if has_triton_libdevice():
+            return f"tl.libdevice.isnand({x}) if {x}.dtype is tl.float64 else tl.libdevice.isnanf({x})"
+        else:
+            return f"{x} != {x}"
+
+    @staticmethod
+    def round(x):
+        if has_triton_libdevice():
+            return f"tl.libdevice.nearbyint({x})"
+        else:
+            return f"tl.where({x}<0, {x}-0.5, {x}+0.5).to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def floor(x):
+        if has_triton_libdevice():
+            return f"tl.libdevice.floor({x})"
+        else:
+            tmp = ops.trunc(x)
+            return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
+
+    @staticmethod
+    def trunc(x):
+        if has_triton_libdevice():
+            return f"tl.libdevice.trunc({x})"
+        else:
+            return f"{x}.to(tl.int32).to(tl.float32)"
 
 
 @dataclasses.dataclass
@@ -572,8 +591,11 @@ class TritonKernel(Kernel):
         if upcast:
             line += ".to(tl.float32)"
 
-        if self.inside_reduction and "rmask" not in mask:
+        if self.inside_reduction and "rmask" not in mask and self.loads != self.compute:
             # can lift a common load outside of reduction loop
+            # One exception is when this is invoked inside of an indirect_load,
+            # because there may be dependency, Kernel.indirect_load sets self.loads
+            # to self.compute which we can use as a checking here.
             tmp = self.cse.generate(self.body, line)
         else:
             tmp = self.cse.generate(self.loads, line)
