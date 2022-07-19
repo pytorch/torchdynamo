@@ -144,7 +144,7 @@ class TritonTemplateKernel(TritonKernel):
             if self.const_dict["CONV1X1_NHWC"] == "False":
                 if self.template_name == "triton_conv_delta_x":
                     assert "delta_x_ptr" not in self.args_dict.keys()
-                    self.args_dict["delta_x_ptr"] = "delta_x"
+                    self.args_dict["delta_x_ptr"] = f"delta_x_{kernel_name}"
                     wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
                     IN_C = self.args_dict["IN_C"]
                     KERNEL_H = self.args_dict["KERNEL_H"]
@@ -159,7 +159,7 @@ class TritonTemplateKernel(TritonKernel):
                     stride_xw = self.args_dict["stride_xw"]
                     device = self.other_dict["device"]
                     wrapper.writeline(
-                        "delta_x = _conv._delta_x_ptr("
+                        f"delta_x_{kernel_name} = _conv._delta_x_ptr("
                         f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
                         f"{dilation_h}, {dilation_w}, "
                         f"{stride_wc}, {stride_wh}, {stride_ww}, "
@@ -170,9 +170,9 @@ class TritonTemplateKernel(TritonKernel):
                     assert "delta_xh_ptr" not in self.args_dict.keys()
                     assert "delta_xw_ptr" not in self.args_dict.keys()
                     assert "delta_xc_ptr" not in self.args_dict.keys()
-                    self.args_dict["delta_xh_ptr"] = "delta_xh"
-                    self.args_dict["delta_xw_ptr"] = "delta_xw"
-                    self.args_dict["delta_xc_ptr"] = "delta_xc"
+                    self.args_dict["delta_xh_ptr"] = f"delta_xh_{kernel_name}"
+                    self.args_dict["delta_xw_ptr"] = f"delta_xw_{kernel_name}"
+                    self.args_dict["delta_xc_ptr"] = f"delta_xc_{kernel_name}"
                     wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
                     IN_C = self.args_dict["IN_C"]
                     KERNEL_H = self.args_dict["KERNEL_H"]
@@ -187,7 +187,7 @@ class TritonTemplateKernel(TritonKernel):
                     stride_xw = self.args_dict["stride_xw"]
                     device = self.other_dict["device"]
                     wrapper.writeline(
-                        "delta_xh, delta_xw, delta_xc = _conv._delta_x_ptr_hwc("
+                        f"delta_xh_{kernel_name}, delta_xw_{kernel_name}, delta_xc_{kernel_name} = _conv._delta_x_ptr_hwc("
                         f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
                         f"{dilation_h}, {dilation_w}, "
                         f"{stride_wc}, {stride_wh}, {stride_ww}, "
