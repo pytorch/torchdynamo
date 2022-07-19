@@ -5,8 +5,6 @@ from typing import List
 import torch
 
 
-# TODO(voz): Spec today offers no reconstrution methods.
-# This means we can describe the spec, but not turn a flat list of Tensors into a materialized spec.
 class Spec:
     @staticmethod
     def describe_spec(t):
@@ -76,7 +74,8 @@ class Spec:
             return self._repr_dict()[self]
 
     def add_element(self, element: Element):
-        # TODO(voz): Add validation logic, (ex: no list close if no list opens on the stack)
+        # TODO(voz): Add validation logic, (ex: no list close if no list opens on the stack).
+        # It currently exists in apply, but not here.
         self.elements.append(element)
         if element == Spec.Element.TENSOR:
             self.tensors += 1
@@ -89,6 +88,13 @@ class Spec:
 
     @staticmethod
     def apply_spec(spec, tensors: List[torch.Tensor]):
+        r"""
+        Given a spec and a list of tensors, return a fully materialized data structure containing
+        all the Tensors.
+
+        Note: If the spec starts with a collection, the result will mirror it. Specs of only tensors, or starting
+        With tensors will be added to a Tuple
+        """
         if len(tensors) == 0:
             return []
 
@@ -135,7 +141,9 @@ class Spec:
                 current_collection = tuple()
             elif current_element in {Spec.Element.CLOSE_LIST, Spec.Element.CLOSE_TUPLE}:
                 # Closing a list is predicated on there being an open list
-
+                assert isinstance(
+                    current_collection, (list, tuple)
+                ), f"Illegal spec. This is a bug in torchdynamo/spec.py. {spec}"
                 # Take the last collection, we will put this list on it, if its there
                 prior = collection_stack.pop()
                 if prior is not None:
