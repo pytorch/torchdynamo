@@ -231,8 +231,9 @@ def template_codegen(scheduler, scheduler_node):
                 # if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
                 #     node.reorder_channel_last()
                 # make sure we force the reads of conv are channel_last layout
-                if len(node.node.get_size()) == 4:
-                    assert node.node.get_stride()[1] == 1
+                if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
+                    reschedule.append(node)
+                    continue
                 try:
                     node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     node.mark_fusable()
