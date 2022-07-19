@@ -1,4 +1,4 @@
-import benchmarks_.microbenchmarks.model as model
+import benchmarks.microbenchmarks.model as model
 import itertools
 import torch
 import triton
@@ -156,7 +156,7 @@ for layer in (model.resnet50_layers + model.alexnet_layers):
     dilation = (1, 1)
     groups = 1
     dtype = torch.float32
-    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 16, 128, 2, 4
+    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 128, 64, 2, 4
     BATCH = 128
     IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
     # 32, 3, 224, 224, 64, 3, 3, (2, 2), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4

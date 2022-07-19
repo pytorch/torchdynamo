@@ -134,8 +134,8 @@ def _kernel_delta_x_hwc(
         # ------ update ptrs ------
         w_ptrs += BLOCK_K
         # load inc ptr of x, upade x_ptrs
+        off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
         if not CONV1X1_NHWC:
-            off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
             delta_xh_ptrs += BLOCK_K
             delta_xw_ptrs += BLOCK_K
             delta_xc_ptrs += BLOCK_K
@@ -147,7 +147,6 @@ def _kernel_delta_x_hwc(
             )
             x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         else:
-            off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
             x_ptrs += BLOCK_K
 
         mask_x = (
