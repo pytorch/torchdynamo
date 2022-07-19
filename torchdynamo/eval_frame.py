@@ -9,6 +9,7 @@ import torch
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import recursive_allclose
 
 from . import config
 from . import convert_frame
@@ -246,6 +247,7 @@ def export(f, *args, **kwargs):
 
     graph = None
     out_guards = None
+    inputs = None
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -256,17 +258,20 @@ def export(f, *args, **kwargs):
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
+        nonlocal inputs
+
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
+        inputs = example_inputs
         return gm.forward
 
     backend_ctx_ctor = null_context
 
-    result = None
+    result_traced = None
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
-        result = f(*args, **kwargs)
+        result_traced = f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
@@ -282,11 +287,49 @@ def export(f, *args, **kwargs):
     for arg in flat_args:
         flat_input_types.append(arg.__class__)
 
-    _, out_spec = pytree.tree_flatten(result)
-
+    # TODO(voz): Assumptive that flat_args matches the graph signature,
+    # we can reorder and permute here like we do with outputs
     assert len(flat_input_types) == len(
         out_sig.parameters
     ), "Flattened inputs length must match out signature parameter lengths."
+
+    flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
+
+    result_export = graph.forward(*flat_args)
+    flat_results_export, out_spec_export = pytree.tree_flatten(result_export)
+    flat_inputs_to_exported_graph, flat_inputs_spec = pytree.tree_flatten(inputs)
+
+    if out_spec_export != out_spec_traced:
+        flat_both = flat_inputs_to_exported_graph + flat_results_export
+        matched_elements_positions = []
+        for x in flat_results_traced:
+            matched_elements = [torch.allclose(x, y) for y in flat_both]
+            matched_elements = set(
+                matched_elements.index(True) for x in matched_elements
+            )
+            matched_elements_positions.extend(matched_elements)
+
+        reconstructed = pytree.tree_unflatten(
+            [flat_both[i] for i in matched_elements_positions], out_spec_traced
+        )
+
+        if reconstructed is None or not recursive_allclose(
+            reconstructed, result_traced
+        ):
+            assert (
+                False
+            ), f"Out spec mismatch: {out_spec_traced}, {out_spec_export}, might fix, but failed: {reorderings}"
+
+        # TODO(voz): call _codegen on the graph to rewrite the graphs input and output
+        # Blocked on bugs in fx. https://github.com/pytorch/pytorch/pull/81177
+        # graph.graph._codegen = _PyTreeCodeGen(
+        # _PyTreeInfo(
+        #         [f"orig_arg_{i}" for i in range(len(inputs))],
+        #         in_spec,
+        #         out_spec_traced,
+        #     )
+        # )
+        # graph.recompile()
 
     for idx in range(len(out_sig.parameters)):
         sig_type = signature_types[idx]
@@ -299,7 +342,7 @@ def export(f, *args, **kwargs):
     # There is currently more work that needs to be done on the fx side before we can support the UX we want.
     # The future UX here will not return a spec, but will rather return a graph with the original signature
     # and return type as the passed in callable, `f`.
-    return (graph, out_guards, in_spec, out_spec)
+    return (graph, out_guards, in_spec, out_spec_traced)
 
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
