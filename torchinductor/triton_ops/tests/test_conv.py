@@ -1,3 +1,4 @@
+import benchmarks_.microbenchmarks.model as model
 import itertools
 import torch
 import triton
@@ -150,23 +151,29 @@ def test_conv(
     assert(same(y, y_correct, cos_similarity=True))
     print("passed")
 
-BATCH, IN_C, IN_H, IN_W, KERNEL_N, KERNEL_H, KERNEL_W, stride, padding, dilation, groups, dtype, BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = \
-    128, 3, 224, 224, 64, 3, 3, (1, 1), (2, 2), (1, 1), 1, torch.float32, 128, 16, 128, 2, 4
-# 32, 3, 224, 224, 64, 3, 3, (2, 2), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
-# 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
-# 
-# 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+for layer in (model.resnet50_layers + model.alexnet_layers):
     
-test_conv(
-        # Tensor dimensions
-        BATCH, IN_C, IN_H, IN_W,
-        KERNEL_N, KERNEL_H, KERNEL_W,
-        # parameters of conv
-        stride, padding,
-        dilation, groups,
-        # others,
-        dtype,
-        # MATA
-        BLOCK_M, BLOCK_N, BLOCK_K,
-        NSTAGE, NWARP,
-        layout="nchw")
+    dilation = (1, 1)
+    groups = 1
+    dtype = torch.float32
+    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 16, 128, 2, 4
+    BATCH = 128
+    IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
+    # 32, 3, 224, 224, 64, 3, 3, (2, 2), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+    # 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+    # 
+    # 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+        
+    test_conv(
+            # Tensor dimensions
+            BATCH, IN_C, IN_H, IN_W,
+            KERNEL_N, KERNEL_H, KERNEL_W,
+            # parameters of conv
+            stride, padding,
+            dilation, groups,
+            # others,
+            dtype,
+            # MATA
+            BLOCK_M, BLOCK_N, BLOCK_K,
+            NSTAGE, NWARP,
+            layout="nchw")
