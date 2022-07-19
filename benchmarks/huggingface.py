@@ -257,7 +257,13 @@ class HuggingfaceRunner(BenchmarkRunner):
         super(HuggingfaceRunner, self).__init__()
 
     def load_model(
-        self, device, model_name, is_training, use_eval_mode, batch_size=None
+        self,
+        device,
+        model_name,
+        is_training,
+        use_eval_mode,
+        batch_size=None,
+        dynamic_shapes=False,
     ):
         dtype = torch.float32
         config, model_cls, batch_size_default, input_fn = ALL_MODELS[model_name]
