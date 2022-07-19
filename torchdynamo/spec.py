@@ -11,8 +11,6 @@ class Spec:
     def describe_spec(t):
         spec = Spec()
 
-        # TODO(voz): Consolidate w/ the Element enum below, strings is fine for now, but we want to
-        # properly assemble a Spec
         def _type_to_element_open(x):
             return {
                 "list": Spec.Element.OPEN_LIST,
