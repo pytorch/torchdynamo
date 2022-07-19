@@ -1,5 +1,6 @@
 from enum import Enum
 from enum import unique
+from typing import List
 
 import torch
 
@@ -46,6 +47,7 @@ class Spec:
 
     def __init__(self):
         self.elements = []
+        self.tensors = 0
 
     @unique
     class Element(str, Enum):
@@ -76,9 +78,89 @@ class Spec:
     def add_element(self, element: Element):
         # TODO(voz): Add validation logic, (ex: no list close if no list opens on the stack)
         self.elements.append(element)
+        if element == Spec.Element.TENSOR:
+            self.tensors += 1
 
     def __repr__(self):
         rep = ""
         for x in self.elements:
             rep += f"{x!r}"
         return rep
+
+    @staticmethod
+    def apply_spec(spec, tensors: List[torch.Tensor]):
+        if len(tensors) == 0:
+            return []
+
+        assert spec.tensors == len(
+            tensors
+        ), f"Spec length {spec.elements} does not match tensor list length {len(tensors)}"
+
+        reversed_elements = spec.elements[::-1]
+        collection_stack = []
+        current_collection = None
+        idx = 0
+
+        def _append(e, collection):
+            if isinstance(collection, list):
+                collection.append(e)
+            elif isinstance(collection, tuple):
+                # TODO(voz): Optimize with forward scanning, this isnt that cheap
+                collection += (e,)
+            else:
+                assert False, f"Unsupported collection type {collection.__class__}"
+
+        result = None
+        current_element = reversed_elements.pop()
+        while current_element is not None:
+            if current_element == Spec.Element.TENSOR:
+                if current_collection is None:
+                    # No current collection, make one
+                    current_collection = (tensors[idx],)
+                else:
+                    # Add tensor to current collection
+                    _append(tensors[idx], current_collection)
+                # advance tensor pointer
+                idx += 1
+                # advance instruction
+            elif current_element == Spec.Element.OPEN_LIST:
+                # Store current collection away onto the stack
+                collection_stack.append(current_collection)
+                # Start a new list
+                current_collection = list()
+            elif current_element == Spec.Element.OPEN_TUPLE:
+                # Store current collection away onto the stack
+                collection_stack.append(current_collection)
+                # Start a new tuple
+                current_collection = tuple()
+            elif current_element in {Spec.Element.CLOSE_LIST, Spec.Element.CLOSE_TUPLE}:
+                # Closing a list is predicated on there being an open list
+
+                # Take the last collection, we will put this list on it, if its there
+                prior = collection_stack.pop()
+                if prior is not None:
+                    # A prior collection exists
+                    _append(current_collection, prior)
+                    # Now that this list is closed, we can have further additions to the prior collection
+                    # Which is the collection this collection was nested in
+                    current_collection = prior
+                else:
+                    # Closing with nothing in the stack, this is the end
+                    result = current_collection
+                    current_collection = None
+            else:
+                assert False, f"{current_element} is not yet supported"
+
+            if len(reversed_elements) > 0:
+                current_element = reversed_elements.pop()
+            else:
+                current_element = None
+        if (current_element is not None and idx == len(tensors)) or (
+            current_element is None and idx < len(tensors)
+        ):
+            # Note: This is checked in a precondition, but it does not hurt to ensure it here too.
+            assert (
+                False
+            ), f"Element count in spec and number of tensors must match! Current element: {current_element}, idx: {idx}"
+
+        return result
