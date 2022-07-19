@@ -414,6 +414,10 @@ class BuiltinVariable(VariableTracker):
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
 
+    def call_dict(self, tx, arg):
+        if isinstance(arg, variables.ConstDictVariable):
+            return arg.clone(mutable_local=MutableLocal())
+
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
         if all(x.has_unpack_var_sequence(tx) for x in args):
