@@ -25,23 +25,23 @@ class Func(object):
     @torchdynamo.optimize("inductor")
     def conv_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # relu(conv)
     def conv_relu(x, w, bias, stride, padding, dilation, groups):
         y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # relu(conv+bias)
     @torchdynamo.optimize("inductor")
     def conv_add_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # relu(conv+bias)
     def conv_add_relu(x, w, bias, stride, padding, dilation, groups):
         y =  torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        return y
+        return torch.relu(y)
 
     # bn(conv)
     @torchdynamo.optimize("inductor")
@@ -103,8 +103,8 @@ def test(layer_params, fusion_type="add"):
     conv_fusion = getattr(Func, f"conv_{fusion_type}")
     y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
     y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
-    # print("y", y[0,:,0,0])
-    # print("y_correct", y[0,:,0,0])
+    # print("y", y[0])
+    # print("y_correct", y_correct[0])
     assert(same(y, y_correct, cos_similarity=True))
 
 fusion_types = ["add", "relu", "add_relu", "bn", "bn_relu"]
