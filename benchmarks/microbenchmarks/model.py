@@ -19,3 +19,8 @@ resnet50_layers = (
     (7, 7, 512, 3, 3, 512, (1, 1), (0, 0)),
     (7, 7, 512, 1, 1, 2048, (1, 1), (0, 0)),
 )
+
+alexnet_layers = (
+    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding
+    (224, 224, 3, 11, 11, 64, (4, 4), (2, 2)),
+)

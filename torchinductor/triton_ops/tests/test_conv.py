@@ -9,6 +9,7 @@ import torchinductor.triton_ops
 torch.backends.cuda.matmul.allow_tf32 = False
 # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
 torch.backends.cudnn.allow_tf32 = False
+from torchdynamo.testing import same
 
 
 @pytest.mark.parametrize(
@@ -144,10 +145,18 @@ def test_conv(
     )
 
     y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    triton.testing.assert_almost_equal(y, y_correct, decimal=1)
+    # print("y", y[0])
+    # print("y_correct", y_correct[0])
+    assert(same(y, y_correct, cos_similarity=True))
+    print("passed")
 
 BATCH, IN_C, IN_H, IN_W, KERNEL_N, KERNEL_H, KERNEL_W, stride, padding, dilation, groups, dtype, BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = \
-    32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float32, 128, 16, 32, 2, 4
+    128, 3, 224, 224, 64, 3, 3, (1, 1), (2, 2), (1, 1), 1, torch.float32, 128, 16, 128, 2, 4
+# 32, 3, 224, 224, 64, 3, 3, (2, 2), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+# 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+# 
+# 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+    
 test_conv(
         # Tensor dimensions
         BATCH, IN_C, IN_H, IN_W,

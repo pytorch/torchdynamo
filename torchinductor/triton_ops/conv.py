@@ -119,7 +119,9 @@ def _kernel(
     stride_yw,
     stride_biasn,
     # pointer inc for x
-    delta_x_ptr,
+    delta_xh_ptr,
+    delta_xw_ptr,
+    delta_xc_ptr,
     # Tensor dimensions
     BATCH,
     IN_C,
@@ -164,8 +166,8 @@ def _kernel(
     off_y_nhw = pid_nhw * BLOCK_M + tl.arange(0, BLOCK_M)
     off_y_n = off_y_nhw // (OUT_H * OUT_W)
     off_y_hw = off_y_nhw % (OUT_H * OUT_W)
-    off_y_h = off_y_hw // OUT_W
-    off_y_w = off_y_hw % OUT_W
+    off_y_h = off_y_hw // OUT_W + output_padding_h
+    off_y_w = off_y_hw % OUT_W + output_padding_w
 
     # offset for the initial ptr for x
     off_x_n = off_y_n
@@ -177,19 +179,29 @@ def _kernel(
     CRS = IN_C * KERNEL_H * KERNEL_W
     # load inc ptr of x, upade x_ptrs
     if not CONV1X1_NHWC:
-        delta_x_ptrs = delta_x_ptr + off_x_crs
-        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+        delta_xh_ptrs = delta_xh_ptr + off_x_crs
+        delta_xw_ptrs = delta_xw_ptr + off_x_crs
+        delta_xc_ptrs = delta_xc_ptr + off_x_crs
+        delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
+        delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
+        delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
+        off_x_crs_unpacked = (
+            delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
+        )
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
     else:
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs[None, :]
+        delta_xh = 0
+        delta_xw = 0
 
     mask_x = (
-        (off_x_n < BATCH)
-        & (off_x_h >= 0)
-        & (off_x_h < IN_H)
-        & (off_x_w >= 0)
-        & (off_x_w < IN_W)
-    )[:, None] & (off_x_crs < CRS)[None, :]
+        (off_x_n < BATCH)[:, None]
+        & (off_x_crs < CRS)[None, :]
+        & (off_x_h[:, None] + delta_xh[None, :] >= 0)
+        & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
+        & (off_x_w[:, None] + delta_xw[None, :] >= 0)
+        & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
+    )
 
     # offset for the inital ptr for w
     off_w_crs = tl.arange(0, BLOCK_K)
@@ -213,21 +225,29 @@ def _kernel(
         w_ptrs += BLOCK_K
         # load inc ptr of x, upade x_ptrs
         if not CONV1X1_NHWC:
-            delta_x_ptrs += BLOCK_K
             off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
-            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+            delta_xh_ptrs += BLOCK_K
+            delta_xw_ptrs += BLOCK_K
+            delta_xc_ptrs += BLOCK_K
+            delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
+            delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
+            delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
+            off_x_crs_unpacked = (
+                delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
+            )
             x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         else:
             off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
             x_ptrs += BLOCK_K
 
         mask_x = (
-            (off_x_n < BATCH)
-            & (off_x_h >= 0)
-            & (off_x_h < IN_H)
-            & (off_x_w >= 0)
-            & (off_x_w < IN_W)
-        )[:, None] & (off_x_crs < CRS)[None, :]
+            (off_x_n < BATCH)[:, None]
+            & (off_x_crs < CRS)[None, :]
+            & (off_x_h[:, None] + delta_xh[None, :] >= 0)
+            & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
+            & (off_x_w[:, None] + delta_xw[None, :] >= 0)
+            & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
+        )
         mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
         # ------ prefetch ------
         # ------ load x ------
@@ -310,10 +330,15 @@ class _conv:
         r_dilation_h = dilation_h * window_unpack_h
         r_dilation_w = dilation_w * window_unpack_w
         r_inc = window_unpack_c
-        delta_x = (
-            r_dilation_h * stride_xh + r_dilation_w * stride_xw + r_inc * stride_xc
+        # delta_x = (
+        #     r_dilation_h * stride_xh + r_dilation_w * stride_xw + r_inc * stride_xc
+        # )
+        # return delta_x
+        return (
+            r_dilation_h,
+            r_dilation_w,
+            r_inc,
         )
-        return delta_x
 
     @staticmethod
     def _call(
@@ -422,7 +447,7 @@ class _conv:
         if stride_x[xc] == 1 and KERNEL_H == 1 and KERNEL_W == 1:
             CONV1X1_NHWC = True
         if not CONV1X1_NHWC:
-            delta_x = _conv._delta_x_ptr(
+            delta_xh, delta_xw, delta_xc = _conv._delta_x_ptr(
                 IN_C,
                 KERNEL_H,
                 KERNEL_W,
@@ -439,7 +464,8 @@ class _conv:
             # delta_x = torch.from_numpy(np_delta_x).cuda()
             # print("delta_x", delta_x)
         else:
-            delta_x = None
+            # delta_x = None
+            delta_xh, delta_xw, delta_xc = None, None, None
 
         # launch kernel, 2-dim, batch*h*w, kernel
         def grid(META):
@@ -468,7 +494,9 @@ class _conv:
             stride_y[yw],
             stride_biasn,
             # pointer inc for x
-            delta_x,
+            delta_xh,
+            delta_xw,
+            delta_xc,
             # Tensor dimensions
             BATCH,
             IN_C,
