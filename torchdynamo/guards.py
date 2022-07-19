@@ -355,8 +355,13 @@ class GuardBuilder:
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"___dict_param_key_ids({ref}) == {set(dict_param_key_ids(value))}")
-        code.append(f"___dict_const_keys({ref}) == {set(dict_const_keys(value))!r}")
+        param_key_ids = set(dict_param_key_ids(value))
+        const_keys = set(dict_const_keys(value))
+        if param_key_ids:
+            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys!r}")
+        else:
+            code.append(f"set({ref}.keys()) == {const_keys!r}")
 
         self._produce_guard_code(guard, code)
 
@@ -482,7 +487,19 @@ class CheckFunctionManager:
         self._weakrefs = []
         self._seen_ids = set()
 
-        local_builder = GuardBuilder(self.id_ref, f_locals, self, renames=True)
+        # Note: right overrides left
+        def combine_scopes(left, right):
+            if left is None:
+                return right
+
+            if right is None:
+                return left
+
+            return left | right
+
+        local_builder = GuardBuilder(
+            self.id_ref, combine_scopes(f_globals, f_locals), self, renames=True
+        )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():

@@ -22,7 +22,6 @@ import torch
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
-from torchdynamo import guards
 from torchdynamo.source import AttrSource
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import GlobalSource

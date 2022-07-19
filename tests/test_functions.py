@@ -425,11 +425,15 @@ class FunctionTests(torchdynamo.testing.TestCase):
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
 
-    @make_test
-    def test_dict_param_keys(a, b):
-        a_param = torch.nn.Parameter(a)
-        tmp = {"a": b, a_param: 3}
-        return tmp["a"] + tmp[a_param]
+    def test_dict_param_keys(self):
+        a_param = torch.nn.Parameter(torch.ones([4, 4]))
+
+        def fn(a):
+            tmp = {"a": a, a_param: 3}
+            return tmp["a"] + tmp[a_param]
+
+        test = make_test(fn)
+        test(self)
 
     @make_test
     def test_min_max(a, b):

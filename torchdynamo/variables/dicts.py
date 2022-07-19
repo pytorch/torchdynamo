@@ -94,7 +94,7 @@ class ConstDictVariable(VariableTracker):
                         k,
                         **options,
                     )
-                    for k in enumerate(val.keys())
+                    for k in val.keys()
                 ],
                 **options,
             )

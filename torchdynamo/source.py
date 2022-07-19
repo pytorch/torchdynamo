@@ -2,13 +2,10 @@ import collections
 import dataclasses
 from typing import Any
 
-from torch.nn import Parameter
-
 from . import utils
 from .bytecode_transformation import create_instruction
 from .guards import Guard
 from .guards import GuardSource
-from .utils import global_key_name
 from .utils import rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {
