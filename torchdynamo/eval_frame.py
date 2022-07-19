@@ -247,7 +247,9 @@ def export(f, *args, **kwargs):
     out_guards = None
     compiler_captured_inputs = None
 
-    def assert_can_rewrite_spec(source_args, candidate_args, new_spec, original_spec, target_result):
+    def assert_can_rewrite_spec(
+        source_args, candidate_args, new_spec, original_spec, target_result
+    ):
         matched_elements_positions = []
         for x in candidate_args:
             matched_elements = [torch.allclose(x, y) for y in source_args]
@@ -263,9 +265,7 @@ def export(f, *args, **kwargs):
         if reconstructed is None or not recursive_allclose(
             reconstructed, target_result
         ):
-            assert (
-                False
-            ), f"Spec mismatch: {original_spec}, {new_spec}."
+            assert False, f"Spec mismatch: {original_spec}, {new_spec}."
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -302,7 +302,9 @@ def export(f, *args, **kwargs):
     needs_spec_rewrite = False
     if in_spec != dynamo_in_spec:
         if len(dynamo_flat_args) > 0:
-            assert_can_rewrite_spec(dynamo_flat_args, flat_args, in_spec, dynamo_in_spec, args)
+            assert_can_rewrite_spec(
+                dynamo_flat_args, flat_args, in_spec, dynamo_in_spec, args
+            )
             needs_spec_rewrite = True
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
@@ -316,7 +318,13 @@ def export(f, *args, **kwargs):
 
     if out_spec_export != out_spec_traced:
         flat_both = flat_inputs_to_exported_graph + flat_results_export
-        assert_can_rewrite_spec(flat_both, flat_results_traced, out_spec_traced, out_spec_export, result_traced)
+        assert_can_rewrite_spec(
+            flat_both,
+            flat_results_traced,
+            out_spec_traced,
+            out_spec_export,
+            result_traced,
+        )
         needs_spec_rewrite = True
 
     # TODO(voz): call _codegen on the graph to rewrite the graphs input and output

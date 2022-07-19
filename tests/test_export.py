@@ -35,7 +35,7 @@ class ExportTests(torchdynamo.testing.TestCase):
             )
             return pre_attention_state_ops(i, mems, state)
 
-        with torchdynamo.optimize("eager", nopython=False):
+        with torchdynamo.optimize("eager", nopython=True):
             real_result = func()
 
         torchdynamo.reset()
@@ -49,5 +49,31 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result_flat, real_spec = pytree.tree_flatten(real_result)
         self.assertEqual(out_spec, real_spec)
         self.assertTrue(
+            torchdynamo.utils.recursive_allclose(real_result_flat, dynamo_result_flat)
+        )
+
+    def test_export_mismatched_out(self):
+        def func(x):
+            y = x + 1
+            return ([x, x], (y, y))
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(torch.tensor([[[1.3737, 0.1]]]))
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, torch.tensor([[[1.3737, 0.1]]]))
+        out_graph = exported[0]
+        out_spec = exported[3]
+
+        dynamo_result = list(out_graph(torch.tensor([[[1.3737, 0.1]]])))
+        dynamo_result_flat, dynamo_spec = pytree.tree_flatten(dynamo_result)
+        real_result_flat, real_spec = pytree.tree_flatten(real_result)
+
+        self.assertEqual(out_spec, real_spec)
+
+        # This is false as long as we do not rewrite the codegen.
+        # This has the potential to be true if we change the graph. Bugs currently block us.
+        self.assertFalse(
             torchdynamo.utils.recursive_allclose(real_result_flat, dynamo_result_flat)
         )
