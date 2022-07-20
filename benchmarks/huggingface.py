@@ -51,9 +51,6 @@ finally:
     from transformers import XLNetLMHeadModel
 
 
-# We are primarily interested in tf32 datatype
-torch.backends.cuda.matmul.allow_tf32 = True
-
 SKIP = {
     # Difficult to run and compare
     "Reformer"
