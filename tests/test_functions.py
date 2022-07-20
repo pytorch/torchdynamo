@@ -255,6 +255,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return torch.add(x, z)
 
     @make_test
+    def test_dict_copy(x):
+        z = dict({"foo": x + 1})
+        return z
+
+    @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
         b = len("test str")
@@ -280,6 +285,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
     @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
+            return x + 1
+
+    @make_test
+    def test_is_sparse(x):
+        if not x.is_sparse:
             return x + 1
 
     @requires_static_shapes
@@ -419,6 +429,16 @@ class FunctionTests(torchdynamo.testing.TestCase):
         tmp["c"] = v + tmp["d"]
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
+
+    def test_dict_param_keys(self):
+        a_param = torch.nn.Parameter(torch.ones([4, 4]))
+
+        def fn(a):
+            tmp = {"a": a, a_param: 3}
+            return tmp["a"] + tmp[a_param]
+
+        test = make_test(fn)
+        test(self)
 
     @make_test
     def test_min_max(a, b):

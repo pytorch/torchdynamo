@@ -4,6 +4,7 @@ isort==5.10.1
 click>=8.1
 expecttest
 Jinja2
+networkx
 ninja
 numpy
 pytest

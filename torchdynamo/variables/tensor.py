@@ -112,6 +112,7 @@ class TensorVariable(VariableTracker):
             def wrap_fake_exception(func):
                 return func()
 
+        initial_example_value = example_value
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
@@ -147,6 +148,9 @@ class TensorVariable(VariableTracker):
                     example_value = fake_wrapper(example_value)
 
         if isinstance(example_value, torch.Tensor):
+            is_parameter = isinstance(example_value, torch.nn.Parameter)
+            parameter_value = initial_example_value if is_parameter else None
+
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(example_value, FakeTensor):
                 example_value = clone_tensor(example_value)
@@ -154,10 +158,11 @@ class TensorVariable(VariableTracker):
             specialized_props = cls.specialize(example_value)
             if use_fake_tensors and isinstance(example_value, FakeTensor):
                 specialized_props["class_type"] = (
-                    torch.nn.Parameter
-                    if isinstance(example_value, torch.nn.Parameter)
-                    else torch.Tensor
+                    torch.nn.Parameter if is_parameter else torch.Tensor
                 )
+
+            specialized_props["parameter_value"] = parameter_value
+
             options.update(specialized_props)
             return cls(proxy, **options)
         elif (
@@ -252,7 +257,9 @@ class TensorVariable(VariableTracker):
         is_quantized=None,
         is_contiguous=None,
         is_complex=None,
+        is_sparse=None,
         class_type=torch.Tensor,
+        parameter_value=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -266,7 +273,9 @@ class TensorVariable(VariableTracker):
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
         self.is_complex = is_complex
+        self.is_sparse = is_sparse
         self.class_type = class_type
+        self.parameter_value = parameter_value
 
     def as_proxy(self):
         return self.proxy
@@ -309,6 +318,7 @@ class TensorVariable(VariableTracker):
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
             "is_complex": value.is_complex(),
+            "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
         if not config.dynamic_shapes:
@@ -338,6 +348,8 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
             result = ConstantVariable(self.is_quantized, **options)
+        elif name == "is_sparse" and self.is_sparse is not None:
+            result = ConstantVariable(self.is_sparse, **options)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:

@@ -126,7 +126,11 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
+@patch.object(torchinductor.config.triton, "cudagraphs", False)
+@patch("torchdynamo.config.raise_on_backend_error", True)
 def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+    torchdynamo.reset()
+
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
     has_lowp_args = False
 
@@ -153,14 +157,12 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     torchinductor.metrics.reset()
 
-    @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
+    @torchdynamo.optimize_assert(compile_fx)
     def run(*ex):
         return model(*ex)
 
-    torchdynamo.reset()
-    with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
-        torch.manual_seed(0)
-        actual = run(*example_inputs)
+    torch.manual_seed(0)
+    actual = run(*example_inputs)
 
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
@@ -177,6 +179,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
+@patch.object(torchinductor.config.triton, "cudagraphs", False)
 def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -747,6 +750,7 @@ class CommonTemplate:
             ),
         )
 
+    @patch.object(config, "aot_autograd", False)
     def test_unsqueeze_inplace(self):
         def fn(a):
             tmp1 = a + 1
@@ -779,6 +783,7 @@ class CommonTemplate:
             ),
         )
 
+    @patch.object(config, "aot_autograd", False)
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -787,6 +792,7 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_linear2(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 8),
@@ -1554,6 +1560,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_new_ones(self):
         def fn(a):
             return (
@@ -1802,6 +1809,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 1, 1]),))
 
+    @patch.object(config, "aot_autograd", False)
     @patch.object(config.triton, "cudagraphs", True)
     def test_input_mutation1(self):
         def fn(a):
@@ -1825,6 +1833,7 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    @patch.object(config, "aot_autograd", False)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -1841,6 +1850,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(config, "aot_autograd", False)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -1861,6 +1871,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -1873,6 +1884,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -1955,6 +1967,7 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @patch.object(config, "aot_autograd", False)
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
@@ -2167,6 +2180,7 @@ class CommonTemplate:
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
+    @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
         if self.device == "cpu":
             # TODO(jansel): CPU RNG is not yet deterministic
