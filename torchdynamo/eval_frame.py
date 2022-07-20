@@ -296,7 +296,6 @@ def export(f, *args, **kwargs):
 
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
-    print(compiler_captured_inputs)
     dynamo_flat_args, dynamo_in_spec = pytree.tree_flatten(compiler_captured_inputs)
 
     if in_spec != dynamo_in_spec:
