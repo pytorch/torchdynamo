@@ -633,26 +633,3 @@ class CompileProfiler:
             rpt += "No cache-limited recompilations detected.\n"
 
         return rpt
-
-
-def recursive_allclose(lhs, rhs, rtol=1e-5, atol=1e-8):
-    r"""
-    Unlike torch.allocse which only handles Tensor arguments, allclose handles
-    list, tuple, dict and nesting of these as well.
-    """
-    if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
-        return torch.allclose(lhs, rhs, rtol, atol)
-    if isinstance(lhs, (tuple, list)) and isinstance(rhs, (tuple, list)):
-        return len(lhs) == len(rhs) and all(
-            recursive_allclose(a, b, rtol, atol) for a, b in zip(lhs, rhs)
-        )
-    if isinstance(lhs, dict) and isinstance(rhs, dict):
-        lhs_keys = set(lhs.keys())
-        rhs_keys = set(rhs.keys())
-        if lhs_keys != rhs_keys:
-            return False
-        return all(recursive_allclose(lhs[k], rhs[k], rtol, atol) for k in lhs)
-    else:
-        raise RuntimeError(
-            f"Unexpected types: lhs type {type(lhs)}, rhs type {type(rhs)}"
-        )

@@ -9,14 +9,13 @@ import torch
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import recursive_allclose
+from torchdynamo.utils import same
 
 from . import config
 from . import convert_frame
 from . import skipfiles
 from . import utils
 from .mutation_guard import install_generation_tagging_init
-from .utils import same
 
 log = logging.getLogger(__name__)
 
@@ -262,9 +261,7 @@ def export(f, *args, **kwargs):
             [source_args[i] for i in matched_elements_positions], new_spec
         )
 
-        if reconstructed is None or not recursive_allclose(
-            reconstructed, target_result
-        ):
+        if reconstructed is None or not same(reconstructed, target_result):
             assert False, f"Spec mismatch: {original_spec}, {new_spec}."
 
     def guard_export_print(guards):
@@ -336,10 +333,17 @@ def export(f, *args, **kwargs):
     #     )
     # )
     # graph.recompile()
+
     # 2) NOTE: This may not be sufficient! In the event that we have args that pass around the graph,
     # and are elided by dynamo, the reconstruct code above places them into the output correctly.
     # However, _PyTreeCodeGen does not do that. If we are to ensure our users have a good UX, we
     # need to do the codegen reconstruction for them.
+    # This gives us a few major paths:
+    #  A) Expose a util function that takes the output of this (graph, specs, etc)
+    # and lets users call it with regular function args, and that function handles the input remapping.
+    #  B) We write out own version of _PyTreeCodeGen that generates the remapping and makes it into the graph.
+    #  C) We return a `wrapper` a la python_key_trace, wherein the user can invoke the wrapper
+    # to kind of do what (A) does
 
     # 3) TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
     # There is currently more work that needs to be done on the fx side before we can support the UX we want.
