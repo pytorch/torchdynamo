@@ -671,7 +671,7 @@ class _conv:
         # need to know ptr update for each dimension to check if
         # the sliding window is out of bounds
         else:
-            kernel = _kernel_delta_x_hwc
+            # kernel = _kernel_delta_x_hwc
             _kernel_delta_x_hwc[grid](
                 x,
                 w,

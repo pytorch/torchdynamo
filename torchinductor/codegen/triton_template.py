@@ -181,7 +181,8 @@ class TritonTemplateKernel(TritonKernel):
                         "from torchinductor.triton_ops import _conv as _conv"
                     )
                     wrapper.writeline(
-                        f"delta_xh_{kernel_name}, delta_xw_{kernel_name}, delta_xc_{kernel_name} = _conv._delta_x_ptr_hwc("
+                        f"delta_xh_{kernel_name}, delta_xw_{kernel_name}, delta_xc_{kernel_name}"
+                        f" = _conv._delta_x_ptr_hwc("
                         f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
                         f"{dilation_h}, {dilation_w}, "
                         f"{stride_wc}, {stride_wh}, {stride_ww}, "
