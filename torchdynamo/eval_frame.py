@@ -323,7 +323,10 @@ def export(f, *args, **kwargs):
             result_traced,
         )
 
-    # TODO(voz): call _codegen on the graph to rewrite the graphs input and output
+    # NOTE: This is a lengthy outline of major UX gaps, but the primary goal is to produce
+    # a graph with the same exact input and output signatures as the original traced callable.
+
+    # 1) TODO(voz): call _codegen on the graph to rewrite the graphs input and output
     # Blocked on bugs in fx. https://github.com/pytorch/pytorch/pull/81177
     # graph.graph._codegen = _PyTreeCodeGen(
     # _PyTreeInfo(
@@ -333,8 +336,12 @@ def export(f, *args, **kwargs):
     #     )
     # )
     # graph.recompile()
+    # 2) NOTE: This may not be sufficient! In the event that we have args that pass around the graph, 
+    # and are elided by dynamo, the reconstruct code above places them into the output correctly.
+    # However, _PyTreeCodeGen does not do that. If we are to ensure our users have a good UX, we
+    # need to do the codegen reconstruction for them.
 
-    # TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
+    # 3) TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
     # There is currently more work that needs to be done on the fx side before we can support the UX we want.
     # The future UX here will not return a spec, but will rather return a graph with the original signature
     # and return type as the passed in callable, `f`.
