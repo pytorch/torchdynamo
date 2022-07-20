@@ -299,13 +299,11 @@ def export(f, *args, **kwargs):
     print(compiler_captured_inputs)
     dynamo_flat_args, dynamo_in_spec = pytree.tree_flatten(compiler_captured_inputs)
 
-    needs_spec_rewrite = False
     if in_spec != dynamo_in_spec:
         if len(dynamo_flat_args) > 0:
             assert_can_rewrite_spec(
                 dynamo_flat_args, flat_args, in_spec, dynamo_in_spec, args
             )
-            needs_spec_rewrite = True
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
@@ -325,7 +323,6 @@ def export(f, *args, **kwargs):
             out_spec_export,
             result_traced,
         )
-        needs_spec_rewrite = True
 
     # TODO(voz): call _codegen on the graph to rewrite the graphs input and output
     # Blocked on bugs in fx. https://github.com/pytorch/pytorch/pull/81177
