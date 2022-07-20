@@ -255,6 +255,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         return torch.add(x, z)
 
     @make_test
+    def test_dict_copy(x):
+        z = dict({"foo": x + 1})
+        return z
+
+    @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
         b = len("test str")
