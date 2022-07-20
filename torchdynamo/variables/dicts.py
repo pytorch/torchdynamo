@@ -298,7 +298,7 @@ class DataClassVariable(ConstDictVariable):
             codegen(self.items[key])
         return [
             codegen.create_load_const(keys),
-            create_instruction("CALL_FUNCTION_KW", len(keys))
+            create_instruction("CALL_FUNCTION_KW", len(keys)),
         ]
 
     def call_method(
