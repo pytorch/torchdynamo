@@ -738,6 +738,7 @@ class BenchmarkRunner:
 
             # run Dynamo few times to see if we reached a fixed point
             torchdynamo.reset()
+            torch.cuda.empty_cache()
             for _ in range(3):
                 with optimize_ctx:
                     model_iter_fn(model, example_inputs)
