@@ -31,11 +31,13 @@ class TritonTemplateKernel(TritonKernel):
             KERNEL_W = self.args_dict["KERNEL_W"]
             padding_h = self.args_dict["padding_h"]
             padding_w = self.args_dict["padding_w"]
-            if ((KERNEL_H == "1" and KERNEL_W == "1")) or ((padding_h == "0") and (padding_w == "0")):
+            if ((KERNEL_H == "1" and KERNEL_W == "1")) or (
+                (padding_h == "0") and (padding_w == "0")
+            ):
                 self.template_name += "_delta_x"
             else:
                 self.template_name += "_delta_x_hwc"
-                
+
         self.template = env.get_template(self.template_name + ".j2")
 
     def rename_vars(self):
@@ -142,22 +144,24 @@ class TritonTemplateKernel(TritonKernel):
         """
         if isinstance(self.node, ir.Convolution):
             if self.const_dict["CONV1X1_NHWC"] == "False":
+                IN_C = self.args_dict["IN_C"]
+                KERNEL_H = self.args_dict["KERNEL_H"]
+                KERNEL_W = self.args_dict["KERNEL_W"]
+                dilation_h = self.args_dict["dilation_h"]
+                dilation_w = self.args_dict["dilation_w"]
+                stride_wc = self.args_dict["stride_wc"]
+                stride_wh = self.args_dict["stride_wh"]
+                stride_ww = self.args_dict["stride_ww"]
+                stride_xc = self.args_dict["stride_xc"]
+                stride_xh = self.args_dict["stride_xh"]
+                stride_xw = self.args_dict["stride_xw"]
+                device = self.other_dict["device"]
                 if self.template_name == "triton_conv_delta_x":
                     assert "delta_x_ptr" not in self.args_dict.keys()
                     self.args_dict["delta_x_ptr"] = f"delta_x_{kernel_name}"
-                    wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
-                    IN_C = self.args_dict["IN_C"]
-                    KERNEL_H = self.args_dict["KERNEL_H"]
-                    KERNEL_W = self.args_dict["KERNEL_W"]
-                    dilation_h = self.args_dict["dilation_h"]
-                    dilation_w = self.args_dict["dilation_w"]
-                    stride_wc = self.args_dict["stride_wc"]
-                    stride_wh = self.args_dict["stride_wh"]
-                    stride_ww = self.args_dict["stride_ww"]
-                    stride_xc = self.args_dict["stride_xc"]
-                    stride_xh = self.args_dict["stride_xh"]
-                    stride_xw = self.args_dict["stride_xw"]
-                    device = self.other_dict["device"]
+                    wrapper.writeline(
+                        "from torchinductor.triton_ops import _conv as _conv"
+                    )
                     wrapper.writeline(
                         f"delta_x_{kernel_name} = _conv._delta_x_ptr("
                         f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
@@ -173,19 +177,9 @@ class TritonTemplateKernel(TritonKernel):
                     self.args_dict["delta_xh_ptr"] = f"delta_xh_{kernel_name}"
                     self.args_dict["delta_xw_ptr"] = f"delta_xw_{kernel_name}"
                     self.args_dict["delta_xc_ptr"] = f"delta_xc_{kernel_name}"
-                    wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
-                    IN_C = self.args_dict["IN_C"]
-                    KERNEL_H = self.args_dict["KERNEL_H"]
-                    KERNEL_W = self.args_dict["KERNEL_W"]
-                    dilation_h = self.args_dict["dilation_h"]
-                    dilation_w = self.args_dict["dilation_w"]
-                    stride_wc = self.args_dict["stride_wc"]
-                    stride_wh = self.args_dict["stride_wh"]
-                    stride_ww = self.args_dict["stride_ww"]
-                    stride_xc = self.args_dict["stride_xc"]
-                    stride_xh = self.args_dict["stride_xh"]
-                    stride_xw = self.args_dict["stride_xw"]
-                    device = self.other_dict["device"]
+                    wrapper.writeline(
+                        "from torchinductor.triton_ops import _conv as _conv"
+                    )
                     wrapper.writeline(
                         f"delta_xh_{kernel_name}, delta_xw_{kernel_name}, delta_xc_{kernel_name} = _conv._delta_x_ptr_hwc("
                         f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
