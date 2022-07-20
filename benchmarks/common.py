@@ -650,7 +650,7 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def get_tolerance(self, is_training, current_device, name):
+    def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
     def run_one_model(
@@ -662,11 +662,12 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        cos_similarity=False,
         skip_accuracy_check=False,
     ):
         t0 = time.perf_counter()
-        tolerance = self.get_tolerance(is_training, current_device, name)
+        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+            is_training, current_device, name
+        )
         with self.pick_grad(name, is_training):
             mode = "train" if is_training else "eval"
             sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
@@ -1228,8 +1229,6 @@ def main(runner, original_dir=None):
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 
-    cos_similarity = args.cosine
-
     if args.output:
         output_filename = args.output
 
@@ -1266,7 +1265,6 @@ def main(runner, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                cos_similarity,
                 args.skip_accuracy_check,
             )
         if args.generate_aot_autograd_stats:
@@ -1311,7 +1309,6 @@ def main(runner, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                cos_similarity,
                 args.skip_accuracy_check,
             )
 

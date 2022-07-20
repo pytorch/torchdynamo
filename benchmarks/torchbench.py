@@ -114,6 +114,10 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "tacotron2",
 }
 
+REQUIRE_COSINE_TOLERACE = {
+    # https://github.com/pytorch/torchdynamo/issues/556
+    "resnet50_quantized_qat",
+}
 
 # non-deterministic output / cant check correctness
 NONDETERMINISTIC = set()
@@ -319,22 +323,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
-    def get_tolerance(self, is_training, current_device, name):
+    def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
+        tolerance = 1e-4
+        cosine = self.args.cosine
         # Increase the tolerance for torch allclose
-        if self.args.float16 or (
-            is_training
-            and current_device == "cuda"
-            and name in REQUIRE_HIGHER_TOLERANCE
-        ):
-            return 1e-3
-        elif (
-            is_training
-            and current_device == "cuda"
-            and name in REQUIRE_EVEN_HIGHER_TOLERANCE
-        ):
-            return 8 * 1e-3
-        else:
-            return 1e-4
+        if self.args.float16:
+            return 1e-3, cosine
+        if is_training and current_device == "cuda":
+            if name in REQUIRE_COSINE_TOLERACE:
+                cosine = True
+            elif name in REQUIRE_HIGHER_TOLERANCE:
+                tolerance = 1e-3
+            elif name in REQUIRE_EVEN_HIGHER_TOLERANCE:
+                tolerance = 8 * 1e-3
+        return tolerance, cosine
 
     def compute_loss(self, pred):
         return reduce_to_scalar_loss(pred)
