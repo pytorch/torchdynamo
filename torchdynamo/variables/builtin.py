@@ -142,7 +142,12 @@ class BuiltinVariable(VariableTracker):
         self.fn = fn
 
     def __str__(self):
-        return f"{self.__class__.__name__}({self.fn.__name__})"
+        if self.fn is None:
+            name = "None"
+        else:
+            name = self.fn.__name__
+
+        return f"{self.__class__.__name__}({name})"
 
     def python_type(self):
         return type(self.fn)
@@ -246,7 +251,11 @@ class BuiltinVariable(VariableTracker):
         if (
             self.can_insert_in_graph()
             and tensor_args
-            and not isinstance(args[0], ConstDictVariable)
+            and not (
+                self.fn is operator.getitem
+                and isinstance(args[0], ConstDictVariable)
+                and isinstance(args[1], variables.TensorVariable)
+            )
         ):
             try:
                 fn = self.fn
