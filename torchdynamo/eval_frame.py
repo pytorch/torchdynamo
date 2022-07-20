@@ -246,23 +246,17 @@ def export(f, *args, **kwargs):
     out_guards = None
     compiler_captured_inputs = None
 
-    def assert_can_rewrite_spec(
-        source_args, candidate_args, new_spec, original_spec, target_result
-    ):
+    def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
         for x in candidate_args:
             matched_elements = [torch.allclose(x, y) for y in source_args]
-            matched_elements = set(
-                matched_elements.index(True) for x in matched_elements
-            )
-            matched_elements_positions.extend(matched_elements)
+            if True in matched_elements:
+                matched_elements = set(
+                    matched_elements.index(True) for x in matched_elements
+                )
+                matched_elements_positions.extend(matched_elements)
 
-        reconstructed = pytree.tree_unflatten(
-            [source_args[i] for i in matched_elements_positions], new_spec
-        )
-
-        if reconstructed is None or not same(reconstructed, target_result):
-            assert False, f"Spec mismatch: {original_spec}, {new_spec}."
+        return matched_elements_positions
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -290,66 +284,88 @@ def export(f, *args, **kwargs):
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
-
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
     dynamo_flat_args, dynamo_in_spec = pytree.tree_flatten(compiler_captured_inputs)
 
+    matched_input_elements_positions = []
     if in_spec != dynamo_in_spec:
         if len(dynamo_flat_args) > 0:
-            assert_can_rewrite_spec(
-                dynamo_flat_args, flat_args, in_spec, dynamo_in_spec, args
+            matched_input_elements_positions = produce_matching(
+                flat_args, dynamo_flat_args
             )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
-    result_export = graph.forward(*flat_args)
+    result_export = graph.forward(*dynamo_flat_args)
     flat_results_export, out_spec_export = pytree.tree_flatten(result_export)
 
     flat_inputs_to_exported_graph, flat_inputs_spec = pytree.tree_flatten(
         compiler_captured_inputs
     )
 
+    matched_output_elements_positions = []
     if out_spec_export != out_spec_traced:
         flat_both = flat_inputs_to_exported_graph + flat_results_export
-        assert_can_rewrite_spec(
-            flat_both,
-            flat_results_traced,
-            out_spec_traced,
-            out_spec_export,
-            result_traced,
+        matched_output_elements_positions = produce_matching(
+            flat_both, flat_results_traced
         )
 
-    # NOTE: This is a lengthy outline of major UX gaps, but the primary goal is to produce
-    # a graph with the same exact input and output signatures as the original traced callable.
+    class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
+        def __init__(
+            self,
+            m,
+            arg_len,
+            matched_input_elements_positions,
+            matched_output_elements_positions,
+            out_spec,
+            in_spec,
+        ):
+            super().__init__(m)
 
-    # 1) TODO(voz): call _codegen on the graph to rewrite the graphs input and output
-    # Blocked on bugs in fx. https://github.com/pytorch/pytorch/pull/81177
-    # graph.graph._codegen = _PyTreeCodeGen(
-    # _PyTreeInfo(
-    #         [f"orig_arg_{i}" for i in range(len(inputs))],
-    #         in_spec,
-    #         out_spec_traced,
-    #     )
-    # )
-    # graph.recompile()
+            self.matched_input_elements_positions = matched_input_elements_positions
+            self.matched_output_elements_positions = matched_output_elements_positions
+            self.out_spec = out_spec
+            self.in_spec = in_spec
 
-    # 2) NOTE: This may not be sufficient! In the event that we have args that pass around the graph,
-    # and are elided by dynamo, the reconstruct code above places them into the output correctly.
-    # However, _PyTreeCodeGen does not do that. If we are to ensure our users have a good UX, we
-    # need to do the codegen reconstruction for them.
-    # This gives us a few major paths:
-    #  A) Expose a util function that takes the output of this (graph, specs, etc)
-    # and lets users call it with regular function args, and that function handles the input remapping.
-    #  B) We write out own version of _PyTreeCodeGen that generates the remapping and makes it into the graph.
-    #  C) We return a `wrapper` a la python_key_trace, wherein the user can invoke the wrapper
-    # to kind of do what (A) does
+            if arg_len > 0:
+                self.new_args = [
+                    super(ChangeInputOutputSignature, self).placeholder(
+                        f"arg{i}", (), {}
+                    )
+                    for i in range(0, arg_len)
+                ]
+            else:
+                self.new_args = []
 
-    # 3) TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
-    # There is currently more work that needs to be done on the fx side before we can support the UX we want.
-    # The future UX here will not return a spec, but will rather return a graph with the original signature
-    # and return type as the passed in callable, `f`.
-    return (graph, out_guards, in_spec, out_spec_traced)
+            self.old_args_gen = (
+                self.new_args[i] for i in self.matched_input_elements_positions
+            )
+
+        def placeholder(self, target, args, kwargs):
+            return next(self.old_args_gen)
+
+        def output(self, target, args, kwargs):
+            old_result_flat = args[0]
+            reshaped_new_arg = pytree.tree_unflatten(self.new_args, self.in_spec)
+            lookup = [*reshaped_new_arg, *old_result_flat]
+            new_result_flat = [
+                lookup[i] for i in self.matched_output_elements_positions
+            ]
+            new_result = pytree.tree_unflatten(new_result_flat, self.out_spec)
+
+            return super().output(target, (new_result,), {})
+
+    new_graph = ChangeInputOutputSignature(
+        graph,
+        len(flat_args),
+        matched_input_elements_positions,
+        matched_output_elements_positions,
+        out_spec_traced,
+        in_spec,
+    ).transform()
+
+    return (new_graph, out_guards)
 
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
