@@ -17,9 +17,6 @@ from torchdynamo.testing import collect_results
 from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.utils import clone_inputs
 
-# We are primarily interested in tf32 datatype
-torch.backends.cuda.matmul.allow_tf32 = True
-
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 for torchbench_dir in (
     "./torchbenchmark",
