@@ -52,16 +52,16 @@ output_filename = None
 @contextlib.contextmanager
 def no_tf32():
     prior_cuda_tf32 = torch.backends.cuda.matmul.allow_tf32
-    prior_cudnn_tf32 = torch.backends.cudnn.allow_tf32
+    # prior_cudnn_tf32 = torch.backends.cudnn.allow_tf32
 
     try:
         torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
+        # torch.backends.cudnn.allow_tf32 = False
         yield
     finally:
         pass
         torch.backends.cuda.matmul.allow_tf32 = prior_cuda_tf32
-        torch.backends.cudnn.allow_tf32 = prior_cudnn_tf32
+        # torch.backends.cudnn.allow_tf32 = prior_cudnn_tf32
 
 
 def output_csv(filename, headers, row):
@@ -685,48 +685,48 @@ class BenchmarkRunner:
             is_training, current_device, name
         )
         # TF32 can amplify minor noises. So, disable TF32 for accuracy comparison
-        # with no_tf32():
-        with self.pick_grad(name, is_training):
-            mode = "train" if is_training else "eval"
-            sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
-            sys.stdout.flush()
-            for submod in itertools.chain([model], model.modules()):
-                assert not torchdynamo.utils.is_jit_model(submod)
-            torch.manual_seed(1337)
-            correct_result = model_iter_fn(
-                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
-            )
-
-            torch.manual_seed(1337)
-            if current_name not in self.non_deterministic_models:
-                correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model),
-                    torchdynamo.utils.clone_inputs(example_inputs),
+        with no_tf32():
+            with self.pick_grad(name, is_training):
+                mode = "train" if is_training else "eval"
+                sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
+                sys.stdout.flush()
+                for submod in itertools.chain([model], model.modules()):
+                    assert not torchdynamo.utils.is_jit_model(submod)
+                torch.manual_seed(1337)
+                correct_result = model_iter_fn(
+                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
-                if not same(correct_result, correct_rerun_result):
-                    print("INCORRECT - Variation in Eager runs itself")
+
+                torch.manual_seed(1337)
+                if current_name not in self.non_deterministic_models:
+                    correct_rerun_result = model_iter_fn(
+                        copy.deepcopy(model),
+                        torchdynamo.utils.clone_inputs(example_inputs),
+                    )
+                    if not same(correct_result, correct_rerun_result):
+                        print("INCORRECT - Variation in Eager runs itself")
+                        if not skip_accuracy_check:
+                            return sys.exit(-1)
+
+                torch.manual_seed(1337)
+                torchdynamo.reset()
+
+                try:
+                    with optimize_ctx:
+                        new_result = model_iter_fn(model, example_inputs)
+                except Exception:
+                    logging.exception("unhandled error")
+                    print("ERROR")
+                    return sys.exit(-1)
+                if current_name in self.non_deterministic_models:
+                    # This model has non-deterministic output so we cant
+                    # check correctness.
+                    # TODO(jansel): submit upstream fix for this
+                    pass
+                elif not same(correct_result, new_result, cos_similarity, tolerance):
+                    print("INCORRECT")
                     if not skip_accuracy_check:
                         return sys.exit(-1)
-
-            torch.manual_seed(1337)
-            torchdynamo.reset()
-
-            try:
-                with optimize_ctx:
-                    new_result = model_iter_fn(model, example_inputs)
-            except Exception:
-                logging.exception("unhandled error")
-                print("ERROR")
-                return sys.exit(-1)
-            if current_name in self.non_deterministic_models:
-                # This model has non-deterministic output so we cant
-                # check correctness.
-                # TODO(jansel): submit upstream fix for this
-                pass
-            elif not same(correct_result, new_result, cos_similarity, tolerance):
-                print("INCORRECT")
-                if not skip_accuracy_check:
-                    return sys.exit(-1)
             ok, total = Stats.reset_counters()
             results = []
 
@@ -737,7 +737,7 @@ class BenchmarkRunner:
                 return 0
 
             # run Dynamo few times to see if we reached a fixed point
-            print(f"{current_name}, {torch.cuda.memory_allocated()/(10**6)}")
+            print(f"MEMORY 1 - {current_name}, {torch.cuda.memory_allocated()/(10**6)}")
             torchdynamo.reset()
             torch.cuda.empty_cache()
             for _ in range(3):
@@ -757,6 +757,7 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:3.0f}s"
                 )
 
+            print(f"MEMORY 2 - {current_name}, {torch.cuda.memory_allocated()/(10**6)}")
             results.append(experiment(model, example_inputs))
             print(" ".join(map(str, results)))
 
@@ -985,8 +986,8 @@ def parse_args():
 
 def main(runner, original_dir=None):
     # We are primarily interested in tf32 datatype
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = True
+    # torch.backends.cudnn.allow_tf32 = True
 
     args = parse_args()
 
@@ -1096,8 +1097,6 @@ def main(runner, original_dir=None):
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"cold_start_{backend_str}.csv"
         args.isolate = True
-        # TODO(whc) should we move this to a more general part of the script?
-        torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
 
