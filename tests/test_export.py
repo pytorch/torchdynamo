@@ -60,9 +60,6 @@ class ExportTests(torchdynamo.testing.TestCase):
         out_graph = exported[0]
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
-        print("REAL:", real_result)
-        print("DYNAMO:", dynamo_result)
-
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
     def test_export_graph_bypass(self):
@@ -88,6 +85,4 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         dynamo_result = out_graph(*flat_input)
 
-        print("REAL:", real_result)
-        print("DYNAMO:", dynamo_result)
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
