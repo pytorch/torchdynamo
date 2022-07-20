@@ -786,8 +786,9 @@ def arange(
     )
 
 
-@register_lowering(torch.linspace)
-def linspace(start, end, steps, *, dtype=None, device=None):
+@register_lowering([torch.linspace, aten.linspace])
+def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
+    assert not pin_memory
     dtype = dtype or torch.get_default_dtype()
 
     step_size = (end - start) / (steps - 1)
