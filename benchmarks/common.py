@@ -159,6 +159,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs):
     Writes to ./coverage.csv
     """
     profiler = Profiler()
+    print(f"MEMORY 3 - {current_name}, {torch.cuda.memory_allocated()/(10**6)}")
     with profiler.prof, torchdynamo.run():
         model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
