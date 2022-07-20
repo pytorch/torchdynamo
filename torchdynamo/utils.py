@@ -430,6 +430,18 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def dict_param_key_ids(value):
+    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+
+
+def dict_const_keys(value):
+    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+
+
+def global_key_name(key):
+    return f"__dict_key_{id(key)}"
+
+
 def rename_implicit(v):
     """
     Usage of inline comprehensions generates a implicit ".0" variable that

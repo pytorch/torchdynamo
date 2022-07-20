@@ -28,6 +28,8 @@ from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
 from .exc import unimplemented
+from .utils import dict_const_keys
+from .utils import dict_param_key_ids
 from .utils import guard_failures
 from .utils import istype
 from .utils import orig_code_map
@@ -44,6 +46,8 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___check_obj_id", check_obj_id),
         ("___is_grad_enabled", torch.is_grad_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
+        ("___dict_param_key_ids", dict_param_key_ids),
+        ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
@@ -351,9 +355,18 @@ class GuardBuilder:
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"{ref}.keys() == {set(value.keys())!r}")
+        param_key_ids = set(dict_param_key_ids(value))
+        const_keys = set(dict_const_keys(value))
+        if param_key_ids:
+            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys!r}")
+        else:
+            code.append(f"set({ref}.keys()) == {const_keys!r}")
 
         self._produce_guard_code(guard, code)
+
+    def WEAKREF_ALIVE(self, guard):
+        self._produce_guard_code(guard, [f"{self.arg_ref(guard)} is not None"])
 
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
@@ -474,7 +487,19 @@ class CheckFunctionManager:
         self._weakrefs = []
         self._seen_ids = set()
 
-        local_builder = GuardBuilder(self.id_ref, f_locals, self, renames=True)
+        # Note: right overrides left
+        def combine_scopes(left, right):
+            if left is None:
+                return right
+
+            if right is None:
+                return left
+
+            return {**left, **right}
+
+        local_builder = GuardBuilder(
+            self.id_ref, combine_scopes(f_globals, f_locals), self, renames=True
+        )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():
