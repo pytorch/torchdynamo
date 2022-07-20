@@ -19,7 +19,7 @@ from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
-template_kernels = [ir.Convolution]
+template_kernels = [ir.Convolution, ir.MatrixMultiply]
 
 
 def cmp(a, b):
@@ -27,12 +27,12 @@ def cmp(a, b):
 
 
 def should_use_template(node: ir.ExternKernel):
-    return (
-        type(node) in template_kernels
-        and ir.is_triton(node.get_device())
-        # TODO(jansel): extend this to other kernels
-        and config.triton.convolution != "aten"
-    )
+    if type(node) in template_kernels and ir.is_triton(node.get_device()):
+        if isinstance(node, ir.Convolution):
+            return config.triton.convolution != "aten"
+        elif isinstance(node, ir.MatrixMultiply):
+            return config.triton.use_mm
+    return False
 
 
 class OutputNode:
@@ -144,7 +144,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return False
 
     def update_dep_type(self):
-        assert isinstance(self.node, ir.Convolution)
+        assert type(self.node) in template_kernels
         assert len(self.read_writes.writes) == 1
         write = self.read_writes.writes.pop()
         if isinstance(write, StarDep):
@@ -203,6 +203,25 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
         if sizes[a] == 1 or sizes[b] == 1:
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
+
+        if config.triton.convolution != "aten":
+            decided = True
+            # if any input is channel_last aka stride[1] == 1
+            # let the output to be channel_last
+            if len(sizes) == 4 and a == 1 and any(stride_lengths[:, a] == 1):
+                for i, stride_length in enumerate(stride_lengths[:, a]):
+                    if stride_length == 1 and min(stride_lengths[i, :]) < 1:
+                        # skip the case [0, 1, 0, 0]
+                        decided = False
+                if decided:
+                    return -1
+            if len(sizes) == 4 and b == 1 and any(stride_lengths[:, b] == 1):
+                for i, stride_length in enumerate(stride_lengths[:, b]):
+                    if stride_length == 1 and min(stride_lengths[i, :]) < 1:
+                        # skip the case [0, 1, 0, 0]
+                        decided = False
+                if decided:
+                    return 1
 
         a_first = np.logical_or(
             stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
@@ -442,6 +461,8 @@ class Scheduler:
                 if should_use_template(node):
                     if isinstance(node, ir.Convolution):
                         group_fn = self.get_backend(node.get_device()).group_fn_NHW_C
+                    elif isinstance(node, ir.MatrixMultiply):
+                        group_fn = self.get_backend(node.get_device()).group_fn_M_N
                     else:
                         group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
