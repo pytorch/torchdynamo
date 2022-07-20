@@ -332,7 +332,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 guard_export_fn(output.guards)
 
             return guarded_code
-        except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
+        except (Unsupported, TorchRuntimeError, BackendCompilerFailed, AssertionError):
             if config.debug or config.trace or config.print_internal_exceptions:
                 debug_print("WONT CONVERT")
             raise
@@ -363,6 +363,9 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
+        except AssertionError:
+            if config.raise_on_assertion_error:
+                raise
         except BackendCompilerFailed:
             raise
         except Exception:

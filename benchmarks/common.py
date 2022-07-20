@@ -823,6 +823,11 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
+        "--raise-on-assertion-error",
+        action="store_true",
+        help="Fail a benchmark if torchdynamo triggers an internal assertion",
+    )
+    parser.add_argument(
         "--raise-on-backend-error",
         action="store_true",
         help="Fail a benchmark if backend throws an exception",
@@ -1011,6 +1016,7 @@ def main(runner, original_dir=None):
     if args.verbose:
         torchdynamo.config.debug = True
 
+    torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
 
     if args.training:
