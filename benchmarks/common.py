@@ -49,11 +49,6 @@ current_device = ""
 output_filename = None
 
 
-# We are primarily interested in tf32 datatype
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-
-
 @contextlib.contextmanager
 def no_tf32():
     prior_cuda_tf32 = torch.backends.cuda.matmul.allow_tf32
@@ -715,11 +710,6 @@ class BenchmarkRunner:
 
                 torch.manual_seed(1337)
                 torchdynamo.reset()
-                if experiment.func is cold_start_experiment:
-                    results = []
-                    results.append(experiment(model, example_inputs, optimize_ctx))
-                    print(" ".join(map(str, results)))
-                    return 0
 
                 try:
                     with optimize_ctx:
@@ -740,9 +730,17 @@ class BenchmarkRunner:
                 ok, total = Stats.reset_counters()
                 results = []
 
-            # run one more time to see if we reached a fixed point
-            with optimize_ctx:
-                model_iter_fn(model, example_inputs)
+            if experiment.func is cold_start_experiment:
+                results = []
+                results.append(experiment(model, example_inputs, optimize_ctx))
+                print(" ".join(map(str, results)))
+                return 0
+
+            # run Dynamo few times to see if we reached a fixed point
+            torchdynamo.reset()
+            for _ in range(3):
+                with optimize_ctx:
+                    model_iter_fn(model, example_inputs)
             _, frames_second_pass = Stats.reset_counters()  # should be 0
 
             if frames_second_pass > 0:
@@ -984,6 +982,10 @@ def parse_args():
 
 
 def main(runner, original_dir=None):
+    # We are primarily interested in tf32 datatype
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
     args = parse_args()
 
     # Pass the parsed args object to benchmark runner object
