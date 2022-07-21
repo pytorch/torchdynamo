@@ -62,6 +62,9 @@ normalize_ir = True
 # __torch_function__ logic of the subclass.
 traceable_tensor_subclasses = set()
 
+# Raise torchdynamo internal assertions
+raise_on_assertion_error = False
+
 # Propagate backend exceptions up to torchdynamo.optimize
 raise_on_backend_error = True
 
