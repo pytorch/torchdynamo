@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import torch
 import torch.utils._pytree as pytree
 
@@ -235,6 +237,30 @@ class ExportTests(torchdynamo.testing.TestCase):
         def func(x, z, k):
             y = x + k
             return y, y, z
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_dupes_and_bypass_with_non_tensor_output(self):
+        inp = torch.tensor([0.1, 0.1])
+        inp2 = torch.tensor([0.1, 0.1])
+        inp3 = 4
+        inps = [inp, inp2, inp3]
+
+        def func(x, z, k):
+            y = x + k
+            return y[0].item(), y, z
 
         with torchdynamo.optimize("eager", nopython=True):
             real_result = func(*inps)
