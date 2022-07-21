@@ -1298,19 +1298,20 @@ def index_select(x, dim, indices):
 
 @register_lowering(aten.scatter_, type_promote=False)
 def scatter_(self, dim: int, index, src, **kwargs):
+    reduction_type = None
     if kwargs:
-        assert kwargs["reduce"] in {"add", "multiply"}
-    return scatter_reduce_(self, dim, index, src, kwargs["reduce"] if kwargs else None)
-
-
-@register_lowering(aten.scatter_add_, type_promote=False)
-def scatter_add_(self, dim: int, index, src):
-    return scatter_reduce_(self, dim, index, src, "add")
+        if kwargs["reduce"] == "add":
+            reduction_type = "sum"
+        elif kwargs["reduce"] == "multiply":
+            reduction_type = "prod"
+        else:
+            assert False
+    return scatter_reduce_(self, dim, index, src, reduction_type)
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)
 def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kwargs):
-    assert reduction_type is None or reduction_type in {"add", "sum"}
+    assert reduction_type is None or reduction_type in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(self.get_size())
@@ -1320,8 +1321,6 @@ def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kw
 
     include_self = kwargs["include_self"] if kwargs else True
     index_loader = index.make_loader()
-    if isinstance(src, TensorBox):
-        src_loader = src.make_loader()
 
     def output_indexer(idx):
         indirect_idx = list(idx)
@@ -1330,12 +1329,13 @@ def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kw
 
     def fn(idx):
         if isinstance(src, TensorBox):
+            src_loader = src.make_loader()
             return src_loader(idx)
         else:
             return ops.constant(src, self.get_dtype())
 
     def reduce_str(reduction_type):
-        if reduction_type == "add" or reduction_type == "sum":
+        if reduction_type == "sum":
             return "atomic_add" if include_self else "atomic_add_exclude_self"
         else:
             # TODO: Need to support more reduction type

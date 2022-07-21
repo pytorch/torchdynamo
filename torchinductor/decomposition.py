@@ -365,6 +365,11 @@ def scatter_add(self, dim: int, index, src):
     return self.clone().scatter_add_(dim, index, src)
 
 
+@register_decomposition([aten.scatter_add_])
+def scatter_add_(self, dim: int, index, src):
+    return self.scatter_reduce_(dim, index, src, "sum")
+
+
 @register_decomposition([aten.scatter_reduce])
 def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
     return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
