@@ -5,6 +5,9 @@ import torchdynamo.testing
 
 
 class ExportTests(torchdynamo.testing.TestCase):
+    # TODO(voz): Refactor to a shared test function.
+    # The tests in this file are a little redundant,
+    # They all take a func, run it with eager, then export it, then compare
     def test_export(self):
         def pre_attention_state_ops(input, mems, state):
             lc_key = state[0]
@@ -60,6 +63,10 @@ class ExportTests(torchdynamo.testing.TestCase):
         out_graph = exported[0]
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
+
+        print("R:", real_result)
+        print("D:", dynamo_result)
+
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
     def test_export_graph_bypass(self):
@@ -82,6 +89,161 @@ class ExportTests(torchdynamo.testing.TestCase):
         exported = torchdynamo.export(func, inp)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_mismatched_out(self):
+        def func(x):
+            y = x + 1
+            return ([x, x], (y, y))
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(torch.tensor([[[1.3737, 0.1]]]))
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, torch.tensor([[[1.3737, 0.1]]]))
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_graph_with_list(self):
+        inp = [
+            torch.tensor([0.1, 0.1]),
+            torch.tensor([0.2, 0.2]),
+            torch.tensor([0.3, 0.3]),
+            torch.tensor([0.4, 0.4]),
+        ]
+
+        def func(x):
+            first = x[2]
+            second = x[2]
+            return first * second, x
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(inp)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inp)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_graph_with_complex_reorder(self):
+        inp = [
+            torch.tensor([0.1, 0.1]),
+            torch.tensor([0.2, 0.2]),
+            torch.tensor([0.3, 0.3]),
+            torch.tensor([0.4, 0.4]),
+        ]
+
+        def func(x):
+            first = x[0]
+            second = x[1]
+            third = x[2]
+            return third, first, second, first * second, first * third
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(inp)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inp)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_dupes(self):
+        inp = torch.tensor([0.1, 0.1])
+
+        def func(x):
+            y = x + 1
+            return y, y
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(inp)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inp)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_dupes(self):
+        inp = torch.tensor([0.1, 0.1])
+
+        def func(x):
+            y = x + 1
+            return y, y
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(inp)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inp)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_dupes_and_bypass(self):
+        inp = torch.tensor([0.1, 0.1])
+        inp2 = torch.tensor([0.4, 0.4])
+        inps = [inp, inp2]
+
+        def func(x, z):
+            y = x + 1
+            return y, y, z
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_dupes_and_bypass_with_non_tensor_arg(self):
+        inp = torch.tensor([0.1, 0.1])
+        inp2 = torch.tensor([0.1, 0.1])
+        inp3 = 4
+        inps = [inp, inp2, inp3]
+
+        def func(x, z, k):
+            y = x + k
+            return y, y, z
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps)
 
         dynamo_result = out_graph(*flat_input)
 

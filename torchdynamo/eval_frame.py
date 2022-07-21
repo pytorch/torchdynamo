@@ -249,7 +249,15 @@ def export(f, *args, **kwargs):
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
         for x in candidate_args:
-            matched_elements = [torch.allclose(x, y) for y in source_args]
+            # TODO(voz): This is a bit unfortunate - it should really be id matches / is
+            # However, we run the graph twice, and so don't get id stability. The TODO
+            # here is to find a way to not run the graph twice.
+            def allclose_if_tensor(x, y):
+                if isinstance(y, torch.Tensor) and isinstance(x, torch.Tensor):
+                    return torch.allclose(x, y)
+                return False
+
+            matched_elements = [allclose_if_tensor(x, y) for y in source_args]
             if True in matched_elements:
                 matched_elements = set(
                     matched_elements.index(True) for x in matched_elements
@@ -306,7 +314,7 @@ def export(f, *args, **kwargs):
 
     matched_output_elements_positions = []
     if out_spec_export != out_spec_traced:
-        flat_both = flat_inputs_to_exported_graph + flat_results_export
+        flat_both = flat_results_export + flat_inputs_to_exported_graph
         matched_output_elements_positions = produce_matching(
             flat_both, flat_results_traced
         )
@@ -315,19 +323,9 @@ def export(f, *args, **kwargs):
         def __init__(
             self,
             m,
-            arg_len,
-            matched_input_elements_positions,
-            matched_output_elements_positions,
-            out_spec,
-            in_spec,
         ):
             super().__init__(m)
-
-            self.matched_input_elements_positions = matched_input_elements_positions
-            self.matched_output_elements_positions = matched_output_elements_positions
-            self.out_spec = out_spec
-            self.in_spec = in_spec
-
+            arg_len = len(flat_args)
             if arg_len > 0:
                 self.new_args = [
                     super(ChangeInputOutputSignature, self).placeholder(
@@ -339,30 +337,38 @@ def export(f, *args, **kwargs):
                 self.new_args = []
 
             self.old_args_gen = (
-                self.new_args[i] for i in self.matched_input_elements_positions
+                self.new_args[i] for i in matched_input_elements_positions
             )
 
         def placeholder(self, target, args, kwargs):
             return next(self.old_args_gen)
 
         def output(self, target, args, kwargs):
-            old_result_flat = args[0]
-            reshaped_new_arg = pytree.tree_unflatten(self.new_args, self.in_spec)
-            lookup = [*reshaped_new_arg, *old_result_flat]
-            new_result_flat = [
-                lookup[i] for i in self.matched_output_elements_positions
+            dynamo_result_flat = args[0]
+            print("Args:", dynamo_result_flat)
+            print(
+                "matched_output_elements_positions", matched_output_elements_positions
+            )
+            lookup = [*dynamo_result_flat, *self.new_args]
+            out_spec_positions = [
+                i
+                for i in range(
+                    len(matched_output_elements_positions), out_spec_traced.num_leaves
+                )
+                if i not in matched_output_elements_positions
             ]
-            new_result = pytree.tree_unflatten(new_result_flat, self.out_spec)
+
+            new_order = matched_output_elements_positions + out_spec_positions
+            print("out_spec_positions", out_spec_positions)
+            print("lookup", lookup)
+            print("new_order", new_order)
+            new_result_flat = [lookup[i] for i in new_order]
+            new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
             return super().output(target, (new_result,), {})
 
     new_graph = ChangeInputOutputSignature(
         graph,
-        len(flat_args),
-        matched_input_elements_positions,
-        matched_output_elements_positions,
-        out_spec_traced,
-        in_spec,
     ).transform()
 
     return (new_graph, out_guards)
