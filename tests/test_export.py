@@ -274,3 +274,27 @@ class ExportTests(torchdynamo.testing.TestCase):
         dynamo_result = out_graph(*flat_input)
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_zeroes_in_and_out(self):
+        inp = torch.zeros(10)
+        inp2 = torch.zeros(10)
+        inp3 = torch.zeros(10)
+        inps = [inp, inp2, inp3]
+
+        inps_rand = [torch.randn(10), torch.randn(10), torch.randn(10)]
+
+        def func(a, b, c):
+            return [[a], [b, c], [a + b], [[c + c]]]
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps_rand)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps_rand)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))

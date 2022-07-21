@@ -245,6 +245,7 @@ def export(f, *args, **kwargs):
     graph = None
     out_guards = None
     compiler_captured_inputs = None
+    graph_result_export = None
 
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
@@ -253,11 +254,12 @@ def export(f, *args, **kwargs):
             # However, we run the graph twice, and so don't get id stability. The TODO
             # here is to find a way to not run the graph twice.
             def compare(x, y):
-                if isinstance(y, torch.Tensor) and isinstance(x, torch.Tensor):
-                    return torch.allclose(x, y)
-                if isinstance(y, torch.Tensor) or isinstance(x, torch.Tensor):
-                    return False
-                return x == y
+                return x is y
+                # if isinstance(y, torch.Tensor) and isinstance(x, torch.Tensor):
+                #     return torch.allclose(x, y)
+                # if isinstance(y, torch.Tensor) or isinstance(x, torch.Tensor):
+                #     return False
+                # return x == y
 
             matched_elements = [compare(x, y) for y in source_args]
             if True in matched_elements:
@@ -282,7 +284,13 @@ def export(f, *args, **kwargs):
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
         compiler_captured_inputs = example_inputs
-        return gm.forward
+
+        def result_capturing_wrapper(*graph_inputs):
+            nonlocal graph_result_export
+            graph_result_export = graph(*graph_inputs)
+            return graph_result_export
+
+        return result_capturing_wrapper
 
     backend_ctx_ctor = null_context
 
@@ -306,9 +314,7 @@ def export(f, *args, **kwargs):
             )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
-
-    result_export = graph.forward(*dynamo_flat_args)
-    flat_results_export, out_spec_export = pytree.tree_flatten(result_export)
+    flat_results_export, out_spec_export = pytree.tree_flatten(graph_result_export)
 
     flat_inputs_to_exported_graph, flat_inputs_spec = pytree.tree_flatten(
         compiler_captured_inputs
@@ -347,10 +353,6 @@ def export(f, *args, **kwargs):
 
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
-            print("Args:", dynamo_result_flat)
-            print(
-                "matched_output_elements_positions", matched_output_elements_positions
-            )
             lookup = [*dynamo_result_flat, *self.new_args]
             out_spec_positions = [
                 i
@@ -361,9 +363,6 @@ def export(f, *args, **kwargs):
             ]
 
             new_order = matched_output_elements_positions + out_spec_positions
-            print("out_spec_positions", out_spec_positions)
-            print("lookup", lookup)
-            print("new_order", new_order)
             new_result_flat = [lookup[i] for i in new_order]
             new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
