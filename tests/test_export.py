@@ -94,7 +94,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    def test_export_mismatched_out(self):
+    def test_export_mismatched_out_2(self):
         def func(x):
             y = x + 1
             return ([x, x], (y, y))
@@ -184,7 +184,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    def test_dupes(self):
+    def test_dupes_2(self):
         inp = torch.tensor([0.1, 0.1])
 
         def func(x):
