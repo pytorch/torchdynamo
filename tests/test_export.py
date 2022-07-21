@@ -275,7 +275,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    def test_zeroes_in_and_out(self):
+    def test_zeroes_in_and_out_different_shape_on_test(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
         inp3 = torch.zeros(10)
@@ -285,6 +285,135 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         def func(a, b, c):
             return [[a], [b, c], [a + b], [[c + c]]]
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps_rand)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps_rand)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_zeroes_in_new_shape_scalar_out(self):
+        inp = torch.zeros(10)
+        inp2 = torch.zeros(10)
+        inp3 = torch.zeros(10)
+        inps = [inp, inp2, inp3]
+
+        inps_rand = [torch.randn(10), torch.randn(10), torch.randn(10)]
+
+        def func(a, b, c):
+            return a[0].item() + b[0].item() + c[0].item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps_rand)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps_rand)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_zeroes_in_new_shape_scalar_out_permute(self):
+        inp = torch.zeros(10)
+        inp2 = torch.zeros(10)
+        inp3 = torch.zeros(10)
+        inps = [inp, inp2, inp3]
+
+        inps_rand = [torch.randn(10), torch.randn(10), torch.randn(10)]
+
+        def func(a, b, c):
+            return b[0].item() + c[0].item() + a[0].item() + a[0].item()
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps_rand)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps_rand)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    def test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass(self):
+        inp = torch.zeros(10)
+        inp2 = torch.zeros(10)
+        inp3 = torch.zeros(10)
+        inps = [inp, inp2, inp3]
+
+        inps_rand = [torch.randn(10), torch.randn(10), torch.randn(10)]
+
+        def func(a, b, c):
+            return a, b[0].item() + c[0].item() + a[0].item() + a[0].item(), a
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps_rand)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps_rand)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_func_return(self):
+        inp = torch.zeros(10)
+        inp2 = torch.zeros(10)
+        inp3 = torch.zeros(10)
+        inps = [inp, inp2, inp3]
+
+        inps_rand = [torch.randn(10), torch.randn(10), torch.randn(10)]
+
+        def func(a, b, c):
+            x = a + b + c
+
+            def func2(y):
+                return x * y
+
+            return func2(x)
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(*inps_rand)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, *inps)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inps_rand)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_dict_return(self):
+        inp = torch.zeros(10)
+        inp2 = torch.zeros(10)
+        inp3 = torch.zeros(10)
+        inps = [inp, inp2, inp3]
+
+        inps_rand = [torch.randn(10), torch.randn(10), torch.randn(10)]
+
+        def func(a, b, c):
+            x = a + b + c
+            return {"a": x}
 
         with torchdynamo.optimize("eager", nopython=True):
             real_result = func(*inps_rand)
