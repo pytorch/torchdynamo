@@ -1296,21 +1296,51 @@ def index_select(x, dim, indices):
     )
 
 
+@register_lowering(aten.scatter_, type_promote=False)
+def scatter_(self, dim: int, index, src, **kwargs):
+    if kwargs:
+        assert kwargs["reduce"] in {"add", "multiply"}
+    return scatter_reduce_(self, dim, index, src, kwargs["reduce"] if kwargs else None)
+
+
 @register_lowering(aten.scatter_add_, type_promote=False)
 def scatter_add_(self, dim: int, index, src):
+    return scatter_reduce_(self, dim, index, src, "add")
+
+
+@register_lowering(aten.scatter_reduce_, type_promote=False)
+def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kwargs):
+    assert reduction_type is None or reduction_type in {"add", "sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(self.get_size())
-    src = to_dtype(src, self.get_dtype())
+
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
+    include_self = kwargs["include_self"] if kwargs else True
     index_loader = index.make_loader()
+    if isinstance(src, TensorBox):
+        src_loader = src.make_loader()
 
     def output_indexer(idx):
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
         return indirect_idx
+
+    def fn(idx):
+        if isinstance(src, TensorBox):
+            return src_loader(idx)
+        else:
+            return ops.constant(src, self.get_dtype())
+
+    def reduce_str(reduction_type):
+        if reduction_type == "add" or reduction_type == "sum":
+            return "atomic_add" if include_self else "atomic_add_exclude_self"
+        else:
+            # TODO: Need to support more reduction type
+            assert reduction_type is None
+            return None
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -1318,10 +1348,10 @@ def scatter_add_(self, dim: int, index, src):
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
-        inner_fn=src.make_loader(),
+        inner_fn=fn,
         ranges=index.get_size(),
         output_indexer=output_indexer,
-        scatter_mode="atomic_add",
+        scatter_mode=reduce_str(reduction_type),
     )
     buffer = ir.ComputedBuffer(
         None,

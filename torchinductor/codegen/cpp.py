@@ -257,7 +257,11 @@ class CppKernel(Kernel):
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr(index)}] = {value};"
-        elif mode == "atomic_add":
+        elif mode == "atomic_add" or mode == "atomic_add_exclude_self":
+            if mode == "atomic_add_exclude_self":
+                line = f"{var}[{cexpr(index)}] = 0;"
+                self.stores.writeline(name, line)
+
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
