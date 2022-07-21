@@ -1,7 +1,7 @@
 # Torchdynamo Benchmarks
 
 ## What We Benchmark
-TorchDynamo provides a benchmark harness that takes care of uniformly benchmarking different models.  It interleaves runs of eager and dynamo to avoid machine noise/variability issues, and reports results based on medians along with P-values. 
+TorchDynamo provides a benchmark harness that takes care of uniformly benchmarking different models.  It interleaves runs of eager and dynamo to avoid machine noise/variability issues, and reports results based on medians along with P-values.
 
 The runner integrates with models from TorchBenchmark, HuggingFace and TIMM suites and covers both training and inference.
 
@@ -19,12 +19,25 @@ We run benchmarks on AWS machines (p4d.24xlarge) using 8xNVidia A100 40GB cards.
 ### Benchmarks
 Make sure to carefully follow the [torchbench installation](https://github.com/pytorch/benchmark#installation) instructions, taking care to build the auxiliary libraries (torchvision, torchtext) from a matching version to your pytorch version.
 
-For HF and TIMM models, the scripts already install the transformers and timm package respectively on the first run. 
+For HF and TIMM models, the scripts already install the transformers and timm package respectively on the first run.
 
 ## Runbook
-There are two ways to run the benchmarks.
 
-First, one could directly call torchbench.py, huggingface.py or timm_models.py with the necessary flags. There are a lot of flags in the benchmarks runner. Some of the examples are as follows.
+### Basic Usage
+There are a lot of flags in the benchmark runner, and it can be confusing to know which settings to use or what machine to run it on.  In order to support apples-to-apples comparison, we have provided the following 'standard' settings in runner.py. This script is a wrapper over the common benchmarking infrastructure and simplifies the flags. We will continually update runner.py with the latest and most relevant compilers for training and inference. It also provides some graph utilities to visualize and compare results. Some of the example commands are
+
+**Inference Commands**
+* Inference compilers on torchbench models - `python benchmarks/runner.py --suites=torchbench --inference --dtypes=float16`
+
+**Training Commands**
+* Training compilers on TIMM models - `python benchmarks/runner.py --suites=timm_models --training --dtypes=float32 --output-dir=timm_logs`
+* AOTAutograd Training compiler on TIMM models - `python benchmarks/runner.py --suites=timm_models --training --dtypes=float32 --compilers=aot_nvfuser --output-dir=timm_logs`
+
+Running runner.py generate a file named `run.sh`. This file contains the actual commands that invoke the common benchmarking infrastructure with the appropriate flags. Which brings us to the advanced usage.
+
+### Advanced Usage
+
+One could directly call torchbench.py, huggingface.py or timm_models.py with the necessary flags. There are a lot of flags in the benchmarks runner. Some of the examples are as follows. These are subject to change.
 
 **Inference Commands**
 * TorchScript NVFuser Inference - `python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-ts`
@@ -33,16 +46,3 @@ First, one could directly call torchbench.py, huggingface.py or timm_models.py w
 **Training Commands**
 * Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/timm_models.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate`
 * AOTAutograd Torchscript NVFuser Training - `python benchmarks/timm_models.py --float32 -dcuda --training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate`
-
-
-As evident from the above scripts, there are a lot of flags. In order to support apples-to-apples comparison, we provide another wrapper over the benchmark infra called runner.py. We will update the commands for the latest and most relevant compilers in runner.py. runner.py also has graph utilities to visualize and compare results. Some of the example commands are
-
-* Training compilers on TIMM models - `python benchmarks/runner.py --suites=timm_models --training --dtypes=float32 --output-dir=timm_logs`
-* AOTAutograd Training compiler on TIMM models - `python benchmarks/runner.py --suites=timm_models --training --dtypes=float32 --compilers=aot_nvfuser --output-dir=timm_logs`
-
-### Training
-* TorchInductor + Triton
-* NVFuser
-
-### Inference
-TODO (which configs do we advertise?)
