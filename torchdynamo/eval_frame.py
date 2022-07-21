@@ -250,18 +250,7 @@ def export(f, *args, **kwargs):
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
         for x in candidate_args:
-            # TODO(voz): This is a bit unfortunate - it should really be id matches / is
-            # However, we run the graph twice, and so don't get id stability. The TODO
-            # here is to find a way to not run the graph twice.
-            def compare(x, y):
-                return x is y
-                # if isinstance(y, torch.Tensor) and isinstance(x, torch.Tensor):
-                #     return torch.allclose(x, y)
-                # if isinstance(y, torch.Tensor) or isinstance(x, torch.Tensor):
-                #     return False
-                # return x == y
-
-            matched_elements = [compare(x, y) for y in source_args]
+            matched_elements = [x is y for y in source_args]
             if True in matched_elements:
                 matched_elements = set(
                     matched_elements.index(True) for x in matched_elements
