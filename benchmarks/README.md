@@ -24,7 +24,7 @@ For HF and TIMM models, the scripts already install the transformers and timm pa
 ## Runbook
 
 ### Basic Usage
-There are a lot of flags in the benchmark runner, and it can be confusing to know which settings to use or what machine to run it on.  In order to support apples-to-apples comparison, we have provided the following 'standard' settings in runner.py. This script is a wrapper over the common benchmarking infrastructure and simplifies the flags. We will continually update runner.py with the latest and most relevant compilers for training and inference. It also provides some graph utilities to visualize and compare results. Some of the example commands are
+There are a lot of flags in the benchmark runner, and it can be confusing to know which settings to use or what machine to run it on.  In order to support apples-to-apples comparison, we have provided the following 'standard' settings in `runner.py`. This script is a wrapper over the common benchmarking infrastructure and simplifies the flags. We will continually update `runner.py` with the latest and most relevant compilers for training and inference. It also provides some graph utilities to visualize and compare results. Some of the example commands are
 
 **Inference Commands**
 * Inference compilers on torchbench models - `python benchmarks/runner.py --suites=torchbench --inference --dtypes=float16`
@@ -33,7 +33,7 @@ There are a lot of flags in the benchmark runner, and it can be confusing to kno
 * Training compilers on TIMM models - `python benchmarks/runner.py --suites=timm_models --training --dtypes=float32 --output-dir=timm_logs`
 * AOTAutograd Training compiler on TIMM models - `python benchmarks/runner.py --suites=timm_models --training --dtypes=float32 --compilers=aot_nvfuser --output-dir=timm_logs`
 
-Running runner.py generate a file named `run.sh`. This file contains the actual commands that invoke the common benchmarking infrastructure with the appropriate flags. Which brings us to the advanced usage.
+Running runner.py generates a file named `run.sh`. This file contains the actual commands that invoke the common benchmarking infrastructure with the appropriate flags. Which brings us to the advanced usage.
 
 ### Advanced Usage
 
@@ -44,5 +44,7 @@ One could directly call torchbench.py, huggingface.py or timm_models.py with the
 * TorchInductor CUDA Graphs Inference - `python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor`
 
 **Training Commands**
-* Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/timm_models.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate`
-* AOTAutograd Torchscript NVFuser Training - `python benchmarks/timm_models.py --float32 -dcuda --training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate`
+* Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/torchbench.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate`
+* AOTAutograd Torchscript NVFuser Training - `python benchmarks/torchbench.py --float32 -dcuda --training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate`
+
+Above commands are for torchbench models. You can simply replace `torchbench.py` with `huggingface.py` for HF models, and `timm_model.py` for TIMM models.
