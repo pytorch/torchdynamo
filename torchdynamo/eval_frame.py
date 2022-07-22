@@ -297,13 +297,11 @@ def export(f, *args, **kwargs):
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
 
-    matched_input_elements_positions = []
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
-    matched_output_elements_positions = []
-    flat_both = graph_captured_result + graph_captured_input
+    flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
     class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
@@ -313,16 +311,10 @@ def export(f, *args, **kwargs):
         ):
             super().__init__(m)
             arg_len = len(flat_args)
-            if arg_len > 0:
-                self.new_args = [
-                    super(ChangeInputOutputSignature, self).placeholder(
-                        f"arg{i}", (), {}
-                    )
-                    for i in range(0, arg_len)
-                ]
-            else:
-                self.new_args = []
-
+            self.new_args = [
+                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
+                for i in range(0, arg_len)
+            ]
             self.old_args_gen = (
                 self.new_args[i] for i in matched_input_elements_positions
             )
@@ -333,16 +325,7 @@ def export(f, *args, **kwargs):
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
             lookup = [*dynamo_result_flat, *self.new_args]
-            out_spec_positions = [
-                i
-                for i in range(
-                    len(matched_output_elements_positions), out_spec_traced.num_leaves
-                )
-                if i not in matched_output_elements_positions
-            ]
-
-            new_order = matched_output_elements_positions + out_spec_positions
-            new_result_flat = [lookup[i] for i in new_order]
+            new_result_flat = [lookup[i] for i in matched_output_elements_positions]
             new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
             return super().output(target, (new_result,), {})
