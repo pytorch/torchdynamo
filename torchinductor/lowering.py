@@ -1298,19 +1298,19 @@ def index_select(x, dim, indices):
 
 @register_lowering(aten.scatter_, type_promote=False)
 def scatter_(self, dim: int, index, src, **kwargs):
-    reduction_type = None
-    if kwargs:
-        if kwargs["reduce"] == "add":
-            reduction_type = "sum"
-        elif kwargs["reduce"] == "multiply":
-            reduction_type = "prod"
-        else:
-            assert False
+    reduction_type = kwargs.get("reduce")
+    if reduction_type == "add":
+        reduction_type = "sum"
+    elif reduction_type == "multiply":
+        reduction_type = "prod"
+    else:
+        assert reduction_type is None
     return scatter_reduce_(self, dim, index, src, reduction_type)
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)
 def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kwargs):
+    # TODO: Need to support more reduction type
     assert reduction_type is None or reduction_type in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
@@ -1319,7 +1319,7 @@ def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kw
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    include_self = kwargs["include_self"] if kwargs else True
+    include_self = kwargs.get("include_self", True)
     index_loader = index.make_loader()
 
     def output_indexer(idx):
