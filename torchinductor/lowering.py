@@ -351,11 +351,13 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering(aten.alias)
-@register_lowering(aten.detach)
-def detach(x):
-    assert isinstance(x, TensorBox)
+@register_lowering([aten.alias, aten.detach, aten.lift])
+def nop(x):
     return x  # AOT autograd handles this for us
+
+
+if hasattr(aten, "lift_fresh"):
+    register_lowering(aten.lift_fresh)(nop)
 
 
 @register_lowering(aten.squeeze)
@@ -692,7 +694,6 @@ make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
-make_fallback(aten.mse_loss_backward)
 
 
 @register_lowering(aten.convolution)
@@ -737,6 +738,10 @@ def clone(x, *, memory_format=0):
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+if hasattr(aten, "lift_fresh_copy"):
+    register_lowering(aten.lift_fresh_copy)(clone)
 
 
 @register_lowering([torch.arange, aten.arange])

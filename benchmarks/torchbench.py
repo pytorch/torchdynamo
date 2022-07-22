@@ -155,6 +155,7 @@ AOT_AUTOGRAD_NOT_YET_WORKING = {
     "tacotron2",  # also has an issue with normalize_ir
     # https://github.com/pytorch/torchdynamo/issues/590
     "pyhpc_isoneutral_mixing",
+    "vision_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/80
     "hf_BigBird",
     # https://github.com/pytorch/pytorch/issues/81526
@@ -166,12 +167,9 @@ AOT_AUTOGRAD_NOT_YET_WORKING = {
 # https://github.com/pytorch/torchdynamo/issues/332
 INDUCTOR_INFERENCE_NOT_YET_WORKING = {
     *AOT_AUTOGRAD_NOT_YET_WORKING,
-    # ValueError: tmpX is not defined
-    "fastNLP_Bert",
-    "vision_maskrcnn",
-    "maml",
-    # missing ops: argmax, scatter
+    # missing ops: scatter / argmax
     "hf_Reformer",
+    "maml",
     # as_strided issue
     "hf_Longformer",
     # RuntimeError: CUDA out of memory.
@@ -188,6 +186,8 @@ INDUCTOR_TRAINING_NOT_YET_WORKING = {
     "mobilenet_v2_quantized_qat",
     # TypeError: expected Tensor as element 0 in argument 1, but got NoneType
     "dlrm",
+    # RuntimeError: The tensor has a non-zero number of elements,
+    "fastNLP_Bert",
     # RuntimeError: CUDA out of memory.
     "Background_Matting",
 }

@@ -108,6 +108,7 @@ class RecordLoadStore(V.MockHandler):
 
     def canonicalize(self, index):
         sizes = list(self._var_ranges.values())
+        sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
             return index, tuple([x for x in sizes if x != 1])
 
