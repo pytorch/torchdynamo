@@ -17,7 +17,10 @@ from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
 from functorch._src.partitioners import draw_graph
 from torch.fx.graph_module import GraphModule
-
+from torch.fx.passes.shape_prop import TensorMetadata
+from . import ir
+from .codegen.cpp import CppScheduling
+from .codegen.triton import TritonScheduling
 
 from . import config
 from .decomposition import decompositions
@@ -170,14 +173,39 @@ def get_fake_func(name):
     return func1
 
 
-def create_fx_graph(nodes, fname):
+def create_fx_graph(nodes, fname, backend = "triton"):
     name_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
+
+    if backend == "triton":
+        group_fn = TritonScheduling(None).group_fn
+        group_fn_NHW_C = TritonScheduling(None).group_fn_NHW_C
+    else:
+        group_fn = CppScheduling(None).group_fn
+
     for node in nodes:
         name = node.get_name()        
         fake_f = get_fake_func(name)
         fx_node = graph.call_function(fake_f, args=(), kwargs=None)
+        dtype = None
+        if isinstance(node, ir.ComputedBuffer):
+            dtype = node.data.dtype
+
+        sizes = node.get_size()
+        if isinstance(node, ir.ComputedBuffer):
+            sizes, _ = node.simplify_reorder_and_tile()
+        elif isinstance(node, ir.ExternKernel):
+             sizes, _ = node.get_group_stride()
+
+        if isinstance(node, ir.Convolution):
+            group = group_fn_NHW_C(sizes)
+        else:
+            group = group_fn(sizes)
+            
+        metadata = TensorMetadata(group, dtype, False, node.get_stride(), type(node.layout), None, None)
+        fx_node.meta["tensor_meta"] = metadata
+
         name_to_fx_node[name] = fx_node
         if first_node is None:
             first_node = fx_node
@@ -207,7 +235,7 @@ def create_fx_graph(nodes, fname):
 
     print(graph)
     gm = GraphModule({}, graph)
-    draw_graph(gm, fname)
+    draw_graph(gm, fname, clear_meta=False)
 
 
 def draw_compute_box(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], fname = "image"):
