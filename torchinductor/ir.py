@@ -1080,6 +1080,14 @@ class Layout(IRNode):
         ), f"convert {type(self).__name__} to FixedLayout first"
         return self.as_fixed().make_indexer()
 
+    def __eq__(self, o) -> bool:
+        return (
+            self.device == o.device
+            and self.dtype == o.dtype
+            and self.size == o.size
+            and self.stride == o.stride
+            and self.offset == o.offset
+        )
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
@@ -1415,7 +1423,10 @@ class ComputedBuffer(Buffer):
             ]
             priority_idx = []
             for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
+                if (
+                    isinstance(reads_buf, Convolution)
+                    and reads_buf.kernel != "aten.convolution"
+                ):
                     # prioritize Conv layout order
                     priority_idx.append(i)
             # only consider reads to buffer of same size
@@ -1765,11 +1776,21 @@ class ConcatKernel(NopKernel):
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
-            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
-                src.data, ExternKernelAlloc
+            if (
+                isinstance(src.data.layout, FlexibleLayout)
+                and not isinstance(src.data, ExternKernelAlloc)
             ):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
+            if (
+                isinstance(src.data.layout, AliasedLayout)
+                and isinstance(dst.layout, FixedLayout)
+                and src.data.layout == dst.layout
+            ):
+                src.data.layout = AliasedLayout(dst)
+                return src.data
+                # if isinstance(dst, ConcatKernel):
+                #     cls.realize_into(src, dst)
         # introduce a copy
         pw = Pointwise.create(
             device=src.get_device(),
