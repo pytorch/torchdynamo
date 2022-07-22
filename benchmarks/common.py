@@ -347,7 +347,9 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
 
     if args.repeat > 5:
-        print(f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n")
+        print(
+            f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n"
+        )
 
     nwarmup = 4
     for rep in range(args.repeat):
@@ -377,18 +379,25 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     shapes = [x[0].shape for x in example_inputs]
     shape_keys = sorted(set(shapes))
     shape_speedups = {
-        shape: list(map(lambda it: it[1], filter(lambda it: it[0] == shape, zip(shapes, speedups))))
+        shape: list(
+            map(
+                lambda it: it[1],
+                filter(lambda it: it[0] == shape, zip(shapes, speedups)),
+            )
+        )
         for shape in shape_keys
     }
-    output_str = f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}" + \
-        "\nSpeedups by shape: " + \
-        "\n".join([
-        f"{shape}: " + ", ".join(
-        [
-            f"{speedup: .3g}" for speedup in shape_speedups[shape]
-        ])
-        for shape in shape_keys
-    ])
+    output_str = (
+        f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}"
+        + "\nSpeedups by shape: "
+        + "\n".join(
+            [
+                f"{shape}: "
+                + ", ".join([f"{speedup: .3g}" for speedup in shape_speedups[shape]])
+                for shape in shape_keys
+            ]
+        )
+    )
     output_csv(
         output_filename,
         ("dev", "name", "speedup mean", "speedup median", "speedup var"),
@@ -469,6 +478,7 @@ def baselines(models, model_iter_fn, example_inputs, args):
         [current_device, current_name] + [f"{x:.4f}" for x in speedup],
     )
     return result
+
 
 def try_script(model, example_inputs):
     try:

@@ -260,7 +260,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return DYNAMIC_SHAPES_NOT_YET_WORKING
 
     def load_model(
-        self, device, model_name, is_training, use_eval_mode, batch_size=None, dynamic_shapes=False
+        self,
+        device,
+        model_name,
+        is_training,
+        use_eval_mode,
+        batch_size=None,
+        dynamic_shapes=False,
     ):
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
