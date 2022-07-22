@@ -140,6 +140,14 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
+    def logical_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
     def rand(seed, offset):
         return f"tl.rand({seed}, {offset})"
 
@@ -186,6 +194,10 @@ class TritonOverrides(OpOverrides):
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def ceil(x):
+        return f"tl.libdevice.ceil({x})"
 
 
 @dataclasses.dataclass
