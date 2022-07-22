@@ -15,6 +15,9 @@ from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
+from functorch._src.partitioners import draw_graph
+from torch.fx.graph_module import GraphModule
+
 
 from . import config
 from .decomposition import decompositions
@@ -153,6 +156,84 @@ def compile_fx_inner(
             )
         else:
             return compiled_fn
+    except Exception:
+        if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
+            wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
+
+        raise
+
+
+class FakeModule(object):
+    def __init__(self, _name):
+        self.__name__ = _name
+
+
+def get_fake_func(name):
+    def func1(*args):
+        return 0
+    func1.__name__ = name
+    return func1
+
+
+def create_fx_graph(nodes, fname):
+    name_to_fx_node = {}
+    fake_root = {}
+    graph = torch.fx.Graph()
+    first_node = None
+    for node in nodes:
+        name = node.get_name()        
+        # fx_node = graph.call_module(name, args=(), kwargs=None)
+        fake_f = get_fake_func(name)
+        fx_node = graph.call_function(fake_f, args=(), kwargs=None)
+        fake_root[name] = torch.fx.GraphModule({}, torch.fx.Graph())
+        name_to_fx_node[name] = fx_node
+        if first_node is None:
+            first_node = fx_node
+
+    for node in nodes:
+        name = node.get_name()      
+        deps = node.get_reads()
+        fx_node = name_to_fx_node[node.name]
+        
+        new_args = []
+        for dep in deps:
+            if dep.name in name_to_fx_node:
+                dep_node = name_to_fx_node[dep.name]
+            else:
+                fake_root[dep.name] = FakeModule(dep.name)
+                with graph.inserting_before(first_node):
+                    dep_node = graph.placeholder(dep.name)  # assume it's a placeholder if not a computebox
+            new_args.append(dep_node)
+
+        fx_node.args = tuple(new_args)
+    
+    outputs = []
+    for k,v in name_to_fx_node.items():
+        if len(v.users) == 0:
+            outputs.append(v)
+    
+    graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
+
+    print(graph)
+    gm = GraphModule({}, graph)
+    draw_graph(gm, fname)
+
+
+def draw_compute_box(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], fname = "image"):
+    """
+    Dump the graph of a compute box to a file with fname.
+    """
+    init_logging()
+    wrap=identity
+
+    try:
+        graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+        with V.set_graph_handler(graph):
+            wrap(graph.run)(*example_inputs)
+            # import pprint
+            # pprint.pprint(graph.buffers)
+            # breakpoint()
+            create_fx_graph(graph.buffers, fname)
     except Exception:
         if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
             wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
