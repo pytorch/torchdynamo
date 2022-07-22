@@ -339,7 +339,9 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
-        with V.set_ops_handler(SimplifyIndexing(V.get_ops_handler(), var_ranges)):
+        with V.set_ops_handler(
+            SimplifyIndexing(V.get_ops_handler(), var_ranges)
+        ), V.kernel.set_current_node(self):
             self._body(*index_vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
