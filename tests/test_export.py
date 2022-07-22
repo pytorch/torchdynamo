@@ -93,6 +93,31 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
+    def test_list_unpack(self):
+        inp = [
+            torch.tensor([0.1, 0.1]),
+            torch.tensor([0.2, 0.2]),
+            torch.tensor([0.3, 0.3]),
+        ]
+
+        def func(x):
+            first = x[2]
+            second = x[2]
+            return x[0], first * second, x[1], x[2]
+
+        with torchdynamo.optimize("eager", nopython=True):
+            real_result = func(inp)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp)
+        out_graph = exported[0]
+        flat_input, _ = pytree.tree_flatten(inp)
+
+        dynamo_result = out_graph(*flat_input)
+
+        self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
     def test_export_mismatched_out_2(self):
         def func(x):
             y = x + 1
