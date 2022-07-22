@@ -351,10 +351,10 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering(aten.alias)
-@register_lowering(aten.detach)
+@register_lowering(
+    [aten.alias, aten.detach, aten.lift_fresh_copy, aten.lift_fresh, aten.lift]
+)
 def detach(x):
-    assert isinstance(x, TensorBox)
     return x  # AOT autograd handles this for us
 
 
@@ -692,7 +692,6 @@ make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
-make_fallback(aten.mse_loss_backward)
 
 
 @register_lowering(aten.convolution)

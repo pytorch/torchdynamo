@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import logging
 from typing import Any
 from typing import Dict
 from typing import List
@@ -20,6 +21,8 @@ from .sizevars import SimplifyIndexing
 from .virtualized import V
 
 template_kernels = [ir.Convolution]
+
+log = logging.getLogger(__name__)
 
 
 def cmp(a, b):
@@ -167,6 +170,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def run(self, codegen_extern_call):
+        log.info(f"RUN EXTERN {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
@@ -184,6 +188,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         return False
 
     def run(self):
+        log.info(f"RUN NOP {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
@@ -323,6 +328,7 @@ class SchedulerNode(BaseSchedulerNode):
         super().allocate()
 
     def run(self, *index_vars):
+        log.info(f"RUN {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
         sizes = self._sizes
@@ -380,8 +386,9 @@ class BlockedNodes:
     def add(self, node: SchedulerNode):
         box = SchedulerNodeBox(node)
         for dep in node.unmet_dependencies:
-            self.name_to_nodes[dep.name].append(box)
             self.dep_to_nodes[dep].append(box)
+        for name in {dep.name for dep in node.unmet_dependencies}:
+            self.name_to_nodes[name].append(box)
 
     def pop_name(self, name):
         return [x.pop() for x in self.name_to_nodes.pop(name, []) if x]
@@ -620,6 +627,15 @@ class Scheduler:
         Mark all pending_buffer_names as available and enqueue any nodes
         that became runable.
         """
+        if config.debug and (self.fusable_deps or self.pending_buffer_names):
+
+            def gc(d):
+                return {k: v for k, v in d.items() if any(v)}
+
+            log.info(f"blocked names: {gc(self.blocked_nodes.dep_to_nodes)}")
+            log.info(f"blocked deps: {gc(self.blocked_nodes.name_to_nodes)}")
+            log.info(f"new fusable_deps: {self.fusable_deps}")
+
         while self.pending_buffer_names:
             self.available_buffer_names.update(self.pending_buffer_names)
             nodes_to_add = []
@@ -651,6 +667,7 @@ class Scheduler:
         self.check_can_free.clear()
 
     def kernel(self, kernel):
+        log.info("NEW KERNEL")
         self.fusable_deps.clear()
         self.kernels.append(kernel)
 
@@ -699,6 +716,15 @@ class Scheduler:
                 # keep poping fusable nodes as their depdencies are satisfied
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
+
+    def pop_groups(self, groups):
+        keep_going = True
+        while keep_going:
+            keep_going = False
+            for group in groups:
+                for node in self.pop_group(group):
+                    keep_going = True
+                    yield node
 
     def flush(self):
         for backend in self.backends.values():

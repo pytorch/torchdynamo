@@ -843,6 +843,7 @@ class TritonScheduling:
         return group
 
     def codegen(self, *groups):
+        log.info(f"codegen {groups}")
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
@@ -865,8 +866,11 @@ class TritonScheduling:
                     group, reduction_group = groups
 
                     # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_group(
-                        (group * reduction_group, sympy.Integer(1)),
+                    for node in scheduler.pop_groups(
+                        [
+                            (group * reduction_group, sympy.Integer(1)),
+                            (group, reduction_group, sympy.Integer(1)),
+                        ]
                     ):
                         try:
                             node.run(*kernel.split_and_set_ranges(node.get_ranges()))

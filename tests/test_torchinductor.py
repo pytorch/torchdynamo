@@ -1348,6 +1348,17 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @patch.object(config, "aot_autograd", False)
+    def test_layer_norm(self):
+        m = torch.nn.Sequential(
+            torch.nn.LayerNorm(32),
+            torch.nn.ReLU(),
+        )
+        m.eval()
+        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
