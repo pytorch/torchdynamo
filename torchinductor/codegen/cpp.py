@@ -78,7 +78,7 @@ def cpp_prefix():
             #include <stdint.h>
             #include <cmath>
 
-            namespace at { 
+            namespace at {
             namespace detail {
                 template <typename T, int size_>
                 struct Array {
@@ -245,7 +245,7 @@ def cpp_prefix():
 
             float normalized_rand_cpu(uint64_t seed, uint64_t offset) {
                 return normalize(at::Philox4_32_10(seed, omp_get_thread_num(), offset)());
-            } 
+            }
             """
         ),
         "h",
