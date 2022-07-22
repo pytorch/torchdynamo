@@ -1297,29 +1297,28 @@ def index_select(x, dim, indices):
 
 
 @register_lowering(aten.scatter_, type_promote=False)
-def scatter_(self, dim: int, index, src, **kwargs):
-    reduction_type = kwargs.get("reduce")
-    if reduction_type == "add":
-        reduction_type = "sum"
-    elif reduction_type == "multiply":
-        reduction_type = "prod"
+def scatter_(self, dim: int, index, src, *, reduce: str = None):
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        reduce = "prod"
     else:
-        assert reduction_type is None
-    return scatter_reduce_(self, dim, index, src, reduction_type)
+        assert reduce is None
+    return scatter_reduce_(self, dim, index, src, reduce)
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)
-def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kwargs):
+def scatter_reduce_(
+    self, dim: int, index, src, reduce: str, *, include_self: bool = True
+):
     # TODO: Need to support more reduction type
-    assert reduction_type is None or reduction_type in {"sum"}
+    assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(self.get_size())
 
     self.realize()
     V.graph.realize_users_of(self.get_name())
-
-    include_self = kwargs.get("include_self", True)
     index_loader = index.make_loader()
 
     def output_indexer(idx):
@@ -1334,12 +1333,12 @@ def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kw
         else:
             return ops.constant(src, self.get_dtype())
 
-    def reduce_str(reduction_type):
-        if reduction_type == "sum":
+    def backend_reduce_str(reduce):
+        if reduce == "sum":
             return "atomic_add" if include_self else "atomic_add_exclude_self"
         else:
             # TODO: Need to support more reduction type
-            assert reduction_type is None
+            assert reduce is None
             return None
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
@@ -1351,7 +1350,7 @@ def scatter_reduce_(self, dim: int, index, src, reduction_type: str = None, **kw
         inner_fn=fn,
         ranges=index.get_size(),
         output_indexer=output_indexer,
-        scatter_mode=reduce_str(reduction_type),
+        scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
         None,
