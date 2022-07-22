@@ -244,18 +244,20 @@ def export(f, *args, **kwargs):
 
     graph = None
     out_guards = None
-    compiler_captured_inputs = None
-    graph_result_export = None
+    graph_captured_input = None
+    graph_captured_result = None
 
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
-        for x in candidate_args:
-            matched_elements = [x is y for y in source_args]
-            if True in matched_elements:
-                matched_elements = set(
-                    matched_elements.index(True) for x in matched_elements
-                )
-                matched_elements_positions.extend(matched_elements)
+        dict_of_source_args = dict()
+        for i in range(0, len(source_args)):
+            element_id = id(source_args[i])
+            dict_of_source_args[element_id] = i
+
+        for i in range(0, len(candidate_args)):
+            arg = candidate_args[i]
+            if id(arg) in dict_of_source_args:
+                matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
@@ -268,16 +270,17 @@ def export(f, *args, **kwargs):
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
-        nonlocal compiler_captured_inputs
 
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        compiler_captured_inputs = example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
-            nonlocal graph_result_export
-            graph_result_export = graph(*graph_inputs)
-            return graph_result_export
+            nonlocal graph_captured_result
+            nonlocal graph_captured_input
+
+            graph_captured_input = graph_inputs
+            graph_captured_result = graph(*graph_inputs)
+            return graph_captured_result
 
         return result_capturing_wrapper
 
@@ -293,28 +296,15 @@ def export(f, *args, **kwargs):
     assert out_guards is not None, "whole graph export entails exactly one guard export"
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
-    dynamo_flat_args, dynamo_in_spec = pytree.tree_flatten(compiler_captured_inputs)
 
     matched_input_elements_positions = []
-    if in_spec != dynamo_in_spec:
-        if len(dynamo_flat_args) > 0:
-            matched_input_elements_positions = produce_matching(
-                flat_args, dynamo_flat_args
-            )
+    matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
-    flat_results_export, out_spec_export = pytree.tree_flatten(graph_result_export)
-
-    flat_inputs_to_exported_graph, flat_inputs_spec = pytree.tree_flatten(
-        compiler_captured_inputs
-    )
 
     matched_output_elements_positions = []
-    if out_spec_export != out_spec_traced:
-        flat_both = flat_results_export + flat_inputs_to_exported_graph
-        matched_output_elements_positions = produce_matching(
-            flat_both, flat_results_traced
-        )
+    flat_both = graph_captured_result + graph_captured_input
+    matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
     class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
         def __init__(
