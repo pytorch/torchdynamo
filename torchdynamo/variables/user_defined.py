@@ -299,6 +299,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.fget, self, **options
             ).call_function(tx, [], {})
 
+        if inspect.isfunction(subobj) and inspect.ismethod(getattr(value, name)):
+            return variables.UserMethodVariable(subobj, self, **options).call_function(
+                tx, [], {}
+            )
+
         if (
             name in getattr(value, "__dict__", {})
             or ConstantVariable.is_literal(subobj)

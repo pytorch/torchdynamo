@@ -2,6 +2,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import math
 import numbers
 import operator
 from contextlib import contextmanager
@@ -229,7 +230,7 @@ class TensorVariable(VariableTracker):
             return variables.ConstantVariable(example_value, **options)
         elif (
             isinstance(example_value, numbers.Number)
-            and proxy.node.target == "item"
+            and (proxy.node.target == "item" or proxy.node.target == math.sqrt)
             and config.capture_scalar_outputs
         ):
             return UnspecializedPythonVariable.create(
