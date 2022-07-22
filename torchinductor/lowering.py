@@ -657,15 +657,15 @@ else:
         offset = V.graph.increment_randomness_offset(sympy_product(size))
 
         random_pos = ir.FixedLayout(
-                device,
-                dtype,
-                size,
-                ir.FlexibleLayout.contiguous_strides(size),
-                offset=offset,
-            ).make_indexer()
+            device,
+            dtype,
+            size,
+            ir.FlexibleLayout.contiguous_strides(size),
+            offset=offset,
+        ).make_indexer()
 
         if device.type == "cuda":
-            
+
             seed_buffer = V.graph.random_seed_buffer(device)
 
             def inner_fn(index):
