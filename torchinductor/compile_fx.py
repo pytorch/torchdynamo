@@ -165,6 +165,58 @@ def compile_fx_inner(
 
         raise
 
+def legalize_graph(graph: torch.fx.Graph):
+    """
+    Replace the graph of the given GraphModule with one that contains the same nodes as the
+    original, but in topologically sorted order.
+
+    This is used by the merge_matmul transformation below, which disturbs the topologically sorted
+    order of its input GraphModule, so that this order is restored before further transformation.
+
+    Arguments:
+        gm: The graph module to topologically sort. It is modified in-place.
+
+    """
+    # Build an adjacency list representation of node dependencies in the graph. This also
+    # serves as a list of nodes that still need to be inserted into the new, topologically
+    # sorted graph.
+    dependencies = {node: node.all_input_nodes.copy() for node in graph.nodes}
+
+    # Construct a new graph that will contain all nodes in topologically sorted order.
+    new_graph = torch.fx.Graph()
+    value_remap = {}
+
+    # Copy over all nodes with no dependencies.
+    for node, deps in dependencies.items():
+        if not deps:
+            value_remap[node] = new_graph.node_copy(node, lambda n: value_remap[n])
+
+    # Remove the copied over nodes from the adjacency list.
+    for copied_node in value_remap.keys():
+        del dependencies[copied_node]
+
+    # While there are still nodes to insert into the new graph:
+    while dependencies:
+        copied_this_round = []
+
+        # Copy over all nodes whose dependencies already exist in the new graph.
+        for node, deps in dependencies.items():
+            all_deps_copied = True
+            for dep in deps:
+                if dep not in value_remap:
+                    all_deps_copied = False
+
+            if all_deps_copied:
+                value_remap[node] = new_graph.node_copy(node, lambda n: value_remap[n])
+                copied_this_round.append(node)
+
+        # Delete all nodes copied over in this iteration from dependencies.
+        for copied_node in copied_this_round:
+            del dependencies[copied_node]
+
+    # Replace the old graph with the new, topologically sorted one.
+    return new_graph
+
 
 def get_fake_func(name):
     def func1(*args):
@@ -173,7 +225,11 @@ def get_fake_func(name):
     return func1
 
 
-def create_fx_graph(nodes, fname, backend = "triton"):
+def create_fx_graph(nodes, fname, backend = "triton", print_graph = False):
+
+    func_dict = {}
+    # import pprint
+    # pprint.pprint(nodes)
     name_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
@@ -184,32 +240,47 @@ def create_fx_graph(nodes, fname, backend = "triton"):
     else:
         group_fn = CppScheduling(None).group_fn
 
+    # create call_function node for each Buffer and Kernel
     for node in nodes:
-        name = node.get_name()        
-        fake_f = get_fake_func(name)
+        name = node.get_name()      
+        node_type = str(type(node)).split(".")[-1].replace("'>","")
+        if node_type in func_dict:
+            fake_f = func_dict[node_type]
+        else:
+            fake_f = get_fake_func(node_type)
+            func_dict[node_type] = fake_f
         fx_node = graph.call_function(fake_f, args=(), kwargs=None)
+        fx_node.name = name
+
+        # gather meta data
         dtype = None
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        sizes = node.get_size()
-        if isinstance(node, ir.ComputedBuffer):
-            sizes, _ = node.simplify_reorder_and_tile()
-        elif isinstance(node, ir.ExternKernel):
-             sizes, _ = node.get_group_stride()
+        try:
+            stride = node.get_stride()
+            layout = type(node.layout)
+            sizes = node.get_size()
+            if isinstance(node, ir.ComputedBuffer):
+                sizes, _ = node.simplify_reorder_and_tile()
+            elif isinstance(node, ir.ExternKernel):
+                sizes, _ = node.get_group_stride()
 
-        if isinstance(node, ir.Convolution):
-            group = group_fn_NHW_C(sizes)
-        else:
-            group = group_fn(sizes)
+            if isinstance(node, ir.Convolution):
+                group = group_fn_NHW_C(sizes)
+            else:
+                group = group_fn(sizes)
+        except:
+            group = torch.Size([0])
             
-        metadata = TensorMetadata(group, dtype, False, node.get_stride(), type(node.layout), None, None)
+        metadata = TensorMetadata(group, dtype, False, stride, layout, None, None)
         fx_node.meta["tensor_meta"] = metadata
 
         name_to_fx_node[name] = fx_node
         if first_node is None:
             first_node = fx_node
 
+    # create edges between nodes
     for node in nodes:
         name = node.get_name()      
         deps = node.get_reads()
@@ -222,6 +293,7 @@ def create_fx_graph(nodes, fname, backend = "triton"):
             else:
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)  # assume it's a placeholder if not a computebox
+                    name_to_fx_node[dep.name] = dep_node
             new_args.append(dep_node)
 
         fx_node.args = tuple(new_args)
@@ -230,15 +302,20 @@ def create_fx_graph(nodes, fname, backend = "triton"):
     for _,v in name_to_fx_node.items():
         if len(v.users) == 0:
             outputs.append(v)
-    
     graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
-
-    print(graph)
+    graph = legalize_graph(graph)
+    graph.lint()
+    
+    # if print_graph:
+    #     print(graph)
+    print("starting creating module")
     gm = GraphModule({}, graph)
+    print(gm)
+    print("starting drawing")
     draw_graph(gm, fname, clear_meta=False)
 
 
-def draw_compute_box(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], fname = "image"):
+def draw_compute_box(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], fname = "image", print_graph = False):
     """
     Dump the graph of a compute box to a file with fname.
     """
@@ -252,7 +329,7 @@ def draw_compute_box(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor
             # import pprint
             # pprint.pprint(graph.buffers)
             # breakpoint()
-            create_fx_graph(graph.buffers, fname)
+            create_fx_graph(graph.buffers, fname, print_graph=print_graph)
     except Exception:
         if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
             wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
@@ -332,19 +409,50 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     assert static_arg_idxs == list(range(len(static_arg_idxs)))
     return len(static_arg_idxs)
 
+# def get_input_meta(args):
+#     input_meta = []
+#     if len(args) > 0 and isinstance(args[0], tuple):  # joint input
+#         input_meta += get_input_meta(args[0])
+#         input_meta += get_input_meta(args[1])
+#         return input_meta
+#     for arg in args:
+#         if(type(arg) == int or type(arg) == float):
+#             input_meta.append((type(arg),))
+#         else:
+#             input_meta.append((type(arg), arg.shape, arg.stride(), arg.dtype, arg.device))
+#     return input_meta
+
+model_name = "alexnet"
 
 def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
     model_ = normalize_ir(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
 
+    # def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+    #     fixed = len(example_inputs) - num_example_inputs
+    #     return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+
+    # def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+    #     fixed = count_tangents(model)
+    #     return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        fixed = len(example_inputs) - num_example_inputs
-        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+        # import pickle
+        # model.graph.set_codegen(torch.fx.graph.CodeGen())  # remove codegen
+        # model.to_folder("hf_Bert_forward_0")
+        # input_meta = get_input_meta(example_inputs)
+        # pickle.dump(input_meta, open("hf_Bert_forward_0/hf_Bert_forward_0.input", "wb"))  # noqa: E501
+        global model_name
+        draw_compute_box(model, example_inputs, f"{model_name}_fw", print_graph=True)
+        return model
+        
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        fixed = count_tangents(model)
-        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+        # print(model)
+        global model_name
+        draw_compute_box(model, example_inputs, f"{model_name}_bw", print_graph=True)
+        return model
 
     return aot_autograd(
         model_,
