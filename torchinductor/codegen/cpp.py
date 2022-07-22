@@ -111,12 +111,13 @@ def cpp_prefix():
             public:
 
             inline explicit philox_engine(uint64_t seed = 67280421310721,
+                                            uint64_t subsequence = 0,
                                             uint64_t offset = 0) {
                 key[0] = static_cast<uint32_t>(seed);
                 key[1] = static_cast<uint32_t>(seed >> 32);
                 counter = detail::UINT4(0);
-                counter[2] = 0;
-                counter[3] = 0;
+                counter[2] = static_cast<uint32_t>(subsequence);
+                counter[3] = static_cast<uint32_t>(subsequence >> 32);
                 STATE = 0;
                 incr_n(offset);
             }
@@ -238,9 +239,12 @@ def cpp_prefix():
 
             } // namespace at
 
+            constexpr float normalize (uint32_t value) {
+                return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
+            }
 
-            uint32_t rand_cpu_new(uint64_t seed, uint64_t offset) {
-                return at::Philox4_32_10(seed, offset)();
+            float rand_cpu_new(uint64_t seed, uint64_t offset) {
+                return normalize(at::Philox4_32_10(seed + 5, omp_get_thread_num(), offset)());
             } 
             """
         ),

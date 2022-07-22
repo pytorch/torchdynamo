@@ -676,11 +676,12 @@ else:
             # on CPU we use mt19937 which doesn't use the offset
             # TODO(jansel): we should rewrite CPU RNG to be closer to cuda and deterministic
             seed_var = V.graph.sizevars.seed()
-            offset = 0
 
             def inner_fn(index):
                 return ops.rand_cpu_new(
-                    ops.index_expr(seed_var, torch.int32), offset, dtype
+                    ops.index_expr(seed_var, torch.int32),
+                    ops.index_expr(offset, torch.int32),
+                    dtype,
                 )
 
         return Pointwise.create(
