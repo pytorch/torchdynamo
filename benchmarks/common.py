@@ -349,7 +349,7 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     if args.repeat > 5:
         print(f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n")
 
-    nwarmup = 2
+    nwarmup = 4
     for rep in range(args.repeat):
         # Start each rep fresh, e.g. only warmup on example 0
         torchdynamo.reset()
@@ -359,13 +359,13 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
 
         for input_idx, inputs in enumerate(example_inputs):
             # interleave the runs to handle frequency scaling and load changes
-            timings[rep, input_idx, 0], expected_output = timed(
-                model, model_iter_fn, inputs, return_result=True
+            timings[rep, input_idx, 0], _ = timed(
+                model, model_iter_fn, inputs, return_result=False
             )
             # different from regular speedup_experiment, we _DO_ want to allow recompilation
             with optimize_ctx:
-                timings[rep, input_idx, 1], actual_output = timed(
-                    model, model_iter_fn, inputs, return_result=True
+                timings[rep, input_idx, 1], _ = timed(
+                    model, model_iter_fn, inputs, return_result=False
                 )
     medians = np.median(timings, axis=0)
     speedups = list(medians[:, 0] / medians[:, 1])
@@ -426,12 +426,6 @@ def baselines(models, model_iter_fn, example_inputs, args):
     """
     Common measurement code across all baseline experiments.
     """
-
-    if args.dynamic_shapes:
-        # TODO possibly merge ds logic back to main baselines fn, but kept it separate
-        # during exploration phase
-        return baselines_ds(models, model_iter_fn, example_inputs, args)
-
     models = list(models)
     for idx, (name, model) in enumerate(models):
         if idx == 0:
@@ -750,7 +744,7 @@ class BenchmarkRunner:
             if dynamic_shapes:
                 # skip correctness check for ds benchmark, becuase example_inputs are not
                 # compatible with the code below, and the same benchmarks can be run in
-                # non-dynamic sshapo mode for correctness checks
+                # non-dynamic shapes mode for correctness checks
                 torch.manual_seed(1337)
                 torchdynamo.reset()
                 results = []
