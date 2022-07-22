@@ -2177,6 +2177,7 @@ class CommonTemplate:
 
         x = torch.ones(1000, device=self.device, dtype=torch.float32)
         result = fn(x)
+        print("RESULT IS: ", result.nonzero().shape[0])
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
