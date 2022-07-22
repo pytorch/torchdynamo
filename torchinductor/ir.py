@@ -1089,6 +1089,7 @@ class Layout(IRNode):
             and self.offset == o.offset
         )
 
+
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
@@ -1779,18 +1780,13 @@ class ConcatKernel(NopKernel):
             if (
                 isinstance(src.data.layout, FlexibleLayout)
                 and not isinstance(src.data, ExternKernelAlloc)
-            ):
-                src.data.layout = AliasedLayout(dst)
-                return src.data
-            if (
+            ) or (
                 isinstance(src.data.layout, AliasedLayout)
                 and isinstance(dst.layout, FixedLayout)
                 and src.data.layout == dst.layout
             ):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
-                # if isinstance(dst, ConcatKernel):
-                #     cls.realize_into(src, dst)
         # introduce a copy
         pw = Pointwise.create(
             device=src.get_device(),

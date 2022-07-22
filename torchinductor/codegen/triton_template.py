@@ -271,10 +271,8 @@ def template_codegen(scheduler, scheduler_node):
                 # if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
                 #     node.reorder_channel_last()
                 # make sure we force the reads of conv are channel_last layout
-                if (
-                    type(node.node) in template_dict.keys()
-                    or (len(node.node.get_size()) == 4
-                    and node.node.get_stride()[1] != 1)
+                if type(node.node) in template_dict.keys() or (
+                    len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1
                 ):
                     reschedule.append(node)
                     continue
