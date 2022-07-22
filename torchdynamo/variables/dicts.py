@@ -293,10 +293,13 @@ class DataClassVariable(ConstDictVariable):
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
-        result = list(super().reconstruct(codegen))
-        assert result[-1].opname == "BUILD_CONST_KEY_MAP"
-        result.append(create_instruction("CALL_FUNCTION_KW", result.pop().argval))
-        return result
+        keys = tuple(self.items.keys())
+        for key in keys:
+            codegen(self.items[key])
+        return [
+            codegen.create_load_const(keys),
+            create_instruction("CALL_FUNCTION_KW", len(keys)),
+        ]
 
     def call_method(
         self,

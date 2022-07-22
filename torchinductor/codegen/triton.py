@@ -140,6 +140,14 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
+    def logical_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
     def rand(seed, offset):
         return f"tl.rand({seed}, {offset})"
 
@@ -186,6 +194,10 @@ class TritonOverrides(OpOverrides):
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def ceil(x):
+        return f"tl.libdevice.ceil({x})"
 
 
 @dataclasses.dataclass
@@ -831,6 +843,7 @@ class TritonScheduling:
         return group
 
     def codegen(self, *groups):
+        log.info(f"codegen {groups}")
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
@@ -853,8 +866,11 @@ class TritonScheduling:
                     group, reduction_group = groups
 
                     # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_group(
-                        (group * reduction_group, sympy.Integer(1)),
+                    for node in scheduler.pop_groups(
+                        [
+                            (group * reduction_group, sympy.Integer(1)),
+                            (group, reduction_group, sympy.Integer(1)),
+                        ]
                     ):
                         try:
                             node.run(*kernel.split_and_set_ranges(node.get_ranges()))

@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 import operator
 import os
 import textwrap
@@ -239,10 +240,16 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
     num_example_inputs = len(example_inputs_)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        if config.debug:
+            print("FORWARD GRAPH:")
+            model.graph.print_tabular()
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+        if config.debug:
+            print("BACKWARD GRAPH:")
+            model.graph.print_tabular()
         fixed = count_tangents(model)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
@@ -258,6 +265,9 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
+    logging.getLogger("torchinductor").setLevel(
+        logging.DEBUG if config.debug else logging.WARNING
+    )
     if config.aot_autograd:
         return compile_fx_aot(model_, example_inputs_)
     else:
