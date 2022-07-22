@@ -243,8 +243,8 @@ def cpp_prefix():
                 return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
             }
 
-            float rand_cpu_new(uint64_t seed, uint64_t offset) {
-                return normalize(at::Philox4_32_10(seed + 5, omp_get_thread_num(), offset)());
+            float normalized_rand_cpu(uint64_t seed, uint64_t offset) {
+                return normalize(at::Philox4_32_10(seed, omp_get_thread_num(), offset)());
             } 
             """
         ),
@@ -380,8 +380,8 @@ class CppOverrides(OpOverrides):
         return f"{a} && {b}"
 
     @staticmethod
-    def rand_cpu_new(seed: sympy.Expr, offset, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(rand_cpu_new({seed}, {offset}));"
+    def normalized_rand_cpu(seed: sympy.Expr, offset, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
 
 class CppKernel(Kernel):

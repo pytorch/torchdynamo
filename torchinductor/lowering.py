@@ -656,14 +656,16 @@ else:
         size = [sympy.expand(s) for s in size]
         offset = V.graph.increment_randomness_offset(sympy_product(size))
 
-        if device.type == "cuda":
-            random_pos = ir.FixedLayout(
+        random_pos = ir.FixedLayout(
                 device,
                 dtype,
                 size,
                 ir.FlexibleLayout.contiguous_strides(size),
                 offset=offset,
             ).make_indexer()
+
+        if device.type == "cuda":
+            
             seed_buffer = V.graph.random_seed_buffer(device)
 
             def inner_fn(index):
@@ -678,9 +680,9 @@ else:
             seed_var = V.graph.sizevars.seed()
 
             def inner_fn(index):
-                return ops.rand_cpu_new(
+                return ops.normalized_rand_cpu(
                     ops.index_expr(seed_var, torch.int32),
-                    ops.index_expr(offset, torch.int32),
+                    ops.index_expr(random_pos(index), torch.int32),
                     dtype,
                 )
 
