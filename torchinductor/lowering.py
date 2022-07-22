@@ -351,11 +351,16 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering(
-    [aten.alias, aten.detach, aten.lift_fresh_copy, aten.lift_fresh, aten.lift]
-)
+@register_lowering([aten.alias, aten.detach, aten.lift_fresh, aten.lift])
 def detach(x):
     return x  # AOT autograd handles this for us
+
+
+if hasattr(aten, "lift_fresh_copy"):
+
+    @register_lowering(aten.lift_fresh_copy)
+    def lift_fresh_copy(x):
+        return x
 
 
 @register_lowering(aten.squeeze)
