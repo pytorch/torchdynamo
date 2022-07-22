@@ -336,42 +336,45 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
 
 def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     """
-    Measure speedups over eager using the autotuning inference backend.  To use this:
-        1) First run once to record graphs that need autotuning
-        2) Next run ./autotune.py to select the right backend for each recorded graph
-        3) Finally, run this target again to measure speedups
+    Run dynamic shapes benchmarks.
 
-    Writes to ./speedups.csv
+    Requires dynamic shape compatible models, which provide a list of example inputs.
+
+    Warms up using the first input example and then iterates the inputs,
+    measuring (and expecting minimal) variance between the runtime for different examples.
+
     """
-    # TODO something is wrong with the dynamic inputs since i have to do this
-    example_inputs = example_inputs[0]
     timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
 
-    # if dynamo is not reset between 'repeats', subsequent repeats won't be fair
-    # but currently warmup for first shape is done outside speedup, and it is fair
-    # to allow one warmup.  So, probably move warmup to inside this loop using just 
-    # the first shape in the sequence, enable repeat, and switch from first_run_speedups
-    # to median_speedups to reduce measurement variance
-    assert args.repeat == 1, "TODO: to enable repeat>1, but ensure dynamo is reset"
+    if args.repeat > 5:
+        print(f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n")
+
+    nwarmup = 2
     for rep in range(args.repeat):
+        # Start each rep fresh, e.g. only warmup on example 0
+        torchdynamo.reset()
+        for _ in range(nwarmup):
+            with optimize_ctx:
+                model_iter_fn(model, example_inputs[0])
+
         for input_idx, inputs in enumerate(example_inputs):
             # interleave the runs to handle frequency scaling and load changes
             timings[rep, input_idx, 0], expected_output = timed(
-                model, model_iter_fn, (inputs,), return_result=True
+                model, model_iter_fn, inputs, return_result=True
             )
             # different from regular speedup_experiment, we _DO_ want to allow recompilation
             with optimize_ctx:
                 timings[rep, input_idx, 1], actual_output = timed(
-                    model, model_iter_fn, (inputs,), return_result=True
+                    model, model_iter_fn, inputs, return_result=True
                 )
-    # medians = np.median(timings, axis=0)
-    # median_speedups = speedups = list(medians[:, 0] / medians[:, 1])
-    speedups = list(timings[0,:,0] / timings[0,:,1])
+    medians = np.median(timings, axis=0)
+    speedups = list(medians[:, 0] / medians[:, 1])
     speedups_mean = np.mean(speedups)
     speedups_median = np.median(speedups)
     speedups_var = np.var(speedups)
 
-    shapes = [x.shape for x in example_inputs]
+    # TODO this x[0] is not going to work in general but bert only has 1 input
+    shapes = [x[0].shape for x in example_inputs]
     shape_keys = sorted(set(shapes))
     shape_speedups = {
         shape: list(map(lambda it: it[1], filter(lambda it: it[0] == shape, zip(shapes, speedups))))
@@ -731,27 +734,39 @@ class BenchmarkRunner:
         optimize_ctx,
         experiment,
         skip_accuracy_check=False,
+        dynamic_shapes=False,
     ):
         t0 = time.perf_counter()
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             is_training, current_device, name
         )
-        static_inputs = (example_inputs[0][0], *example_inputs[1:])
         with self.pick_grad(name, is_training):
             mode = "train" if is_training else "eval"
             sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
             sys.stdout.flush()
             for submod in itertools.chain([model], model.modules()):
                 assert not torchdynamo.utils.is_jit_model(submod)
+
+            if dynamic_shapes:
+                # skip correctness check for ds benchmark, becuase example_inputs are not
+                # compatible with the code below, and the same benchmarks can be run in
+                # non-dynamic sshapo mode for correctness checks
+                torch.manual_seed(1337)
+                torchdynamo.reset()
+                results = []
+                results.append(experiment(model, example_inputs))
+                print(" ".join(map(str, results)))
+                return 0
+
             torch.manual_seed(1337)
             correct_result = model_iter_fn(
-                copy.deepcopy(model), torchdynamo.utils.clone_inputs(static_inputs)
+                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
             )
 
             torch.manual_seed(1337)
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(static_inputs)
+                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
                 if not same(correct_result, correct_rerun_result):
                     print("INCORRECT - Variation in Eager runs itself")
@@ -762,13 +777,13 @@ class BenchmarkRunner:
             torchdynamo.reset()
             if experiment.func is cold_start_experiment:
                 results = []
-                results.append(experiment(model, static_inputs, optimize_ctx))
+                results.append(experiment(model, example_inputs, optimize_ctx))
                 print(" ".join(map(str, results)))
                 return 0
 
             try:
                 with optimize_ctx:
-                    new_result = model_iter_fn(model, static_inputs)
+                    new_result = model_iter_fn(model, example_inputs)
             except Exception:
                 logging.exception("unhandled error")
                 print("ERROR")
@@ -787,12 +802,12 @@ class BenchmarkRunner:
 
             # run one more time to see if we reached a fixed point
             with optimize_ctx:
-                model_iter_fn(model, static_inputs)
+                model_iter_fn(model, example_inputs)
             _, frames_second_pass = Stats.reset_counters()  # should be 0
 
             if frames_second_pass > 0:
                 with optimize_ctx:
-                    model_iter_fn(model, static_inputs)
+                    model_iter_fn(model, example_inputs)
                 _, frames_third_pass = Stats.reset_counters()  # should be 0
             else:
                 frames_third_pass = 0
@@ -1347,6 +1362,7 @@ def main(runner, original_dir=None):
                 optimize_ctx,
                 experiment,
                 args.skip_accuracy_check,
+                args.dynamic_shapes,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
@@ -1391,6 +1407,7 @@ def main(runner, original_dir=None):
                 optimize_ctx,
                 experiment,
                 args.skip_accuracy_check,
+                args.dynamic_shapes,
             )
 
         Stats.print_summary()
