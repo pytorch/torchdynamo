@@ -163,11 +163,6 @@ def compile_fx_inner(
         raise
 
 
-class FakeModule(object):
-    def __init__(self, _name):
-        self.__name__ = _name
-
-
 def get_fake_func(name):
     def func1(*args):
         return 0
@@ -177,15 +172,12 @@ def get_fake_func(name):
 
 def create_fx_graph(nodes, fname):
     name_to_fx_node = {}
-    fake_root = {}
     graph = torch.fx.Graph()
     first_node = None
     for node in nodes:
         name = node.get_name()        
-        # fx_node = graph.call_module(name, args=(), kwargs=None)
         fake_f = get_fake_func(name)
         fx_node = graph.call_function(fake_f, args=(), kwargs=None)
-        fake_root[name] = torch.fx.GraphModule({}, torch.fx.Graph())
         name_to_fx_node[name] = fx_node
         if first_node is None:
             first_node = fx_node
@@ -200,7 +192,6 @@ def create_fx_graph(nodes, fname):
             if dep.name in name_to_fx_node:
                 dep_node = name_to_fx_node[dep.name]
             else:
-                fake_root[dep.name] = FakeModule(dep.name)
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)  # assume it's a placeholder if not a computebox
             new_args.append(dep_node)
@@ -208,7 +199,7 @@ def create_fx_graph(nodes, fname):
         fx_node.args = tuple(new_args)
     
     outputs = []
-    for k,v in name_to_fx_node.items():
+    for _,v in name_to_fx_node.items():
         if len(v.users) == 0:
             outputs.append(v)
     
