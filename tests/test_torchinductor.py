@@ -378,6 +378,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
+    def test_sgn(self):
+        def fn(a):
+            return torch.sgn(a), torch.sgn(a + 1) - 1
+
+        self.common(fn, [torch.linspace(-10, 10, 41)])
+
     def test_max_min(self):
         def fn(a, b):
             return (torch.maximum(a, b), torch.minimum(a, b))
@@ -1728,7 +1734,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
-    def test_upsample_bilinear2d(self):
+    def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
                 aten.upsample_bilinear2d(a, [45, 45], False, None),
@@ -1736,6 +1742,17 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_bilinear2d_b(self):
+        def fn(a):
+            return aten.upsample_bilinear2d(a, None, True, [2.0, 2.0])
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2, 40, 59]),
+            ],
+        )
 
     def test_reflection_pad2d(self):
         def fn(a):
@@ -1746,6 +1763,22 @@ class CommonTemplate:
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_grid_sampler_2d(self):
+        def fn(a, b):
+            return (
+                aten.grid_sampler_2d(a, b, 0, 0, True),
+                aten.grid_sampler_2d(a, b, 0, 1, False),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([4, 3, 352, 352], dtype=torch.float32),
+                torch.rand([4, 352, 352, 2], dtype=torch.float32) * 2 - 1,
+            ),
+            check_lowp=False,
         )
 
     def test_sort(self):

@@ -45,10 +45,12 @@ add_needs_realized_inputs(
         aten.constant_pad_nd,
         aten.convolution,
         aten.convolution_backward,
+        aten.grid_sampler_2d,
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
         aten.reflection_pad2d,
+        aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
     ]
 )
@@ -571,38 +573,6 @@ def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
-@register_lowering(aten._embedding_bag, type_promote=False)
-def _embedding_bag(
-    weight,
-    indices,
-    offsets,
-    scale_grad_by_freq=False,
-    mode=0,
-    sparse=False,
-    per_sample_weights=None,
-    include_last_offset=False,
-):
-    kernel = (
-        aten._embedding_bag_forward_only if config.forward_only else aten._embedding_bag
-    )
-    return list(
-        map(
-            TensorBox.create,
-            ir.FallbackKernel.create(
-                kernel,
-                weight,
-                indices,
-                offsets,
-                scale_grad_by_freq,
-                mode,
-                False,  # TODO(jansel): support sparse
-                per_sample_weights,
-                include_last_offset,
-            ),
-        )
-    )
-
-
 def make_fallback(kernel):
     add_needs_realized_inputs(kernel)
 
@@ -641,70 +611,82 @@ else:
     # native_dropout handled in decomps
     # bernoulli_ handled in decomps
 
-    @register_lowering(aten.rand)
-    def rand(
-        *size, dtype=None, layout=0, device=None, pin_memory=False, memory_format=None
-    ):
-        logging.warning("using triton random, expect difference from eager")
-        assert not pin_memory
-        assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
-        device = decode_device(device)
-        dtype = dtype or torch.get_default_dtype()
-        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
-            size = tuple(size[0])
-        size = [sympy.expand(s) for s in size]
-        offset = V.graph.increment_randomness_offset(sympy_product(size))
+    def make_rand(fn_name):
+        def rand_or_randn(
+            *size,
+            dtype=None,
+            layout=0,
+            device=None,
+            pin_memory=False,
+            memory_format=None,
+        ):
+            logging.warning("using triton random, expect difference from eager")
+            assert not pin_memory
+            assert layout in (0, torch.strided)
+            assert memory_format in (None, torch.contiguous_format)
+            device = decode_device(device)
+            dtype = dtype or torch.get_default_dtype()
+            if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+                size = tuple(size[0])
+            size = [sympy.expand(s) for s in size]
+            offset = V.graph.increment_randomness_offset(sympy_product(size))
 
-        random_pos = ir.FixedLayout(
-            device,
-            dtype,
-            size,
-            ir.FlexibleLayout.contiguous_strides(size),
-            offset=offset,
-        ).make_indexer()
+            if device.type == "cuda":
+                random_pos = ir.FixedLayout(
+                    device,
+                    dtype,
+                    size,
+                    ir.FlexibleLayout.contiguous_strides(size),
+                    offset=offset,
+                ).make_indexer()
+                seed_buffer = V.graph.random_seed_buffer(device)
 
-        if device.type == "cuda":
+                def inner_fn(index):
+                    return getattr(ops, fn_name)(
+                        ops.load(seed_buffer, sympy.Integer(0)),
+                        ops.index_expr(random_pos(index), torch.int32),
+                    )
 
-            seed_buffer = V.graph.random_seed_buffer(device)
+            else:
+                # on CPU we use mt19937 which doesn't use the offset
+                # TODO(jansel): we should rewrite CPU RNG to be closer to cuda and deterministic
+                seed_var = V.graph.sizevars.seed()
 
             def inner_fn(index):
-                return ops.rand(
-                    ops.load(seed_buffer, sympy.Integer(0)),
-                    ops.index_expr(random_pos(index), torch.int32),
-                )
-
-        else:
-            # on CPU we use mt19937 which doesn't use the offset
-            # TODO(jansel): we should rewrite CPU RNG to be closer to cuda and deterministic
-            seed_var = V.graph.sizevars.seed()
-
-            def inner_fn(index):
-                return ops.normalized_rand_cpu(
+                return getattr(ops, f"{fn_name}_cpu")(
                     ops.index_expr(seed_var, torch.int32),
                     ops.index_expr(random_pos(index), torch.int32),
                     dtype,
                 )
 
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=inner_fn,
-            ranges=list(size),
-        )
+            return Pointwise.create(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                ranges=list(size),
+            )
+
+        return rand_or_randn
+
+    rand = register_lowering([aten.rand, torch.rand])(make_rand("rand"))
+    randn = register_lowering([aten.randn, torch.randn])(make_rand("randn"))
 
 
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
 # TODO(jansel): we should implement decomps for these
+# https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
+make_fallback(aten.argmax)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
 make_fallback(aten.cumsum)
+make_fallback(aten._embedding_bag)
+make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
-make_fallback(aten.grid_sampler_2d)
+make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
@@ -712,6 +694,7 @@ make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
+make_fallback(aten.mse_loss_backward)
 
 
 @register_lowering(aten.convolution)
@@ -1394,11 +1377,209 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
 
 
 @register_lowering(aten.upsample_bilinear2d)
-def upsample_bilinear2d(x, output_size=None, align_corners=False, scale_factors=None):
-    return TensorBox.create(
-        ir.FallbackKernel.create(
-            aten.upsample_bilinear2d, x, output_size, align_corners, scale_factors
+def upsample_bilinear2d_vec(
+    input,
+    output_size,
+    align_corners,
+    scale_factors=None,
+):
+    """
+    Based on https://github.com/pytorch/pytorch/pull/80964
+    The decomp version has worse perf because indexing doesn't get traced.
+    """
+
+    *size_prefix, in_h, in_w = input.get_size()
+    in_h = V.graph.sizevars.guard_static_shape(in_h)
+    in_w = V.graph.sizevars.guard_static_shape(in_w)
+
+    if output_size is not None:
+        out_h = float(output_size[0])
+        out_w = float(output_size[1])
+    elif scale_factors is not None:
+        out_h = in_h * scale_factors[0]
+        out_w = in_w * scale_factors[1]
+    else:
+        raise TypeError("requires output_size or scale_factors")
+
+    # Calculate horizontal and vertical scaling factor
+    if out_h > 1:
+        if align_corners:
+            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
+        else:
+            h_scale_factor = in_h / out_h
+    else:
+        h_scale_factor = 0.0
+
+    if out_w > 1:
+        if align_corners:
+            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
+        else:
+            w_scale_factor = in_w / out_w
+    else:
+        w_scale_factor = 0.0
+
+    input.realize()  # read many times
+    input_loader = input.make_loader()
+
+    def fn(index):
+        *prefix, i, j = index
+        i = ops.index_expr(i, torch.float32)
+        j = ops.index_expr(j, torch.float32)
+
+        c_h_scale_factor = ops.constant(h_scale_factor, torch.float32)
+        c_w_scale_factor = ops.constant(w_scale_factor, torch.float32)
+        if align_corners:
+            x = ops.mul(i, c_h_scale_factor)
+            y = ops.mul(j, c_w_scale_factor)
+        else:
+            c05 = ops.constant(0.5, torch.float32)
+            c00 = ops.constant(0.0, torch.float32)
+            x = ops.maximum(
+                ops.sub(ops.mul(ops.add(i, c05), c_h_scale_factor), c05), c00
+            )
+            y = ops.maximum(
+                ops.sub(ops.mul(ops.add(j, c05), c_w_scale_factor), c05), c00
+            )
+
+        x_floor = ops.floor(x)
+        y_floor = ops.floor(y)
+        x_ceil = ops.minimum(ops.ceil(x), ops.constant(in_h - 1, torch.float32))
+        y_ceil = ops.minimum(ops.ceil(y), ops.constant(in_w - 1, torch.float32))
+
+        idx_x_floor = ops.indirect_indexing(ops.to_dtype(x_floor, torch.int64))
+        idx_y_floor = ops.indirect_indexing(ops.to_dtype(y_floor, torch.int64))
+        idx_x_ceil = ops.indirect_indexing(ops.to_dtype(x_ceil, torch.int64))
+        idx_y_ceil = ops.indirect_indexing(ops.to_dtype(y_ceil, torch.int64))
+
+        v1 = input_loader([*prefix, idx_x_floor, idx_y_floor])
+        v2 = input_loader([*prefix, idx_x_ceil, idx_y_floor])
+        v3 = input_loader([*prefix, idx_x_floor, idx_y_ceil])
+        v4 = input_loader([*prefix, idx_x_ceil, idx_y_ceil])
+
+        xscale2 = ops.sub(x, x_floor)
+        yscale2 = ops.sub(y, y_floor)
+
+        c1 = ops.constant(1.0, torch.float32)
+        xscale1 = ops.sub(c1, xscale2)
+        yscale1 = ops.sub(c1, yscale2)
+
+        q1 = ops.add(ops.mul(v1, xscale1), ops.mul(v2, xscale2))
+        q2 = ops.add(ops.mul(v3, xscale1), ops.mul(v4, xscale2))
+        result = ops.add(ops.mul(q1, yscale1), ops.mul(q2, yscale2))
+        return result
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=input.get_dtype(),
+        inner_fn=fn,
+        ranges=[*size_prefix, sympy.Integer(int(out_h)), sympy.Integer(int(out_w))],
+    )
+
+
+@register_lowering([aten.grid_sampler_2d])
+def grid_sampler_2d(
+    image, optical, interpolation_mode=0, padding_mode=0, align_corners=False
+):
+    image.realize()  # reuse
+    optical.realize()
+    image_loader = image.make_loader()
+    optical_loader = optical.make_loader()
+
+    assert interpolation_mode == 0
+    assert padding_mode in (0, 1)
+
+    N, C, IH, IW = image.get_size()
+    _, H, W, _ = optical.get_size()
+
+    def clamp(v, min, max):
+        if isinstance(min, (int, sympy.Expr)):
+            min = ops.index_expr(min, torch.float32)
+        if isinstance(max, (int, sympy.Expr)):
+            max = ops.index_expr(max, torch.float32)
+        return ops.maximum(min, ops.minimum(max, v))
+
+    def findex(v):
+        # indirect indexing via a float value
+        return ops.indirect_indexing(ops.to_dtype(v, torch.int64))
+
+    def fn(index):
+        n, c, y, x = index
+        ix = optical_loader([n, y, x, sympy.Integer(0)])
+        iy = optical_loader([n, y, x, sympy.Integer(1)])
+        zero = ops.constant(0.0, torch.float32)
+        one = ops.constant(1.0, torch.float32)
+        two = ops.constant(2.0, torch.float32)
+
+        def grid_sampler_compute_source_index(coord, size):
+            size = ops.index_expr(size, torch.float32)
+            if align_corners:
+                # unnormalize coord from [-1, 1] to [0, size - 1]
+                coord = ops.mul(ops.div(ops.add(coord, one), two), ops.sub(size, one))
+            else:
+                # unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
+                coord = ops.div(ops.sub(ops.mul(ops.add(coord, one), size), one), two)
+
+            if padding_mode == 0:  # GridSamplerPadding::Zeros
+                return coord
+            elif padding_mode == 1:  # GridSamplerPadding::Border
+                return clamp(coord, zero, ops.sub(size, one))
+            else:
+                raise NotImplementedError("reflection padding")
+
+        ix = grid_sampler_compute_source_index(ix, IW)
+        iy = grid_sampler_compute_source_index(iy, IH)
+
+        ix_nw = ops.floor(ix)
+        iy_nw = ops.floor(iy)
+
+        ix_ne = ops.add(ix_nw, one)
+        iy_ne = iy_nw
+
+        ix_sw = ix_nw
+        iy_sw = ops.add(iy_nw, one)
+
+        ix_se = ops.add(ix_nw, one)
+        iy_se = ops.add(iy_nw, one)
+
+        nw = ops.mul(ops.sub(ix_se, ix), ops.sub(iy_se, iy))
+        ne = ops.mul(ops.sub(ix, ix_sw), ops.sub(iy_sw, iy))
+        sw = ops.mul(ops.sub(ix_ne, ix), ops.sub(iy, iy_ne))
+        se = ops.mul(ops.sub(ix, ix_nw), ops.sub(iy, iy_nw))
+
+        # TODO(jansel): here we are missing the mask required
+        # for GridSamplerPadding::Zeros and instead always doing
+        # GridSamplerPadding::Border.  It does not seem to matter for
+        # correctness in the one model using this: SuperSlowMo.
+
+        ix_nw = clamp(ix_nw, 0, IW - 1)
+        iy_nw = clamp(iy_nw, 0, IH - 1)
+        ix_ne = clamp(ix_ne, 0, IW - 1)
+        iy_ne = clamp(iy_ne, 0, IH - 1)
+        ix_sw = clamp(ix_sw, 0, IW - 1)
+        iy_sw = clamp(iy_sw, 0, IH - 1)
+        ix_se = clamp(ix_se, 0, IW - 1)
+        iy_se = clamp(iy_se, 0, IH - 1)
+
+        nw_val = image_loader([n, c, findex(iy_nw), findex(ix_nw)])
+        ne_val = image_loader([n, c, findex(iy_ne), findex(ix_ne)])
+        sw_val = image_loader([n, c, findex(iy_sw), findex(ix_sw)])
+        se_val = image_loader([n, c, findex(iy_se), findex(ix_se)])
+
+        return functools.reduce(
+            ops.add,
+            [
+                ops.mul(nw_val, nw),
+                ops.mul(ne_val, ne),
+                ops.mul(sw_val, sw),
+                ops.mul(se_val, se),
+            ],
         )
+
+    return Pointwise.create(
+        device=image.get_device(),
+        dtype=image.get_dtype(),
+        inner_fn=fn,
+        ranges=[N, C, H, W],
     )
 
 
@@ -2162,6 +2343,7 @@ register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.trunc)
 register_pointwise(aten.floor)
+register_pointwise(aten.ceil)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
 register_pointwise(aten.isnan, override_dtype=torch.bool)
 
@@ -2171,8 +2353,12 @@ register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.__and__, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.__or__, type_promote=False, override_dtype=torch.bool)
+register_lowering(aten.__and__, type_promote=False)(
+    register_pointwise(aten.logical_and, type_promote=False, override_dtype=torch.bool)
+)
+register_lowering(aten.__or__, type_promote=False)(
+    register_pointwise(aten.logical_or, type_promote=False, override_dtype=torch.bool)
+)
 
 
 def register_inplace(aten_op, outplace_op):

@@ -278,6 +278,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype):
+        assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
@@ -312,6 +313,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floor(x):
         return f"std::floor({x})"
+
+    @staticmethod
+    def ceil(x):
+        return f"std::ceil({x})"
 
     @staticmethod
     def trunc(x):
@@ -376,11 +381,15 @@ class CppOverrides(OpOverrides):
         return var
 
     @staticmethod
-    def and_(a, b):
+    def logical_and(a, b):
         return f"{a} && {b}"
 
     @staticmethod
-    def normalized_rand_cpu(seed: sympy.Expr, offset, dtype):
+    def logical_or(a, b):
+        return f"{a} || {b}"
+
+    @staticmethod
+    def rand_cpu(seed: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
 
