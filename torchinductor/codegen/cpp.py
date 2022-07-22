@@ -380,7 +380,7 @@ class CppOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(rand_cpu({seed}));"
 
     @staticmethod
-    def rand_cpu_new(seed, offset, dtype):
+    def rand_cpu_new(seed: sympy.Expr, offset, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(rand_cpu_new({seed, offset}));"
 
 

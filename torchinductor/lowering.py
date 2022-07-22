@@ -679,7 +679,9 @@ else:
             offset = 0
 
             def inner_fn(index):
-                return ops.rand_cpu_new(seed_var, offset, dtype)
+                return ops.rand_cpu_new(
+                    ops.index_expr(seed_var, torch.int32), offset, dtype
+                )
 
         return Pointwise.create(
             device=device,

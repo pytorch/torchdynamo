@@ -128,9 +128,9 @@ class CppCodeCache:
         if key not in cls.cache:
             output_path = input_path[:-3] + "so"
             if not os.path.exists(output_path):
-                cmd = cpp_compile_command(input=input_path, output=output_path, include_pytorch=False).split(
-                    " "
-                )
+                cmd = cpp_compile_command(
+                    input=input_path, output=output_path, include_pytorch=False
+                ).split(" ")
                 try:
                     subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError as e:
