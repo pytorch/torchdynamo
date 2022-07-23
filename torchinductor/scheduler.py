@@ -423,12 +423,12 @@ class Scheduler:
         super(Scheduler, self).__init__()
         self.backends = {}
         self.current_device = None
-        # runable_groups maps node group to priority
-        # we use self.runable_groups.most_common() to implement a priority queue
-        self.runable_groups = collections.Counter()
-        # runable_nodes  maps node group to nodes
-        self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
-        self.runable_extern_kernels = collections.deque()
+        # runnable_groups maps node group to priority
+        # we use self.runnable_groups.most_common() to implement a priority queue
+        self.runnable_groups = collections.Counter()
+        # runnable_nodes  maps node group to nodes
+        self.runnable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
+        self.runnable_extern_kernels = collections.deque()
         self.blocked_nodes = BlockedNodes()
         self.run_count = 0
         self.nodes = []
@@ -589,13 +589,13 @@ class Scheduler:
             self.blocked_nodes.add(node)
         else:
             if isinstance(node, ExternKernelSchedulerNode):
-                self.runable_extern_kernels.append(node)
+                self.runnable_extern_kernels.append(node)
             elif isinstance(node, NopKernelSchedulerNode):
                 node.run()  # just schedule nop kernels eagerly
             else:  # SchedulerNode
-                self.runable_nodes[node.group].append(node)
-                old_priority, old_count = self.runable_groups.get(node.group, (0, 0))
-                self.runable_groups[node.group] = (
+                self.runnable_nodes[node.group].append(node)
+                old_priority, old_count = self.runnable_groups.get(node.group, (0, 0))
+                self.runnable_groups[node.group] = (
                     max(old_priority, node.get_priority()),
                     old_count + 1,
                 )
@@ -627,7 +627,7 @@ class Scheduler:
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
-        that became runable.
+        that became runnable.
         """
         if config.debug and (self.fusable_deps or self.pending_buffer_names):
 
@@ -680,10 +680,10 @@ class Scheduler:
 
         return ctx()
 
-    def iter_runable_groups(self):
-        while self.runable_groups or self.runable_extern_kernels:
-            if self.runable_extern_kernels:
-                runnable_extern_kernel = self.runable_extern_kernels.popleft()
+    def iter_runnable_groups(self):
+        while self.runnable_groups or self.runnable_extern_kernels:
+            if self.runnable_extern_kernels:
+                runnable_extern_kernel = self.runnable_extern_kernels.popleft()
                 try:
                     self.current_device = runnable_extern_kernel.get_device()
                 except AttributeError:
@@ -691,10 +691,10 @@ class Scheduler:
                     pass
                 runnable_extern_kernel.run(self.codegen_extern_call)
             else:
-                group, priority = self.runable_groups.most_common(1)[0]
-                del self.runable_groups[group]
+                group, priority = self.runnable_groups.most_common(1)[0]
+                del self.runnable_groups[group]
                 yield group
-        assert not self.runable_nodes
+        assert not self.runnable_nodes
         assert len(self.nodes) == self.run_count
 
     def iter_fixed_point(self):
@@ -708,10 +708,10 @@ class Scheduler:
 
     def pop_group(self, group_without_device):
         group = (self.current_device, tuple(group_without_device))
-        while group in self.runable_nodes:
-            if group in self.runable_groups:
-                del self.runable_groups[group]
-            yield from self.runable_nodes.pop(group)
+        while group in self.runnable_nodes:
+            if group in self.runnable_groups:
+                del self.runnable_groups[group]
+            yield from self.runnable_nodes.pop(group)
         if self.fusable_deps:
             fusable = True
             while fusable:
@@ -760,7 +760,7 @@ class Scheduler:
         return self.backends[device]
 
     def codegen(self):
-        for device, group in self.iter_runable_groups():
+        for device, group in self.iter_runnable_groups():
             if device != self.current_device:
                 self.flush()
                 self.current_device = device

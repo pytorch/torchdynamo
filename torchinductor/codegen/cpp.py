@@ -472,7 +472,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
         if not ws.in_parallel:
             scheduler.barrier()
-        if not scheduler.runable_nodes and scheduler.pending_buffer_names:
+        if not scheduler.runnable_nodes and scheduler.pending_buffer_names:
             ws.barrier()
             scheduler.barrier()
 
