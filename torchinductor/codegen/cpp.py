@@ -68,176 +68,14 @@ def cpp_prefix():
             #include <random>
             #include <omp.h>
 
+            #include <ATen/core/PhiloxRNGEngine.h>
+
             template<typename T>
             inline T mod(T a, T b) { return a % b; }
             template<>
             inline float mod(float a, float b) { return std::fmod(a, b); }
             template<>
             inline double mod(double a, double b) { return std::fmod(a, b); }
-
-            #include <stdint.h>
-            #include <cmath>
-
-            namespace at {
-            namespace detail {
-                template <typename T, int size_>
-                struct Array {
-                T data[size_];
-                T operator[](int i) const {
-                    return data[i];
-                }
-                T& operator[](int i) {
-                    return data[i];
-                }
-                Array() = default;
-                Array(const Array&) = default;
-                Array& operator=(const Array&) = default;
-                static constexpr int size(){return size_;}
-                // Fill the array with x.
-                Array(T x) {
-                    for (int i = 0; i < size_; i++) {
-                    data[i] = x;
-                    }
-                }
-                };
-            typedef at::detail::Array<uint32_t, 4> UINT4;
-            typedef at::detail::Array<uint32_t, 2> UINT2;
-            typedef at::detail::Array<double, 2> DOUBLE2;
-            typedef at::detail::Array<float, 2> FLOAT2;
-
-            } // namespace detail
-
-            class philox_engine {
-            public:
-
-            inline explicit philox_engine(uint64_t seed = 67280421310721,
-                                            uint64_t subsequence = 0,
-                                            uint64_t offset = 0) {
-                key[0] = static_cast<uint32_t>(seed);
-                key[1] = static_cast<uint32_t>(seed >> 32);
-                counter = detail::UINT4(0);
-                counter[2] = static_cast<uint32_t>(subsequence);
-                counter[3] = static_cast<uint32_t>(subsequence >> 32);
-                STATE = 0;
-                incr_n(offset);
-            }
-
-            /**
-            * Produces a unique 32-bit pseudo random number on every invocation
-            */
-            inline uint32_t operator()() {
-                if(STATE == 0) {
-                detail::UINT4 counter_ = counter;
-                detail::UINT2 key_ = key;
-
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-                counter_ = single_round(counter_, key_);
-                key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-
-                output = single_round(counter_, key_);
-                incr();
-                }
-                uint32_t ret = output[STATE];
-                STATE = (STATE + 1) & 3;
-                return ret;
-            }
-
-            /**
-            * Function that Skips N 128 bit numbers in a subsequence
-            */
-            inline void incr_n(uint64_t n) {
-                uint32_t nlo = static_cast<uint32_t>(n);
-                uint32_t nhi = static_cast<uint32_t>(n >> 32);
-                counter[0] += nlo;
-                // if overflow in x has occurred, carry over to nhi
-                if (counter[0] < nlo) {
-                nhi++;
-                // if overflow in nhi has occurred during carry over,
-                // propagate that overflow to y and exit to increment z
-                // otherwise return
-                counter[1] += nhi;
-                if(nhi != 0) {
-                    if (nhi <= counter[1]) {
-                    return;
-                    }
-                }
-                } else {
-                // if overflow in y has occurred during addition,
-                // exit to increment z
-                // otherwise return
-                counter[1] += nhi;
-                if (nhi <= counter[1]) {
-                    return;
-                }
-                }
-                if (++counter[2])
-                return;
-                ++counter[3];
-            }
-
-            /**
-            * Function that Skips one 128 bit number in a subsequence
-            */
-            inline void incr() {
-                if (++counter[0])
-                return;
-                if (++counter[1])
-                return;
-                if (++counter[2]) {
-                return;
-                }
-                ++counter[3];
-            }
-
-            private:
-            detail::UINT4 counter;
-            detail::UINT4 output;
-            detail::UINT2 key;
-            uint32_t STATE;
-
-            inline uint32_t mulhilo32(uint32_t a, uint32_t b,
-                                                uint32_t *result_high) {
-                const uint64_t product = static_cast<uint64_t>(a) * b;
-                *result_high = static_cast<uint32_t>(product >> 32);
-                return static_cast<uint32_t>(product);
-            }
-
-            inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 in_key) {
-                uint32_t hi0;
-                uint32_t hi1;
-                uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
-                uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
-                detail::UINT4 ret;
-                ret[0] = hi1 ^ ctr[1] ^ in_key[0];
-                ret[1] = lo1;
-                ret[2] = hi0 ^ ctr[3] ^ in_key[1];
-                ret[3] = lo0;
-                return ret;
-            }
-            static const uint32_t kPhilox10A = 0x9E3779B9;
-            static const uint32_t kPhilox10B = 0xBB67AE85;
-            static const uint32_t kPhiloxSA = 0xD2511F53;
-            static const uint32_t kPhiloxSB = 0xCD9E8D57;
-            };
-
-            typedef philox_engine Philox4_32_10;
-
-            } // namespace at
 
             constexpr float normalize (uint32_t value) {
                 return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
@@ -389,7 +227,7 @@ class CppOverrides(OpOverrides):
         return f"{a} || {b}"
 
     @staticmethod
-    def rand_cpu(seed: sympy.Expr, offset: sympy.Expr, dtype):
+    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
 

@@ -652,7 +652,7 @@ else:
                 seed_var = V.graph.sizevars.seed()
 
                 def inner_fn(index):
-                    return getattr(ops, f"{fn_name}_cpu")(
+                    return getattr(ops, f"{fn_name}")(
                         ops.index_expr(seed_var, torch.int32),
                         ops.index_expr(random_pos(index), torch.int32),
                         dtype,
