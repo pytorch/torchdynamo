@@ -298,6 +298,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
 
     Writes to ./speedups.csv
     """
+    if args.dynamic_shapes:
+        return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
+
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
@@ -329,6 +332,78 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         [current_device, current_name, float(speedup)],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
+
+
+def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
+    """
+    Run dynamic shapes benchmarks.
+
+    Requires dynamic shape compatible models, which provide a list of example inputs.
+
+    Warms up using the first input example and then iterates the inputs,
+    measuring (and expecting minimal) variance between the runtime for different examples.
+
+    """
+    timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
+
+    if args.repeat > 5:
+        print(
+            f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n"
+        )
+
+    nwarmup = 4
+    for rep in range(args.repeat):
+        # Start each rep fresh, e.g. only warmup on example 0
+        torchdynamo.reset()
+        for _ in range(nwarmup):
+            with optimize_ctx:
+                model_iter_fn(model, example_inputs[0])
+
+        for input_idx, inputs in enumerate(example_inputs):
+            # interleave the runs to handle frequency scaling and load changes
+            timings[rep, input_idx, 0], _ = timed(
+                model, model_iter_fn, inputs, return_result=False
+            )
+            # different from regular speedup_experiment, we _DO_ want to allow recompilation
+            with optimize_ctx:
+                timings[rep, input_idx, 1], _ = timed(
+                    model, model_iter_fn, inputs, return_result=False
+                )
+    medians = np.median(timings, axis=0)
+    speedups = list(medians[:, 0] / medians[:, 1])
+    speedups_mean = np.mean(speedups)
+    speedups_median = np.median(speedups)
+    speedups_var = np.var(speedups)
+
+    # TODO this x[0] is not going to work in general but bert only has 1 input
+    shapes = [x[0].shape for x in example_inputs]
+    shape_keys = sorted(set(shapes))
+    shape_speedups = {
+        shape: list(
+            map(
+                lambda it: it[1],
+                filter(lambda it: it[0] == shape, zip(shapes, speedups)),
+            )
+        )
+        for shape in shape_keys
+    }
+    output_str = (
+        f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}"
+        + "\nSpeedups by shape: "
+        + "\n".join(
+            [
+                f"{shape}: "
+                + ", ".join([f"{speedup: .3g}" for speedup in shape_speedups[shape]])
+                for shape in shape_keys
+            ]
+        )
+    )
+    output_csv(
+        output_filename,
+        ("dev", "name", "speedup mean", "speedup median", "speedup var"),
+        [current_device, current_name, speedups_mean, speedups_median, speedups_var],
+    )
+    return output_str
 
 
 def overhead_experiment(*args, model_iter_fn):
@@ -663,6 +738,7 @@ class BenchmarkRunner:
         optimize_ctx,
         experiment,
         skip_accuracy_check=False,
+        dynamic_shapes=False,
     ):
         t0 = time.perf_counter()
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
@@ -674,6 +750,18 @@ class BenchmarkRunner:
             sys.stdout.flush()
             for submod in itertools.chain([model], model.modules()):
                 assert not torchdynamo.utils.is_jit_model(submod)
+
+            if dynamic_shapes:
+                # skip correctness check for ds benchmark, becuase example_inputs are not
+                # compatible with the code below, and the same benchmarks can be run in
+                # non-dynamic shapes mode for correctness checks
+                torch.manual_seed(1337)
+                torchdynamo.reset()
+                results = []
+                results.append(experiment(model, example_inputs))
+                print(" ".join(map(str, results)))
+                return 0
+
             torch.manual_seed(1337)
             correct_result = model_iter_fn(
                 copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
@@ -801,6 +889,11 @@ def parse_args():
         "--training",
         action="store_true",
         help="Performs training",
+    )
+    parser.add_argument(
+        "--dynamic_shapes",
+        action="store_true",
+        help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
         "--use-eval-mode",
@@ -1059,8 +1152,8 @@ def main(runner, original_dir=None):
         runner.skip_models.clear()
 
     experiment = null_experiment
+    global current_name, current_device, output_filename, optimize_ctx
     optimize_ctx = NullContext()
-    global current_name, current_device, output_filename
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
@@ -1252,6 +1345,7 @@ def main(runner, original_dir=None):
                     args.training,
                     args.use_eval_mode,
                     args.batch_size,
+                    args.dynamic_shapes,
                 )
             except NotImplementedError:
                 continue  # bad benchmark implementation
@@ -1272,6 +1366,7 @@ def main(runner, original_dir=None):
                 optimize_ctx,
                 experiment,
                 args.skip_accuracy_check,
+                args.dynamic_shapes,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
@@ -1316,6 +1411,7 @@ def main(runner, original_dir=None):
                 optimize_ctx,
                 experiment,
                 args.skip_accuracy_check,
+                args.dynamic_shapes,
             )
 
         Stats.print_summary()

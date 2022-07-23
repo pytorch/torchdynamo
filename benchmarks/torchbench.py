@@ -32,6 +32,7 @@ for torchbench_dir in (
 ):
     if exists(torchbench_dir):
         break
+
 assert exists(torchbench_dir), "../../torchbenchmark does not exist"
 original_dir = abspath(os.getcwd())
 torchbench_dir = abspath(torchbench_dir)
@@ -259,7 +260,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return DYNAMIC_SHAPES_NOT_YET_WORKING
 
     def load_model(
-        self, device, model_name, is_training, use_eval_mode, batch_size=None
+        self,
+        device,
+        model_name,
+        is_training,
+        use_eval_mode,
+        batch_size=None,
+        dynamic_shapes=False,
     ):
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
@@ -276,7 +283,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="eval", device=device, jit=False, batch_size=batch_size
             )
-        model, example_inputs = benchmark.get_module()
+        if dynamic_shapes:
+            if not hasattr(benchmark, "get_dynamic_shapes_module"):
+                raise NotImplementedError("Dynamic Shapes not supported")
+            model, example_inputs = benchmark.get_dynamic_shapes_module()
+        else:
+            model, example_inputs = benchmark.get_module()
 
         # Models that must be in train mode while training
         if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
@@ -299,6 +311,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                         args.training,
                         args.use_eval_mode,
                         args.batch_size,
+                        args.dynamic_shapes,
                     )
                 except NotImplementedError:
                     continue  # bad benchmark implementation
