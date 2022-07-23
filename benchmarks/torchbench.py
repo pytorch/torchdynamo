@@ -168,6 +168,8 @@ AOT_AUTOGRAD_NOT_YET_WORKING = {
 # https://github.com/pytorch/torchdynamo/issues/332
 INDUCTOR_INFERENCE_NOT_YET_WORKING = {
     *AOT_AUTOGRAD_NOT_YET_WORKING,
+    # RuntimeError: The tensor has a non-zero number of elements,
+    "fastNLP_Bert",
     # missing ops: scatter / argmax
     "hf_Reformer",
     "maml",
@@ -187,8 +189,6 @@ INDUCTOR_TRAINING_NOT_YET_WORKING = {
     "mobilenet_v2_quantized_qat",
     # TypeError: expected Tensor as element 0 in argument 1, but got NoneType
     "dlrm",
-    # RuntimeError: The tensor has a non-zero number of elements,
-    "fastNLP_Bert",
     # RuntimeError: CUDA out of memory.
     "Background_Matting",
 }
