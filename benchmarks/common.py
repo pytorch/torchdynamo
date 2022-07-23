@@ -30,10 +30,6 @@ from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.python_key import python_key
-from torchdynamo.optimizations.training import aot_autograd_debug_strategy1
-from torchdynamo.optimizations.training import aot_autograd_nnc_strategy
-from torchdynamo.optimizations.training import aot_autograd_prims_nvfuser_strategy
-from torchdynamo.optimizations.training import aot_autograd_speedup_strategy
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
@@ -736,6 +732,7 @@ class BenchmarkRunner:
         model_iter_fn,
         example_inputs,
         optimize_ctx,
+        accuracy_ctx,
         experiment,
         skip_accuracy_check=False,
         dynamic_shapes=False,
@@ -786,7 +783,7 @@ class BenchmarkRunner:
                 return 0
 
             try:
-                with optimize_ctx:
+                with accuracy_ctx:
                     new_result = model_iter_fn(model, example_inputs)
             except Exception:
                 logging.exception("unhandled error")
@@ -804,9 +801,11 @@ class BenchmarkRunner:
             ok, total = Stats.reset_counters()
             results = []
 
-            # run one more time to see if we reached a fixed point
-            with optimize_ctx:
-                model_iter_fn(model, example_inputs)
+            torchdynamo.reset()
+            # run with torchdynamo few times to populate the cache
+            for _ in range(3):
+                with optimize_ctx:
+                    model_iter_fn(model, example_inputs)
             _, frames_second_pass = Stats.reset_counters()  # should be 0
 
             if frames_second_pass > 0:
@@ -1151,6 +1150,7 @@ def main(runner, original_dir=None):
     if args.no_skip:
         runner.skip_models.clear()
 
+    accuracy_ctx = None
     experiment = null_experiment
     global current_name, current_device, output_filename, optimize_ctx
     optimize_ctx = NullContext()
@@ -1160,10 +1160,9 @@ def main(runner, original_dir=None):
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.cold_start:
-        optimize_ctx = torchdynamo.optimize(
-            aot_autograd_speedup_strategy, nopython=args.nopython
-        )
+        optimize_ctx = torchdynamo.optimize("aot_nvfuser", nopython=args.nopython)
         experiment = cold_start_experiment
+        assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"cold_start_{backend_str}.csv"
         args.isolate = True
@@ -1261,29 +1260,25 @@ def main(runner, original_dir=None):
         args.float16 = True
         args.cosine = True
     elif args.accuracy_aot_nop:
-        optimize_ctx = torchdynamo.optimize(
-            aot_autograd_debug_strategy1, nopython=args.nopython
-        )
+        optimize_ctx = torchdynamo.optimize("aot_nop", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "accuracy_aot_nop.csv"
     elif args.accuracy_aot_ts:
-        optimize_ctx = torchdynamo.optimize(
-            aot_autograd_nnc_strategy, nopython=args.nopython
-        )
+        optimize_ctx = torchdynamo.optimize("aot_ts", nopython=args.nopython)
         experiment = speedup_experiment
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}.csv"
     elif args.accuracy_aot_ts_mincut:
-        optimize_ctx = torchdynamo.optimize(
-            aot_autograd_speedup_strategy, nopython=args.nopython
+        optimize_ctx = torchdynamo.optimize("aot_nvfuser", nopython=args.nopython)
+        accuracy_ctx = torchdynamo.optimize(
+            "aot_nvfuser_nodecomps", nopython=args.nopython
         )
         experiment = speedup_experiment
+        assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
     elif args.prims_nvfuser:
-        optimize_ctx = torchdynamo.optimize(
-            aot_autograd_prims_nvfuser_strategy, nopython=args.nopython
-        )
+        optimize_ctx = torchdynamo.optimize("prims_nvfuser", nopython=args.nopython)
         experiment = speedup_experiment
         backend_str = "prims_nvfuser"
         output_filename = f"accuracy_aot_{backend_str}.csv"
@@ -1323,6 +1318,9 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if accuracy_ctx is None:
+        accuracy_ctx = optimize_ctx
 
     runner.setup_amp()
 
@@ -1364,6 +1362,7 @@ def main(runner, original_dir=None):
                 model_iter_fn,
                 example_inputs,
                 optimize_ctx,
+                accuracy_ctx,
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
@@ -1409,6 +1408,7 @@ def main(runner, original_dir=None):
                 model_iter_fn,
                 example_inputs,
                 optimize_ctx,
+                accuracy_ctx,
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
