@@ -146,8 +146,19 @@ class SizeVarAllocator(object):
             return left
 
     def maybe_guard_equals(self, left: sympy.Expr, right: sympy.Expr):
+        """if left==right, guard on that fact and return true"""
         if self.size_hint(left - right) == 0:
             self.guard_equals(left, right)
+            return True
+        return False
+
+    def maybe_guard_list_equals(self, left: List[sympy.Expr], right: List[sympy.Expr]):
+        """if left==right, guard on that fact and return true"""
+        if len(left) != len(right):
+            return False
+        if all(self.size_hint(a - b) == 0 for a, b in zip(left, right)):
+            for a, b in zip(left, right):
+                self.guard_equals(a, b)
             return True
         return False
 
@@ -247,6 +258,11 @@ class SizeVarAllocator(object):
                     - index_dim.subs({v: sympy.Integer(0)})
                 )
         return strides
+
+    def offset_var(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+        """Extract offset part of an indexing expression"""
+        index = index.subs(self.replacements)
+        return index.subs({v: sympy.Integer(0) for v in vars if v != 0})
 
     def stride_hints(self, index: sympy.Expr, vars: List[sympy.Symbol]):
         for v in index.free_symbols:
