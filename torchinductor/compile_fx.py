@@ -310,7 +310,7 @@ def create_fx_graph(nodes, fname, backend = "triton", print_graph = False):
     #     print(graph)
     print("starting creating module")
     gm = GraphModule({}, graph)
-    print(gm)
+    # print(gm)
     print("starting drawing")
     draw_graph(gm, fname, clear_meta=False)
 
@@ -422,7 +422,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 #             input_meta.append((type(arg), arg.shape, arg.stride(), arg.dtype, arg.device))
 #     return input_meta
 
-model_name = "alexnet"
+model_name = "hf_Bert"
 
 def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
