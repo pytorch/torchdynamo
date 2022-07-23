@@ -63,9 +63,7 @@ def cpp_prefix():
             #include <atomic>
             #include <cmath>
             #include <cstdlib>
-            #include <iostream>
             #include <limits>
-            #include <random>
             #include <omp.h>
 
             #include <ATen/core/PhiloxRNGEngine.h>
