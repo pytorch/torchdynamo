@@ -429,13 +429,29 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
     model_ = normalize_ir(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
 
-    # def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-    #     fixed = len(example_inputs) - num_example_inputs
-    #     return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+    def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        fixed = len(example_inputs) - num_example_inputs
+        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
-    # def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-    #     fixed = count_tangents(model)
-    #     return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+    def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+        fixed = count_tangents(model)
+        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+
+
+    return aot_autograd(
+        model_,
+        example_inputs_,
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
+        decompositions=decompositions,
+        partition_fn=min_cut_rematerialization_partition,
+    )
+
+
+def compile_fx_aot_dump(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+    """Main entrypoint to a compile given FX graph"""
+    model_ = normalize_ir(model_, example_inputs_)
+
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         # import pickle

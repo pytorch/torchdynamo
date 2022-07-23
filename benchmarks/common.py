@@ -331,6 +331,30 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
 
+def dump_experiment(args, model_iter_fn, model, example_inputs):
+    """
+    Run the model to dump the graph
+    """
+    timings = np.zeros((1, 2), np.float64)
+    # if we randomize the input, we should also check the result is correct
+    should_check_result = should_randomize_input = args.randomize_input
+    is_correct = True
+
+    inputs = (
+        randomize_input(copy.deepcopy(example_inputs))
+        if should_randomize_input
+        else example_inputs
+    )
+
+    with torchdynamo.run():
+        timed(
+            model, model_iter_fn, inputs, return_result=True
+        )
+
+
+    return current_name
+
+
 def overhead_experiment(*args, model_iter_fn):
     """
     Measure overheads of TorchDynamo by running with no backend (only
@@ -823,6 +847,11 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
+        "--inductor-dump",
+        action="store_true",
+        help="Dump the graphs of computebuffers",
+    )
+    parser.add_argument(
         "--raise-on-assertion-error",
         action="store_true",
         help="Fail a benchmark if torchdynamo triggers an internal assertion",
@@ -1076,7 +1105,7 @@ def main(runner, original_dir=None):
         args.isolate = True
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
-    elif args.inductor or args.inductor_dynamic:
+    elif args.inductor or args.inductor_dynamic or args.inductor_dump:
         import torchinductor.config
 
         torchinductor.config.debug = args.verbose
@@ -1089,8 +1118,13 @@ def main(runner, original_dir=None):
         else:
             torchinductor.config.dynamic_shapes = False
 
-        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
-        experiment = speedup_experiment
+        if args.inductor_dump:
+            optimize_ctx = torchdynamo.optimize("inductor_dump", nopython=args.nopython)
+            experiment = dump_experiment
+            output_filename = "inductor_dump.csv"
+        else:
+            optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+            experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
