@@ -256,8 +256,10 @@ def export(f, *args, **kwargs):
 
         for i in range(0, len(candidate_args)):
             arg = candidate_args[i]
-            if id(arg) in dict_of_source_args:
-                matched_elements_positions.append(dict_of_source_args[id(arg)])
+            assert (
+                id(arg) in dict_of_source_args
+            ), "Dynamo input and output is a strict subset of traced input/output"
+            matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
