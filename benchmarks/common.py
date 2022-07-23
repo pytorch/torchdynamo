@@ -361,12 +361,12 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
 
         for input_idx, inputs in enumerate(example_inputs):
             # interleave the runs to handle frequency scaling and load changes
-            timings[rep, input_idx, 0], _ = timed(
+            timings[rep, input_idx, 0] = timed(
                 model, model_iter_fn, inputs, return_result=False
             )
             # different from regular speedup_experiment, we _DO_ want to allow recompilation
             with optimize_ctx:
-                timings[rep, input_idx, 1], _ = timed(
+                timings[rep, input_idx, 1] = timed(
                     model, model_iter_fn, inputs, return_result=False
                 )
     medians = np.median(timings, axis=0)
