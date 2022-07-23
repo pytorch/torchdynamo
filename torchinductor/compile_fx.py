@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 import operator
 import os
 import textwrap
@@ -100,10 +101,10 @@ def dump_to_repro(gm, *args):
         print("wrote repro.py")
 
 
-def compile_fx(
+def compile_fx_python_key(
     model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
 ):
-    """Main entrypoint to a compile given FX graph"""
+    """Alternate version for inference only"""
     assert isinstance(model, torch.fx.GraphModule)
     assert all(isinstance(x, torch.Tensor) for x in example_inputs)
 
@@ -158,13 +159,6 @@ def compile_fx_inner(
             wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
         raise
-
-
-def no_compile(
-    gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-):
-    return gm.forward
 
 
 def cudagraphify(model, inputs, static_input_idxs=()):
@@ -240,17 +234,22 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-def compile_fx_training(
-    model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
-):
+def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+    """Main entrypoint to a compile given FX graph"""
     model_ = normalize_ir(model_, example_inputs_)
+    num_example_inputs = len(example_inputs_)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        # model.graph.print_tabular()
-        fixed = len(example_inputs) - len(example_inputs_)
+        if config.debug:
+            print("FORWARD GRAPH:")
+            model.graph.print_tabular()
+        fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+        if config.debug:
+            print("BACKWARD GRAPH:")
+            model.graph.print_tabular()
         fixed = count_tangents(model)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
@@ -262,3 +261,14 @@ def compile_fx_training(
         decompositions=decompositions,
         partition_fn=min_cut_rematerialization_partition,
     )
+
+
+def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+    """Main entrypoint to a compile given FX graph"""
+    logging.getLogger("torchinductor").setLevel(
+        logging.DEBUG if config.debug else logging.WARNING
+    )
+    if config.aot_autograd:
+        return compile_fx_aot(model_, example_inputs_)
+    else:
+        return compile_fx_python_key(model_, example_inputs_)

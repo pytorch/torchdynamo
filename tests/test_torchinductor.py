@@ -126,7 +126,11 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
+@patch.object(torchinductor.config.triton, "cudagraphs", False)
+@patch("torchdynamo.config.raise_on_backend_error", True)
 def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+    torchdynamo.reset()
+
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
     has_lowp_args = False
 
@@ -153,14 +157,12 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     torchinductor.metrics.reset()
 
-    @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
+    @torchdynamo.optimize_assert(compile_fx)
     def run(*ex):
         return model(*ex)
 
-    torchdynamo.reset()
-    with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
-        torch.manual_seed(0)
-        actual = run(*example_inputs)
+    torch.manual_seed(0)
+    actual = run(*example_inputs)
 
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
@@ -177,6 +179,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
+@patch.object(torchinductor.config.triton, "cudagraphs", False)
 def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -374,6 +377,12 @@ class CommonTemplate:
             return (a / (torch.abs(a) + 1),)
 
         self.common(fn, (torch.randn(17),))
+
+    def test_sgn(self):
+        def fn(a):
+            return torch.sgn(a), torch.sgn(a + 1) - 1
+
+        self.common(fn, [torch.linspace(-10, 10, 41)])
 
     def test_max_min(self):
         def fn(a, b):
@@ -747,6 +756,7 @@ class CommonTemplate:
             ),
         )
 
+    @patch.object(config, "aot_autograd", False)
     def test_unsqueeze_inplace(self):
         def fn(a):
             tmp1 = a + 1
@@ -779,6 +789,7 @@ class CommonTemplate:
             ),
         )
 
+    @patch.object(config, "aot_autograd", False)
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -787,6 +798,7 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_linear2(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 8),
@@ -1336,6 +1348,17 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @patch.object(config, "aot_autograd", False)
+    def test_layer_norm(self):
+        m = torch.nn.Sequential(
+            torch.nn.LayerNorm(32),
+            torch.nn.ReLU(),
+        )
+        m.eval()
+        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
@@ -1554,6 +1577,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_new_ones(self):
         def fn(a):
             return (
@@ -1721,7 +1745,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
-    def test_upsample_bilinear2d(self):
+    def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
                 aten.upsample_bilinear2d(a, [45, 45], False, None),
@@ -1729,6 +1753,17 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_bilinear2d_b(self):
+        def fn(a):
+            return aten.upsample_bilinear2d(a, None, True, [2.0, 2.0])
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2, 40, 59]),
+            ],
+        )
 
     def test_reflection_pad2d(self):
         def fn(a):
@@ -1739,6 +1774,22 @@ class CommonTemplate:
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_grid_sampler_2d(self):
+        def fn(a, b):
+            return (
+                aten.grid_sampler_2d(a, b, 0, 0, True),
+                aten.grid_sampler_2d(a, b, 0, 1, False),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([4, 3, 352, 352], dtype=torch.float32),
+                torch.rand([4, 352, 352, 2], dtype=torch.float32) * 2 - 1,
+            ),
+            check_lowp=False,
         )
 
     def test_sort(self):
@@ -1802,6 +1853,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 1, 1]),))
 
+    @patch.object(config, "aot_autograd", False)
     @patch.object(config.triton, "cudagraphs", True)
     def test_input_mutation1(self):
         def fn(a):
@@ -1825,6 +1877,7 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    @patch.object(config, "aot_autograd", False)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -1841,6 +1894,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(config, "aot_autograd", False)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -1861,6 +1915,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -1873,6 +1928,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -1955,6 +2011,7 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @patch.object(config, "aot_autograd", False)
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
@@ -2167,6 +2224,7 @@ class CommonTemplate:
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
+    @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
         if self.device == "cpu":
             # TODO(jansel): CPU RNG is not yet deterministic

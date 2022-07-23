@@ -298,6 +298,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
 
     Writes to ./speedups.csv
     """
+    if args.dynamic_shapes:
+        return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
+
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
@@ -329,6 +332,78 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         [current_device, current_name, float(speedup)],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
+
+
+def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
+    """
+    Run dynamic shapes benchmarks.
+
+    Requires dynamic shape compatible models, which provide a list of example inputs.
+
+    Warms up using the first input example and then iterates the inputs,
+    measuring (and expecting minimal) variance between the runtime for different examples.
+
+    """
+    timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
+
+    if args.repeat > 5:
+        print(
+            f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n"
+        )
+
+    nwarmup = 4
+    for rep in range(args.repeat):
+        # Start each rep fresh, e.g. only warmup on example 0
+        torchdynamo.reset()
+        for _ in range(nwarmup):
+            with optimize_ctx:
+                model_iter_fn(model, example_inputs[0])
+
+        for input_idx, inputs in enumerate(example_inputs):
+            # interleave the runs to handle frequency scaling and load changes
+            timings[rep, input_idx, 0], _ = timed(
+                model, model_iter_fn, inputs, return_result=False
+            )
+            # different from regular speedup_experiment, we _DO_ want to allow recompilation
+            with optimize_ctx:
+                timings[rep, input_idx, 1], _ = timed(
+                    model, model_iter_fn, inputs, return_result=False
+                )
+    medians = np.median(timings, axis=0)
+    speedups = list(medians[:, 0] / medians[:, 1])
+    speedups_mean = np.mean(speedups)
+    speedups_median = np.median(speedups)
+    speedups_var = np.var(speedups)
+
+    # TODO this x[0] is not going to work in general but bert only has 1 input
+    shapes = [x[0].shape for x in example_inputs]
+    shape_keys = sorted(set(shapes))
+    shape_speedups = {
+        shape: list(
+            map(
+                lambda it: it[1],
+                filter(lambda it: it[0] == shape, zip(shapes, speedups)),
+            )
+        )
+        for shape in shape_keys
+    }
+    output_str = (
+        f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}"
+        + "\nSpeedups by shape: "
+        + "\n".join(
+            [
+                f"{shape}: "
+                + ", ".join([f"{speedup: .3g}" for speedup in shape_speedups[shape]])
+                for shape in shape_keys
+            ]
+        )
+    )
+    output_csv(
+        output_filename,
+        ("dev", "name", "speedup mean", "speedup median", "speedup var"),
+        [current_device, current_name, speedups_mean, speedups_median, speedups_var],
+    )
+    return output_str
 
 
 def overhead_experiment(*args, model_iter_fn):
@@ -650,7 +725,7 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def get_tolerance(self, is_training, current_device, name):
+    def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
     def run_one_model(
@@ -662,17 +737,31 @@ class BenchmarkRunner:
         example_inputs,
         optimize_ctx,
         experiment,
-        cos_similarity=False,
         skip_accuracy_check=False,
+        dynamic_shapes=False,
     ):
         t0 = time.perf_counter()
-        tolerance = self.get_tolerance(is_training, current_device, name)
+        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+            is_training, current_device, name
+        )
         with self.pick_grad(name, is_training):
             mode = "train" if is_training else "eval"
             sys.stdout.write(f"{current_device:4} {mode:5} {current_name:34} ")
             sys.stdout.flush()
             for submod in itertools.chain([model], model.modules()):
                 assert not torchdynamo.utils.is_jit_model(submod)
+
+            if dynamic_shapes:
+                # skip correctness check for ds benchmark, becuase example_inputs are not
+                # compatible with the code below, and the same benchmarks can be run in
+                # non-dynamic shapes mode for correctness checks
+                torch.manual_seed(1337)
+                torchdynamo.reset()
+                results = []
+                results.append(experiment(model, example_inputs))
+                print(" ".join(map(str, results)))
+                return 0
+
             torch.manual_seed(1337)
             correct_result = model_iter_fn(
                 copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
@@ -802,6 +891,11 @@ def parse_args():
         help="Performs training",
     )
     parser.add_argument(
+        "--dynamic_shapes",
+        action="store_true",
+        help="Runs a dynamic shapes version of the benchmark, if available.",
+    )
+    parser.add_argument(
         "--use-eval-mode",
         action="store_true",
         help="sets model.eval() to reduce randomness",
@@ -820,6 +914,11 @@ def parse_args():
         "--inductor-settings",
         action="store_true",
         help="Use same settings as --inductor for baseline comparisons",
+    )
+    parser.add_argument(
+        "--raise-on-assertion-error",
+        action="store_true",
+        help="Fail a benchmark if torchdynamo triggers an internal assertion",
     )
     parser.add_argument(
         "--raise-on-backend-error",
@@ -1010,6 +1109,7 @@ def main(runner, original_dir=None):
     if args.verbose:
         torchdynamo.config.debug = True
 
+    torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
 
     if args.training:
@@ -1031,9 +1131,6 @@ def main(runner, original_dir=None):
         if args.float16:
             # TODO(jansel): check if correctness issue is real
             runner.skip_models.add("yolov3")
-        if not (args.float16 or args.float32):
-            # https://github.com/openai/triton/issues/543 causes only 98.8% similarity
-            runner.non_deterministic_models.add("pyhpc_equation_of_state")
         if args.training:
             # dropout,etc makes results not match
             args.skip_accuracy_check = True
@@ -1055,8 +1152,8 @@ def main(runner, original_dir=None):
         runner.skip_models.clear()
 
     experiment = null_experiment
+    global current_name, current_device, output_filename, optimize_ctx
     optimize_ctx = NullContext()
-    global current_name, current_device, output_filename
 
     if args.overhead:
         optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
@@ -1085,14 +1182,7 @@ def main(runner, original_dir=None):
         else:
             torchinductor.config.dynamic_shapes = False
 
-        if args.training:
-            from torchinductor.compile_fx import compile_fx_training
-
-            optimize_ctx = torchdynamo.optimize(
-                compile_fx_training, nopython=args.nopython
-            )
-        else:
-            optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.online_autotune:
@@ -1238,8 +1328,6 @@ def main(runner, original_dir=None):
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 
-    cos_similarity = args.cosine
-
     if args.output:
         output_filename = args.output
 
@@ -1257,6 +1345,7 @@ def main(runner, original_dir=None):
                     args.training,
                     args.use_eval_mode,
                     args.batch_size,
+                    args.dynamic_shapes,
                 )
             except NotImplementedError:
                 continue  # bad benchmark implementation
@@ -1276,11 +1365,11 @@ def main(runner, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                cos_similarity,
                 args.skip_accuracy_check,
+                args.dynamic_shapes,
             )
-        stats_file = output_filename.split(".csv")[0] + "_stats.csv"
         if args.generate_aot_autograd_stats:
+            stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
                 stats_file,
                 ("dev", "name", "total_aot_graphs", "ok_aot_graphs"),
@@ -1321,8 +1410,8 @@ def main(runner, original_dir=None):
                 example_inputs,
                 optimize_ctx,
                 experiment,
-                cos_similarity,
                 args.skip_accuracy_check,
+                args.dynamic_shapes,
             )
 
         Stats.print_summary()

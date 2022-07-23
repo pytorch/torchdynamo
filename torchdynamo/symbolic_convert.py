@@ -11,6 +11,7 @@ import sys
 import traceback
 import types
 import typing
+import weakref
 from typing import Any
 from typing import Dict
 from typing import Iterable
@@ -24,6 +25,7 @@ import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import GlobalSource
+from torchdynamo.source import GlobalWeakRefSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
@@ -760,8 +762,10 @@ class InstructionTranslatorBase(object):
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable)
-            result[k.value] = v
+            assert isinstance(k, ConstantVariable) or (
+                isinstance(k, TensorVariable) and k.parameter_value is not None
+            )
+            result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
             ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
@@ -1131,6 +1135,12 @@ class InstructionTranslatorBase(object):
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
         )
+
+    def store_dict_key(self, name, value):
+        self.output.guards.add(
+            GlobalWeakRefSource(name).create_guard(GuardBuilder.WEAKREF_ALIVE)
+        )
+        self.f_globals[name] = weakref.ref(value)
 
     @property
     def fake_mode(self):

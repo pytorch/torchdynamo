@@ -140,6 +140,14 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
+    def logical_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
     def rand(seed, offset):
         return f"tl.rand({seed}, {offset})"
 
@@ -186,6 +194,10 @@ class TritonOverrides(OpOverrides):
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def ceil(x):
+        return f"tl.libdevice.ceil({x})"
 
 
 @dataclasses.dataclass
@@ -502,21 +514,22 @@ class TritonKernel(Kernel):
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
+    def is_indirect_indexing(self, index: sympy.Expr):
+        index_vars = set(index.free_symbols)
+        return any(
+            # tmpX  means indirect indexing
+            str(v).startswith("tmp")
+            for v in index_vars
+        )
+
     def indexing(self, index: sympy.Expr, copy_shape=None):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
         index_vars = set(index.free_symbols)
         index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
-
-        need_dense = (
-            config.triton.dense_indexing
-            or any(
-                # tmpX  means indirect indexing
-                str(v).startswith("tmp")
-                for v in index_vars
-            )
-        ) and index != 0
+        indirect_indexing = self.is_indirect_indexing(index)
+        need_dense = (config.triton.dense_indexing or indirect_indexing) and index != 0
         have_dense = True
         have_loop_vars = False
         mask = []
@@ -537,6 +550,8 @@ class TritonKernel(Kernel):
         elif not have_loop_vars and copy_shape:
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+        elif indirect_indexing:
+            mask = dense_mask
 
         if self._load_mask:
             mask.append(self._load_mask)
@@ -586,16 +601,15 @@ class TritonKernel(Kernel):
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         var = self.args.input(name)
+        indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
         line = f"tl.load({var} + {index}, {mask})"
         if upcast:
             line += ".to(tl.float32)"
 
-        if self.inside_reduction and "rmask" not in mask and self.loads != self.compute:
+        if self.inside_reduction and "rmask" not in mask and not indirect_indexing:
             # can lift a common load outside of reduction loop
-            # One exception is when this is invoked inside of an indirect_load,
-            # because there may be dependency, Kernel.indirect_load sets self.loads
-            # to self.compute which we can use as a checking here.
+            # One exception is when this is an indirect_load.
             tmp = self.cse.generate(self.body, line)
         else:
             tmp = self.cse.generate(self.loads, line)
@@ -829,6 +843,7 @@ class TritonScheduling:
         return group
 
     def codegen(self, *groups):
+        log.info(f"codegen {groups}")
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
@@ -851,8 +866,11 @@ class TritonScheduling:
                     group, reduction_group = groups
 
                     # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_group(
-                        (group * reduction_group, sympy.Integer(1)),
+                    for node in scheduler.pop_groups(
+                        [
+                            (group * reduction_group, sympy.Integer(1)),
+                            (group, reduction_group, sympy.Integer(1)),
+                        ]
                     ):
                         try:
                             node.run(*kernel.split_and_set_ranges(node.get_ranges()))

@@ -61,6 +61,7 @@ LOGGING_CONFIG = {
             "propagate": False,
         },
     },
+    "disable_existing_loggers": False,
 }
 
 
@@ -428,6 +429,18 @@ def product(it):
 def tuple_iterator_getitem(it, index):
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def dict_param_key_ids(value):
+    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+
+
+def dict_const_keys(value):
+    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+
+
+def global_key_name(key):
+    return f"__dict_key_{id(key)}"
 
 
 def rename_implicit(v):
