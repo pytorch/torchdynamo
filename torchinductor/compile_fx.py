@@ -359,18 +359,6 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     assert static_arg_idxs == list(range(len(static_arg_idxs)))
     return len(static_arg_idxs)
 
-# def get_input_meta(args):
-#     input_meta = []
-#     if len(args) > 0 and isinstance(args[0], tuple):  # joint input
-#         input_meta += get_input_meta(args[0])
-#         input_meta += get_input_meta(args[1])
-#         return input_meta
-#     for arg in args:
-#         if(type(arg) == int or type(arg) == float):
-#             input_meta.append((type(arg),))
-#         else:
-#             input_meta.append((type(arg), arg.shape, arg.stride(), arg.dtype, arg.device))
-#     return input_meta
 
 model_name = "hf_Bert"
 
@@ -404,20 +392,14 @@ def compile_fx_aot_dump(model_: torch.fx.GraphModule, example_inputs_: List[torc
 
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        # import pickle
-        # model.graph.set_codegen(torch.fx.graph.CodeGen())  # remove codegen
-        # model.to_folder("hf_Bert_forward_0")
-        # input_meta = get_input_meta(example_inputs)
-        # pickle.dump(input_meta, open("hf_Bert_forward_0/hf_Bert_forward_0.input", "wb"))  # noqa: E501
         global model_name
-        draw_compute_box(model, example_inputs, f"{model_name}_fw", print_graph=True)
+        draw_compute_box(model, example_inputs, f"{model_name}_fw", print_graph=False)
         return model
         
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        # print(model)
         global model_name
-        draw_compute_box(model, example_inputs, f"{model_name}_bw", print_graph=True)
+        draw_compute_box(model, example_inputs, f"{model_name}_bw", print_graph=False)
         return model
 
     return aot_autograd(
