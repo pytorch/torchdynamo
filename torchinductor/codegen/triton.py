@@ -148,7 +148,7 @@ class TritonOverrides(OpOverrides):
         return f"{a} | {b}"
 
     @staticmethod
-    def rand(seed, offset):
+    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
