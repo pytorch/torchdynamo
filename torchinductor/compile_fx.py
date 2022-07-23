@@ -18,6 +18,7 @@ from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
 
 from . import config
+from . import overrides
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
@@ -108,9 +109,11 @@ def compile_fx_python_key(
     assert isinstance(model, torch.fx.GraphModule)
     assert all(isinstance(x, torch.Tensor) for x in example_inputs)
 
-    gm, wrap = python_key_normalize(
-        model, example_inputs, decompositions=decompositions
-    )
+    with overrides.patch_functions():
+        gm, wrap = python_key_normalize(
+            model, example_inputs, decompositions=decompositions
+        )
+        gm = overrides.replace_fx(gm)
 
     if config.dce:
         gm.graph.eliminate_dead_code()
@@ -236,7 +239,9 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 
 def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
-    model_ = normalize_ir(model_, example_inputs_)
+    with overrides.patch_functions():
+        model_ = normalize_ir(model_, example_inputs_)
+        model_ = overrides.replace_fx(model_)
     num_example_inputs = len(example_inputs_)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
@@ -253,14 +258,15 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
         fixed = count_tangents(model)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
-    return aot_autograd(
-        model_,
-        example_inputs_,
-        fw_compiler=fw_compiler,
-        bw_compiler=bw_compiler,
-        decompositions=decompositions,
-        partition_fn=min_cut_rematerialization_partition,
-    )
+    with overrides.patch_functions():
+        return aot_autograd(
+            model_,
+            example_inputs_,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            decompositions=decompositions,
+            partition_fn=min_cut_rematerialization_partition,
+        )
 
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):

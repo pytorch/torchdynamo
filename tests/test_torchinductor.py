@@ -2366,6 +2366,78 @@ class CommonTemplate:
         )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
 
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_lowmem_dropout1(self):
+        n = 100000
+        weight = torch.ones(
+            n, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(n, device=self.device, dtype=torch.float32)
+
+        @torchdynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return F.dropout(x * weight, 0.33, train)
+
+        def check(r, g):
+            rmean = r.mean().item()
+            gmean = g.mean().item()
+            rcount = len(r.nonzero())
+            gcount = len(g.nonzero())
+
+            # dropped elements should match
+            self.assertTrue(same(r.nonzero(), g.nonzero()))
+            self.assertEqual(rcount, gcount)
+
+            # dropped should be close to 0.33
+            self.assertGreater(rcount, 0.64 * n)
+            self.assertGreater(0.68 * n, rcount)
+
+            self.assertAlmostEqual(rmean, gmean)
+            self.assertAlmostEqual(rmean, 1.0, places=2)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        g1 = weight.grad.clone()
+        # eval mode should be all ones
+        self.assertTrue(same(r1, torch.ones_like(r1)))
+        self.assertTrue(same(g1, torch.ones_like(g1)))
+
+        torch.manual_seed(1234)
+        weight.grad.zero_()
+        r2 = run(ones)
+        r2.sum().backward()
+        g2 = weight.grad.clone()
+        check(r2, g2)
+
+        torch.manual_seed(1234)
+        weight.grad.zero_()
+        r3 = run(ones)
+        r3.sum().backward()
+        g3 = weight.grad.clone()
+        check(r3, g3)
+
+        if self.device != "cpu":
+            # second run is same result as first
+            self.assertTrue(same(r2, r3))
+            self.assertTrue(same(g2, g3))
+
+    def test_lowmem_dropout2(self):
+        m = torch.nn.Sequential(
+            torch.nn.Linear(32, 32, bias=False),
+            torch.nn.Dropout(),
+            torch.nn.Linear(32, 32, bias=False),
+            torch.nn.Dropout(),
+        ).to(self.device)
+
+        @torchdynamo.optimize_assert("inductor")
+        def run(x):
+            return m(x)
+
+        torchinductor.metrics.generated_kernel_count = 0
+        result = run(torch.randn([8, 32], device=self.device))
+        result.sum().backward()
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 4)
+
 
 if HAS_CPU:
 

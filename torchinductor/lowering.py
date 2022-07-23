@@ -9,6 +9,7 @@ import torch.fx
 
 from . import config
 from . import ir
+from . import overrides
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -670,6 +671,40 @@ else:
 
     rand = register_lowering([aten.rand, torch.rand])(make_rand("rand"))
     randn = register_lowering([aten.randn, torch.randn])(make_rand("randn"))
+
+
+@register_lowering(overrides.philox_seed_like)
+def philox_seed_like(x):
+    logging.warning("using triton random, expect difference from eager")
+    return V.graph.random_seed_buffer(x.get_device(), as_buffer=True)
+
+
+@register_lowering(overrides.philox_rand_like, type_promote=False)
+def philox_rand_like(x, seed, offset):
+    device = x.get_device()
+    dtype = x.get_dtype()
+    size = x.get_size()
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+        offset=sympy.expand(offset),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+
+    def inner_fn(index):
+        return ops.rand(
+            seed_loader([]),
+            ops.index_expr(random_pos(index), torch.int32),
+        )
+
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
 
 
 if has_torchvision_roi_align():

@@ -1367,6 +1367,13 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class RandSeedBuffer(ConstantBuffer):
+    def codegen_reference(self):
+        # Clone makes sure if we pass this from forwards to backwards
+        # the value does not get clobbered by the time backwards is run.
+        return self.get_name() + ".clone()"
+
+
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
@@ -1858,6 +1865,8 @@ class ExternKernel(InputsKernel):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
             )
+        if isinstance(x, ConstantBuffer):
+            return x
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
