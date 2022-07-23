@@ -639,24 +639,14 @@ else:
                 offset=offset,
             ).make_indexer()
 
-            if device.type == "cuda":
-                seed_buffer = V.graph.random_seed_buffer(device)
+            seed_buffer = V.graph.random_seed_buffer(device)
 
-                def inner_fn(index):
-                    return getattr(ops, fn_name)(
-                        ops.load(seed_buffer, sympy.Integer(0)),
-                        ops.index_expr(random_pos(index), torch.int32),
-                    )
-
-            else:
-                seed_var = V.graph.sizevars.seed()
-
-                def inner_fn(index):
-                    return getattr(ops, f"{fn_name}")(
-                        ops.index_expr(seed_var, torch.int32),
-                        ops.index_expr(random_pos(index), torch.int32),
-                        dtype,
-                    )
+            def inner_fn(index):
+                return getattr(ops, fn_name)(
+                    ops.load(seed_buffer, sympy.Integer(0)),
+                    ops.index_expr(random_pos(index), torch.int32),
+                    dtype,
+                )
 
             return Pointwise.create(
                 device=device,

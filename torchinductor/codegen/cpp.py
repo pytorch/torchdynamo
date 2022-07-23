@@ -79,8 +79,8 @@ def cpp_prefix():
                 return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
             }
 
-            float normalized_rand_cpu(uint64_t seed, uint64_t offset) {
-                return normalize(at::Philox4_32_10(seed, omp_get_thread_num(), offset)());
+            float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
+                return normalize(at::Philox4_32_10(seed, 0, offset)());
             }
             """
         ),
