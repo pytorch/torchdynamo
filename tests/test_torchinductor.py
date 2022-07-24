@@ -2225,10 +2225,6 @@ class CommonTemplate:
 
     @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
-        if self.device == "cpu":
-            # TODO(jansel): CPU RNG is not yet deterministic
-            raise unittest.SkipTest("CPU currently nondeterministic")
-
         @torchdynamo.optimize("inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
@@ -2239,12 +2235,12 @@ class CommonTemplate:
 
                 x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 a0 = fn(x).clone()
                 a1 = fn(x).clone()
                 a2 = fn(x).clone()
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 b0 = fn(x).clone()
                 b1 = fn(x).clone()
                 b2 = fn(x).clone()
