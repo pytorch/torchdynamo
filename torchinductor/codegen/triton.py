@@ -605,14 +605,7 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
-        if "rmask" in mask:
-            # This eviction policy heuristic is untested.
-            # ptillet suggested we should try only doing this for
-            # the first N-1 loops and not for the final loop.
-            ep = ", eviction_policy='evict_last'"
-        else:
-            ep = ""
-        line = f"tl.load({var} + {index}, {mask}{ep})"
+        line = f"tl.load({var} + {index}, {mask})"
         if upcast:
             line += ".to(tl.float32)"
 

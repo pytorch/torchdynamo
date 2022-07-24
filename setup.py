@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-import sys
-
 from setuptools import Extension
 from setuptools import find_packages
 from setuptools import setup
@@ -15,22 +13,6 @@ of PyTorch operations into an FX Graph which is then just-in-time
 compiled with an ensemble of different backends and autotuning.
 """
 
-
-package_include = [
-    "torchdynamo",
-    "torchdynamo.*",
-    "torchinductor",
-    "torchinductor.*",
-]
-
-if "develop" in sys.argv:
-    package_include += [
-        "benchmarks",
-        "benchmarks.microbenchmarks",
-        "benchmarks.microbenchmarks.*",
-    ]
-
-
 setup(
     name="torchdynamo",
     version="1.13.0.dev0",
@@ -44,7 +26,14 @@ setup(
     keywords="pytorch machine learning compilers",
     python_requires=">=3.7, <3.11",
     install_requires=["torch>=1.12.0", "numpy", "tabulate", "pyyaml", "sympy"],
-    packages=find_packages(include=package_include),
+    packages=find_packages(
+        include=[
+            "torchdynamo",
+            "torchdynamo.*",
+            "torchinductor",
+            "torchinductor.*",
+        ]
+    ),
     zip_safe=False,
     ext_modules=[
         Extension(
