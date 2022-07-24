@@ -642,11 +642,15 @@ else:
                 offset=offset,
             ).make_indexer()
 
-            seed_buffer = V.graph.random_seed_buffer(device)
+            seed_buffer = V.graph.random_seed_buffer(device, as_buffer=True)
 
             def inner_fn(index):
+                seed = seed_buffer([])
+                # change seed so that we don't collide with philox_rand_like()
+                # TODO(jansel): migrate everything to philox_rand_like()
+                seed = ops.bitwise_xor(seed, ops.constant(0xFFFF, torch.int32))
                 return getattr(ops, fn_name)(
-                    ops.load(seed_buffer, sympy.Integer(0)),
+                    seed,
                     ops.index_expr(random_pos(index), torch.int32),
                     dtype,
                 )
