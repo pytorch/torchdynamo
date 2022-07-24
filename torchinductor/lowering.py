@@ -688,6 +688,7 @@ def philox_rand_like(x, seed, offset):
         return ops.rand(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
+            dtype,
         )
 
     return Pointwise.create(

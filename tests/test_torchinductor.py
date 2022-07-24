@@ -2161,7 +2161,6 @@ class CommonTemplate:
             ],
         )
 
-    @unittest.skip("Triton kernel fails when xnumel == 1")
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -2238,7 +2237,7 @@ class CommonTemplate:
             with patch.object(torchinductor.config.triton, "cudagraphs", cg):
                 torchdynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float16)
+                x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
                 torch.cuda.manual_seed(1234)
                 a0 = fn(x).clone()
@@ -2416,10 +2415,9 @@ class CommonTemplate:
         g3 = weight.grad.clone()
         check(r3, g3)
 
-        if self.device != "cpu":
-            # second run is same result as first
-            self.assertTrue(same(r2, r3))
-            self.assertTrue(same(g2, g3))
+        # second run is same result as first
+        self.assertTrue(same(r2, r3))
+        self.assertTrue(same(g2, g3))
 
     def test_lowmem_dropout2(self):
         m = torch.nn.Sequential(

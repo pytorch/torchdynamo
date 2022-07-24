@@ -111,18 +111,9 @@ class LowmemDropout(torch.autograd.Function):
     def forward(ctx, x, p):
         ctx.p = p
         scale = float(1.0 / (1.0 - p))
-        ctx.fallback = x.device.type == "cpu"
-
-        # remove when https://github.com/pytorch/torchdynamo/pull/636 lands
-        if ctx.fallback:
-            result, mask = torch.ops.aten.native_dropout(x, p, True)
-            ctx.save_for_backward(mask)
-            return result
-
         seed, offset = LowmemDropout.get_seed_offset(x)
         ctx.save_for_backward(seed)
         ctx.offset = offset
-
         bool_mask = philox_rand_like(x, seed, offset) > p
         return bool_mask.to(x.dtype) * x * scale
 
@@ -130,15 +121,6 @@ class LowmemDropout(torch.autograd.Function):
     def backward(ctx, grad_output):
         p = ctx.p
         scale = float(1.0 / (1.0 - p))
-
-        # remove when https://github.com/pytorch/torchdynamo/pull/636 lands
-        if ctx.fallback:
-            (mask,) = ctx.saved_tensors
-            return (
-                torch.ops.aten.native_dropout_backward(grad_output, mask, scale),
-                None,
-            )
-
         (seed,) = ctx.saved_tensors
         bool_mask = philox_rand_like(grad_output, seed, ctx.offset) > p
         return bool_mask.to(grad_output.dtype) * grad_output * scale, None
@@ -156,7 +138,10 @@ def lowmem_dropout(input, p, training=True, inplace=False):
         )
     if not training:
         return input
-    return LowmemDropout.apply(input, p)
+    result = LowmemDropout.apply(input, p)
+    if inplace:
+        input.copy_(result)
+    return result
 
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout}
