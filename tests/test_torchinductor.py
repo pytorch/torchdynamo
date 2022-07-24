@@ -2351,6 +2351,21 @@ class CommonTemplate:
             ],
         )
 
+    @patch.object(config, "aot_autograd", False)
+    def test_mm_views(self):
+        def fn(a, b):
+            return torch.mm(a.view(32, 32), b.view(32, 32))
+
+        self.common(
+            fn,
+            (
+                torch.randn([32, 32]).transpose(0, 1),
+                torch.randn([1, 32, 32]).transpose(0, 1),
+            ),
+            check_lowp=False,
+        )
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
+
 
 if HAS_CPU:
 
