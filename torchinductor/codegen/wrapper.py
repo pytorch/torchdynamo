@@ -2,6 +2,9 @@ import collections
 import dataclasses
 import hashlib
 from itertools import count
+from typing import Any
+from typing import Dict
+from typing import List
 
 from .. import codecache
 from .. import config
@@ -19,7 +22,11 @@ pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    return (node.get_device(), node.get_dtype(), sympy_product(node.get_size()))
+    return (
+        node.get_device(),
+        node.get_dtype(),
+        V.graph.sizevars.simplify(sympy_product(node.get_size())),
+    )
 
 
 def make_buffer_reuse(old, new):
@@ -34,17 +41,123 @@ def make_buffer_reuse(old, new):
     )
 
 
-@dataclasses.dataclass
-class FreedBuffer:
-    node: ir.Buffer
-    reused_as: ir.Buffer = None
+def make_buffer_allocation(buffer):
+    device = buffer.get_device()
+    dtype = buffer.get_dtype()
+    shape = tuple(buffer.get_size())
+    stride = tuple(buffer.get_stride())
+    return (
+        f"{buffer.get_name()} = empty_strided("
+        f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
+        f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
+        f"device='{device.type}', dtype={dtype})"
+    )
+
+
+class MemoryPlanningState:
+    def __init__(self):
+        super().__init__()
+        self.reuse_pool: Dict[
+            Any, List["FreeIfNotReusedLine"]
+        ] = collections.defaultdict(list)
+
+    def __contains__(self, key):
+        return bool(self.reuse_pool.get(key, None))
+
+    def pop(self, key) -> "FreeIfNotReusedLine":
+        item = self.reuse_pool[key].pop()
+        assert not item.is_reused
+        return item
+
+    def push(self, key, item: "FreeIfNotReusedLine"):
+        assert not item.is_reused
+        self.reuse_pool[key].append(item)
+
+
+class MemoryPlanningLine:
+    def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
+        """First pass to find reuse"""
+        return self
 
     def codegen(self, code: IndentedBuffer):
-        name = self.node.get_name()
-        if self.reused_as is not None:
-            code.writeline(make_buffer_reuse(self.node, self.reused_as))
-        else:
-            code.writeline(f"del {name}")
+        """Second pass to output code"""
+        pass
+
+
+@dataclasses.dataclass
+class AllocateLine(MemoryPlanningLine):
+    node: ir.Buffer
+
+    def plan(self, state: MemoryPlanningState):
+        if self.node.get_name() in V.graph.removed_buffers:
+            return NullLine()
+
+        # try to reuse a recently freed buffer
+        key = buffer_reuse_key(self.node)
+        if key in state:
+            free_line = state.pop(key)
+            free_line.is_reused = True
+            return ReuseLine(free_line.node, self.node)
+
+        return self
+
+    def codegen(self, code: IndentedBuffer):
+        assert self.node.get_name() not in V.graph.removed_buffers
+        code.writeline(make_buffer_allocation(self.node))
+
+
+@dataclasses.dataclass
+class FreeIfNotReusedLine(MemoryPlanningLine):
+    node: ir.Buffer
+    is_reused: bool = False
+
+    def plan(self, state: MemoryPlanningState):
+        assert not self.is_reused
+        if self.node.get_name() in V.graph.removed_buffers:
+            return NullLine()
+        state.push(buffer_reuse_key(self.node), self)
+        return self
+
+    def codegen(self, code: IndentedBuffer):
+        assert self.node.get_name() not in V.graph.removed_buffers
+        if not self.is_reused:
+            code.writeline(f"del {self.node.get_name()}")
+
+
+@dataclasses.dataclass
+class ReuseLine(MemoryPlanningLine):
+    node: ir.Buffer
+    reused_as: ir.Buffer
+
+    def plan(self, state: MemoryPlanningState):
+        if self.reused_as.get_name() in V.graph.removed_buffers:
+            # we hit this case only for inplace buffers
+            return FreeLine(self.node).plan(state)
+        assert self.node.get_name() not in V.graph.removed_buffers
+        return self
+
+    def codegen(self, code: IndentedBuffer):
+        assert self.node.get_name() not in V.graph.removed_buffers
+        assert self.reused_as.get_name() not in V.graph.removed_buffers
+        code.writeline(make_buffer_reuse(self.node, self.reused_as) + "  # reuse")
+
+
+@dataclasses.dataclass
+class FreeLine(MemoryPlanningLine):
+    node: ir.Buffer
+
+    def plan(self, state: MemoryPlanningState):
+        if self.node.get_name() in V.graph.removed_buffers:
+            return NullLine()
+        return self
+
+    def codegen(self, code: IndentedBuffer):
+        assert self.node.get_name() not in V.graph.removed_buffers
+        code.writeline(f"del {self.node.get_name()}")
+
+
+class NullLine(MemoryPlanningLine):
+    pass
 
 
 class WrapperCodeGen(CodeGen):
@@ -112,7 +225,6 @@ class WrapperCodeGen(CodeGen):
 
         self.allocated = set()
         self.freed = set()
-        self.reuse_pool = collections.defaultdict(list)
 
     def next_kernel_name(self):
         return f"kernel{next(self._names_iter)}"
@@ -130,30 +242,12 @@ class WrapperCodeGen(CodeGen):
             assert isinstance(layout.view, ir.ReinterpretView)
             self.codegen_allocation(layout.view.data)
             allocation = DeferredLine(
-                name, f"{name} = {layout.view.codegen_reference()}"
+                name, f"{name} = {layout.view.codegen_reference()}  # alias"
             )
             self.writeline(allocation)
             return
 
-        # try to reuse a recently freed buffer
-        key = buffer_reuse_key(buffer)
-        if self.reuse_pool.get(key, None):
-            fb = self.reuse_pool[key].pop()
-            fb.reused_as = buffer
-            return
-
-        device = buffer.get_device()
-        dtype = buffer.get_dtype()
-        shape = tuple(buffer.get_size())
-        stride = tuple(buffer.get_stride())
-        allocation = DeferredLine(
-            name,
-            f"{name} = empty_strided("
-            f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
-            f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
-            f"device='{device.type}', dtype={dtype})",
-        )
-        self.writeline(allocation)
+        self.writeline(AllocateLine(buffer))
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
@@ -166,9 +260,7 @@ class WrapperCodeGen(CodeGen):
             self.writeline(f"del {name}")
             return
 
-        fb = FreedBuffer(buffer)
-        self.reuse_pool[buffer_reuse_key(buffer)].append(fb)
-        self.writeline(fb)
+        self.writeline(FreeIfNotReusedLine(buffer))
 
     def can_reuse(self, buffer):
         name = buffer.get_name()
@@ -186,20 +278,29 @@ class WrapperCodeGen(CodeGen):
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
-        self.writeline(FreedBuffer(input_buffer, output_buffer))
+        self.writeline(ReuseLine(input_buffer, output_buffer))
 
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
         with result.indent():
-            while self.lines and isinstance(self.lines[-1], FreedBuffer):
+            while self.lines and isinstance(self.lines[-1], MemoryPlanningLine):
+                # these lines will be pointless
                 self.lines.pop()
+
+            # codegen allocations in two passes
+            planning_state = MemoryPlanningState()
+            for i in range(len(self.lines)):
+                if isinstance(self.lines[i], MemoryPlanningLine):
+                    self.lines[i] = self.lines[i].plan(planning_state)
+
             for line in self.lines:
-                if isinstance(line, FreedBuffer):
+                if isinstance(line, MemoryPlanningLine):
                     line.codegen(result)
                 else:
                     result.writeline(line)
+
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
             if output_refs:
                 result.writeline("return (" + ", ".join(output_refs) + ", )")
@@ -216,6 +317,15 @@ class WrapperCodeGen(CodeGen):
         """
         if not config.benchmark_harness:
             return
+
+        def add_fake_input(name, shape, stride, device, dtype):
+            output.writeline(
+                f"{name} = rand_strided("
+                f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
+                f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
+                f"device='{device.type}', dtype={dtype})"
+            )
+
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
@@ -225,17 +335,19 @@ class WrapperCodeGen(CodeGen):
                 """,
                 strip=True,
             )
+
+            for name, value in V.graph.constants.items():
+                add_fake_input(
+                    name, value.size(), value.stride(), value.device, value.dtype
+                )
+
             for name, value in V.graph.graph_inputs.items():
                 shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                 stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                device = value.get_device()
-                dtype = value.get_dtype()
-                output.writeline(
-                    f"{name} = rand_strided("
-                    f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
-                    f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
-                    f"device='{device.type}', dtype={dtype})"
+                add_fake_input(
+                    name, shape, stride, value.get_device(), value.get_dtype()
                 )
+
             output.writeline(
                 f"print_performance(lambda: call({', '.join(V.graph.graph_inputs.keys())}))"
             )
