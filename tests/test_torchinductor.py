@@ -2226,10 +2226,6 @@ class CommonTemplate:
 
     @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
-        if self.device == "cpu":
-            # TODO(jansel): CPU RNG is not yet deterministic
-            raise unittest.SkipTest("CPU currently nondeterministic")
-
         @torchdynamo.optimize("inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
