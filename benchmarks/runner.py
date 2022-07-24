@@ -45,7 +45,6 @@ TABLE = {
         "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode --isolate",
         "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode --isolate",
         "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate",
-        "ts_nvfuser_cudagraphs": "--training --inductor-settings --backend=cudagraphs_ts --use-eval-mode --isolate",
         "inductor_cudagraphs": "--training --inductor --use-eval-mode --isolate",
     },
     "inference": {
@@ -63,7 +62,7 @@ INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
 TRAINING_COMPILERS = tuple(TABLE["training"].keys())
 
 DEFAULTS = {
-    "training": ["ts_nvfuser_cudagraphs", "aot_nvfuser", "inductor_cudagraphs"],
+    "training": ["ts_nvfuser", "aot_nvfuser", "inductor_cudagraphs"],
     "inference": ["ts_nvfuser_cudagraphs", "inductor_cudagraphs"],
     "dtypes": [
         "float32",
