@@ -67,7 +67,7 @@ def stride_order2fill_order(order):
     return fill_order
 
 
-def reads_from_conv(buf):
+def reads_from_conv(buf, var_ranges):
     """
     return:
     if reads_from_conv: boolean
@@ -77,8 +77,9 @@ def reads_from_conv(buf):
         return False, None
     if isinstance(buf, Convolution):
         indexer = buf.layout.as_fixed().make_indexer()
-        sizes = buf.get_size()
-        index_vars = [sympy.Symbol(f"q{i}") for i in range(len(sizes))]
+        # sizes = buf.get_size()
+        index_vars = sorted(var_ranges, key=lambda var: var.name)
+        #[sympy.Symbol(f"q{i}") for i in range(len(sizes))]
         index = indexer(index_vars)
         return True, index
     # for case like
@@ -97,22 +98,23 @@ def reads_from_conv(buf):
             for r in reads
         ]
         for reads_buf in reads_bufs:
-            read_from_conv, addr = reads_from_conv(reads_buf)
+            read_from_conv, addr = reads_from_conv(reads_buf, var_ranges)
             if read_from_conv:
                 return True, addr
     return False, None
 
 
-def layout_priority_idx(reads_bufs, memory_addrs):
+def layout_priority_idx(reads_bufs, memory_addrs, var_ranges):
     """
     if reads from conv that needs to use specific layout
     return:
     priority_idx regarding memory_addrs idx
     memory_addrs - update memory_addrs with the true addr if needed
     """
+    
     priority_idx = []
     for i, reads_buf in enumerate(reads_bufs):
-        read_from_conv, mem_addr = reads_from_conv(reads_buf)
+        read_from_conv, mem_addr = reads_from_conv(reads_buf, var_ranges)
         if read_from_conv:
             priority_idx.append(i)
             memory_addrs[i] = mem_addr
@@ -1525,7 +1527,7 @@ class ComputedBuffer(Buffer):
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
             )
-        index_formulas = [*body.indexing_exprs.values()]
+        # index_formulas = [*body.indexing_exprs.values()]
         memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
         priority_idx = []
         if config.triton.convolution != "aten":
@@ -1535,7 +1537,7 @@ class ComputedBuffer(Buffer):
                 else None
                 for reads_name in body.reads_name2expr.keys()
             ]
-            priority_idx, memory_addrs = layout_priority_idx(reads_bufs, memory_addrs)
+            priority_idx, memory_addrs = layout_priority_idx(reads_bufs, memory_addrs, var_ranges)
             # for i, reads_buf in enumerate(reads_bufs):
             #     if reads_from_conv(reads_buf, memory_addrs, i):
             #     # if isinstance(reads_buf, Convolution):
@@ -1543,7 +1545,7 @@ class ComputedBuffer(Buffer):
             #         # preferred_stride_order = reads_buf.preferred_stride_order
             #         # preferred_order = stride_order2fill_order(preferred_stride_order)
             #         priority_idx.append(i)
-
+        index_formulas = memory_addrs
         index_vars = []
         reduce_vars = []
         index_size = []
