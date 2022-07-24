@@ -900,7 +900,7 @@ class ReinterpretView(BaseView):
         def loader(index):
             indexer = self.layout.make_indexer()
             upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype == torch.bfloat16
+                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
             )
             return ops.load(self.get_name(), indexer(index), upcast)
 

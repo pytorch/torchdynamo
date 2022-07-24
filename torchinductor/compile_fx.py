@@ -23,6 +23,8 @@ from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
 
+log = logging.getLogger(__name__)
+
 
 class CheckEachNode(torch.fx.Interpreter):
     def call_function(self, target, args, kwargs):
@@ -155,8 +157,11 @@ def compile_fx_inner(
             return cudagraphify(
                 compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
             )
-        else:
-            return compiled_fn
+        elif cudagraphs and set(graph.device_types) == {"cuda"}:
+            log.warning("skipping cudagraphs due to input mutation")
+        elif cudagraphs:
+            log.warning("skipping cudagraphs due multple devices")
+        return compiled_fn
     except Exception:
         if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
             wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
