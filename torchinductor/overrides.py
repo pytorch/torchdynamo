@@ -145,16 +145,16 @@ class LowmemDropout(torch.autograd.Function):
 
 
 @torch.fx.wrap
-def lowmem_dropout(input, p, train=True, inplace=False):
+def lowmem_dropout(input, p, training=True, inplace=False):
     if isinstance(input, torch.fx.Proxy):
         # double check we don't FX trace this
         return input.tracer.create_proxy(
             "call_function",
             lowmem_dropout,
-            (input, p, train),
+            (input, p, training),
             {},
         )
-    if not train:
+    if not training:
         return input
     return LowmemDropout.apply(input, p)
 
