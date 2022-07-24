@@ -634,31 +634,22 @@ else:
             size = [sympy.expand(s) for s in size]
             offset = V.graph.increment_randomness_offset(sympy_product(size))
 
-            if device.type == "cuda":
-                random_pos = ir.FixedLayout(
-                    device,
+            random_pos = ir.FixedLayout(
+                device,
+                dtype,
+                size,
+                ir.FlexibleLayout.contiguous_strides(size),
+                offset=offset,
+            ).make_indexer()
+
+            seed_buffer = V.graph.random_seed_buffer(device)
+
+            def inner_fn(index):
+                return getattr(ops, fn_name)(
+                    ops.load(seed_buffer, sympy.Integer(0)),
+                    ops.index_expr(random_pos(index), torch.int32),
                     dtype,
-                    size,
-                    ir.FlexibleLayout.contiguous_strides(size),
-                    offset=offset,
-                ).make_indexer()
-                seed_buffer = V.graph.random_seed_buffer(device)
-
-                def inner_fn(index):
-                    return getattr(ops, fn_name)(
-                        ops.load(seed_buffer, sympy.Integer(0)),
-                        ops.index_expr(random_pos(index), torch.int32),
-                    )
-
-            else:
-                # on CPU we use mt19937 which doesn't use the offset
-                # TODO(jansel): we should rewrite CPU RNG to be closer to cuda and deterministic
-                seed_var = V.graph.sizevars.seed()
-
-                def inner_fn(index):
-                    return getattr(ops, f"{fn_name}_cpu")(
-                        ops.index_expr(seed_var, torch.int32), dtype
-                    )
+                )
 
             return Pointwise.create(
                 device=device,

@@ -100,7 +100,11 @@ def cpp_compile_command(input, output, include_pytorch=False):
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
     else:
-        ipaths = []
+        # Note - this is effectively a header only inclusion. Usage of some header files may result in
+        # symbol not found, if those header files require a library.
+        # For those cases, include the lpath and libs command as we do for pytorch above.
+        # This approach allows us to only pay for what we use.
+        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
         libs = ["gomp"]
     ipaths = " ".join(["-I" + p for p in ipaths])
