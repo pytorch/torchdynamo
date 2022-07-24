@@ -642,7 +642,9 @@ else:
                 offset=offset,
             ).make_indexer()
 
-            seed_buffer = V.graph.random_seed_buffer(device, as_buffer=True).make_loader()
+            seed_buffer = V.graph.random_seed_buffer(
+                device, as_buffer=True
+            ).make_loader()
 
             def inner_fn(index):
                 seed = seed_buffer([])
