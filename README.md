@@ -133,10 +133,6 @@ Current limitations:
 
 Example
 ```py
-from typing import List
-import torch
-import torchdynamo
-
 # nothing special about this part
 model = ...
 optimizer = ...
