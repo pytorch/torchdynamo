@@ -2175,7 +2175,6 @@ class CommonTemplate:
             ],
         )
 
-    #@unittest.skip("Intermittent failure on CUDA, may be an Triton bug")
     def test_scatter2(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")

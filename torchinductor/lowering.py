@@ -1301,6 +1301,7 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
+        assert False, "TODO: multiply not supported"
         reduce = "prod"
     else:
         assert reduce is None
@@ -1318,6 +1319,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     self.realize()
     V.graph.realize_users_of(self.get_name())
     index_loader = index.make_loader()
+    src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
     def output_indexer(idx):
         indirect_idx = list(idx)
@@ -1325,10 +1327,10 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         return indirect_idx
 
     def fn(idx):
-        if isinstance(src, TensorBox):
-            src_loader = src.make_loader()
+        if src_loader:
             return src_loader(idx)
         else:
+            # src is a scalar
             return ops.constant(src, self.get_dtype())
 
     def backend_reduce_str(reduce):
