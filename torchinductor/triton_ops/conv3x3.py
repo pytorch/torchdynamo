@@ -7,67 +7,39 @@ from torchinductor.triton_ops.utils import _unpack
 from .conv_perf_model import early_config_prune
 from .conv_perf_model import estimate_conv_time
 
-
+BLOCK_K = 32
 @triton.autotune(
     configs=[
         # basic configs for compute-bound matmuls
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": BLOCK_K}, num_stages=2, num_warps=8
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
+            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": BLOCK_K}, num_stages=2, num_warps=8
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
+            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=2
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=8
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        # good for int8
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=5, num_warps=2
+            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
         ),
     ],
     # the above configs will be evaluated anytime the key changes
@@ -119,15 +91,9 @@ def _kernel(
     stride_yw,
     stride_biasn,
     # pointer inc for x, 3x3
-    delta_x0_h, delta_x0_w,
-    delta_x1_h, delta_x1_w,
-    delta_x2_h, delta_x2_w,
-    delta_x3_h, delta_x3_w,
-    delta_x4_h, delta_x4_w,
-    delta_x5_h, delta_x5_w,
-    delta_x6_h, delta_x6_w,
-    delta_x7_h, delta_x7_w,
-    delta_x8_h, delta_x8_w,
+    delta_xh_ptr, # len=9
+    delta_xw_ptr, # len=9
+    delta_xc_ptr, # len=(BLOCK_K // (KERNEL_SIZE)) * KERNEL_SIZE
     # Tensor dimensions
     BATCH,
     IN_C,
@@ -150,7 +116,6 @@ def _kernel(
     groups,
     # Metaparameters
     ACC_TYPE: tl.constexpr,
-    CONV1X1_NHWC: tl.constexpr,
     # blocks in different dimension
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -182,69 +147,75 @@ def _kernel(
     off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
     off_x_crs = tl.arange(0, BLOCK_K)
 
-    CRS = IN_C * KERNEL_H * KERNEL_W
-    KERNEL_SIZE = KERNEL_H * KERNEL_W
-    R_KERNEL_SIZE = tl.arange(0, KERNEL_SIZE)
+    CRS = IN_C * 9
     # load inc ptr of x, upade x_ptrs
-    crs_mul_of_KERNEL = ((BLOCK_K + KERNEL_SIZE - 1) // (KERNEL_SIZE)) * KERNEL_SIZE
-    off_x_crs_mul_of_KERNEL = tl.arange(0, crs_mul_of_KERNEL)
-    off_x_inc = off_x_crs_mul_of_KERNEL // (KERNEL_SIZE)
-    delta_xh = tl.load(delta_xh_ptr + R_KERNEL_SIZE) 
-    delta_xw = tl.load(delta_xw_ptr + R_KERNEL_SIZE) 
-    delta_xc = tl.load(delta_xc_ptr + R_KERNEL_SIZE) 
-    delta_xhwc = delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
-    off_delta_x = delta_xhwc[:, None] + tl.reshape(off_x_inc * stride_xc, [KERNEL_SIZE, crs_mul_of_KERNEL // KERNEL_SIZE])
-    off_delta_x = tl.reshape(off_delta_x, [crs_mul_of_KERNEL])
-    delta_x_ptrs = delta_x_ptr + off_x_crs
-    off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
-    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
+    # number of in_c regarding BLOCK_K elements
+    num_inc_BLOCK_K = BLOCK_K // 9
+    crs_mul_of_KERNEL = num_inc_BLOCK_K * 9
+    off_x_crs_mul_of_KERNEL = (off_x_crs // 9) * 9
+    delta_xh_ptrs = delta_xh_ptr + off_x_crs
+    delta_xw_ptrs = delta_xw_ptr + off_x_crs
+    delta_xc_ptrs = delta_xc_ptr + off_x_crs
+    delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
+    delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
+    delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
+    off_x_crs_unpacked = (
+        delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
+    )
+    # delta_xc = tl.arange(0, crs_mul_of_KERNEL) # but triton does not allow arange over non tl.constexpr values
+    # delta_xc = tl.load(delta_xc_ptr + off_x_crs, off_x_crs < 27) # len = 27
+    # off_delta_x = (delta_xh * stride_xh + delta_xw * stride_xw) + tl.reshape(delta_xc * stride_xc, [9, 3])
+    # off_x_crs_unpacked = tl.reshape(off_delta_x, [27])
+    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :] # BLOCK_M * 27
 
     mask_x = (
-        (off_x_n < BATCH)
-        & (off_x_h + delta_xh >= 0)
-        & (off_x_h + delta_xh < IN_H)
-        & (off_x_w + delta_xw >= 0)
-        & (off_x_w + delta_xw < IN_W)
-    )[:, None] & (off_x_crs < CRS)[None, :]
+        (off_x_n < BATCH)[:, None]
+        & (off_x_crs_mul_of_KERNEL < CRS)[None, :]
+        & (off_x_h[:, None] + delta_xh[None, :] >= 0)
+        & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
+        & (off_x_w[:, None] + delta_xw[None, :] >= 0)
+        & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
+    )
 
     # offset for the inital ptr for w
-    off_w_crs = tl.arange(0, BLOCK_K)
+    # off_w_crs = off_x_crs
     off_w_k = off_y_k
-    w_ptrs = w + off_w_crs[:, None] + off_w_k[None, :] * stride_wn
-    mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+    w_ptrs = w + off_x_crs_mul_of_KERNEL[:, None] + off_w_k[None, :] * stride_wn
+    mask_w = (off_x_crs_mul_of_KERNEL < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+
+    # off_x_crs_mul_of_KERNEL += crs_mul_of_KERNEL
+    # off_w_crs_mul_of_KERNEL += crs_mul_of_KERNEL
 
     # ------ load x ------
-    matrix_x = tl.load(x_ptrs, mask=mask_x)
+    matrix_x = tl.load(x_ptrs, mask=mask_x) # BLOCK_M * crs_mul_of_KERNEL
     # ------ load w ------
-    matrix_w = tl.load(w_ptrs, mask=mask_w)
+    matrix_w = tl.load(w_ptrs, mask=mask_w) # crs_mul_of_KERNEL * BLOCK_N
 
     # -----------------------------------------------------------
     # allocate accumulator
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for crs in range(0, CRS, BLOCK_K):
+    for crs in range(0, CRS, crs_mul_of_KERNEL):
 
         # ------ matrix multiplication ------
         acc += tl.dot(matrix_x, matrix_w)
         # ------ update ptrs ------
-        w_ptrs += BLOCK_K
-        # load inc ptr of x, upade x_ptrs
-        if not CONV1X1_NHWC:
-            delta_x_ptrs += BLOCK_K
-            off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
-            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
-            x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
-        else:
-            off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
-            x_ptrs += BLOCK_K
+        w_ptrs += crs_mul_of_KERNEL
+        # load next num_inc_BLOCK_K of in_c of x values
+        off_x_crs_mul_of_KERNEL = crs + crs_mul_of_KERNEL + tl.arange(0, BLOCK_K)
+        num_inc_BLOCK_K = num_inc_BLOCK_K
+        x_ptrs += num_inc_BLOCK_K * stride_xc
 
         mask_x = (
-            (off_x_n < BATCH)
-            & (off_x_h >= 0)
-            & (off_x_h < IN_H)
-            & (off_x_w >= 0)
-            & (off_x_w < IN_W)
-        )[:, None] & (off_x_crs < CRS)[None, :]
-        mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+            (off_x_n < BATCH)[:, None]
+            & (off_x_crs_mul_of_KERNEL < CRS)[None, :]
+            & (off_x_h[:, None] + delta_xh[None, :] >= 0)
+            & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
+            & (off_x_w[:, None] + delta_xw[None, :] >= 0)
+            & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
+        )
+        mask_w = (off_x_crs_mul_of_KERNEL < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+        # off_x_crs_mul_of_KERNEL += crs_mul_of_KERNEL # map:at error
+        # off_w_crs_mul_of_KERNEL += crs_mul_of_KERNEL # map:at error
         # ------ prefetch ------
         # ------ load x ------
         matrix_x = tl.load(x_ptrs, mask=mask_x)
@@ -252,14 +223,14 @@ def _kernel(
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
     # add bias if is not None
-    if bias is not None:
-        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-        bias_ptrs = bias + off_bias_k * stride_biasn
-        mask_bias = off_bias_k < KERNEL_N
-        _bias = tl.load(bias_ptrs, mask=mask_bias)
-        acc += _bias[None, :]
+    # if bias is not None:
+    #     off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
+    #     bias_ptrs = bias + off_bias_k * stride_biasn
+    #     mask_bias = off_bias_k < KERNEL_N
+    #     _bias = tl.load(bias_ptrs, mask=mask_bias)
+    #     acc += _bias[None, :]
 
-    acc = acc.to(y.dtype.element_ty)
+    # acc = acc.to(y.dtype.element_ty)
 
     # rematerialize -- this saves some registers
     # offset for output y
@@ -300,6 +271,7 @@ class _conv3x3:
     # ptr changes for x in a sliding window
     @staticmethod
     def _delta_x_ptr(
+        IN_C,
         KERNEL_H,
         KERNEL_W,
         dilation_h,
@@ -310,18 +282,23 @@ class _conv3x3:
         device,
     ):
         # get the order of axes in w, innermost dimension outward
-        stride_w_2d = [stride_wh, stride_ww]
-        order = sorted(range(len(stride_w_2d)), key=stride_w_2d.__getitem__)
-        window_size = KERNEL_H * KERNEL_W
+        stride_w_3d = [stride_wc, stride_wh, stride_ww]
+        order = sorted(range(len(stride_w_3d)), key=stride_w_3d.__getitem__)
+        window_size = IN_C * KERNEL_H * KERNEL_W
 
-        r_window = torch.arange(window_size, device=device)
-        window_unpack = _unpack(r_window, order, [KERNEL_H, KERNEL_W])
-        window_unpack_h = window_unpack[order[0]]
-        window_unpack_w = window_unpack[order[1]]
+        r_window = torch.arange(0, window_size, 1, device=device)
+        window_unpack = _unpack(r_window, order, [IN_C, KERNEL_H, KERNEL_W])
+        window_unpack_c = window_unpack[order[0]]
+        window_unpack_h = window_unpack[order[1]]
+        window_unpack_w = window_unpack[order[2]]
         r_dilation_h = dilation_h * window_unpack_h
         r_dilation_w = dilation_w * window_unpack_w
-        delta_x = (r_dilation_h, r_dilation_w,)
-        return delta_x
+        r_inc = window_unpack_c
+        return (
+            r_dilation_h,
+            r_dilation_w,
+            r_inc,
+        )
 
     @staticmethod
     def _call(
@@ -360,7 +337,7 @@ class _conv3x3:
         assert (
             shape_x[xc] == in_channel
         ), f"in_channel did not match {shape_x[xc]} != {in_channel}"
-        assert kernel_size == (3, 3), "should be 3x3 kernel"
+        assert kernel_size == [3, 3], "should be 3x3 kernel"
 
         assert (
             len(stride)
@@ -409,6 +386,8 @@ class _conv3x3:
         stride_bias = bias.stride() if shape_bias else None
         stride_biasn = stride_bias[0] if stride_bias else None
 
+        assert stride_w[xw] == 1, "3x3 kernel needs w in NCHW layout"
+
         # output layout should be the same as x
         if stride_x[xc] < stride_x[xh] and stride_x[xc] < stride_x[xw]:
             y = y.to(memory_format=torch.channels_last)
@@ -428,7 +407,8 @@ class _conv3x3:
         # into block of [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] because of better
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
         
-        delta_x = _conv3x3._delta_x_ptr(
+        delta_xh, delta_xw, delta_xc = _conv3x3._delta_x_ptr(
+            IN_C,
             KERNEL_H,
             KERNEL_W,
             dilation[0],
@@ -466,15 +446,9 @@ class _conv3x3:
             stride_y[yw],
             stride_biasn,
             # pointer inc for x
-            delta_x0_h, delta_x0_w,
-            delta_x1_h, delta_x1_w,
-            delta_x2_h, delta_x2_w,
-            delta_x3_h, delta_x3_w,
-            delta_x4_h, delta_x4_w,
-            delta_x5_h, delta_x5_w,
-            delta_x6_h, delta_x6_w,
-            delta_x7_h, delta_x7_w,
-            delta_x8_h, delta_x8_w,
+            delta_xh,
+            delta_xw,
+            delta_xc,
             # Tensor dimensions
             BATCH,
             IN_C,
@@ -497,10 +471,9 @@ class _conv3x3:
             groups,
             # Metaparameters
             ACC_TYPE=ACC_TYPE,
-            CONV1X1_NHWC=CONV1X1_NHWC,
             # BLOCK_M=128,
             # BLOCK_N=32,
-            # BLOCK_K=32,
+            # BLOCK_K=BLOCK_K,
             GROUP_H=1,
         )
         # do matrix multiplication
@@ -525,7 +498,7 @@ class _conv3x3:
             return
         if transposed:
             print("Do not support transposed")
-        return _conv._call(
+        return _conv3x3._call(
             x,
             w,
             bias,
