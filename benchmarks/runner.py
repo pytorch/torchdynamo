@@ -208,7 +208,6 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
     for iter in itertools.product(suites, devices, dtypes):
         suite, device, dtype = iter
         frames = []
-        best_compiler = compilers[-1]
         # Collect results from all the files
         for compiler in compilers:
             output_filename = (
@@ -226,14 +225,16 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
         if len(compilers) == 1:
             df = frames[0]
         else:
-            df = pd.merge(*frames, on=["dev", "name"])
+            df = pd.merge(frames[0], frames[1], on=["dev", "name"])
+            for idx in range(2, len(frames)):
+                df = pd.merge(df, frames[idx], on=["dev", "name"])
 
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"
         pp_dataframe(df, title, output_dir)
 
         # Sort the dataframe and pretty print
-        sorted_df = df.sort_values(by=best_compiler, ascending=False)
+        sorted_df = df.sort_values(by=list(reversed(compilers)), ascending=False)
         pp_dataframe(sorted_df, f"sorted_{title}", output_dir)
 
 
