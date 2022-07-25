@@ -67,7 +67,6 @@ decompositions = get_decompositions(
         aten.threshold_backward,
         aten.transpose.int,
         aten.upsample_nearest2d_backward,
-        aten.lift_fresh_copy,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
