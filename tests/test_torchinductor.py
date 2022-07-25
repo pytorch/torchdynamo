@@ -2592,6 +2592,33 @@ class CommonTemplate:
             ],
         )
 
+    def test_argmax_argmin1(self):
+        def fn(x):
+            return (aten.argmax(x), aten.argmin(x))
+
+        self.common(
+            fn,
+            [
+                torch.randn([32, 256]),
+            ],
+        )
+
+    def test_argmax_argmin2(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([144, 144]),
+            ],
+        )
+
 
 if HAS_CPU:
 
