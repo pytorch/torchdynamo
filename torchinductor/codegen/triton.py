@@ -630,10 +630,7 @@ class TritonKernel(Kernel):
         index, mask = self.indexing(index, value)
         if mode is None:
             line = f"tl.store({var} + {index}, {value}, {mask})"
-        elif mode == "atomic_add" or mode == "atomic_add_exclude_self":
-            if mode == "atomic_add_exclude_self":
-                line = f"tl.store({var} + {index}, 0, {mask})"
-                self.stores.writeline(name, line)
+        elif mode == "atomic_add":
             line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")

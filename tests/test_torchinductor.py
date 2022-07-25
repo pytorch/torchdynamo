@@ -2175,6 +2175,7 @@ class CommonTemplate:
             ],
         )
 
+    #@unittest.skip("Intermittent failure on CUDA, may be an Triton bug")
     def test_scatter2(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")
@@ -2182,10 +2183,10 @@ class CommonTemplate:
         self.common(
             fn,
             [
-                torch.randn(2, 3),
+                torch.zeros(64, 512),
                 0,
-                torch.tensor([[0, 0, 0], [1, 1, 1]]),
-                torch.randn(2, 3),
+                torch.zeros((64, 512), dtype=torch.int64),
+                torch.ones(64, 512),
             ],
         )
 
@@ -2266,10 +2267,10 @@ class CommonTemplate:
         self.common(
             fn,
             [
-                torch.randn(5, 29, 13),
-                1,
-                torch.tensor([[[1, 3, 5, 7, 9]]]),
-                torch.randn(1, 1, 10),
+                torch.randn(2, 3),
+                0,
+                torch.zeros((2, 3), dtype=torch.int64),
+                torch.randn(2, 3),
             ],
         )
 

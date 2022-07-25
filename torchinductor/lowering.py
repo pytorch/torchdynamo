@@ -1308,9 +1308,7 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)
-def scatter_reduce_(
-    self, dim: int, index, src, reduce: str, *, include_self: bool = True
-):
+def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     # TODO: Need to support more reduction type
     assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
@@ -1335,11 +1333,28 @@ def scatter_reduce_(
 
     def backend_reduce_str(reduce):
         if reduce == "sum":
-            return "atomic_add" if include_self else "atomic_add_exclude_self"
+            return "atomic_add"
         else:
             # TODO: Need to support more reduction type
             assert reduce is None
             return None
+
+    if not include_self:
+        # zero out the corresponding elements first
+        zero_out = ir.Scatter(
+            device=self.get_device(),
+            dtype=self.get_dtype(),
+            inner_fn=lambda index: ops.constant(0, self.get_dtype()),
+            ranges=index.get_size(),
+            output_indexer=output_indexer,
+            scatter_mode=None,
+        )
+        buffer = ir.ComputedBuffer(
+            None,
+            ir.MutationLayout(self),
+            zero_out,
+        )
+        buffer.name = V.graph.register_buffer(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
