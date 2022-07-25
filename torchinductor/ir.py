@@ -1527,7 +1527,7 @@ class ComputedBuffer(Buffer):
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
             )
-        # index_formulas = [*body.indexing_exprs.values()]
+        index_formulas = [*body.indexing_exprs.values()]
         memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
         priority_idx = []
         if config.triton.convolution != "aten":
@@ -1537,15 +1537,14 @@ class ComputedBuffer(Buffer):
                 else None
                 for reads_name in body.reads_name2expr.keys()
             ]
-            priority_idx, memory_addrs = layout_priority_idx(reads_bufs, memory_addrs, var_ranges)
-            # for i, reads_buf in enumerate(reads_bufs):
-            #     if reads_from_conv(reads_buf, memory_addrs, i):
-            #     # if isinstance(reads_buf, Convolution):
-            #         # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
-            #         # preferred_stride_order = reads_buf.preferred_stride_order
-            #         # preferred_order = stride_order2fill_order(preferred_stride_order)
-            #         priority_idx.append(i)
-        index_formulas = memory_addrs
+            # priority_idx, memory_addrs = layout_priority_idx(reads_bufs, memory_addrs, var_ranges)
+            for i, reads_buf in enumerate(reads_bufs):
+                if isinstance(reads_buf, Convolution):
+                    # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
+                    # preferred_stride_order = reads_buf.preferred_stride_order
+                    # preferred_order = stride_order2fill_order(preferred_stride_order)
+                    priority_idx.append(i)
+        # index_formulas = memory_addrs
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -1837,9 +1836,10 @@ class ConcatKernel(NopKernel):
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
-            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
-                src.data, ExternKernelAlloc
-            ):
+            if isinstance(src.data.layout, FlexibleLayout):
+            # and not isinstance(
+            #     src.data, ExternKernelAlloc
+            # ):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
         # introduce a copy
