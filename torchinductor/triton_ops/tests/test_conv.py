@@ -1,4 +1,4 @@
-import benchmarks.microbenchmarks.model as model
+import benchmarks_.microbenchmarks.model as model
 import itertools
 import torch
 import triton
@@ -13,101 +13,6 @@ torch.backends.cudnn.allow_tf32 = False
 from torchdynamo.testing import same
 
 
-@pytest.mark.parametrize(
-    "BATCH, IN_C, IN_H, IN_W, KERNEL_N, KERNEL_H, KERNEL_W, stride, padding, dilation, groups, dtype,\
-        BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP, layout",
-    itertools.chain(
-        *[
-            [
-                # 1 warp
-                (16, 16, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 16, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 16, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 32, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 32, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 16, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 64, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 32, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 64, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 16, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 32, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 16, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 32, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 32, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 64, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 1, layout),
-                (16, 64, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 1, layout),
-
-                # 2 wrap
-                (16, 128, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 32, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 128, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 256, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 256, 8, 8, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 64, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 64, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 64, 16, 16, 32, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 64, 16, 16, 32, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 32, BLOCK_K, NSTAGE, 2, layout),
-                (16, 16, 32, 32, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 32, 16, BLOCK_K, NSTAGE, 2, layout),
-                (16, 16, 32, 32, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 2, layout),
-
-                # 4 wrap
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 256, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 256, 16, 16, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 32, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 32, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 32, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 64, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 64, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 32, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 32, 32, 64, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 64, BLOCK_K, NSTAGE, 4, layout),
-                (16, 16, 64, 64, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 16, 64, 64, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 16, 64, 64, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 256, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 8, 128, 128, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 8, 128, 128, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 256, 16, BLOCK_K, NSTAGE, 4, layout),
-
-                # 8 wrap
-                (16, 256, 32, 32, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 8, layout),
-                (16, 256, 32, 32, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 256, 16, BLOCK_K, NSTAGE, 8, layout),
-                (16, 128, 64, 64, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 8, layout),
-                (16, 128, 64, 64, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 256, 16, BLOCK_K, NSTAGE, 8, layout),
-                (16, 128, 128, 128, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 16, BLOCK_K, NSTAGE, 8, layout),
-                (16, 128, 128, 128, 16, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 256, 16, BLOCK_K, NSTAGE, 8, layout),
-                (16, 128, 32, 32, 128, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 256, 64, BLOCK_K, NSTAGE, 8, layout),
-                (16, 128, 32, 32, 128, 1, 1, (1, 1), (0, 0), (1, 1), 1, DTYPE, 128, 128, BLOCK_K, NSTAGE, 8, layout),
-
-            ] for DTYPE in [torch.float32]
-            for BLOCK_K in [32]
-            for NSTAGE in [2, 3, 4]
-            for layout in ["nchw", "nhwc"]
-        ],
-        # kernel, stride, padding, dilation
-        *[
-            [
-                # kernel > 1
-                (16, 128, 16, 16, 16, 2, 2, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 3, 3, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 4, 4, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 5, 5, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 7, 7, (1, 1), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-
-                # stride > 1
-                (16, 128, 16, 16, 16, 1, 1, (2, 2), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (3, 3), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (4, 4), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (5, 5), (0, 0), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-
-                # padding > 0
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (1, 1), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (2, 2), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (3, 3), (1, 1), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-
-                # dilation > 1
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (1, 1), (2, 2), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-                (16, 128, 16, 16, 16, 1, 1, (1, 1), (1, 1), (3, 3), 1, DTYPE, 64, 16, BLOCK_K, NSTAGE, 4, layout),
-
-            ] for DTYPE in [torch.float32]
-            for BLOCK_K in [32]
-            for NSTAGE in [2, 3, 4]
-            for layout in ["nchw", "nhwc"]
-        ],
-    ),
-)
 def test_conv(
         # Tensor dimensions
         BATCH, IN_C, IN_H, IN_W,
@@ -121,6 +26,7 @@ def test_conv(
         BLOCK_M, BLOCK_N, BLOCK_K,
         NSTAGE, NWARP,
         layout,
+        provider="conv",
     ):
 
     torch.manual_seed(0)
@@ -137,29 +43,32 @@ def test_conv(
     x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda')
     w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W),
                     dtype=dtype, device='cuda')
-    bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+    # bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+    bias = None
     if layout == "nhwc":
         x = x.to(memory_format=torch.channels_last)
-        w = w.to(memory_format=torch.channels_last)
-    y = torchinductor.triton_ops.conv(
+        if provider != "conv_analytic":
+            w = w.to(memory_format=torch.channels_last)
+    triton_conv = getattr(torchinductor.triton_ops, provider)
+    y = triton_conv(
         x, w, bias, stride, padding, dilation, False, (0, 0), groups
     )
 
     y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    # print("y", y[0])
-    # print("y_correct", y_correct[0])
+    # print("y", y[0,-1,:,:])
+    # print("y_correct", y_correct[0,-1,:,:])
     assert(same(y, y_correct, cos_similarity=True))
     print("passed")
 
-for layer in (model.resnet50_layers + model.alexnet_layers):
-    
+for layer in ((model.resnet50_layers + model.alexnet_layers)):
+    provider = "conv_split"
     dilation = (1, 1)
     groups = 1
     dtype = torch.float32
-    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 128, 64, 2, 4
-    BATCH = 128
+    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 32, 64, 2, 4
+    BATCH = 1
     IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
-    # 32, 3, 224, 224, 64, 3, 3, (2, 2), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
+    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = 8, 8, 32, 3, 3, 32, (1, 1), (0, 0)
     # 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # 
     # 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
@@ -176,4 +85,6 @@ for layer in (model.resnet50_layers + model.alexnet_layers):
             # MATA
             BLOCK_M, BLOCK_N, BLOCK_K,
             NSTAGE, NWARP,
-            layout="nchw")
+            layout="nchw",
+            provider=provider,
+            )

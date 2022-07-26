@@ -18,8 +18,8 @@ conv_confs = [
         x_names=["layout"],
         x_vals=["nchw", "nhwc"],
         line_arg="provider",
-        line_vals=["aten", "conv", "conv_analytic", "conv1x1"],
-        line_names=["aten", "triton.conv_precomputed", "triton.conv_analytic", "triton.conv1x1"],
+        line_vals=["aten", "conv_split", "conv_analytic", "conv1x1"], #"conv"
+        line_names=["aten", "triton.conv_split", "triton.conv_analytic", "triton.conv1x1"], #"triton.conv_precompute"
         ylabel="TFLOPS",
         plot_name=f"resnet50-conv{i}-perf",
         args={
@@ -65,7 +65,7 @@ def bench_op(
     padding=(0, 0),
     dilation=(1, 1),
     groups=1,
-    dtype=torch.float16,
+    dtype=torch.float32,
     layout="nhwc",
     warmup=25,
     rep=75,
@@ -79,7 +79,8 @@ def bench_op(
     bias = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
     if layout == "nhwc":
         x = x.to(memory_format=torch.channels_last)
-        # w = w.to(memory_format=torch.channels_last)
+        if provider != "conv_analytic":
+            w = w.to(memory_format=torch.channels_last)
     OUT_H = (
         IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]
     ) // stride[0]
