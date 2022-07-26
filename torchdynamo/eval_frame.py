@@ -288,7 +288,11 @@ def export(f, *args, **kwargs):
 
     backend_ctx_ctor = null_context
 
+    # TODO(voz): Handle kwargs properly?
+    flat_args, in_spec = pytree.tree_flatten(args)
+
     result_traced = None
+
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
@@ -296,8 +300,6 @@ def export(f, *args, **kwargs):
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
