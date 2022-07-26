@@ -1,4 +1,4 @@
-import benchmarks_.microbenchmarks.model as model
+import benchmarks.microbenchmarks.model as model
 import itertools
 import torch
 import triton
@@ -61,10 +61,10 @@ def test_conv(
     print("passed")
 
 for layer in ((model.resnet50_layers + model.alexnet_layers)):
-    provider = "conv_split"
+    provider = "conv_analytic"
     dilation = (1, 1)
     groups = 1
-    dtype = torch.float32
+    dtype = torch.float16
     BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 32, 64, 2, 4
     BATCH = 1
     IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
@@ -72,7 +72,9 @@ for layer in ((model.resnet50_layers + model.alexnet_layers)):
     # 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # 
     # 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
-        
+    if provider == "conv_analytic" and KERNEL_H * KERNEL_W > 32:
+        continue
+
     test_conv(
             # Tensor dimensions
             BATCH, IN_C, IN_H, IN_W,
