@@ -7,6 +7,7 @@ from torchinductor.triton_ops.utils import _unpack
 from .conv_perf_model import early_config_prune
 from .conv_perf_model import estimate_conv_time
 
+
 @triton.autotune(
     configs=[
         # basic configs for compute-bound matmuls
@@ -145,13 +146,15 @@ def _kernel(
     CRS = IN_C * 9
     # load inc ptr of x, upade x_ptrs
     BLOCK_K_mul_of_KERNEL = BLOCK_K // 9 * 9
-    delta_xc = (off_x_crs // 3) // 3  # len = BLOCK_K
+    delta_xc = (off_x_crs // 3) // 3
     delta_xhw = (off_x_crs // 3) % 3
-    delta_xh = delta_xhw % 3 # len = BLOCK_K
-    delta_xw = off_x_crs % 3 # len = BLOCK_K
+    delta_xh = delta_xhw % 3
+    delta_xw = off_x_crs % 3
     # c, h, w: IN_C, 3, 3
-    off_x_crs_unpacked = delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
-    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :] # BLOCK_M * 27
+    off_x_crs_unpacked = (
+        delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
+    )
+    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
 
     mask_x = (
         (off_x_n < BATCH)[:, None]
@@ -167,6 +170,7 @@ def _kernel(
     # off_w_crs = off_x_crs
     off_w_k = off_y_k
     w_ptrs = w + off_x_crs[:, None] + off_w_k[None, :] * stride_wn
+    # tell triton not to vectorize, otherwise misaligned address error
     w_ptrs = tl.multiple_of(w_ptrs, 1)
     mask_w = (
         (off_x_crs < CRS)[:, None]
@@ -174,13 +178,10 @@ def _kernel(
         & (off_w_k < KERNEL_N)[None, :]
     )
 
-    # off_x_crs_mul_of_KERNEL += crs_mul_of_KERNEL
-    # off_w_crs_mul_of_KERNEL += crs_mul_of_KERNEL
-
     # ------ load x ------
-    matrix_x = tl.load(x_ptrs, mask=mask_x) # BLOCK_M * crs_mul_of_KERNEL
+    matrix_x = tl.load(x_ptrs, mask=mask_x)  # BLOCK_M * crs_mul_of_KERNEL
     # ------ load w ------
-    matrix_w = tl.load(w_ptrs, mask=mask_w) # crs_mul_of_KERNEL * BLOCK_N
+    matrix_w = tl.load(w_ptrs, mask=mask_w)  # crs_mul_of_KERNEL * BLOCK_N
 
     # -----------------------------------------------------------
     # allocate accumulator
