@@ -6,6 +6,7 @@ from itertools import chain
 import torch
 from torch.fx import GraphModule
 from torch.fx import Node
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.nn.utils import _stateless
 
 from ..allowed_functions import torch_get_name
@@ -96,6 +97,8 @@ def python_key_normalize(
     params_len = len(params_flat)
     nargs = params_len + len(example_inputs)
 
+    tracer = None
+
     class PatchingInterpreter(torch.fx.Interpreter):
         def run_node(self, n: torch.fx.Node):
             try:
@@ -108,6 +111,14 @@ def python_key_normalize(
                         # Tensor creation ops won't be captured because none
                         # of their inputs are PythonTensor proxies.
                         # Explicitly add them to the output graph.
+
+                        if n.target.__module__ == "torch":
+                            assert tracer, "Tracer must not be None here."
+                            proxy_mode = ProxyTorchDispatchMode(tracer)
+                            with proxy_mode:
+                                result = super().run_node(n)
+                            return result
+
                         result = python_tensor_cls(
                             result,
                             tracer.create_proxy(n.op, n.target, n.args, n.kwargs),
