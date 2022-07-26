@@ -108,6 +108,11 @@ def python_key_normalize(
                         # Tensor creation ops won't be captured because none
                         # of their inputs are PythonTensor proxies.
                         # Explicitly add them to the output graph.
+                        
+                        # FX should do the right thing here if the op target func came from torch
+                        if n.target.__module__ == 'torch':
+                            return result
+
                         result = python_tensor_cls(
                             result,
                             tracer.create_proxy(n.op, n.target, n.args, n.kwargs),
