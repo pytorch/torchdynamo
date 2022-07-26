@@ -58,8 +58,6 @@ class SizeVarAllocator(object):
         return sympy.expand(expr).subs(self.replacements)
 
     def simplify_with_ranges(self, expr, var_ranges):
-        if isinstance(var_ranges, tuple):
-            var_ranges = var_ranges[0]
         """
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
@@ -67,6 +65,9 @@ class SizeVarAllocator(object):
         from .ir import IndexingDiv
         from .ir import ModularIndexing
 
+        if isinstance(var_ranges, tuple):
+            assert len(var_ranges) == 1, var_ranges
+            var_ranges = var_ranges[0]
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
@@ -87,18 +88,12 @@ class SizeVarAllocator(object):
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            if isinstance(base, sympy.Expr):
+            if isinstance(base, (sympy.Expr, sympy.Symbol)):
                 # actual iteration range is to size-1
-                iter_ranges = {k: v-1 for k, v in var_ranges.items()}
+                iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = base.subs(iter_ranges)
                 if self.maybe_guard_lt(base_s, modulus * divisor):
                     return IndexingDiv(base, divisor)
-            if (
-                isinstance(base, sympy.Symbol)
-                and base in var_ranges
-                and self.maybe_guard_leq(var_ranges[base], modulus * divisor)
-            ):
-                return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
         expr = expr.replace(
@@ -187,7 +182,6 @@ class SizeVarAllocator(object):
             return False
         self.guard_lt(left, right)
         return True
-
 
     def guard_leq(self, left: sympy.Expr, right: sympy.Expr):
         return self.guard_lt(left, right + 1)
