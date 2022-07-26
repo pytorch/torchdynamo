@@ -7,39 +7,38 @@ from torchinductor.triton_ops.utils import _unpack
 from .conv_perf_model import early_config_prune
 from .conv_perf_model import estimate_conv_time
 
-BLOCK_K = 32
 @triton.autotune(
     configs=[
         # basic configs for compute-bound matmuls
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": BLOCK_K}, num_stages=2, num_warps=8
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": BLOCK_K}, num_stages=2, num_warps=8
+            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=2
+            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=8
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": BLOCK_K}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
         ),
     ],
     # the above configs will be evaluated anytime the key changes
@@ -90,10 +89,6 @@ def _kernel(
     stride_yh,
     stride_yw,
     stride_biasn,
-    # pointer inc for x, 3x3
-    delta_xh_ptr, # len=9
-    delta_xw_ptr, # len=9
-    delta_xc_ptr, # len=(BLOCK_K // (KERNEL_SIZE)) * KERNEL_SIZE
     # Tensor dimensions
     BATCH,
     IN_C,
@@ -149,28 +144,19 @@ def _kernel(
 
     CRS = IN_C * 9
     # load inc ptr of x, upade x_ptrs
-    # number of in_c regarding BLOCK_K elements
-    num_inc_BLOCK_K = BLOCK_K // 9
-    crs_mul_of_KERNEL = num_inc_BLOCK_K * 9
-    off_x_crs_mul_of_KERNEL = (off_x_crs // 9) * 9
-    delta_xh_ptrs = delta_xh_ptr + off_x_crs
-    delta_xw_ptrs = delta_xw_ptr + off_x_crs
-    delta_xc_ptrs = delta_xc_ptr + off_x_crs
-    delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
-    delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
-    delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
-    off_x_crs_unpacked = (
-        delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
-    )
-    # delta_xc = tl.arange(0, crs_mul_of_KERNEL) # but triton does not allow arange over non tl.constexpr values
-    # delta_xc = tl.load(delta_xc_ptr + off_x_crs, off_x_crs < 27) # len = 27
-    # off_delta_x = (delta_xh * stride_xh + delta_xw * stride_xw) + tl.reshape(delta_xc * stride_xc, [9, 3])
-    # off_x_crs_unpacked = tl.reshape(off_delta_x, [27])
+    BLOCK_K_mul_of_KERNEL = BLOCK_K // 9 * 9
+    delta_xc = (off_x_crs // 3) // 3  # len = BLOCK_K
+    delta_xhw = (off_x_crs // 3) % 3
+    delta_xh = delta_xhw % 3 # len = BLOCK_K
+    delta_xw = off_x_crs % 3 # len = BLOCK_K
+    # c, h, w: IN_C, 3, 3
+    off_x_crs_unpacked = delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
     x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :] # BLOCK_M * 27
 
     mask_x = (
         (off_x_n < BATCH)[:, None]
-        & (off_x_crs_mul_of_KERNEL < CRS)[None, :]
+        & (off_x_crs < CRS)[None, :]
+        & (off_x_crs < BLOCK_K_mul_of_KERNEL)[None, :]
         & (off_x_h[:, None] + delta_xh[None, :] >= 0)
         & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
         & (off_x_w[:, None] + delta_xw[None, :] >= 0)
@@ -180,8 +166,13 @@ def _kernel(
     # offset for the inital ptr for w
     # off_w_crs = off_x_crs
     off_w_k = off_y_k
-    w_ptrs = w + off_x_crs_mul_of_KERNEL[:, None] + off_w_k[None, :] * stride_wn
-    mask_w = (off_x_crs_mul_of_KERNEL < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+    w_ptrs = w + off_x_crs[:, None] + off_w_k[None, :] * stride_wn
+    w_ptrs = tl.multiple_of(w_ptrs, 1)
+    mask_w = (
+        (off_x_crs < CRS)[:, None]
+        & (off_x_crs < BLOCK_K_mul_of_KERNEL)[:, None]
+        & (off_w_k < KERNEL_N)[None, :]
+    )
 
     # off_x_crs_mul_of_KERNEL += crs_mul_of_KERNEL
     # off_w_crs_mul_of_KERNEL += crs_mul_of_KERNEL
@@ -194,28 +185,31 @@ def _kernel(
     # -----------------------------------------------------------
     # allocate accumulator
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for crs in range(0, CRS, crs_mul_of_KERNEL):
+    for crs in range(0, CRS, BLOCK_K_mul_of_KERNEL):
 
         # ------ matrix multiplication ------
         acc += tl.dot(matrix_x, matrix_w)
         # ------ update ptrs ------
-        w_ptrs += crs_mul_of_KERNEL
-        # load next num_inc_BLOCK_K of in_c of x values
-        off_x_crs_mul_of_KERNEL = crs + crs_mul_of_KERNEL + tl.arange(0, BLOCK_K)
-        num_inc_BLOCK_K = num_inc_BLOCK_K
+        # # load next num_inc_BLOCK_K of in_c of x values
+        off_x_crs = crs + BLOCK_K_mul_of_KERNEL + tl.arange(0, BLOCK_K)
+        num_inc_BLOCK_K = BLOCK_K // 9
         x_ptrs += num_inc_BLOCK_K * stride_xc
+        w_ptrs += BLOCK_K_mul_of_KERNEL
 
         mask_x = (
             (off_x_n < BATCH)[:, None]
-            & (off_x_crs_mul_of_KERNEL < CRS)[None, :]
+            & (off_x_crs < CRS)[None, :]
+            & (tl.arange(0, BLOCK_K) < BLOCK_K_mul_of_KERNEL)[None, :]
             & (off_x_h[:, None] + delta_xh[None, :] >= 0)
             & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
             & (off_x_w[:, None] + delta_xw[None, :] >= 0)
             & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
         )
-        mask_w = (off_x_crs_mul_of_KERNEL < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
-        # off_x_crs_mul_of_KERNEL += crs_mul_of_KERNEL # map:at error
-        # off_w_crs_mul_of_KERNEL += crs_mul_of_KERNEL # map:at error
+        mask_w = (
+            (off_x_crs < CRS)[:, None]
+            & (tl.arange(0, BLOCK_K) < BLOCK_K_mul_of_KERNEL)[:, None]
+            & (off_w_k < KERNEL_N)[None, :]
+        )
         # ------ prefetch ------
         # ------ load x ------
         matrix_x = tl.load(x_ptrs, mask=mask_x)
@@ -406,18 +400,6 @@ class _conv3x3:
         # if input activation is channel-last, it"s good to tiling output
         # into block of [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] because of better
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
-        
-        delta_xh, delta_xw, delta_xc = _conv3x3._delta_x_ptr(
-            IN_C,
-            KERNEL_H,
-            KERNEL_W,
-            dilation[0],
-            dilation[1],
-            stride_w[wc],
-            stride_w[wh],
-            stride_w[ww],
-            device,
-        )
 
         # launch kernel, 2-dim, batch*h*w, kernel
         def grid(META):
@@ -445,10 +427,6 @@ class _conv3x3:
             stride_y[yh],
             stride_y[yw],
             stride_biasn,
-            # pointer inc for x
-            delta_xh,
-            delta_xw,
-            delta_xc,
             # Tensor dimensions
             BATCH,
             IN_C,

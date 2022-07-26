@@ -42,8 +42,12 @@ def test_conv(
     kernel.kernel_decorators += decorators[1:]
 
     # allocate inputs, nchw
-    x = torch.ones((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda')
-    w = torch.ones((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W), 
+    # inc_arange = torch.arange(IN_C, dtype=dtype, device='cuda')
+    # x = inc_arange.view(1, -1, 1, 1).expand((BATCH, IN_C, IN_H, IN_W))
+    x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device='cuda')
+    # w = inc_arange.view(1, -1, 1, 1).expand((KERNEL_N, IN_C, KERNEL_H, KERNEL_W)).clone()
+    # w = w.to(memory_format=torch.contiguous_format)
+    w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W), 
                     dtype=dtype, device='cuda')
     # bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
     bias = None
@@ -55,24 +59,21 @@ def test_conv(
     )
 
     y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-    print("y", y[0])
-    print("y_correct", y_correct[0])
-    assert(same(y, y_correct, cos_similarity=True))
+    assert(same(y, y_correct, cos_similarity=True, equal_nan=True))
     print("passed")
 
-# for layer in (model.resnet50_layers + model.alexnet_layers):
-for i in range(1):
+for layer in (model.resnet50_layers + model.alexnet_layers):
     
     dilation = (1, 1)
     groups = 1
     dtype = torch.float32
     BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 32, 64, 2, 4
     BATCH = 128
-    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
+    IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
     # 32, 3, 224, 224, 64, 3, 3, (2, 2), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
-    IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = 8, 8, 16, 3, 3, 32, (1, 1), (0, 0)
+    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = 8, 8, 16, 3, 3, 32, (1, 1), (0, 0)
     if KERNEL_H != 3 or KERNEL_W != 3:
         continue
     test_conv(
