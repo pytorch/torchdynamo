@@ -143,14 +143,15 @@ def _kernel(
     off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
     off_x_crs = tl.arange(0, BLOCK_K)
 
-    CRS = IN_C * 9
+    KERNEL_SIZE = KERNEL_H * KERNEL_W
+    CRS = IN_C * KERNEL_SIZE
     # load inc ptr of x, upade x_ptrs
-    BLOCK_K_mul_of_KERNEL = BLOCK_K // 9 * 9
-    delta_xc = (off_x_crs // 3) // 3
-    delta_xhw = (off_x_crs // 3) % 3
-    delta_xh = delta_xhw % 3
-    delta_xw = off_x_crs % 3
-    # c, h, w: IN_C, 3, 3
+    # NOTE: incorrect results if BLOCK_K < KERNEL_SIZE * KERNEL_SIZE
+    BLOCK_K_mul_of_KERNEL = BLOCK_K // KERNEL_SIZE * KERNEL_SIZE
+    delta_xc = (off_x_crs // KERNEL_W) // KERNEL_H
+    delta_xh = (off_x_crs // KERNEL_W) % KERNEL_H
+    delta_xw = off_x_crs % KERNEL_W
+    # c, h, w: IN_C, KERNEL_H, KERNEL_W
     off_x_crs_unpacked = (
         delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
     )
@@ -193,7 +194,7 @@ def _kernel(
         # ------ update ptrs ------
         # # load next num_inc_BLOCK_K of in_c of x values
         off_x_crs = crs + BLOCK_K_mul_of_KERNEL + tl.arange(0, BLOCK_K)
-        num_inc_BLOCK_K = BLOCK_K // 9
+        num_inc_BLOCK_K = BLOCK_K // KERNEL_SIZE
         x_ptrs += num_inc_BLOCK_K * stride_xc
         w_ptrs += BLOCK_K_mul_of_KERNEL
 
@@ -218,12 +219,12 @@ def _kernel(
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
     # add bias if is not None
-    # if bias is not None:
-    #     off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-    #     bias_ptrs = bias + off_bias_k * stride_biasn
-    #     mask_bias = off_bias_k < KERNEL_N
-    #     _bias = tl.load(bias_ptrs, mask=mask_bias)
-    #     acc += _bias[None, :]
+    if bias is not None:
+        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
+        bias_ptrs = bias + off_bias_k * stride_biasn
+        mask_bias = off_bias_k < KERNEL_N
+        _bias = tl.load(bias_ptrs, mask=mask_bias)
+        acc += _bias[None, :]
 
     # acc = acc.to(y.dtype.element_ty)
 
@@ -259,7 +260,7 @@ def _kernel(
     return
 
 
-class _conv3x3:
+class _conv_analytic:
     kernel = _kernel
 
     # for the contigous order of w ptr, what"s the corresponding
@@ -332,7 +333,7 @@ class _conv3x3:
         assert (
             shape_x[xc] == in_channel
         ), f"in_channel did not match {shape_x[xc]} != {in_channel}"
-        assert kernel_size == [3, 3], "should be 3x3 kernel"
+        # assert kernel_size == [3, 3], "should be 3x3 kernel"
 
         assert (
             len(stride)
@@ -381,7 +382,7 @@ class _conv3x3:
         stride_bias = bias.stride() if shape_bias else None
         stride_biasn = stride_bias[0] if stride_bias else None
 
-        assert stride_w[xw] == 1, "3x3 kernel needs w in NCHW layout"
+        assert stride_w[xw] == 1, "kernel needs w in NCHW layout"
 
         # output layout should be the same as x
         if stride_x[xc] < stride_x[xh] and stride_x[xc] < stride_x[xw]:
@@ -477,7 +478,7 @@ class _conv3x3:
             return
         if transposed:
             print("Do not support transposed")
-        return _conv3x3._call(
+        return _conv_analytic._call(
             x,
             w,
             bias,
@@ -490,4 +491,4 @@ class _conv3x3:
         )
 
 
-conv3x3 = _conv3x3.forward
+conv_analytic = _conv_analytic.forward

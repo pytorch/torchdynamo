@@ -49,12 +49,12 @@ def test_conv(
     # w = w.to(memory_format=torch.contiguous_format)
     w = torch.randn((KERNEL_N, IN_C // groups, KERNEL_H, KERNEL_W), 
                     dtype=dtype, device='cuda')
-    # bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
-    bias = None
+    bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
+    # bias = None
     if layout == "nhwc":
         x = x.to(memory_format=torch.channels_last)
         # w = w.to(memory_format=torch.channels_last)
-    y = torchinductor.triton_ops.conv3x3(
+    y = torchinductor.triton_ops.conv_analytic(
         x, w, bias, stride, padding, dilation, False, (0, 0), groups
     )
 
@@ -74,7 +74,7 @@ for layer in (model.resnet50_layers + model.alexnet_layers):
     # 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = 8, 8, 16, 3, 3, 32, (1, 1), (0, 0)
-    if KERNEL_H != 3 or KERNEL_W != 3:
+    if KERNEL_H > 3 or KERNEL_W > 3:
         continue
     test_conv(
             # Tensor dimensions
