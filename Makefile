@@ -92,7 +92,7 @@ pull-deps:
 	(cd ../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
 
-build-deps: clone-deps
+define conda_deps
 	# conda env remove --name torchdynamo
 	# conda create --name torchdynamo -y python=3.8
 	# conda activate torchdynamo
@@ -100,16 +100,44 @@ build-deps: clone-deps
         cffi typing_extensions future six requests dataclasses protobuf numba cython
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
+endef
 
+define build_pytorch
 	make setup && pip uninstall -y torch
 	(cd ../pytorch     && python setup.py clean && python setup.py develop)
+endef
+
+define build_pytorch_fast
+	make setup && pip uninstall -y torch
+	(cd ../pytorch     && python setup.py clean && USE_CUDA=1 CXXFLAGS="-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer" REL_WITH_DEB_INFO=1 CXX=clang++-10 CC=clang-10 BUILD_CAFFE2=0 USE_XNNPACK=0 USE_FBGEMM=0 USE_QNNPACK=0 USE_NNPACK=0 BUILD_TEST=0 USE_GOLD_LINKER=1 USE_PYTORCH_QNNPACK=0 USE_GOLD_LINKER=1 DEBUG=0 python setup.py develop)
+endef
+
+define build_torchbench
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
 	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../functorch   && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py)
+endef
+
+define build_triton
 	(cd ../triton/python && python setup.py clean && python setup.py develop)
+endef
+
+build-deps: clone-deps
+	$(call conda_deps)
+	$(call build_pytorch)
+	$(call build_torchbench)
+	$(call build_triton)
+	make setup_lint
+	python setup.py develop
+
+build-deps-fast: clone-deps
+	$(call conda_deps)
+	$(call build_pytorch_fast)
+	$(call build_torchbench)
+	$(call build_triton)
 	make setup_lint
 	python setup.py develop
 
