@@ -11,7 +11,7 @@ from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
 from .constant import ConstantVariable
-
+from inspect import signature
 
 class BaseListVariable(VariableTracker):
     @staticmethod
@@ -34,7 +34,12 @@ class BaseListVariable(VariableTracker):
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
-        return self.python_type()([x.as_python_constant() for x in self.items])
+        param_length = len(signature(self.python_type()).parameters)
+        items_as_consts = [x.as_python_constant() for x in self.items]
+        if param_length == 1:
+            return self.python_type()(items_as_consts)
+        else:
+            return self.python_type()(*items_as_consts)
 
     def as_proxy(self):
         return self.python_type()(self._as_proxy())
