@@ -89,7 +89,9 @@ def _kernel(
     delta_xw = off_x_crs % KERNEL_W
     # c, h, w: IN_C, KERNEL_H, KERNEL_W
     off_x_crs_unpacked = (
-        delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
+        delta_xh * dilation_h * stride_xh
+        + delta_xw * dilation_w * stride_xw
+        + delta_xc * stride_xc
     )
     x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
 
@@ -97,10 +99,10 @@ def _kernel(
         (off_x_n < BATCH)[:, None]
         & (off_x_crs < CRS)[None, :]
         & (off_x_crs < BLOCK_K_mul_of_KERNEL)[None, :]
-        & (off_x_h[:, None] + delta_xh[None, :] >= 0)
-        & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
-        & (off_x_w[:, None] + delta_xw[None, :] >= 0)
-        & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
+        & (off_x_h[:, None] + (delta_xh * dilation_h)[None, :] >= 0)
+        & (off_x_h[:, None] + (delta_xh * dilation_h)[None, :] < IN_H)
+        & (off_x_w[:, None] + (delta_xw * dilation_w)[None, :] >= 0)
+        & (off_x_w[:, None] + (delta_xw * dilation_w)[None, :] < IN_W)
     )
 
     # offset for the inital ptr for w
@@ -138,10 +140,10 @@ def _kernel(
             (off_x_n < BATCH)[:, None]
             & (off_x_crs < CRS)[None, :]
             & (tl.arange(0, BLOCK_K) < BLOCK_K_mul_of_KERNEL)[None, :]
-            & (off_x_h[:, None] + delta_xh[None, :] >= 0)
-            & (off_x_h[:, None] + delta_xh[None, :] < IN_H)
-            & (off_x_w[:, None] + delta_xw[None, :] >= 0)
-            & (off_x_w[:, None] + delta_xw[None, :] < IN_W)
+            & (off_x_h[:, None] + (delta_xh * dilation_h)[None, :] >= 0)
+            & (off_x_h[:, None] + (delta_xh * dilation_h)[None, :] < IN_H)
+            & (off_x_w[:, None] + (delta_xw * dilation_w)[None, :] >= 0)
+            & (off_x_w[:, None] + (delta_xw * dilation_w)[None, :] < IN_W)
         )
         mask_w = (
             (off_x_crs < CRS)[:, None]
