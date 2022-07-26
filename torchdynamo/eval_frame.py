@@ -296,6 +296,7 @@ def export(f, *args, **kwargs):
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
