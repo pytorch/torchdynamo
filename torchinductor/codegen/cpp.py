@@ -63,10 +63,10 @@ def cpp_prefix():
             #include <atomic>
             #include <cmath>
             #include <cstdlib>
-            #include <iostream>
             #include <limits>
-            #include <random>
             #include <omp.h>
+
+            #include <ATen/core/PhiloxRNGEngine.h>
 
             template<typename T>
             inline T mod(T a, T b) { return a % b; }
@@ -75,10 +75,12 @@ def cpp_prefix():
             template<>
             inline double mod(double a, double b) { return std::fmod(a, b); }
 
-            float rand_cpu(unsigned int seed) {
-                static thread_local std::mt19937 gen(seed ^ omp_get_thread_num());
-                static_assert(std::mt19937::min() == 0);
-                return gen() * static_cast<float>(1.0 / (std::mt19937::max() + 1.0));
+            constexpr float normalize (uint32_t value) {
+                return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
+            }
+
+            float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
+                return normalize(at::Philox4_32_10(seed, 0, offset)());
             }
             """
         ),
@@ -112,6 +114,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype):
+        assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
@@ -146,6 +149,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floor(x):
         return f"std::floor({x})"
+
+    @staticmethod
+    def ceil(x):
+        return f"std::ceil({x})"
 
     @staticmethod
     def trunc(x):
@@ -210,12 +217,16 @@ class CppOverrides(OpOverrides):
         return var
 
     @staticmethod
-    def and_(a, b):
+    def logical_and(a, b):
         return f"{a} && {b}"
 
     @staticmethod
-    def rand_cpu(seed: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(rand_cpu({seed}));"
+    def logical_or(a, b):
+        return f"{a} || {b}"
+
+    @staticmethod
+    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
 
 class CppKernel(Kernel):
@@ -463,7 +474,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
         if not ws.in_parallel:
             scheduler.barrier()
-        if not scheduler.runable_nodes and scheduler.pending_buffer_names:
+        if not scheduler.runnable_nodes and scheduler.pending_buffer_names:
             ws.barrier()
             scheduler.barrier()
 

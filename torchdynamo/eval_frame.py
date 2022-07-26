@@ -9,13 +9,13 @@ import torch
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import same
 
 from . import config
 from . import convert_frame
 from . import skipfiles
 from . import utils
 from .mutation_guard import install_generation_tagging_init
-from .utils import same
 
 log = logging.getLogger(__name__)
 
@@ -240,12 +240,28 @@ def optimize(backend, nopython=False):
 
 
 def export(f, *args, **kwargs):
-    from inspect import signature
-
     import torch.utils._pytree as pytree
 
     graph = None
     out_guards = None
+    graph_captured_input = None
+    graph_captured_result = None
+
+    def produce_matching(source_args, candidate_args):
+        matched_elements_positions = []
+        dict_of_source_args = dict()
+        for i in range(0, len(source_args)):
+            element_id = id(source_args[i])
+            dict_of_source_args[element_id] = i
+
+        for i in range(0, len(candidate_args)):
+            arg = candidate_args[i]
+            assert (
+                id(arg) in dict_of_source_args
+            ), "Dynamo input and output is a strict subset of traced input/output"
+            matched_elements_positions.append(dict_of_source_args[id(arg)])
+
+        return matched_elements_positions
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -256,50 +272,71 @@ def export(f, *args, **kwargs):
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
+
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        return gm.forward
+
+        def result_capturing_wrapper(*graph_inputs):
+            nonlocal graph_captured_result
+            nonlocal graph_captured_input
+
+            graph_captured_input = graph_inputs
+            graph_captured_result = graph(*graph_inputs)
+            return graph_captured_result
+
+        return result_capturing_wrapper
 
     backend_ctx_ctor = null_context
 
-    result = None
+    result_traced = None
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
-        result = f(*args, **kwargs)
+        result_traced = f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
-
-    out_sig = signature(graph.forward)
-    signature_types = [
-        out_sig.parameters[k].annotation for k in list(out_sig.parameters)
-    ]
-
-    flat_input_types = []
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
-    for arg in flat_args:
-        flat_input_types.append(arg.__class__)
 
-    _, out_spec = pytree.tree_flatten(result)
+    matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
-    assert len(flat_input_types) == len(
-        out_sig.parameters
-    ), "Flattened inputs length must match out signature parameter lengths."
+    flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
-    for idx in range(len(out_sig.parameters)):
-        sig_type = signature_types[idx]
-        in_type = flat_input_types[idx]
-        assert (
-            sig_type == in_type
-        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+    flat_both = list(graph_captured_result) + flat_args
+    matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
-    # TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
-    # There is currently more work that needs to be done on the fx side before we can support the UX we want.
-    # The future UX here will not return a spec, but will rather return a graph with the original signature
-    # and return type as the passed in callable, `f`.
-    return (graph, out_guards, in_spec, out_spec)
+    class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
+        def __init__(
+            self,
+            m,
+        ):
+            super().__init__(m)
+            arg_len = len(flat_args)
+            self.new_args = [
+                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
+                for i in range(0, arg_len)
+            ]
+            self.old_args_gen = (
+                self.new_args[i] for i in matched_input_elements_positions
+            )
+
+        def placeholder(self, target, args, kwargs):
+            return next(self.old_args_gen)
+
+        def output(self, target, args, kwargs):
+            dynamo_result_flat = args[0]
+            lookup = [*dynamo_result_flat, *self.new_args]
+            new_result_flat = [lookup[i] for i in matched_output_elements_positions]
+            new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
+
+            return super().output(target, (new_result,), {})
+
+    new_graph = ChangeInputOutputSignature(
+        graph,
+    ).transform()
+
+    return (new_graph, out_guards)
 
 
 def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):

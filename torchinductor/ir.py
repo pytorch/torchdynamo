@@ -740,6 +740,9 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
+        if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
+            return x
+
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         if is_contiguous_storage_and_layout(x) and not isinstance(
             x.data, ExternKernelAlloc
@@ -1682,6 +1685,7 @@ class InputsKernel(Buffer):
             {dependencies.StarDep(x.get_name()) for x in self.inputs},
             {dependencies.StarDep(self.get_name())},
             set(),
+            [],
         )
 
     @staticmethod
@@ -1808,6 +1812,45 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
+    def convert_to_reinterpret_view(cls, x):
+        """
+        In order to pass this to an extern kernel we need a
+        ReinterpretView not a View.  This allows us to avoid some
+        uneeded copies.
+        """
+        assert isinstance(x, BaseView)
+        if isinstance(x, ReinterpretView):
+            return x
+
+        x.data.freeze_layout()
+        rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
+        assert len(rw.reads) == 1
+
+        index = V.graph.sizevars.simplify(list(rw.reads)[0].index)
+        strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
+        offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+
+        if sum([a * b for a, b in zip(strides, rw.range_vars)]) + offset != index:
+            log.debug(
+                "convert_to_reinterpret_view failed: stride=%s offset=%s index=%",
+                strides,
+                offset,
+                index,
+            )
+            raise NotImplementedError()
+
+        return ReinterpretView(
+            data=x.data,
+            layout=FixedLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=x.get_size(),
+                stride=strides,
+                offset=offset,
+            ),
+        )
+
+    @classmethod
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
@@ -1819,6 +1862,11 @@ class ExternKernel(InputsKernel):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return x
+        if isinstance(x, BaseView) and is_storage_and_layout(x.data):
+            try:
+                return cls.convert_to_reinterpret_view(x)
+            except NotImplementedError:
+                pass
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()

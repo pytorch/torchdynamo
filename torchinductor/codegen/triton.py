@@ -140,7 +140,15 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
-    def rand(seed, offset):
+    def logical_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
@@ -186,6 +194,10 @@ class TritonOverrides(OpOverrides):
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def ceil(x):
+        return f"tl.libdevice.ceil({x})"
 
 
 @dataclasses.dataclass
@@ -591,7 +603,14 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
-        line = f"tl.load({var} + {index}, {mask})"
+        if "rmask" in mask:
+            # This eviction policy heuristic is untested.
+            # ptillet suggested we should try only doing this for
+            # the first N-1 loops and not for the final loop.
+            ep = ", eviction_policy='evict_last'"
+        else:
+            ep = ""
+        line = f"tl.load({var} + {index}, {mask}{ep})"
         if upcast:
             line += ".to(tl.float32)"
 
@@ -831,6 +850,7 @@ class TritonScheduling:
         return group
 
     def codegen(self, *groups):
+        log.info(f"codegen {groups}")
         wrapper = V.graph.wrapper_code
         scheduler = self.scheduler
 
@@ -853,8 +873,11 @@ class TritonScheduling:
                     group, reduction_group = groups
 
                     # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_group(
-                        (group * reduction_group, sympy.Integer(1)),
+                    for node in scheduler.pop_groups(
+                        [
+                            (group * reduction_group, sympy.Integer(1)),
+                            (group, reduction_group, sympy.Integer(1)),
+                        ]
                     ):
                         try:
                             node.run(*kernel.split_and_set_ranges(node.get_ranges()))
