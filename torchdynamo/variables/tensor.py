@@ -669,7 +669,8 @@ class UnspecializedPythonVariable(TensorVariable):
 
 
 class FakeItemVariable(UnspecializedPythonVariable):
-    """A UnspecializedPythonVariable which prevents access to the underlying raw value. This is needed if item is called on a FakeTensor."""
+    """A UnspecializedPythonVariable which prevents access to the underlying raw value.
+    This is needed if item is called on a FakeTensor."""
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         super(FakeItemVariable, self).__init__(proxy, **kwargs)

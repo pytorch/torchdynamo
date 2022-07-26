@@ -286,11 +286,9 @@ class BuiltinVariable(VariableTracker):
                         return variables.FakeItemVariable.create(
                             tx,
                             proxy,
-                            raw_value=raw_value,
-                            need_unwrap=need_unwrap,
                             **options,
                         )
-    
+
                     else:
                         _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                         raw_value = self.fn(*_args, **_kwargs)
