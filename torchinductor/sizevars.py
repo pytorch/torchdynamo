@@ -88,12 +88,11 @@ class SizeVarAllocator(object):
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            if isinstance(base, (sympy.Expr, sympy.Symbol)):
-                # actual iteration range is to size-1
-                iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
-                base_s = base.subs(iter_ranges)
-                if self.maybe_guard_lt(base_s, modulus * divisor):
-                    return IndexingDiv(base, divisor)
+            # actual iteration range is to size-1
+            iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
+            base_s = base.subs(iter_ranges)
+            if self.maybe_guard_lt(base_s, modulus * divisor):
+                return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
         expr = expr.replace(
