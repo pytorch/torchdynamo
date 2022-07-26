@@ -5,11 +5,12 @@ from triton import Config
 from triton import cdiv
 from triton import heuristics
 from triton import next_power_of_2
-from .conv_perf_model import early_config_prune
-from .conv_perf_model import estimate_conv_time
 
 from torchinductor import config
 from torchinductor.utils import conditional_product
+
+from .conv_perf_model import early_config_prune
+from .conv_perf_model import estimate_conv_time
 
 log = logging.getLogger(__name__)
 
