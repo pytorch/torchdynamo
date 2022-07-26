@@ -10,7 +10,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 # https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/
-useCudaGraph = False
+useCudaGraph = True
 
 # conv benchmarks
 conv_confs = [
@@ -18,8 +18,8 @@ conv_confs = [
         x_names=["layout"],
         x_vals=["nchw", "nhwc"],
         line_arg="provider",
-        line_vals=["cublas", "triton"],
-        line_names=["cuBLAS", "Triton"],
+        line_vals=["aten", "conv", "conv_analytic", "conv1x1"],
+        line_names=["aten", "triton.conv_precomputed", "triton.conv_analytic", "triton.conv1x1"],
         ylabel="TFLOPS",
         plot_name=f"resnet50-conv{i}-perf",
         args={
@@ -65,7 +65,7 @@ def bench_op(
     padding=(0, 0),
     dilation=(1, 1),
     groups=1,
-    dtype=torch.float32,
+    dtype=torch.float16,
     layout="nhwc",
     warmup=25,
     rep=75,
@@ -79,7 +79,7 @@ def bench_op(
     bias = torch.randn((KERNEL_N), dtype=dtype, device="cuda")
     if layout == "nhwc":
         x = x.to(memory_format=torch.channels_last)
-        w = w.to(memory_format=torch.channels_last)
+        # w = w.to(memory_format=torch.channels_last)
     OUT_H = (
         IN_H + 2 * padding[0] - dilation[0] * (KERNEL_H - 1) - 1 + stride[0]
     ) // stride[0]
@@ -99,15 +99,20 @@ def bench_op(
         / ms
         * 1e-9
     )
-    if provider == "cublas":
+    if provider == "aten":
 
         def fn():
             return torch.conv2d(x, w, bias, stride, padding, dilation, groups)
 
-    elif provider == "triton":
+    else:
+        if provider == "conv1x1" and (KERNEL_H != 1 or KERNEL_W != 1):
+            return 0, 0, 0
+        if provider == "conv_analytic" and (KERNEL_H * KERNEL_W > 32):
+            return 0, 0, 0
+        conv_fn = getattr(torchinductor.triton_ops, f"{provider}")
 
         def fn():
-            return torchinductor.triton_ops.conv(
+            return conv_fn(
                 x, w, bias, stride, padding, dilation, False, (0, 0), groups
             )
 

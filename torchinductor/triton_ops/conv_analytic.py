@@ -2,74 +2,10 @@ import torch
 import triton
 import triton.language as tl
 
-from torchinductor.triton_ops.utils import _unpack
-
-from .conv_perf_model import early_config_prune
-from .conv_perf_model import estimate_conv_time
+from .autotune import conv_heuristics
 
 
-@triton.autotune(
-    configs=[
-        # basic configs for compute-bound matmuls
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-    ],
-    # the above configs will be evaluated anytime the key changes
-    key=[
-        "BATCH",
-        "IN_C",
-        "IN_H",
-        "IN_W",
-        "KERNEL_N",
-        "KERNEL_H",
-        "KERNEL_W",
-        "OUT_H",
-        "OUT_W",
-        # parameters of conv
-        "stride_h",
-        "stride_w",
-        "padding_h",
-        "padding_w",
-        "dilation_h",
-        "dilation_w",
-        "output_padding_h",
-        "output_padding_w",
-        "groups",
-    ],
-    prune_configs_by={
-        "early_config_prune": early_config_prune,
-        "perf_model": estimate_conv_time,
-        "top_k": 10,
-    },
-)
+@conv_heuristics()
 @triton.jit
 def _kernel(
     x,
@@ -226,7 +162,7 @@ def _kernel(
         _bias = tl.load(bias_ptrs, mask=mask_bias)
         acc += _bias[None, :]
 
-    # acc = acc.to(y.dtype.element_ty)
+    acc = acc.to(y.dtype.element_ty)
 
     # rematerialize -- this saves some registers
     # offset for output y
@@ -262,39 +198,6 @@ def _kernel(
 
 class _conv_analytic:
     kernel = _kernel
-
-    # for the contigous order of w ptr, what"s the corresponding
-    # ptr changes for x in a sliding window
-    @staticmethod
-    def _delta_x_ptr(
-        IN_C,
-        KERNEL_H,
-        KERNEL_W,
-        dilation_h,
-        dilation_w,
-        stride_wc,
-        stride_wh,
-        stride_ww,
-        device,
-    ):
-        # get the order of axes in w, innermost dimension outward
-        stride_w_3d = [stride_wc, stride_wh, stride_ww]
-        order = sorted(range(len(stride_w_3d)), key=stride_w_3d.__getitem__)
-        window_size = IN_C * KERNEL_H * KERNEL_W
-
-        r_window = torch.arange(0, window_size, 1, device=device)
-        window_unpack = _unpack(r_window, order, [IN_C, KERNEL_H, KERNEL_W])
-        window_unpack_c = window_unpack[order[0]]
-        window_unpack_h = window_unpack[order[1]]
-        window_unpack_w = window_unpack[order[2]]
-        r_dilation_h = dilation_h * window_unpack_h
-        r_dilation_w = dilation_w * window_unpack_w
-        r_inc = window_unpack_c
-        return (
-            r_dilation_h,
-            r_dilation_w,
-            r_inc,
-        )
 
     @staticmethod
     def _call(
@@ -389,19 +292,12 @@ class _conv_analytic:
             y = y.to(memory_format=torch.channels_last)
         stride_y = y.stride()
 
-        # allocate tmp
-        # WINDOW_SIZE = KERNEL_H * KERNEL_W * IN_C
-        # tmp_x = torch.empty((BATCH * OUT_H * OUT_W, WINDOW_SIZE), device=device, dtype=x.dtype)
-        # tmp_w = torch.empty((WINDOW_SIZE, KERNEL_N), device=device, dtype=w.dtype)
         # accumulator types
         ACC_TYPE = (
             tl.float32
             if x.dtype in [torch.float16, torch.bfloat16, torch.float32]
             else tl.int32
         )
-        # if input activation is channel-last, it"s good to tiling output
-        # into block of [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] because of better
-        # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
 
         # launch kernel, 2-dim, batch*h*w, kernel
         def grid(META):
@@ -456,9 +352,6 @@ class _conv_analytic:
             # BLOCK_K=BLOCK_K,
             GROUP_H=1,
         )
-        # do matrix multiplication
-        # else:
-        #    _kernel_mm[grid]()
         return y
 
     @staticmethod
