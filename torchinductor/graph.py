@@ -91,9 +91,18 @@ class GraphLowering(torch.fx.Interpreter):
         """
         name = f"seed_{device.type}_{device.index}"
         if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int32)
+            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
             self.randomness_seeds.append(name)
-        return name
+
+        return ir.RandSeedBuffer(
+            name=name,
+            layout=ir.FixedLayout(
+                device=device,
+                dtype=torch.int64,
+                size=[],
+                stride=[],
+            ),
+        )
 
     def increment_randomness_offset(self, numel):
         """
@@ -220,7 +229,8 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
-            isinstance(x, (TensorBox, ir.Constant, type(None))) for x in result
+            isinstance(x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer))
+            for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
 

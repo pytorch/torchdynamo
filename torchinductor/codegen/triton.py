@@ -510,7 +510,9 @@ class TritonKernel(Kernel):
 
             return_getters_groups.append(return_getters)
 
-        assert all(s == 1 for s in remaining)
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 

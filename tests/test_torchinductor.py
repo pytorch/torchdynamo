@@ -2300,10 +2300,6 @@ class CommonTemplate:
 
     @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
-        if self.device == "cpu":
-            # TODO(jansel): CPU RNG is not yet deterministic
-            raise unittest.SkipTest("CPU currently nondeterministic")
-
         @torchdynamo.optimize("inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
@@ -2312,14 +2308,14 @@ class CommonTemplate:
             with patch.object(torchinductor.config.triton, "cudagraphs", cg):
                 torchdynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float16)
+                x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 a0 = fn(x).clone()
                 a1 = fn(x).clone()
                 a2 = fn(x).clone()
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 b0 = fn(x).clone()
                 b1 = fn(x).clone()
                 b2 = fn(x).clone()
@@ -2332,6 +2328,40 @@ class CommonTemplate:
                 # different calls, different values
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
+
+    @patch.object(config, "aot_autograd", False)
+    def test_rand_like_deterministic(self):
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.rand_like(a), torch.rand_like(a)
+
+        x = torch.ones(1024, device=self.device, dtype=torch.float32)
+
+        torch.manual_seed(1234)
+        a0 = fn(x)[0].clone()
+        a1 = fn(x)[0].clone()
+        a2 = fn(x)[0].clone()
+
+        torch.manual_seed(1234)
+        b0 = fn(x)[0].clone()
+        b1 = fn(x)[0].clone()
+        b2 = fn(x)[0].clone()
+
+        # same seed, same values
+        self.assertTrue(torch.allclose(a0, b0))
+        self.assertTrue(torch.allclose(a1, b1))
+        self.assertTrue(torch.allclose(a2, b2))
+
+        # different calls, different values
+        self.assertFalse(torch.allclose(a0, a1))
+        self.assertFalse(torch.allclose(a1, a2))
+
+        c, d = fn(x)
+        self.assertFalse(torch.allclose(c, d))
+        self.assertTrue((c >= 0).all())
+        self.assertTrue((c < 1).all())
+        self.assertTrue((d >= 0).all())
+        self.assertTrue((d < 1).all())
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
@@ -2439,6 +2469,77 @@ class CommonTemplate:
             check_lowp=False,
         )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
+
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_lowmem_dropout1(self):
+        n = 100000
+        weight = torch.ones(
+            n, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(n, device=self.device, dtype=torch.float32)
+
+        @torchdynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return F.dropout(x * weight, 0.33, train)
+
+        def check(r, g):
+            rmean = r.mean().item()
+            gmean = g.mean().item()
+            rcount = len(r.nonzero())
+            gcount = len(g.nonzero())
+
+            # dropped elements should match
+            self.assertTrue(same(r.nonzero(), g.nonzero()))
+            self.assertEqual(rcount, gcount)
+
+            # dropped should be close to 0.33
+            self.assertGreater(rcount, 0.64 * n)
+            self.assertGreater(0.68 * n, rcount)
+
+            self.assertAlmostEqual(rmean, gmean)
+            self.assertAlmostEqual(rmean, 1.0, places=2)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        g1 = weight.grad.clone()
+        # eval mode should be all ones
+        self.assertTrue(same(r1, torch.ones_like(r1)))
+        self.assertTrue(same(g1, torch.ones_like(g1)))
+
+        torch.manual_seed(1234)
+        weight.grad.zero_()
+        r2 = run(ones)
+        r2.sum().backward()
+        g2 = weight.grad.clone()
+        check(r2, g2)
+
+        torch.manual_seed(1234)
+        weight.grad.zero_()
+        r3 = run(ones)
+        r3.sum().backward()
+        g3 = weight.grad.clone()
+        check(r3, g3)
+
+        # second run is same result as first
+        self.assertTrue(same(r2, r3))
+        self.assertTrue(same(g2, g3))
+
+    def test_lowmem_dropout2(self):
+        m = torch.nn.Sequential(
+            torch.nn.Linear(32, 32, bias=False),
+            torch.nn.Dropout(),
+            torch.nn.Linear(32, 32, bias=False),
+            torch.nn.Dropout(),
+        ).to(self.device)
+
+        @torchdynamo.optimize_assert("inductor")
+        def run(x):
+            return m(x)
+
+        torchinductor.metrics.generated_kernel_count = 0
+        result = run(torch.randn([8, 32], device=self.device))
+        result.sum().backward()
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 4)
 
 
 if HAS_CPU:
