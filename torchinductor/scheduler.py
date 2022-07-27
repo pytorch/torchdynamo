@@ -27,6 +27,8 @@ from .virtualized import V
 
 template_kernels = [ir.Convolution]
 
+log = logging.getLogger(__name__)
+
 
 def cmp(a, b):
     return int(a > b) - int(a < b)
@@ -173,6 +175,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def run(self, codegen_extern_call):
+        log.info(f"RUN EXTERN {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
@@ -190,6 +193,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
         return False
 
     def run(self):
+        log.info(f"RUN NOP {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
         self.scheduler.pending_buffer_names.add(self.get_name())
@@ -329,6 +333,7 @@ class SchedulerNode(BaseSchedulerNode):
         super().allocate()
 
     def run(self, *index_vars):
+        log.info(f"RUN {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
         sizes = self._sizes
@@ -339,7 +344,9 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
-        with V.set_ops_handler(SimplifyIndexing(V.get_ops_handler(), var_ranges)):
+        with V.set_ops_handler(
+            SimplifyIndexing(V.get_ops_handler(), var_ranges)
+        ), V.kernel.set_current_node(self):
             self._body(*index_vars)
         self.scheduler.pending_buffer_names.add(self.get_name())
 
@@ -386,8 +393,9 @@ class BlockedNodes:
     def add(self, node: SchedulerNode):
         box = SchedulerNodeBox(node)
         for dep in node.unmet_dependencies:
-            self.name_to_nodes[dep.name].append(box)
             self.dep_to_nodes[dep].append(box)
+        for name in {dep.name for dep in node.unmet_dependencies}:
+            self.name_to_nodes[name].append(box)
 
     def pop_name(self, name):
         return [x.pop() for x in self.name_to_nodes.pop(name, []) if x]
@@ -516,12 +524,12 @@ class Scheduler:
         super(Scheduler, self).__init__()
         self.backends = {}
         self.current_device = None
-        # runable_groups maps node group to priority
-        # we use self.runable_groups.most_common() to implement a priority queue
-        self.runable_groups = collections.Counter()
-        # runable_nodes  maps node group to nodes
-        self.runable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
-        self.runable_extern_kernels = collections.deque()
+        # runnable_groups maps node group to priority
+        # we use self.runnable_groups.most_common() to implement a priority queue
+        self.runnable_groups = collections.Counter()
+        # runnable_nodes  maps node group to nodes
+        self.runnable_nodes: Dict[Any, SchedulerNode] = collections.defaultdict(list)
+        self.runnable_extern_kernels = collections.deque()
         self.blocked_nodes = BlockedNodes()
         self.run_count = 0
         self.nodes = []
@@ -675,6 +683,7 @@ class Scheduler:
                 updated_nodes.append(node)
             else:
                 # dead code
+                log.debug("removed dead node: %s", node.get_name())
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
@@ -689,13 +698,13 @@ class Scheduler:
             self.blocked_nodes.add(node)
         else:
             if isinstance(node, ExternKernelSchedulerNode):
-                self.runable_extern_kernels.append(node)
+                self.runnable_extern_kernels.append(node)
             elif isinstance(node, NopKernelSchedulerNode):
                 node.run()  # just schedule nop kernels eagerly
             else:  # SchedulerNode
-                self.runable_nodes[node.group].append(node)
-                old_priority, old_count = self.runable_groups.get(node.group, (0, 0))
-                self.runable_groups[node.group] = (
+                self.runnable_nodes[node.group].append(node)
+                old_priority, old_count = self.runnable_groups.get(node.group, (0, 0))
+                self.runnable_groups[node.group] = (
                     max(old_priority, node.get_priority()),
                     old_count + 1,
                 )
@@ -714,21 +723,29 @@ class Scheduler:
                 ]
             )
             if not is_live:
-                # Assign a special value instead of deleting the entry
-                # because we still rely on output_buffers's length to
-                # generate unique arg name.
-                V.kernel.args.output_buffers[name] = "REMOVED"
-                V.graph.removed_buffers.add(name)
+                self.remove_buffer(name)
 
     def remove_buffer(self, name):
+        # Assign a special value instead of deleting the entry
+        # because we still rely on output_buffers's length to
+        # generate unique arg name.
         V.kernel.args.output_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 
     def barrier(self):
         """
         Mark all pending_buffer_names as available and enqueue any nodes
-        that became runable.
+        that became runnable.
         """
+        if config.debug and (self.fusable_deps or self.pending_buffer_names):
+
+            def gc(d):
+                return {k: v for k, v in d.items() if any(v)}
+
+            log.info(f"blocked names: {gc(self.blocked_nodes.dep_to_nodes)}")
+            log.info(f"blocked deps: {gc(self.blocked_nodes.name_to_nodes)}")
+            log.info(f"new fusable_deps: {self.fusable_deps}")
+
         while self.pending_buffer_names:
             self.available_buffer_names.update(self.pending_buffer_names)
             nodes_to_add = []
@@ -760,6 +777,7 @@ class Scheduler:
         self.check_can_free.clear()
 
     def kernel(self, kernel):
+        log.info("NEW KERNEL")
         self.fusable_deps.clear()
         self.kernels.append(kernel)
 
@@ -770,10 +788,10 @@ class Scheduler:
 
         return ctx()
 
-    def iter_runable_groups(self):
-        while self.runable_groups or self.runable_extern_kernels:
-            if self.runable_extern_kernels:
-                runnable_extern_kernel = self.runable_extern_kernels.popleft()
+    def iter_runnable_groups(self):
+        while self.runnable_groups or self.runnable_extern_kernels:
+            if self.runnable_extern_kernels:
+                runnable_extern_kernel = self.runnable_extern_kernels.popleft()
                 try:
                     self.current_device = runnable_extern_kernel.get_device()
                 except AttributeError:
@@ -781,10 +799,10 @@ class Scheduler:
                     pass
                 runnable_extern_kernel.run(self.codegen_extern_call)
             else:
-                group, priority = self.runable_groups.most_common(1)[0]
-                del self.runable_groups[group]
+                group, priority = self.runnable_groups.most_common(1)[0]
+                del self.runnable_groups[group]
                 yield group
-        assert not self.runable_nodes
+        assert not self.runnable_nodes
         assert len(self.nodes) == self.run_count
 
     def iter_fixed_point(self):
@@ -798,16 +816,25 @@ class Scheduler:
 
     def pop_group(self, group_without_device):
         group = (self.current_device, tuple(group_without_device))
-        while group in self.runable_nodes:
-            if group in self.runable_groups:
-                del self.runable_groups[group]
-            yield from self.runable_nodes.pop(group)
+        while group in self.runnable_nodes:
+            if group in self.runnable_groups:
+                del self.runnable_groups[group]
+            yield from self.runnable_nodes.pop(group)
         if self.fusable_deps:
             fusable = True
             while fusable:
                 # keep poping fusable nodes as their depdencies are satisfied
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
+
+    def pop_groups(self, groups):
+        keep_going = True
+        while keep_going:
+            keep_going = False
+            for group in groups:
+                for node in self.pop_group(group):
+                    keep_going = True
+                    yield node
 
     def flush(self):
         for backend in self.backends.values():
@@ -841,7 +868,7 @@ class Scheduler:
         return self.backends[device]
 
     def codegen(self):
-        for device, group in self.iter_runable_groups():
+        for device, group in self.iter_runnable_groups():
             if device != self.current_device:
                 self.flush()
                 self.current_device = device

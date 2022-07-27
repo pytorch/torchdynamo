@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import itertools
+import logging
 import typing
 from typing import List
 from typing import Set
@@ -9,6 +10,8 @@ import sympy
 
 from .codegen.common import _simplify_loops
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 class MemoryDep(typing.NamedTuple):
@@ -80,12 +83,14 @@ class ReadWrites:
     reads: Set[MemoryDep]
     writes: Set[MemoryDep]
     index_exprs: Set[IndexExprDep]
+    range_vars: List[sympy.Expr]
 
     def rename(self, renames: typing.Dict[str, str]):
         return ReadWrites(
             {dep.rename(renames) for dep in self.reads},
             {dep.rename(renames) for dep in self.writes},
             self.index_exprs,
+            self.range_vars,
         )
 
     def with_read(self, name: str):
@@ -94,6 +99,7 @@ class ReadWrites:
             set.union(self.reads, {StarDep(name)}),
             self.writes,
             self.index_exprs,
+            self.range_vars,
         )
 
 
@@ -108,6 +114,7 @@ class RecordLoadStore(V.MockHandler):
 
     def canonicalize(self, index):
         sizes = list(self._var_ranges.values())
+        sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
             return index, tuple([x for x in sizes if x != 1])
 
@@ -182,7 +189,13 @@ def extract_read_writes(fn, *argsizes, normalize=False, prefix="d"):
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):
         fn(*args)
-    return ReadWrites(rw._reads, rw._writes, rw._index_exprs)
+
+    if normalize:
+        range_vars = None  # Number of vars could differ due to normalization
+    else:
+        range_vars = [*itertools.chain(*args)]
+
+    return ReadWrites(rw._reads, rw._writes, rw._index_exprs, range_vars)
 
 
 def canonicalization_prefix():

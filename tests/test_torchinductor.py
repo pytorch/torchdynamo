@@ -295,6 +295,10 @@ class TestIndexingSimplification(unittest.TestCase):
             IndexingDiv(i1 + 2 * i2, 32),
         )
 
+        expr = ModularIndexing(2 * i2 + r3, 1, 64)
+        # modular indexing is removed if base is smaller than modulo
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
+
         # check the same thing but with symbolic divisor
         self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
         self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
@@ -377,6 +381,12 @@ class CommonTemplate:
             return (a / (torch.abs(a) + 1),)
 
         self.common(fn, (torch.randn(17),))
+
+    def test_sgn(self):
+        def fn(a):
+            return torch.sgn(a), torch.sgn(a + 1) - 1
+
+        self.common(fn, [torch.linspace(-10, 10, 41)])
 
     def test_max_min(self):
         def fn(a, b):
@@ -1342,6 +1352,17 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @patch.object(config, "aot_autograd", False)
+    def test_layer_norm(self):
+        m = torch.nn.Sequential(
+            torch.nn.LayerNorm(32),
+            torch.nn.ReLU(),
+        )
+        m.eval()
+        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
@@ -1728,7 +1749,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
-    def test_upsample_bilinear2d(self):
+    def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
                 aten.upsample_bilinear2d(a, [45, 45], False, None),
@@ -1736,6 +1757,17 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_bilinear2d_b(self):
+        def fn(a):
+            return aten.upsample_bilinear2d(a, None, True, [2.0, 2.0])
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2, 40, 59]),
+            ],
+        )
 
     def test_reflection_pad2d(self):
         def fn(a):
@@ -1746,6 +1778,22 @@ class CommonTemplate:
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_grid_sampler_2d(self):
+        def fn(a, b):
+            return (
+                aten.grid_sampler_2d(a, b, 0, 0, True),
+                aten.grid_sampler_2d(a, b, 0, 1, False),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([4, 3, 352, 352], dtype=torch.float32),
+                torch.rand([4, 352, 352, 2], dtype=torch.float32) * 2 - 1,
+            ),
+            check_lowp=False,
         )
 
     def test_sort(self):
@@ -2117,7 +2165,49 @@ class CommonTemplate:
             ],
         )
 
-    @unittest.skip("Triton kernel fails when xnumel == 1")
+    def test_scatter1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.zeros(2, 3),
+                0,
+                torch.tensor([[0]]),
+                torch.ones(2, 3),
+            ],
+        )
+
+    def test_scatter2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        self.common(
+            fn,
+            [
+                torch.zeros(64, 512),
+                0,
+                torch.zeros((64, 512), dtype=torch.int64),
+                torch.ones(64, 512),
+            ],
+        )
+
+    def test_scatter3(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                0.8,  # src can be a scalar
+            ],
+        )
+
+    @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -2157,6 +2247,34 @@ class CommonTemplate:
                 2,
                 torch.tensor([[[3, 5, 7, 9]]]),
                 torch.randn(1, 1, 10),
+            ],
+        )
+
+    def test_scatter_reduce1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_reduce(a, dim, index, b, "sum")
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                torch.randn(1, 1, 10),
+            ],
+        )
+
+    def test_scatter_reduce2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+
+        self.common(
+            fn,
+            [
+                torch.randn(2, 3),
+                0,
+                torch.zeros((2, 3), dtype=torch.int64),
+                torch.randn(2, 3),
             ],
         )
 
@@ -2306,6 +2424,21 @@ class CommonTemplate:
                 torch.randn([1, 1, 20, 15]),
             ],
         )
+
+    @patch.object(config, "aot_autograd", False)
+    def test_mm_views(self):
+        def fn(a, b):
+            return torch.mm(a.view(32, 32), b.view(32, 32))
+
+        self.common(
+            fn,
+            (
+                torch.randn([32, 32]).transpose(0, 1),
+                torch.randn([1, 32, 32]).transpose(0, 1),
+            ),
+            check_lowp=False,
+        )
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
 
 
 if HAS_CPU:

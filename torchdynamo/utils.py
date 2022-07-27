@@ -61,6 +61,7 @@ LOGGING_CONFIG = {
             "propagate": False,
         },
     },
+    "disable_existing_loggers": False,
 }
 
 
