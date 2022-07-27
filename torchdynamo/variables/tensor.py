@@ -206,10 +206,10 @@ class TensorVariable(VariableTracker):
                 options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
         elif istype(example_value, int) and proxy.node.target in (
-            torch.seed,
-            operator.mod,
-            torch.distributed.get_rank,
-            torch.distributed.get_world_size,
+                torch.seed,
+                operator.mod,
+                torch.distributed.get_rank,
+                torch.distributed.get_world_size,
         ):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
@@ -415,11 +415,11 @@ class TensorVariable(VariableTracker):
         return super(TensorVariable, self).unpack_var_sequence(tx)
 
     def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+            self,
+            tx,
+            name,
+            args: "List[VariableTracker]",
+            kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable
         from . import TupleVariable
@@ -454,6 +454,7 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif (
+
             name == "repeat"
             and not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
@@ -500,10 +501,10 @@ class TensorVariable(VariableTracker):
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
             if (
-                name == "new"
-                and len(args) == 1
-                and isinstance(args[0], (SizeVariable, ShapeVariable))
-                and not config.dynamic_shapes
+                    name == "new"
+                    and len(args) == 1
+                    and isinstance(args[0], (SizeVariable, ShapeVariable))
+                    and not config.dynamic_shapes
             ):
                 name = "new_empty"
 
@@ -597,14 +598,14 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
     @staticmethod
     def inline_torch_function_unwrapped(
-        tx,
-        original_func_var,
-        tensor_with_tf_override_source,
-        tf_func,
-        subclass_type,
-        options,
-        args,
-        kwargs,
+            tx,
+            original_func_var,
+            tensor_with_tf_override_source,
+            tf_func,
+            subclass_type,
+            options,
+            args,
+            kwargs,
     ):
         """
         This function inlines the `__torch_function__` override for `original_func_var`.
