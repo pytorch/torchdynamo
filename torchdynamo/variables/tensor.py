@@ -279,21 +279,21 @@ class TensorVariable(VariableTracker):
 
 
     def __init__(
-            self,
-            proxy: torch.fx.Proxy,
-            dtype=None,
-            device=None,
-            ndim=None,
-            size=None,
-            stride=None,
-            requires_grad=None,
-            is_quantized=None,
-            is_contiguous=None,
-            is_complex=None,
-            is_sparse=None,
-            class_type=torch.Tensor,
-            parameter_value=None,
-            **kwargs,
+        self,
+        proxy: torch.fx.Proxy,
+        dtype=None,
+        device=None,
+        ndim=None,
+        size=None,
+        stride=None,
+        requires_grad=None,
+        is_quantized=None,
+        is_contiguous=None,
+        is_complex=None,
+        is_sparse=None,
+        class_type=torch.Tensor,
+        parameter_value=None,
+        **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
         self.proxy = proxy
