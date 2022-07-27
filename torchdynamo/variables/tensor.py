@@ -254,15 +254,15 @@ class TensorVariable(VariableTracker):
         elif example_value is None or proxy.node.target is torch.manual_seed:
             return variables.ConstantVariable(None, **options)
         elif (
-                isinstance(example_value, int)
-                and proxy.node.target is torch._utils._element_size
+            isinstance(example_value, int)
+            and proxy.node.target is torch._utils._element_size
         ):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
         elif (
-                isinstance(example_value, numbers.Number)
-                and proxy.node.target == "item"
-                and config.capture_scalar_outputs
+            isinstance(example_value, numbers.Number)
+            and proxy.node.target == "item"
+            and config.capture_scalar_outputs
         ):
             return UnspecializedPythonVariable.create(
                 tx=tx,
