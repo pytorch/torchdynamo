@@ -86,31 +86,41 @@ def _kernel(
     # load inc ptr of x, upade x_ptrs
     # position of sliding window at position h, w = [0,0]
     off_x00_crs_unpacked = off_x_inc * stride_xc
-    # the remaining 8 elements are power-of-2
-    RANGE_8 = tl.arange(0, 8)
-    delta_xh = RANGE_8 // 3
-    delta_xw = RANGE_8 % 3
-    delta_xc = off_x_inc
-    # c, h, w: IN_C, KERNEL_H, KERNEL_W
+    off_x01_crs_unpacked = off_x_inc * stride_xc + 0 * dilation_h * stride_xh + 1 * dilation_w * stride_xw
+    off_x02_crs_unpacked = off_x_inc * stride_xc + 0 * dilation_h * stride_xh + 2 * dilation_w * stride_xw
+    off_x10_crs_unpacked = off_x_inc * stride_xc + 1 * dilation_h * stride_xh + 0 * dilation_w * stride_xw
+    off_x11_crs_unpacked = off_x_inc * stride_xc + 1 * dilation_h * stride_xh + 1 * dilation_w * stride_xw
+    off_x12_crs_unpacked = off_x_inc * stride_xc + 1 * dilation_h * stride_xh + 2 * dilation_w * stride_xw
+    off_x20_crs_unpacked = off_x_inc * stride_xc + 2 * dilation_h * stride_xh + 0 * dilation_w * stride_xw
+    off_x21_crs_unpacked = off_x_inc * stride_xc + 2 * dilation_h * stride_xh + 1 * dilation_w * stride_xw
+    off_x22_crs_unpacked = off_x_inc * stride_xc + 2 * dilation_h * stride_xh + 2 * dilation_w * stride_xw
+    # # the remaining 8 elements are power-of-2
+    # RANGE_8 = tl.arange(0, 8)
+    # delta_xh = RANGE_8 // 3
+    # delta_xw = RANGE_8 % 3
+    # delta_xc = off_x_inc
+    # delta_xh_ravel = tl.ravel(delta_xh[:, None] + tl.zeros([BLOCK_K], dtype=tl.int32)[None, :])
+    # delta_xw_ravel = tl.ravel(delta_xw[:, None] + tl.zeros([BLOCK_K], dtype=tl.int32)[None, :])
+    # delta_xc_ravel = tl.ravel(delta_xc[None, :] + tl.zeros([8], dtype=tl.int32)[:, None])
     # off_x_crs_unpacked = (
-    #     delta_xh[:, None] * dilation_h * stride_xh
-    #     + delta_xw[:, None] * dilation_w * stride_xw
-    #     + delta_xc[None, :] * stride_xc
+    #     delta_xh_ravel * dilation_h * stride_xh
+    #     + delta_xw_ravel * dilation_w * stride_xw
+    #     + delta_xc_ravel * stride_xc
     # )
-    # off_x_crs_unpacked = tl.ravel(off_x_crs_unpacked)
-    delta_xh_ravel = tl.ravel(delta_xh[:, None] + tl.zeros([8, BLOCK_K], dtype=tl.int32))
-    delta_xw_ravel = tl.ravel(delta_xw[:, None] + tl.zeros([8, BLOCK_K], dtype=tl.int32))
-    delta_xc_ravel = tl.ravel(delta_xc[None, :] + tl.zeros([8, BLOCK_K], dtype=tl.int32))
-    off_x_crs_unpacked = (
-        delta_xh_ravel * dilation_h * stride_xh
-        + delta_xw_ravel * dilation_w * stride_xw
-        + delta_xc_ravel * stride_xc
-    )
-    x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
-    # x_ptrs = x + off_x_nhw[:, None] + tl.zeros([BLOCK_M, 8 * BLOCK_K], dtype=tl.int32)
-    # x_ptrs = x + tl.zeros([BLOCK_M, 8 * BLOCK_K], dtype=tl.int32) + off_x_crs_unpacked[None, :]
-    # x_ptrs = x + tl.zeros([BLOCK_M, 8 * BLOCK_K], dtype=tl.int32)
+    # x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
+    # # x_ptrs = x + off_x_nhw[:, None] + tl.zeros([8 * BLOCK_K], dtype=tl.int32)[None, :]
+    # # x_ptrs = x + tl.zeros([BLOCK_M, 8 * BLOCK_K], dtype=tl.int32) + off_x_crs_unpacked[None, :]
+    # # x_ptrs = x + tl.zeros([BLOCK_M, 8 * BLOCK_K], dtype=tl.int32)
     x00_ptrs = x + off_x_nhw[:, None] + off_x00_crs_unpacked[None, :]
+    x01_ptrs = x + off_x_nhw[:, None] + off_x01_crs_unpacked[None, :]
+    x02_ptrs = x + off_x_nhw[:, None] + off_x02_crs_unpacked[None, :]
+    x10_ptrs = x + off_x_nhw[:, None] + off_x10_crs_unpacked[None, :]
+    x11_ptrs = x + off_x_nhw[:, None] + off_x11_crs_unpacked[None, :]
+    x12_ptrs = x + off_x_nhw[:, None] + off_x12_crs_unpacked[None, :]
+    x20_ptrs = x + off_x_nhw[:, None] + off_x20_crs_unpacked[None, :]
+    x21_ptrs = x + off_x_nhw[:, None] + off_x21_crs_unpacked[None, :]
+    x22_ptrs = x + off_x_nhw[:, None] + off_x22_crs_unpacked[None, :]
+
 
     mask_x00 = (
         (off_x_n < BATCH)[:, None] # BLOCK_N
@@ -120,14 +130,79 @@ def _kernel(
         & (off_x_w >= 0)[:, None]
         & (off_x_w < IN_W)[:, None]
     )
-    mask_x = (
+    # mask_x01 = mask_x00
+    mask_x01 = (
         (off_x_n < BATCH)[:, None] # BLOCK_N
-        # & (delta_xc_ravel < IN_C)[None, :] # 8 * BLOCK_K
-        # & (off_x_h[:, None] + (delta_xh_ravel * dilation_h)[None, :] >= 0)
-        # & (off_x_h[:, None] + (delta_xh_ravel * dilation_h)[None, :] < IN_H)
-        # & (off_x_w[:, None] + (delta_xw_ravel * dilation_w)[None, :] >= 0)
-        # & (off_x_w[:, None] + (delta_xw_ravel * dilation_w)[None, :] < IN_W)
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h >= 0)[:, None]
+        & (off_x_h < IN_H)[:, None]
+        & (off_x_w + dilation_w >= 0)[:, None]
+        & (off_x_w + dilation_w < IN_W)[:, None]
     )
+    mask_x02 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h >= 0)[:, None]
+        & (off_x_h < IN_H)[:, None]
+        & (off_x_w + 2 * dilation_w >= 0)[:, None]
+        & (off_x_w + 2 * dilation_w < IN_W)[:, None]
+    )
+    mask_x10 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h + dilation_h >= 0)[:, None]
+        & (off_x_h + dilation_h < IN_H)[:, None]
+        & (off_x_w >= 0)[:, None]
+        & (off_x_w < IN_W)[:, None]
+    )
+    mask_x11 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h + dilation_h >= 0)[:, None]
+        & (off_x_h + dilation_h < IN_H)[:, None]
+        & (off_x_w + dilation_w >= 0)[:, None]
+        & (off_x_w + dilation_w < IN_W)[:, None]
+    )
+    mask_x12 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h + dilation_h >= 0)[:, None]
+        & (off_x_h + dilation_h < IN_H)[:, None]
+        & (off_x_w + 2 * dilation_w >= 0)[:, None]
+        & (off_x_w + 2 * dilation_w < IN_W)[:, None]
+    )
+    mask_x20 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h + 2 * dilation_h >= 0)[:, None]
+        & (off_x_h + 2 * dilation_h < IN_H)[:, None]
+        & (off_x_w >= 0)[:, None]
+        & (off_x_w < IN_W)[:, None]
+    )
+    mask_x21 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h + 2 * dilation_h >= 0)[:, None]
+        & (off_x_h + 2 * dilation_h < IN_H)[:, None]
+        & (off_x_w + dilation_h >= 0)[:, None]
+        & (off_x_w + dilation_h < IN_W)[:, None]
+    )
+    mask_x22 = (
+        (off_x_n < BATCH)[:, None] # BLOCK_N
+        & (off_x_inc < IN_C)[None, :] # BLOCK_K
+        & (off_x_h + 2 * dilation_h >= 0)[:, None]
+        & (off_x_h + 2 * dilation_h < IN_H)[:, None]
+        & (off_x_w + 2 * dilation_h >= 0)[:, None]
+        & (off_x_w + 2 * dilation_h < IN_W)[:, None]
+    )
+    # mask_x = (
+    #     (off_x_n < BATCH)[:, None] # BLOCK_N
+    #     & (delta_xc_ravel < IN_C)[None, :] # 8 * BLOCK_K
+    #     & (off_x_h[:, None] + (delta_xh_ravel * dilation_h)[None, :] >= 0)
+    #     & (off_x_h[:, None] + (delta_xh_ravel * dilation_h)[None, :] < IN_H)
+    #     & (off_x_w[:, None] + (delta_xw_ravel * dilation_w)[None, :] >= 0)
+    #     & (off_x_w[:, None] + (delta_xw_ravel * dilation_w)[None, :] < IN_W)
+    # )
 
     # offset for the inital ptr for w
     off_w00_crs = off_x_inc * stride_wc
@@ -135,24 +210,64 @@ def _kernel(
     w00_ptrs = w + off_w00_crs[:, None] + off_w_k[None, :] * stride_wn
     mask_w00 = (off_x_inc < IN_C)[:, None] & (off_w_k < KERNEL_N)[None, :]
 
-    off_w_crs = delta_xh[:, None] * stride_wh + delta_xw[:, None] * stride_ww + delta_xc[None, :] * stride_wc
-    off_w_crs_ravel = tl.ravel(off_w_crs)
-    w_ptrs = w + off_w_crs_ravel[:, None] + off_w_k[None, :] * stride_wn
-    mask_w = (delta_xc_ravel < IN_C)[:, None] & (off_w_k < KERNEL_N)[None, :]
+    off_w01_crs = off_x_inc * stride_wc + 0 * stride_wh + 1 * stride_ww
+    w01_ptrs = w + off_w01_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w02_crs = off_x_inc * stride_wc + 0 * stride_wh + 2 * stride_ww
+    w02_ptrs = w + off_w02_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w10_crs = off_x_inc * stride_wc + 1 * stride_wh + 0 * stride_ww
+    w10_ptrs = w + off_w10_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w11_crs = off_x_inc * stride_wc + 1 * stride_wh + 1 * stride_ww
+    w11_ptrs = w + off_w11_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w12_crs = off_x_inc * stride_wc + 1 * stride_wh + 2 * stride_ww
+    w12_ptrs = w + off_w12_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w20_crs = off_x_inc * stride_wc + 2 * stride_wh + 0 * stride_ww
+    w20_ptrs = w + off_w20_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w21_crs = off_x_inc * stride_wc + 2 * stride_wh + 1 * stride_ww
+    w21_ptrs = w + off_w21_crs[:, None] + off_w_k[None, :] * stride_wn
+    off_w22_crs = off_x_inc * stride_wc + 2 * stride_wh + 2 * stride_ww
+    w22_ptrs = w + off_w22_crs[:, None] + off_w_k[None, :] * stride_wn
+    # off_w_crs = delta_xh[:, None] * stride_wh + delta_xw[:, None] * stride_ww + delta_xc[None, :] * stride_wc
+    # off_w_crs_ravel = tl.ravel(off_w_crs)
+    # w_ptrs = w + off_w_crs_ravel[:, None] + off_w_k[None, :] * stride_wn
+    # mask_w = (delta_xc_ravel < IN_C)[:, None] & (off_w_k < KERNEL_N)[None, :]
 
     # ------ load x ------
     matrix_x00 = tl.load(x00_ptrs, mask=mask_x00, other=0.) # BLOCK * (1 * BLOCK_K)
-    matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.)  # BLOCK_M * (8 * BLOCK_K)
-    # matrix_x = tl.zeros([BLOCK_M, 8 * BLOCK_K], dtype=tl.float32)
+    matrix_x01 = tl.load(x01_ptrs, mask=mask_x01, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x02 = tl.load(x02_ptrs, mask=mask_x02, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x10 = tl.load(x10_ptrs, mask=mask_x10, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x11 = tl.load(x11_ptrs, mask=mask_x11, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x12 = tl.load(x12_ptrs, mask=mask_x12, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x20 = tl.load(x20_ptrs, mask=mask_x20, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x21 = tl.load(x21_ptrs, mask=mask_x21, other=0.) # BLOCK * (1 * BLOCK_K)
+    matrix_x22 = tl.load(x22_ptrs, mask=mask_x22, other=0.) # BLOCK * (1 * BLOCK_K)
+    # matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.)  # BLOCK_M * (8 * BLOCK_K)
     # ------ load w ------
     matrix_w00 = tl.load(w00_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
-    matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.)  # (8 * BLOCK_K) * BLOCK_N
-    # matrix_w = tl.zeros([8 * BLOCK_K, BLOCK_N], dtype=tl.float32)
+    matrix_w01 = tl.load(w01_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N #Note: mask is same
+    matrix_w02 = tl.load(w02_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    matrix_w10 = tl.load(w10_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    matrix_w11 = tl.load(w11_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    matrix_w12 = tl.load(w12_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    matrix_w20 = tl.load(w20_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    matrix_w21 = tl.load(w21_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    matrix_w22 = tl.load(w22_ptrs, mask=mask_w00, other=0.)  # (1 * BLOCK_K) * BLOCK_N
+    # matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.)  # (8 * BLOCK_K) * BLOCK_N
 
     # -----------------------------------------------------------
     # allocate accumulator
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    acc += tl.dot(matrix_x, matrix_w) + tl.dot(matrix_x00, matrix_w00)
+    acc += (
+        tl.dot(matrix_x00, matrix_w00)
+        + tl.dot(matrix_x01, matrix_w01)
+        + tl.dot(matrix_x02, matrix_w02)
+        + tl.dot(matrix_x10, matrix_w10)
+        + tl.dot(matrix_x11, matrix_w11)
+        + tl.dot(matrix_x12, matrix_w12)
+        + tl.dot(matrix_x20, matrix_w20)
+        + tl.dot(matrix_x21, matrix_w21)
+        + tl.dot(matrix_x22, matrix_w22)
+    )
     # for inc in range(0, IN_C, BLOCK_K):
 
     #     # ------ matrix multiplication ------
@@ -228,8 +343,7 @@ def _kernel(
         & (off_y_k < KERNEL_N)[None, :]
     )
 
-    # tl.store(y_ptrs, acc, mask=mask_y)
-    tl.atomic_add(y_ptrs, acc, mask=mask_y)
+    tl.store(y_ptrs, acc, mask=mask_y)
 
     return
 

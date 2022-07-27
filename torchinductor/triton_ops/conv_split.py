@@ -9,7 +9,7 @@ def init_to_zero(name):
     return lambda nargs: nargs[name].zero_()
 
 
-@conv_heuristics(pre_hook=init_to_zero("y"))
+@conv_heuristics(pre_hook=init_to_zero("y"), MAX_BLOCK_K=32)
 @triton.jit
 def _kernel(
     x,
@@ -57,8 +57,7 @@ def _kernel(
     BLOCK_N: tl.constexpr,
     # reduction tiling parameter for matmul
     BLOCK_K: tl.constexpr,
-    # Super-blocking for better L2 peformance
-    GROUP_H: tl.constexpr,
+    SPLIT_K: tl.constexpr,
 ):
     """
     each program instance computes a [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] block of y
@@ -183,8 +182,10 @@ def _kernel(
         & (off_y_k < KERNEL_N)[None, :]
     )
 
-    # tl.store(y_ptrs, acc, mask=mask_y)
-    tl.atomic_add(y_ptrs, acc, mask=mask_y)
+    if SPLIT_K == 1:
+        tl.store(y_ptrs, acc, mask=mask_y)
+    else:
+        tl.atomic_add(y_ptrs, acc, mask=mask_y)
 
     return
 
@@ -270,7 +271,7 @@ class _conv_split:
         OUT_W = shape_y[yw]
 
         # allocate output
-        y = torch.zeros(shape_y, device=device, dtype=x.dtype)
+        y = torch.empty(shape_y, device=device, dtype=x.dtype)
 
         # get strides for tensors
         stride_x = x.stride()
@@ -343,7 +344,7 @@ class _conv_split:
             # BLOCK_M=128,
             # BLOCK_N=32,
             # BLOCK_K=BLOCK_K,
-            GROUP_H=1,
+            SPLIT_K = KERNEL_H * KERNEL_W,
         )
         return y
 
