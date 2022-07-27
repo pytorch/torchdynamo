@@ -415,11 +415,11 @@ class TensorVariable(VariableTracker):
         return super(TensorVariable, self).unpack_var_sequence(tx)
 
     def call_method(
-            self,
-            tx,
-            name,
-            args: "List[VariableTracker]",
-            kwargs: "Dict[str, VariableTracker]",
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable
         from . import TupleVariable
@@ -557,11 +557,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
         self.subclass_type = subclass_type
 
     def call_method(
-            self,
-            tx,
-            name,
-            args: "List[VariableTracker]",
-            kwargs: "Dict[str, VariableTracker]",
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
