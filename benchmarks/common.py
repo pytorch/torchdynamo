@@ -1415,13 +1415,13 @@ def main(runner, original_dir=None):
             current_name = name
             current_device = device
             from functorch._src.aot_autograd import set_model_name
+
             set_model_name(name)
 
             if args.float32:
                 model, example_inputs = cast_to_fp32(model, example_inputs)
             elif args.float16:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
-            
 
             runner.run_one_model(
                 name,

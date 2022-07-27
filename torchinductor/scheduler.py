@@ -26,7 +26,7 @@ template_kernels = [ir.Convolution]
 log = logging.getLogger(__name__)
 
 
-INDUCTOR_SCHEDULER_GRAPH = bool(os.environ.get("INDUCTOR_SCHEDULER_GRAPH", None)=='1')
+INDUCTOR_SCHEDULER_GRAPH = bool(os.environ.get("INDUCTOR_SCHEDULER_GRAPH", None) == "1")
 
 
 def cmp(a, b):
@@ -563,10 +563,9 @@ class Scheduler:
 
         if INDUCTOR_SCHEDULER_GRAPH:
             from functorch._src.aot_autograd import get_graph_being_compiled
+
             graph_name = get_graph_being_compiled()
-            create_fx_graph(
-                self.nodes, graph_name, print_graph=True
-            )
+            create_fx_graph(self.nodes, graph_name, print_graph=True)
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
