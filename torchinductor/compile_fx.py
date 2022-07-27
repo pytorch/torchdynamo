@@ -233,8 +233,6 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-model_name = "hf_Bert"
-
 def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
     model_ = normalize_ir(model_, example_inputs_)
@@ -247,7 +245,6 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
-
 
     return aot_autograd(
         model_,

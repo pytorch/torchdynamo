@@ -83,7 +83,6 @@ def _wrap_compiler_fn(compiler_fn):
         from torchinductor.compile_fx import compile_fx
 
         return compile_fx
-
     elif isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
