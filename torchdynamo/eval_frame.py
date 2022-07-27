@@ -422,7 +422,6 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            print(opt)
             setattr(opt.step, "hooked", True)
 
     @staticmethod
