@@ -26,6 +26,9 @@ template_kernels = [ir.Convolution]
 log = logging.getLogger(__name__)
 
 
+INDUCTOR_SCHEDULER_GRAPH = bool(os.environ.get("INDUCTOR_SCHEDULER_GRAPH", None)=='1')
+
+
 def cmp(a, b):
     return int(a > b) - int(a < b)
 
@@ -518,9 +521,6 @@ def create_fx_graph(nodes, fname, print_graph=False):
     draw_graph(gm, fname, clear_meta=False)
 
 
-graph_dump_index = 0
-
-
 class Scheduler:
     def __init__(self, nodes):
         super(Scheduler, self).__init__()
@@ -561,12 +561,12 @@ class Scheduler:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
 
-        if bool(os.environ.get("INDUCTOR_SCHEDULER_GRAPH", 0)==1):
-            global graph_dump_index
+        if INDUCTOR_SCHEDULER_GRAPH:
+            from functorch._src.aot_autograd import get_graph_being_compiled
+            graph_name = get_graph_being_compiled()
             create_fx_graph(
-                self.nodes, f"compute_buffer_{graph_dump_index}", print_graph=True
+                self.nodes, graph_name, print_graph=True
             )
-            graph_dump_index += 1
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
