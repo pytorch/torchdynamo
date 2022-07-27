@@ -276,7 +276,6 @@ class TensorVariable(VariableTracker):
                 False
             ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
 
-
     def __init__(
         self,
         proxy: torch.fx.Proxy,
@@ -453,7 +452,6 @@ class TensorVariable(VariableTracker):
                 )
             return constant_result
         elif (
-
             name == "repeat"
             and not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())

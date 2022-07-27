@@ -1239,7 +1239,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             if k in f_locals
         )
 
-
         # symbolic_locals contains the mapping from original f_locals to the
         # Variable objects. During the Variable building phase, each object also
         # has its associated guards. At the end, we will accumulate these
