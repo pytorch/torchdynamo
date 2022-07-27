@@ -646,3 +646,11 @@ class CompileProfiler:
             rpt += "No cache-limited recompilations detected.\n"
 
         return rpt
+
+def maybe_condition(node):
+    """
+    Determines if a node has an operation that could potentially be a conditional
+    :param node: current node
+    :return: True if the node's target is an operation that could be used as a conditional
+    """
+    return node.target == operator.lt or node.target == operator.gt or node.target == operator.ne

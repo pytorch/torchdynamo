@@ -10,6 +10,11 @@ from typing import List
 
 import torch.fx
 import torch.random
+import z3
+
+from torchdynamo.utils import maybe_condition
+
+from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import evaluate_conditional_with_constraints
 
 from ..utils import fake_tensors_available
 
@@ -40,6 +45,17 @@ from .base import typestr
 from .lists import ShapeVariable
 from .lists import SizeVariable
 
+
+class FakeRootModule(torch.nn.Module):
+    """Trick the constructor of fx.GraphModule"""
+
+    def __init__(self, nn_modules: dict):
+        super(FakeRootModule, self).__init__()
+        for k, v in nn_modules.items():
+            setattr(self, k, v)
+
+    def __repr__(self):
+        return "FakeRootModule(...)"
 
 @contextmanager
 def preserve_rng_state():
@@ -91,6 +107,21 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
+        if maybe_condition(proxy.node):
+            try:
+                positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules), proxy.tracer.graph, proxy.node)
+                if positive == z3.unsat and negative == z3.sat:
+                    proxy.tracer.graph.erase_node(proxy.node)
+                    return variables.ConstantVariable(False)
+                elif positive == z3.sat and negative == z3.unsat:
+                    proxy.tracer.graph.erase_node(proxy.node)
+                    return variables.ConstantVariable(True)
+
+             # if a node is not a condition and we try to evaluate it as one,
+            # it will trigger an assertion error
+            except AssertionError:
+                pass
+
         if "guards" in options:
             tx.output.guards.update(options["guards"])
 
@@ -102,6 +133,7 @@ class TensorVariable(VariableTracker):
 
         use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
         if use_fake_tensors:
+
             fake_wrapper = functools.partial(
                 wrap_to_fake_tensor, fake_mode=tx.fake_mode
             )
@@ -166,8 +198,8 @@ class TensorVariable(VariableTracker):
             options.update(specialized_props)
             return cls(proxy, **options)
         elif (
-            istype(example_value, (torch.Size, int, bool, float))
-            and config.dynamic_shapes
+                istype(example_value, (torch.Size, int, bool, float))
+                and config.dynamic_shapes
         ):
             proxy.node.meta["example_value"] = example_value
             if isinstance(example_value, torch.Size):
@@ -182,7 +214,7 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
         elif istype(example_value, torch.Size) and all(
-            [isinstance(x, int) for x in example_value]
+                [isinstance(x, int) for x in example_value]
         ):
             sizes = [variables.ConstantVariable(x) for x in example_value]
             return SizeVariable(sizes, **options)
@@ -213,8 +245,8 @@ class TensorVariable(VariableTracker):
                 )
             else:
                 assert (
-                    example_value.__class__.__module__ == "torch.return_types"
-                    or hasattr(example_value, "_fields")
+                        example_value.__class__.__module__ == "torch.return_types"
+                        or hasattr(example_value, "_fields")
                 ), "namedtuple?"
                 return variables.NamedTupleVariable(
                     unpacked, example_value.__class__, **options
@@ -222,15 +254,15 @@ class TensorVariable(VariableTracker):
         elif example_value is None or proxy.node.target is torch.manual_seed:
             return variables.ConstantVariable(None, **options)
         elif (
-            isinstance(example_value, int)
-            and proxy.node.target is torch._utils._element_size
+                isinstance(example_value, int)
+                and proxy.node.target is torch._utils._element_size
         ):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
         elif (
-            isinstance(example_value, numbers.Number)
-            and proxy.node.target == "item"
-            and config.capture_scalar_outputs
+                isinstance(example_value, numbers.Number)
+                and proxy.node.target == "item"
+                and config.capture_scalar_outputs
         ):
             return UnspecializedPythonVariable.create(
                 tx=tx,
@@ -245,22 +277,23 @@ class TensorVariable(VariableTracker):
                 False
             ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
 
+
     def __init__(
-        self,
-        proxy: torch.fx.Proxy,
-        dtype=None,
-        device=None,
-        ndim=None,
-        size=None,
-        stride=None,
-        requires_grad=None,
-        is_quantized=None,
-        is_contiguous=None,
-        is_complex=None,
-        is_sparse=None,
-        class_type=torch.Tensor,
-        parameter_value=None,
-        **kwargs,
+            self,
+            proxy: torch.fx.Proxy,
+            dtype=None,
+            device=None,
+            ndim=None,
+            size=None,
+            stride=None,
+            requires_grad=None,
+            is_quantized=None,
+            is_contiguous=None,
+            is_complex=None,
+            is_sparse=None,
+            class_type=torch.Tensor,
+            parameter_value=None,
+            **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
         self.proxy = proxy
@@ -424,8 +457,8 @@ class TensorVariable(VariableTracker):
             name == "repeat"
             and not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            )
-            and not config.dynamic_shapes
+        )
+                and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
         elif name in ("tolist", "numpy", "backward"):
@@ -509,12 +542,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
     """
 
     def __init__(
-        self,
-        tensor_variable,
-        orig_tensor_variable_source,
-        subclass_torch_function__func,
-        subclass_type,
-        **kwargs,
+            self,
+            tensor_variable,
+            orig_tensor_variable_source,
+            subclass_torch_function__func,
+            subclass_type,
+            **kwargs,
     ):
         super(TensorWithTFOverrideVariable, self).__init__(**kwargs)
         self.tensor_variable = tensor_variable
@@ -523,11 +556,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
         self.subclass_type = subclass_type
 
     def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+            self,
+            tx,
+            name,
+            args: "List[VariableTracker]",
+            kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
@@ -656,3 +689,5 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+
