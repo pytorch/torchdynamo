@@ -4,6 +4,7 @@ import unittest
 
 import torch
 
+import torchdynamo
 import torchdynamo.testing
 
 input = torch.ones([10, 10])
