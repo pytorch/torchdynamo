@@ -159,7 +159,7 @@ def compile_fx_inner(
             )
         elif cudagraphs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
-        elif cudagraphs:
+        elif cudagraphs and len(graph.device_types) > 1:
             log.warning("skipping cudagraphs due multple devices")
         return compiled_fn
     except Exception:
