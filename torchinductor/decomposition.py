@@ -90,8 +90,9 @@ def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
-    return functorch._src.decompositions.register_decomposition(ops, decompositions, disable_meta=True)
-
+    return functorch._src.decompositions.register_decomposition(
+        ops, decompositions, disable_meta=True
+    )
 
 @register_decomposition([aten.clamp])
 def clamp(x, min=None, max=None):
