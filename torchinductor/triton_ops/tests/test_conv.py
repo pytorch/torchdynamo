@@ -33,7 +33,8 @@ def test_conv(
     # nuke kernel decorators -- will set meta-parameters manually
     kwargs = {'BLOCK_M': BLOCK_M, 'BLOCK_N': BLOCK_N, 'BLOCK_K': BLOCK_K}
     configs = [triton.Config(kwargs=kwargs, num_warps=NWARP, num_stages=NSTAGE)]
-    kernel = torchinductor.triton_ops._conv.kernel
+    inner_triton_conv = getattr(torchinductor.triton_ops, f"_{provider}")
+    kernel = inner_triton_conv.kernel
     decorators = kernel.kernel_decorators
     kernel.kernel_decorators = []
     triton.autotune(configs, [])(kernel)
@@ -60,19 +61,21 @@ def test_conv(
     assert(same(y, y_correct, cos_similarity=True))
     print("passed")
 
-for layer in ((model.resnet50_layers + model.alexnet_layers)):
-    provider = "conv_analytic"
+for layer in ((model.resnet50_layers + model.alexnet_layers)[:1]):
+    provider = "conv3x3_unroll"
     dilation = (1, 1)
     groups = 1
-    dtype = torch.float16
-    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 32, 64, 2, 4
+    dtype = torch.float32
+    BLOCK_M, BLOCK_N, BLOCK_K, NSTAGE, NWARP = 128, 32, 16, 2, 4
     BATCH = 1
-    IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
-    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = 8, 8, 32, 3, 3, 32, (1, 1), (0, 0)
+    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = layer
+    IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding = 8, 8, 16, 3, 3, 32, (1, 1), (0, 0)
     # 32, 3, 224, 224, 32, 3, 3, (1, 1), (1, 1), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     # 
     # 32, 128, 32, 32,32, 3, 3, (1, 1), (0, 0), (1, 1), 1, torch.float16, 128, 16, 32, 2, 4
     if provider == "conv_analytic" and KERNEL_H * KERNEL_W > 32:
+        continue
+    if provider == "conv3x3_unroll" and (KERNEL_H != 3 or KERNEL_W != 3):
         continue
 
     test_conv(
