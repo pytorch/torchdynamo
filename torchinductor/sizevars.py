@@ -65,6 +65,9 @@ class SizeVarAllocator(object):
         from .ir import IndexingDiv
         from .ir import ModularIndexing
 
+        if isinstance(var_ranges, tuple):
+            assert len(var_ranges) == 1, var_ranges
+            var_ranges = var_ranges[0]
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
@@ -83,13 +86,12 @@ class SizeVarAllocator(object):
         def visit_indexing_div(base, divisor):
             return IndexingDiv(remove_zero_terms(base, divisor), divisor)
 
-        def visit_moduler_indexing(base, divisor, modulus):
+        def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            if (
-                isinstance(base, sympy.Symbol)
-                and base in var_ranges
-                and self.maybe_guard_leq(var_ranges[base], modulus * divisor)
-            ):
+            # actual iteration range is to size-1
+            iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
+            base_s = base.subs(iter_ranges)
+            if self.maybe_guard_lt(base_s, modulus * divisor):
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -99,7 +101,7 @@ class SizeVarAllocator(object):
                 sympy.Wild("divisor"),
                 sympy.Wild("modulus"),
             ),
-            visit_moduler_indexing,
+            visit_modular_indexing,
         )
         expr = expr.replace(
             IndexingDiv(
@@ -146,8 +148,19 @@ class SizeVarAllocator(object):
             return left
 
     def maybe_guard_equals(self, left: sympy.Expr, right: sympy.Expr):
+        """if left==right, guard on that fact and return true"""
         if self.size_hint(left - right) == 0:
             self.guard_equals(left, right)
+            return True
+        return False
+
+    def maybe_guard_list_equals(self, left: List[sympy.Expr], right: List[sympy.Expr]):
+        """if left==right, guard on that fact and return true"""
+        if len(left) != len(right):
+            return False
+        if all(self.size_hint(a - b) == 0 for a, b in zip(left, right)):
+            for a, b in zip(left, right):
+                self.guard_equals(a, b)
             return True
         return False
 
@@ -158,6 +171,15 @@ class SizeVarAllocator(object):
         except TypeError:
             return False
         self.guard_leq(left, right)
+        return True
+
+    def maybe_guard_lt(self, left: sympy.Expr, right: sympy.Expr):
+        try:
+            if self.size_hint(left) >= self.size_hint(right):
+                return False
+        except TypeError:
+            return False
+        self.guard_lt(left, right)
         return True
 
     def guard_leq(self, left: sympy.Expr, right: sympy.Expr):
@@ -247,6 +269,11 @@ class SizeVarAllocator(object):
                     - index_dim.subs({v: sympy.Integer(0)})
                 )
         return strides
+
+    def offset_var(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+        """Extract offset part of an indexing expression"""
+        index = index.subs(self.replacements)
+        return index.subs({v: sympy.Integer(0) for v in vars if v != 0})
 
     def stride_hints(self, index: sympy.Expr, vars: List[sympy.Symbol]):
         for v in index.free_symbols:

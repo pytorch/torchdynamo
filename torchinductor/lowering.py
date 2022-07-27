@@ -351,11 +351,13 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering(aten.alias)
-@register_lowering(aten.detach)
-def detach(x):
-    assert isinstance(x, TensorBox)
+@register_lowering([aten.alias, aten.detach, aten.lift])
+def nop(x):
     return x  # AOT autograd handles this for us
+
+
+if hasattr(aten, "lift_fresh"):
+    register_lowering(aten.lift_fresh)(nop)
 
 
 @register_lowering(aten.squeeze)
@@ -631,31 +633,22 @@ else:
             size = [sympy.expand(s) for s in size]
             offset = V.graph.increment_randomness_offset(sympy_product(size))
 
-            if device.type == "cuda":
-                random_pos = ir.FixedLayout(
-                    device,
+            random_pos = ir.FixedLayout(
+                device,
+                dtype,
+                size,
+                ir.FlexibleLayout.contiguous_strides(size),
+                offset=offset,
+            ).make_indexer()
+
+            seed_buffer = V.graph.random_seed_buffer(device)
+
+            def inner_fn(index):
+                return getattr(ops, fn_name)(
+                    ops.load(seed_buffer, sympy.Integer(0)),
+                    ops.index_expr(random_pos(index), torch.int32),
                     dtype,
-                    size,
-                    ir.FlexibleLayout.contiguous_strides(size),
-                    offset=offset,
-                ).make_indexer()
-                seed_buffer = V.graph.random_seed_buffer(device)
-
-                def inner_fn(index):
-                    return getattr(ops, fn_name)(
-                        ops.load(seed_buffer, sympy.Integer(0)),
-                        ops.index_expr(random_pos(index), torch.int32),
-                    )
-
-            else:
-                # on CPU we use mt19937 which doesn't use the offset
-                # TODO(jansel): we should rewrite CPU RNG to be closer to cuda and deterministic
-                seed_var = V.graph.sizevars.seed()
-
-                def inner_fn(index):
-                    return getattr(ops, f"{fn_name}_cpu")(
-                        ops.index_expr(seed_var, torch.int32), dtype
-                    )
+                )
 
             return Pointwise.create(
                 device=device,
@@ -692,7 +685,6 @@ make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
-make_fallback(aten.mse_loss_backward)
 
 
 @register_lowering(aten.convolution)
@@ -737,6 +729,10 @@ def clone(x, *, memory_format=0):
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+if hasattr(aten, "lift_fresh_copy"):
+    register_lowering(aten.lift_fresh_copy)(clone)
 
 
 @register_lowering([torch.arange, aten.arange])
@@ -1300,21 +1296,67 @@ def index_select(x, dim, indices):
     )
 
 
-@register_lowering(aten.scatter_add_, type_promote=False)
-def scatter_add_(self, dim: int, index, src):
+@register_lowering(aten.scatter_, type_promote=False)
+def scatter_(self, dim: int, index, src, *, reduce: str = None):
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        assert False, "TODO: multiply not supported"
+        reduce = "prod"
+    else:
+        assert reduce is None
+    return scatter_reduce_(self, dim, index, src, reduce)
+
+
+@register_lowering(aten.scatter_reduce_, type_promote=False)
+def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
+    # TODO: Need to support more reduction type
+    assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(self.get_size())
-    src = to_dtype(src, self.get_dtype())
+
     self.realize()
     V.graph.realize_users_of(self.get_name())
-
     index_loader = index.make_loader()
+    src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
     def output_indexer(idx):
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
         return indirect_idx
+
+    def fn(idx):
+        if src_loader:
+            return src_loader(idx)
+        else:
+            # src is a scalar
+            return ops.constant(src, self.get_dtype())
+
+    def backend_reduce_str(reduce):
+        if reduce == "sum":
+            return "atomic_add"
+        else:
+            # TODO: Need to support more reduction type
+            assert reduce is None
+            return None
+
+    if not include_self:
+        # zero out the corresponding elements first
+        zero_out = ir.Scatter(
+            device=self.get_device(),
+            dtype=self.get_dtype(),
+            inner_fn=lambda index: ops.constant(0, self.get_dtype()),
+            ranges=index.get_size(),
+            output_indexer=output_indexer,
+            scatter_mode=None,
+        )
+        buffer = ir.ComputedBuffer(
+            None,
+            ir.MutationLayout(self),
+            zero_out,
+        )
+        buffer.name = V.graph.register_buffer(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -1322,10 +1364,10 @@ def scatter_add_(self, dim: int, index, src):
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
-        inner_fn=src.make_loader(),
+        inner_fn=fn,
         ranges=index.get_size(),
         output_indexer=output_indexer,
-        scatter_mode="atomic_add",
+        scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
         None,
