@@ -74,8 +74,8 @@ def argmax_argmin_prefix(reduction_type, dtype, tmpvar):
         prefix.extend(
             [
                 f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
-                "\tomp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
-                "\tomp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
+                "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
+                "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, dtype)}}})",
             ]
         )
@@ -83,8 +83,8 @@ def argmax_argmin_prefix(reduction_type, dtype, tmpvar):
         prefix.extend(
             [
                 f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
-                "\tomp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
-                "\tomp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
+                "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
+                "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, dtype)}}})",
             ]
         )
@@ -324,9 +324,13 @@ class CppKernel(Kernel):
                 argmax_argmin_prefix(reduction_type, dtype, tmpvar)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
-            self.stores.writeline(
+            self.stores.writelines(
                 None,
-                f"if ({tmpvar}.value {compare_op} {value}) {{{tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};}}",
+                [
+                    f"if ({tmpvar}.value {compare_op} {value}) {{",
+                    f"    {tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};",
+                    "}",
+                ],
             )
         else:
             self.reduction_prefix.writeline(

@@ -751,9 +751,12 @@ class TritonKernel(Kernel):
                 # argmax, argmin
                 self.suffix.writelines(
                     [
-                        f"{accumulator_index}_reduce = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
-                        f"{accumulator_index}_mask = (tl.arange(0, {reduction_range_prefix.upper()}BLOCK)[None, :] == {accumulator_index}_reduce)",
-                        f"{result_var} = tl.reshape(tl.sum(tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
+                        f"{accumulator_index}_reduce = tl.reshape(",
+                        f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
+                        f"{accumulator_index}_mask = (tl.arange(0, {reduction_range_prefix.upper()}BLOCK)[None, :]",
+                        f"\t == {accumulator_index}_reduce)",
+                        f"{result_var} = tl.reshape(tl.sum(",
+                        f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
                     ]
                 )
             else:

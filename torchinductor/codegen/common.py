@@ -301,6 +301,10 @@ class DeferredIndentedBuffer(IndentedBuffer):
         assert "buf" in name
         return super().writeline(DeferredLine(name, line))
 
+    def writelines(self, name, lines):
+        for line in lines:
+            self.writeline(name, line)
+
 
 class BracesBuffer(IndentedBuffer):
     def indent(self, offset=1):
