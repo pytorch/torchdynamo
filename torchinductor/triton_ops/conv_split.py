@@ -344,7 +344,7 @@ class _conv_split:
             # BLOCK_M=128,
             # BLOCK_N=32,
             # BLOCK_K=BLOCK_K,
-            SPLIT_K = KERNEL_H * KERNEL_W,
+            SPLIT_K=KERNEL_H * KERNEL_W,
         )
         return y
 

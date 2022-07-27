@@ -15,7 +15,7 @@ __all__ = [
     "_conv1x1",
     "conv1x1",
     "_conv3x3_unroll",
-    "conv3x3_unroll"
+    "conv3x3_unroll",
     "_conv_analytic",
     "conv_analytic",
     "_conv_split",

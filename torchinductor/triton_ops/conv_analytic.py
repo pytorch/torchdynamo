@@ -118,9 +118,9 @@ def _kernel(
     )
 
     # ------ load x ------
-    matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.)  # BLOCK_M * crs_mul_of_KERNEL
+    matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)  # BLOCK_M * crs_mul_of_KERNEL
     # ------ load w ------
-    matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.)  # crs_mul_of_KERNEL * BLOCK_N
+    matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)  # crs_mul_of_KERNEL * BLOCK_N
 
     # -----------------------------------------------------------
     # allocate accumulator
@@ -153,9 +153,9 @@ def _kernel(
         )
         # ------ prefetch ------
         # ------ load x ------
-        matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.)
+        matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
         # ------ load w ------
-        matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.)
+        matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
 
     # add bias if is not None
     if bias is not None:
