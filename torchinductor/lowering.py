@@ -1338,21 +1338,67 @@ def index_select(x, dim, indices):
     )
 
 
-@register_lowering(aten.scatter_add_, type_promote=False)
-def scatter_add_(self, dim: int, index, src):
+@register_lowering(aten.scatter_, type_promote=False)
+def scatter_(self, dim: int, index, src, *, reduce: str = None):
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        assert False, "TODO: multiply not supported"
+        reduce = "prod"
+    else:
+        assert reduce is None
+    return scatter_reduce_(self, dim, index, src, reduce)
+
+
+@register_lowering(aten.scatter_reduce_, type_promote=False)
+def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
+    # TODO: Need to support more reduction type
+    assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(self.get_size())
-    src = to_dtype(src, self.get_dtype())
+
     self.realize()
     V.graph.realize_users_of(self.get_name())
-
     index_loader = index.make_loader()
+    src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
     def output_indexer(idx):
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
         return indirect_idx
+
+    def fn(idx):
+        if src_loader:
+            return src_loader(idx)
+        else:
+            # src is a scalar
+            return ops.constant(src, self.get_dtype())
+
+    def backend_reduce_str(reduce):
+        if reduce == "sum":
+            return "atomic_add"
+        else:
+            # TODO: Need to support more reduction type
+            assert reduce is None
+            return None
+
+    if not include_self:
+        # zero out the corresponding elements first
+        zero_out = ir.Scatter(
+            device=self.get_device(),
+            dtype=self.get_dtype(),
+            inner_fn=lambda index: ops.constant(0, self.get_dtype()),
+            ranges=index.get_size(),
+            output_indexer=output_indexer,
+            scatter_mode=None,
+        )
+        buffer = ir.ComputedBuffer(
+            None,
+            ir.MutationLayout(self),
+            zero_out,
+        )
+        buffer.name = V.graph.register_buffer(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -1360,10 +1406,10 @@ def scatter_add_(self, dim: int, index, src):
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
-        inner_fn=src.make_loader(),
+        inner_fn=fn,
         ranges=index.get_size(),
         output_indexer=output_indexer,
-        scatter_mode="atomic_add",
+        scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
         None,

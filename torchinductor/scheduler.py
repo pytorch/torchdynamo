@@ -575,6 +575,7 @@ class Scheduler:
                 updated_nodes.append(node)
             else:
                 # dead code
+                log.debug("removed dead node: %s", node.get_name())
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 
@@ -614,13 +615,12 @@ class Scheduler:
                 ]
             )
             if not is_live:
-                # Assign a special value instead of deleting the entry
-                # because we still rely on output_buffers's length to
-                # generate unique arg name.
-                V.kernel.args.output_buffers[name] = "REMOVED"
-                V.graph.removed_buffers.add(name)
+                self.remove_buffer(name)
 
     def remove_buffer(self, name):
+        # Assign a special value instead of deleting the entry
+        # because we still rely on output_buffers's length to
+        # generate unique arg name.
         V.kernel.args.output_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 

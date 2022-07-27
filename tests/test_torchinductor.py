@@ -295,6 +295,10 @@ class TestIndexingSimplification(unittest.TestCase):
             IndexingDiv(i1 + 2 * i2, 32),
         )
 
+        expr = ModularIndexing(2 * i2 + r3, 1, 64)
+        # modular indexing is removed if base is smaller than modulo
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
+
         # check the same thing but with symbolic divisor
         self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
         self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
@@ -2161,6 +2165,48 @@ class CommonTemplate:
             ],
         )
 
+    def test_scatter1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.zeros(2, 3),
+                0,
+                torch.tensor([[0]]),
+                torch.ones(2, 3),
+            ],
+        )
+
+    def test_scatter2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        self.common(
+            fn,
+            [
+                torch.zeros(64, 512),
+                0,
+                torch.zeros((64, 512), dtype=torch.int64),
+                torch.ones(64, 512),
+            ],
+        )
+
+    def test_scatter3(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                0.8,  # src can be a scalar
+            ],
+        )
+
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -2200,6 +2246,34 @@ class CommonTemplate:
                 2,
                 torch.tensor([[[3, 5, 7, 9]]]),
                 torch.randn(1, 1, 10),
+            ],
+        )
+
+    def test_scatter_reduce1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_reduce(a, dim, index, b, "sum")
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                torch.randn(1, 1, 10),
+            ],
+        )
+
+    def test_scatter_reduce2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+
+        self.common(
+            fn,
+            [
+                torch.randn(2, 3),
+                0,
+                torch.zeros((2, 3), dtype=torch.int64),
+                torch.randn(2, 3),
             ],
         )
 

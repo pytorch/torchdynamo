@@ -117,6 +117,41 @@ output         output  output                   ((mul,),)  {}
 Note that the order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 
+### Training and AotAutograd
+The example above only covers inference (model.forward).  
+
+Torchdynamo supports training, using AotAutograd to capture backwards:
+* only the .forward() graph is captured by torchdynamo's python evalframe frontend
+* for each segment of .forward() that torchdynamo captures, it uses AotAutograd to generate a backward graph segment
+* each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backwrad
+* the forward, backward pairs are wrapped in autograd.function modules
+* usercode calling .backward() still triggers eager's autograd engine, which runs each 'compiled backward' graph as if it were one op, also running any non-compiled eager ops' .backward() functions
+
+Current limitations:
+* optimizer ops are currently not captured at all, and thus not compiled (under investigation to add support)
+* DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
+
+Example
+```py
+# nothing special about this part
+model = ...
+optimizer = ...
+
+with torchdynamo.optimize("aot_nvfuser"):
+    for _ in range(100):
+        # forward graphs are captured, and AotAutograd generates corresponding backward graphs
+        # both forward and backward graphs are compiled at this time
+        loss = model(torch.randn(10), torch.randn(10))
+        
+        # no further compilation happens here, but eager autograd executes compiled backwards graphs from above
+        loss.backward()
+        
+        # dynamo won't compile this, currently
+        optimizer.step()
+```
+
+
+
 ## Troubleshooting
 See [Troubleshooting](TROUBLESHOOTING.md).
 

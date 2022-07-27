@@ -65,6 +65,9 @@ class SizeVarAllocator(object):
         from .ir import IndexingDiv
         from .ir import ModularIndexing
 
+        if isinstance(var_ranges, tuple):
+            assert len(var_ranges) == 1, var_ranges
+            var_ranges = var_ranges[0]
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
@@ -83,13 +86,12 @@ class SizeVarAllocator(object):
         def visit_indexing_div(base, divisor):
             return IndexingDiv(remove_zero_terms(base, divisor), divisor)
 
-        def visit_moduler_indexing(base, divisor, modulus):
+        def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            if (
-                isinstance(base, sympy.Symbol)
-                and base in var_ranges
-                and self.maybe_guard_leq(var_ranges[base], modulus * divisor)
-            ):
+            # actual iteration range is to size-1
+            iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
+            base_s = base.subs(iter_ranges)
+            if self.maybe_guard_lt(base_s, modulus * divisor):
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -99,7 +101,7 @@ class SizeVarAllocator(object):
                 sympy.Wild("divisor"),
                 sympy.Wild("modulus"),
             ),
-            visit_moduler_indexing,
+            visit_modular_indexing,
         )
         expr = expr.replace(
             IndexingDiv(
@@ -169,6 +171,15 @@ class SizeVarAllocator(object):
         except TypeError:
             return False
         self.guard_leq(left, right)
+        return True
+
+    def maybe_guard_lt(self, left: sympy.Expr, right: sympy.Expr):
+        try:
+            if self.size_hint(left) >= self.size_hint(right):
+                return False
+        except TypeError:
+            return False
+        self.guard_lt(left, right)
         return True
 
     def guard_leq(self, left: sympy.Expr, right: sympy.Expr):
