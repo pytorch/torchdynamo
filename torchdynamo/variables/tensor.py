@@ -198,18 +198,18 @@ class TensorVariable(VariableTracker):
             options.update(specialized_props)
             return cls(proxy, **options)
         elif (
-                istype(example_value, (torch.Size, int, bool, float))
-                and config.dynamic_shapes
+            istype(example_value, (torch.Size, int, bool, float))
+            and config.dynamic_shapes
         ):
             proxy.node.meta["example_value"] = example_value
             if isinstance(example_value, torch.Size):
                 options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
         elif istype(example_value, int) and proxy.node.target in (
-                torch.seed,
-                operator.mod,
-                torch.distributed.get_rank,
-                torch.distributed.get_world_size,
+            torch.seed,
+            operator.mod,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
         ):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
@@ -459,7 +459,7 @@ class TensorVariable(VariableTracker):
             and not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
         )
-                and not config.dynamic_shapes
+            and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
         elif name in ("tolist", "numpy", "backward"):
@@ -501,10 +501,10 @@ class TensorVariable(VariableTracker):
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
             if (
-                    name == "new"
-                    and len(args) == 1
-                    and isinstance(args[0], (SizeVariable, ShapeVariable))
-                    and not config.dynamic_shapes
+                name == "new"
+                and len(args) == 1
+                and isinstance(args[0], (SizeVariable, ShapeVariable))
+                and not config.dynamic_shapes
             ):
                 name = "new_empty"
 
@@ -690,5 +690,3 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
-
-
