@@ -412,12 +412,18 @@ class TorchPatcher:
             opt._cuda_graph_capture_health_check = disable(
                 opt._cuda_graph_capture_health_check
             )
-            # disable future hooking
-            setattr(opt.step, "hooked", True)
             # disable any currently set hooks
-            unwrapped_step = getattr(opt.step, "__wrapped__", None)
-            if unwrapped_step:
-                opt.step = unwrapped_step
+            # Note: we only want to disable the profiling hook
+            # which is the *last* hook applied, we want to keep the no_grad hook
+            hooked = getattr(opt.step, "hooked", False)
+            if hooked:
+                unwrapped_step = getattr(opt.step, "__wrapped__", None)
+                if unwrapped_step:
+                    opt.step = unwrapped_step
+
+            # disable future hooking
+            print(opt)
+            setattr(opt.step, "hooked", True)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
