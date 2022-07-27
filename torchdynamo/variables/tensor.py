@@ -543,12 +543,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
     """
 
     def __init__(
-            self,
-            tensor_variable,
-            orig_tensor_variable_source,
-            subclass_torch_function__func,
-            subclass_type,
-            **kwargs,
+        self,
+        tensor_variable,
+        orig_tensor_variable_source,
+        subclass_torch_function__func,
+        subclass_type,
+        **kwargs,
     ):
         super(TensorWithTFOverrideVariable, self).__init__(**kwargs)
         self.tensor_variable = tensor_variable
