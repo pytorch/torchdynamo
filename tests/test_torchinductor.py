@@ -2207,6 +2207,7 @@ class CommonTemplate:
             ],
         )
 
+    @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
