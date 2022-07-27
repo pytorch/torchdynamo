@@ -331,30 +331,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
 
-def dump_experiment(args, model_iter_fn, model, example_inputs):
-    """
-    Run the model to dump the graph
-    """
-    timings = np.zeros((1, 2), np.float64)
-    # if we randomize the input, we should also check the result is correct
-    should_check_result = should_randomize_input = args.randomize_input
-    is_correct = True
-
-    inputs = (
-        randomize_input(copy.deepcopy(example_inputs))
-        if should_randomize_input
-        else example_inputs
-    )
-
-    with torchdynamo.run():
-        timed(
-            model, model_iter_fn, inputs, return_result=True
-        )
-
-
-    return current_name
-
-
 def overhead_experiment(*args, model_iter_fn):
     """
     Measure overheads of TorchDynamo by running with no backend (only
@@ -1118,13 +1094,8 @@ def main(runner, original_dir=None):
         else:
             torchinductor.config.dynamic_shapes = False
 
-        if args.inductor_dump:
-            optimize_ctx = torchdynamo.optimize("inductor_dump", nopython=args.nopython)
-            experiment = dump_experiment
-            output_filename = "inductor_dump.csv"
-        else:
-            optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
-            experiment = speedup_experiment
+        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
+        experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
