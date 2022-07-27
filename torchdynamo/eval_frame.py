@@ -200,6 +200,20 @@ class WrapperBackend:
             self.restore()
 
 
+def get_compiler_fn(compiler_fn):
+    """Expand backend strings to functions"""
+    if compiler_fn == "inductor":
+        from torchinductor.compile_fx import compile_fx
+
+        return compile_fx
+    elif isinstance(compiler_fn, str):
+        from .optimizations import BACKENDS
+
+        return BACKENDS[compiler_fn]
+    else:
+        return compiler_fn
+
+
 def optimize(backend, nopython=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -228,6 +242,9 @@ def optimize(backend, nopython=False):
         with torchdynamo.optimize(my_compiler):
            ...
     """
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
     backend_ctx_ctor = null_context
     if hasattr(backend, "backend_ctx_ctor"):
         backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
