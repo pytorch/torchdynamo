@@ -94,6 +94,7 @@ def register_decomposition(ops):
         ops, decompositions, disable_meta=True
     )
 
+
 @register_decomposition([aten.clamp])
 def clamp(x, min=None, max=None):
     if min is not None:
