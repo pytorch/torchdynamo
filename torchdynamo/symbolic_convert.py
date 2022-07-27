@@ -20,6 +20,8 @@ from unittest.mock import patch
 
 import torch
 
+import gc
+
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
@@ -1225,6 +1227,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
         )
+
+        self.new_annotations = [obj for obj in gc.get_referrers(f_code) if hasattr(obj, '__code__')][0].__annotations__
+
         self.one_graph: bool = one_graph
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
@@ -1233,6 +1238,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             for k in vars
             if k in f_locals
         )
+
 
         # symbolic_locals contains the mapping from original f_locals to the
         # Variable objects. During the Variable building phase, each object also
