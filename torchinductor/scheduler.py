@@ -3,13 +3,17 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import os
 from typing import Any
 from typing import Dict
 from typing import List
 
 import numpy as np
 import torch
-import os
+from functorch._src.partitioners import draw_graph
+from torch.fx.graph_module import GraphModule
+from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.tools_common import legalize_graph
 
 from . import config
 from . import dependencies
@@ -19,10 +23,6 @@ from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
-from torch.fx.passes.tools_common import legalize_graph
-from functorch._src.partitioners import draw_graph
-from torch.fx.graph_module import GraphModule
-from torch.fx.passes.shape_prop import TensorMetadata
 
 template_kernels = [ir.Convolution]
 
