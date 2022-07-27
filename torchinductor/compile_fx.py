@@ -112,10 +112,10 @@ def compile_fx_python_key(
     assert all(isinstance(x, torch.Tensor) for x in example_inputs)
 
     with overrides.patch_functions():
+        model = overrides.replace_fx(model)
         gm, wrap = python_key_normalize(
             model, example_inputs, decompositions=decompositions
         )
-        gm = overrides.replace_fx(gm)
 
     if config.dce:
         gm.graph.eliminate_dead_code()

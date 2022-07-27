@@ -80,7 +80,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
         self.name_to_buffer = {}
 
-    def random_seed_buffer(self, device: torch.device, as_buffer=False):
+    def random_seed_buffer(self, device: torch.device):
         """
         Return a device-unique 1-element tensor storing our RNG seed.
         This will get initialized at the start of each graph in
@@ -91,21 +91,18 @@ class GraphLowering(torch.fx.Interpreter):
         """
         name = f"seed_{device.type}_{device.index}"
         if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int32)
+            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
             self.randomness_seeds.append(name)
 
-        if as_buffer:
-            return ir.RandSeedBuffer(
-                name=name,
-                layout=ir.FixedLayout(
-                    device=device,
-                    dtype=torch.int32,
-                    size=[],
-                    stride=[],
-                ),
-            )
-
-        return name
+        return ir.RandSeedBuffer(
+            name=name,
+            layout=ir.FixedLayout(
+                device=device,
+                dtype=torch.int64,
+                size=[],
+                stride=[],
+            ),
+        )
 
     def increment_randomness_offset(self, numel):
         """

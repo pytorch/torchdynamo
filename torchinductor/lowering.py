@@ -642,9 +642,7 @@ else:
                 offset=offset,
             ).make_indexer()
 
-            seed_buffer = V.graph.random_seed_buffer(
-                device, as_buffer=True
-            ).make_loader()
+            seed_buffer = V.graph.random_seed_buffer(device).make_loader()
 
             def inner_fn(index):
                 seed = seed_buffer([])
@@ -670,13 +668,13 @@ else:
     randn = register_lowering([aten.randn, torch.randn])(make_rand("randn"))
 
 
-@register_lowering(overrides.philox_seed_like)
+@register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
     logging.warning("using triton random, expect difference from eager")
-    return V.graph.random_seed_buffer(x.get_device(), as_buffer=True)
+    return V.graph.random_seed_buffer(x.get_device())
 
 
-@register_lowering(overrides.philox_rand_like, type_promote=False)
+@register_lowering(overrides.philox_rand_like._overloadpacket, type_promote=False)
 def philox_rand_like(x, seed, offset):
     device = x.get_device()
     dtype = x.get_dtype()

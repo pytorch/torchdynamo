@@ -1,20 +1,24 @@
-import contextlib
 import logging
 import random
 import weakref
 
 import torch
 from torch import _prims
+from torch.overrides import TorchFunctionMode
 
 log = logging.getLogger(__name__)
 
 
-@contextlib.contextmanager
-def patch_functions():
-    prior = torch.nn.functional.dropout
-    torch.nn.functional.dropout = lowmem_dropout
-    yield
-    torch.nn.functional.dropout = prior
+class AutogradMonkeypatch(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if not kwargs:
+            kwargs = {}
+        if func is replacements:
+            return replacements[func](*args, **kwargs)
+        return func(*args, **kwargs)
+
+
+patch_functions = AutogradMonkeypatch
 
 
 def replace_fx(gm: torch.fx.GraphModule):
@@ -73,45 +77,45 @@ def null_ref():
     return None
 
 
-class LowmemDropout(torch.autograd.Function):
+class PhiloxRandomState:
     next_offset = 0
     seed = {}
     last_tracer_ref = null_ref
 
-    @staticmethod
-    def reset(tracer=None):
-        LowmemDropout.next_offset = 0
-        LowmemDropout.seed = {}
-        LowmemDropout.last_tracer_ref = (
-            weakref.ref(tracer) if tracer is not None else null_ref
-        )
+    @classmethod
+    def reset(cls, tracer=None):
+        cls.next_offset = 0
+        cls.seed = {}
+        cls.last_tracer_ref = weakref.ref(tracer) if tracer is not None else null_ref
 
-    @staticmethod
-    def get_seed_offset(x):
+    @classmethod
+    def get_seed_offset(cls, x):
         if isinstance(x, torch.fx.experimental.proxy_tensor.ProxyTensor):
-            if LowmemDropout.last_tracer_ref() is not x.proxy.tracer:
+            if cls.last_tracer_ref() is not x.proxy.tracer:
                 # tracer changed, need to reset state
-                LowmemDropout.reset(x.proxy.tracer)
+                cls.reset(x.proxy.tracer)
         else:
             # no tracer, need to reset state
-            LowmemDropout.reset()
+            cls.reset()
 
         device = x.device
-        if device not in LowmemDropout.seed:
-            # Compute the seed just once per trace so we pass fewer
+        if device not in cls.seed:
+            # Compute the seed just once per trace so that we pass fewer
             # things from forward to backward
-            LowmemDropout.seed[device] = philox_seed_like(x)
+            cls.seed[device] = philox_seed_like(x)
 
-        seed = LowmemDropout.seed[device]
-        offset = LowmemDropout.next_offset
-        LowmemDropout.next_offset += x.numel()
+        seed = cls.seed[device]
+        offset = cls.next_offset
+        cls.next_offset += x.numel()
         return seed, offset
 
+
+class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, p):
         ctx.p = p
         scale = float(1.0 / (1.0 - p))
-        seed, offset = LowmemDropout.get_seed_offset(x)
+        seed, offset = PhiloxRandomState.get_seed_offset(x)
         ctx.save_for_backward(seed)
         ctx.offset = offset
         bool_mask = philox_rand_like(x, seed, offset) > p
@@ -144,4 +148,14 @@ def lowmem_dropout(input, p, training=True, inplace=False):
     return result
 
 
-replacements = {torch.nn.functional.dropout: lowmem_dropout}
+@torch.fx.wrap
+def rand_like(x, **kwargs):
+    if isinstance(x, torch.fx.Proxy):
+        # double check we don't FX trace this
+        return x.tracer.create_proxy("call_function", rand_like, (x), kwargs)
+    assert kwargs.get("device", x.device) == x.device
+    seed, offset = PhiloxRandomState.get_seed_offset(x)
+    return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
+
+
+replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}

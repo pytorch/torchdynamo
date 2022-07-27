@@ -2299,10 +2299,6 @@ class CommonTemplate:
 
     @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
-        if self.device == "cpu":
-            # TODO(jansel): CPU RNG is not yet deterministic
-            raise unittest.SkipTest("CPU currently nondeterministic")
-
         @torchdynamo.optimize("inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
@@ -2311,14 +2307,14 @@ class CommonTemplate:
             with patch.object(torchinductor.config.triton, "cudagraphs", cg):
                 torchdynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float16)
+                x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 a0 = fn(x).clone()
                 a1 = fn(x).clone()
                 a2 = fn(x).clone()
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 b0 = fn(x).clone()
                 b1 = fn(x).clone()
                 b2 = fn(x).clone()
@@ -2331,6 +2327,40 @@ class CommonTemplate:
                 # different calls, different values
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
+
+    @patch.object(config, "aot_autograd", False)
+    def test_rand_like_deterministic(self):
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.rand_like(a), torch.rand_like(a)
+
+        x = torch.ones(1024, device=self.device, dtype=torch.float32)
+
+        torch.manual_seed(1234)
+        a0 = fn(x)[0].clone()
+        a1 = fn(x)[0].clone()
+        a2 = fn(x)[0].clone()
+
+        torch.manual_seed(1234)
+        b0 = fn(x)[0].clone()
+        b1 = fn(x)[0].clone()
+        b2 = fn(x)[0].clone()
+
+        # same seed, same values
+        self.assertTrue(torch.allclose(a0, b0))
+        self.assertTrue(torch.allclose(a1, b1))
+        self.assertTrue(torch.allclose(a2, b2))
+
+        # different calls, different values
+        self.assertFalse(torch.allclose(a0, a1))
+        self.assertFalse(torch.allclose(a1, a2))
+
+        c, d = fn(x)
+        self.assertFalse(torch.allclose(c, d))
+        self.assertTrue((c >= 0).all())
+        self.assertTrue((c < 1).all())
+        self.assertTrue((d >= 0).all())
+        self.assertTrue((d < 1).all())
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
