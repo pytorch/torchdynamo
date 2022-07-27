@@ -823,11 +823,6 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
-        "--inductor-dump",
-        action="store_true",
-        help="Dump the graphs of computebuffers",
-    )
-    parser.add_argument(
         "--raise-on-assertion-error",
         action="store_true",
         help="Fail a benchmark if torchdynamo triggers an internal assertion",
@@ -1081,7 +1076,7 @@ def main(runner, original_dir=None):
         args.isolate = True
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
-    elif args.inductor or args.inductor_dynamic or args.inductor_dump:
+    elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
 
         torchinductor.config.debug = args.verbose

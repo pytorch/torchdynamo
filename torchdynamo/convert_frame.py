@@ -84,11 +84,6 @@ def _wrap_compiler_fn(compiler_fn):
 
         return compile_fx
 
-    elif compiler_fn == "inductor_dump":
-        from torchinductor.compile_fx import compile_fx_aot_dump
-
-        return compile_fx_aot_dump
-
     elif isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
