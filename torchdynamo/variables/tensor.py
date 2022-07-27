@@ -133,7 +133,6 @@ class TensorVariable(VariableTracker):
 
         use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
         if use_fake_tensors:
-
             fake_wrapper = functools.partial(
                 wrap_to_fake_tensor, fake_mode=tx.fake_mode
             )
@@ -214,7 +213,7 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
         elif istype(example_value, torch.Size) and all(
-                [isinstance(x, int) for x in example_value]
+            [isinstance(x, int) for x in example_value]
         ):
             sizes = [variables.ConstantVariable(x) for x in example_value]
             return SizeVariable(sizes, **options)
@@ -245,8 +244,8 @@ class TensorVariable(VariableTracker):
                 )
             else:
                 assert (
-                        example_value.__class__.__module__ == "torch.return_types"
-                        or hasattr(example_value, "_fields")
+                    example_value.__class__.__module__ == "torch.return_types"
+                    or hasattr(example_value, "_fields")
                 ), "namedtuple?"
                 return variables.NamedTupleVariable(
                     unpacked, example_value.__class__, **options
@@ -458,7 +457,7 @@ class TensorVariable(VariableTracker):
             name == "repeat"
             and not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-        )
+            )
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
