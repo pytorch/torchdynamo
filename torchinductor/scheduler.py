@@ -11,10 +11,6 @@ from typing import List
 
 import numpy as np
 import torch
-from functorch._src.partitioners import draw_graph
-from torch.fx.graph_module import GraphModule
-from torch.fx.passes.shape_prop import TensorMetadata
-from torch.fx.passes.tools_common import legalize_graph
 
 from . import config
 from . import dependencies
@@ -437,6 +433,12 @@ def create_fx_graph(nodes, fname, print_graph=False):
 
     nodes is a list of SchedulerNode objects.
     """
+
+    from functorch._src.partitioners import draw_graph
+    from torch.fx.graph_module import GraphModule
+    from torch.fx.passes.shape_prop import TensorMetadata
+    from torch.fx.passes.tools_common import legalize_graph
+
     func_dict = {}
     name_to_fx_node = {}
     graph = torch.fx.Graph()
@@ -559,7 +561,7 @@ class Scheduler:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
 
-        if bool(os.environ.get("INDUCTOR_DEBUG", False)):
+        if bool(os.environ.get("INDUCTOR_SCHEDULER_GRAPH", 0)==1):
             global graph_dump_index
             create_fx_graph(
                 self.nodes, f"compute_buffer_{graph_dump_index}", print_graph=True
