@@ -6,8 +6,21 @@ from torch.fx.tensor_type import Dyn
 import torchdynamo
 import torchdynamo.testing
 
+try:
+    import z3  # noqa
+    from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (  # noqa
+        evaluate_conditional_with_constraints,
+    )
+
+    HAS_Z3 = True
+except ImportError:
+    HAS_Z3 = False
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_Z3, "no z3")
+
 
 class TorchDynamoUseCases(unittest.TestCase):
+    @skipIfNoTorchVision
     def test_reshape(self):
         """
         Here, we expect a single graph because
@@ -37,6 +50,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         self.assertEqual(cnts.op_count, 3)
         self.assertEqual(cnts.frame_count, 1)
 
+    @skipIfNoTorchVision
     def test_fake_condition(self):
         """
         We use a gt node, but it is not actually
