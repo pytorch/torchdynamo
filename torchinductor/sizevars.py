@@ -348,8 +348,8 @@ def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
 
     This type of pattern can come from view operations
     """
-    from .ir import ModularIndexing
     from .ir import IndexingDiv
+    from .ir import ModularIndexing
 
     if not isinstance(expr, sympy.Add):
         return expr
