@@ -10,10 +10,12 @@ from typing import List
 
 import torch.fx
 import torch.random
+from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
+    evaluate_conditional_with_constraints,
+)
 
-from torchdynamo.utils import maybe_condition, FakeRootModule
-
-from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import evaluate_conditional_with_constraints
+from torchdynamo.utils import FakeRootModule
+from torchdynamo.utils import maybe_condition
 
 from ..utils import fake_tensors_available
 
@@ -46,10 +48,11 @@ from .lists import SizeVariable
 
 try:
     import z3  # type: ignore[import]
-    from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, z3_dyn, D
+
     HAS_Z3 = True
-except:
+except ImportError:
     HAS_Z3 = False
+
 
 @contextmanager
 def preserve_rng_state():
@@ -102,11 +105,16 @@ class TensorVariable(VariableTracker):
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
         if HAS_Z3:
-            annotated_graph, annotated_node = annotate_graph(tx, proxy.node.graph, proxy.node)
+            annotated_graph, annotated_node = annotate_graph(
+                tx, proxy.node.graph, proxy.node
+            )
             if maybe_condition(proxy.node):
                 try:
-                    positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules),
-                                                                               annotated_graph, annotated_node)
+                    positive, negative = evaluate_conditional_with_constraints(
+                        FakeRootModule(tx.output.nn_modules),
+                        annotated_graph,
+                        annotated_node,
+                    )
                     if positive == z3.unsat and negative == z3.sat:
                         proxy.tracer.graph.erase_node(proxy.node)
                         return variables.ConstantVariable(False)
@@ -700,6 +708,4 @@ def annotate_graph(tx, graph, node):
 
         if node.name in tx.new_annotations:
             node.type = tx.new_annotations[node.name]
-
         return new_graph, new_node
-
