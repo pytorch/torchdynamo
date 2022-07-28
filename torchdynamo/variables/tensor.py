@@ -700,12 +700,10 @@ def annotate_graph(tx, graph, node):
     """
 
     if tx.new_annotations is not None:
-        new_graph = copy.copy(graph)
-        new_node = copy.copy(node)
-        for n in new_graph.nodes:
+        for n in graph.nodes:
             if n.name in tx.new_annotations:
                 n.type = tx.new_annotations[n.name]
 
         if node.name in tx.new_annotations:
             node.type = tx.new_annotations[node.name]
-        return new_graph, new_node
+        return graph, node
