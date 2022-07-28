@@ -103,6 +103,7 @@ SKIP_DIRS = [
 ]
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
+    os.path.dirname(__file__) + "/logic/control_flow.py", # TODO(voz): If this grows > 1 or 2 files, walk it properly
 }
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
@@ -114,7 +115,6 @@ if HAS_PRIMS_REFS:
         torch._refs.nn.functional.__file__,
     }
 SKIP_DIRS_RE = None
-
 
 def _recompile_re():
     global SKIP_DIRS_RE

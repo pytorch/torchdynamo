@@ -548,6 +548,28 @@ class SkipFilesVariable(VariableTracker):
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented("call torchdynamo.disable() wrapped function")
+        if inspect.getattr_static(self.value, "_torchdynamo_special_logic", False):
+            print("Calling ", self.value, args, kwargs)
+            # unimplemented("Burger")
+            if self.value.__name__ == "cond":
+                nested_user_func = None
+                if (args[0].raw_value):
+                    # Predicate passes, uuse true function
+                    nested_user_func = args[1]
+                else:
+                    nested_user_func = args[2]
+                 
+                func_args_packed = args[3]
+                print(func_args_packed)
+                args = []
+                for item in func_args_packed.items:
+                    args.append(item)
+                
+                return nested_user_func.call_function(tx, args, {})
+
+            else:
+                print("No my name is", self.value.__name__)
+
         else:
             try:
                 path = inspect.getfile(self.value)
