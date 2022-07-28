@@ -88,6 +88,9 @@ def is_dynamic_nn_module(obj):
     )
 
 
+OVERRIDE_GENERATION_TAGGING = None
+
+
 def install_generation_tagging_init():
     """
     Monkey patch torch.nn.Module.__init__ and torch.nn.Module.__setstate__
@@ -113,4 +116,7 @@ def install_generation_tagging_init():
 
         Module.___needs_generation_tag_patch = False
 
-    GenerationTracker.generation += 1
+    if OVERRIDE_GENERATION_TAGGING is not None:
+        GenerationTracker.generation += OVERRIDE_GENERATION_TAGGING
+    else:
+        GenerationTracker.generation += 1

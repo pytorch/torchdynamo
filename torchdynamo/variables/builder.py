@@ -295,6 +295,12 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif istype(value, types.FunctionType):
+            from torchdynamo.logic.control_flow import cond
+
+            if value is cond:
+                from torchdynamo.variables.functions import DynamoControlFlowFunction
+
+                return DynamoControlFlowFunction(value)
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),

@@ -71,8 +71,10 @@ class TensorVariable(VariableTracker):
     ]
 
     @staticmethod
-    def propagate_args_kwargs(node):
+    def propagate_args_kwargs(node, condition=None):
         def visit(n: torch.fx.Node):
+            if condition is not None:
+                return condition.get(n.target, n.meta.get("example_value", None))
             return n.meta["example_value"]
 
         return torch.fx.node.map_arg((node.args, node.kwargs), visit)
@@ -91,6 +93,10 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
+        return cls.create_conditional(tx=tx, proxy=proxy, example_value=example_value, nnmodule=nnmodule, condition=None, **options)
+
+    @classmethod
+    def create_conditional(cls, tx, proxy, example_value=None, nnmodule=None, condition=None, **options):
         if "guards" in options:
             tx.output.guards.update(options["guards"])
 
@@ -116,7 +122,7 @@ class TensorVariable(VariableTracker):
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
-                args, kwargs = cls.propagate_args_kwargs(proxy.node)
+                args, kwargs = cls.propagate_args_kwargs(proxy.node, condition)
                 if use_fake_tensors:
                     args = tree_map(fake_wrapper, args)
                     kwargs = tree_map(fake_wrapper, kwargs)
@@ -240,22 +246,11 @@ class TensorVariable(VariableTracker):
                 need_unwrap=False,
                 **options,
             )
-        elif (isinstance(example_value, bool)
-            and proxy.node.target == torch.allclose
-            and config.capture_scalar_outputs):
-            return UnspecializedPythonVariable.create(
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                raw_value=example_value,
-                need_unwrap=False,
-                **options,
-            )
-            
+
         else:
             assert (
                 False
-            ), f"torch.* op returned non-Tensor {isinstance(example_value, bool)}, {proxy.node.target}, {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
 
     def __init__(
         self,

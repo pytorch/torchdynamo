@@ -325,3 +325,84 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen(self.code)
         codegen(self.fn_name)
         return [create_instruction("MAKE_FUNCTION", flags)]
+
+
+class DynamoControlFlowFunction(VariableTracker):
+    def __init__(self, fn, **kwargs):
+        super(DynamoControlFlowFunction, self).__init__(**kwargs)
+        assert isinstance(
+            fn, types.FunctionType
+        ), f"expected FunctionType {typestr(fn)} {fn}"
+        self.fn = fn
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        func_args_packed = args[3]
+        func_args = []
+        for item in func_args_packed.items:
+            func_args.append(item.proxy.node.meta["example_value"])
+
+        import torchdynamo
+
+        assert (
+            torchdynamo.config.fake_tensor_propagation == False
+        ), "Fake Tensor Propogation must be disabled for conditional capture"
+        out_true = torchdynamo.export(args[1].get_function(), *func_args)
+        out_true_graph = out_true[0]
+
+        # `export` causes generation increments, and this means that the second exported graph 
+        # is incorrectly tagged as "dynamic". This is a disgusting hack, and we can do a little
+        # better job here probably with another type of export that avoids generational incrementing
+        # via supplying a different function on the context, rather than this.
+        torchdynamo.mutation_guard.OVERRIDE_GENERATION_TAGGING = 0
+        out_false = torchdynamo.export(args[2].get_function(), *func_args)
+        torchdynamo.mutation_guard.OVERRIDE_GENERATION_TAGGING = None
+        
+        from torchdynamo.mutation_guard import GenerationTracker
+        # Adjust the generation back to what it should be
+        GenerationTracker.generation += 1
+
+        out_false_graph = out_false[0]
+
+        from torchdynamo.source import LocalSource
+        from torchdynamo.source import NNModuleSource
+
+        true_source = LocalSource(out_true_graph)
+        true_source.local_name = "true_graph"
+        false_source = LocalSource(out_false_graph)
+        false_source.local_name = "false_graph"
+
+        tx.output.add_submodule(
+            out_false_graph, "false_graph", source=NNModuleSource(false_source)
+        )
+        tx.output.add_submodule(
+            out_true_graph, "true_graph", source=NNModuleSource(true_source)
+        )
+
+        true_graph_node = tx.output.create_proxy(
+            "get_attr",
+            "true_graph",
+            func_args_packed.as_proxy(),
+            {},
+        )
+
+        false_graph_node = tx.output.create_proxy(
+            "get_attr",
+            "false_graph",
+            func_args_packed.as_proxy(),
+            {},
+        )
+
+        proxied_args = [x.as_proxy() for x in func_args_packed.unpack_var_sequence(tx)]
+
+        return variables.TensorVariable.create_conditional(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torchdynamo.logic.control_flow.cond,
+                (args[0].as_proxy(), true_graph_node, false_graph_node, proxied_args),
+                {},
+            ),
+            condition={"true_graph": out_true_graph, "false_graph": out_false_graph},
+        )

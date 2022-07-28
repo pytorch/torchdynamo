@@ -47,7 +47,7 @@ null_context = contextlib.nullcontext
 
 unset = object()
 
-compile_lock = threading.Lock()
+compile_lock = threading.RLock()
 
 
 class _TorchDynamoContext:
@@ -98,8 +98,6 @@ class _TorchDynamoContext:
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
             _fn._torchdynamo_disable = True
-        if isinstance(self, LogicalHandlingContext):
-            _fn._torchdynamo_special_logic = True
         else:
             _fn._torchdynamo_inline = fn
 
@@ -129,12 +127,6 @@ class RunOnlyContext(_TorchDynamoContext):
 class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
-
-
-class LogicalHandlingContext(_TorchDynamoContext):
-    def __init__(self):
-        super().__init__(callback=None)
-
 
 
 def catch_errors_wrapper(callback):
@@ -176,10 +168,10 @@ class WrapperBackend:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
+        self.gm.graph.print_tabular()
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
 
@@ -366,12 +358,6 @@ def run(fn=None):
         return RunOnlyContext()(fn)
     return RunOnlyContext()
 
-
-def _logical_handling(fn=None):
-    if fn is not None:
-        assert callable(fn)
-        return LogicalHandlingContext()(fn)
-    return LogicalHandlingContext()
 
 def disable(fn=None):
     """Decorator and context manager to disable TorchDynamo"""
