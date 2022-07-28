@@ -430,7 +430,7 @@ def get_fake_func(name):
     return func1
 
 
-def create_fx_graph(nodes, fname, print_graph=False):
+def create_fx_from_buffers(nodes, fname, print_graph=False):
     """
     Draw a graph in fname.svg.
 
@@ -565,7 +565,7 @@ class Scheduler:
             from functorch._src.aot_autograd import get_graph_being_compiled
 
             graph_name = get_graph_being_compiled()
-            create_fx_graph(self.nodes, graph_name, print_graph=True)
+            create_fx_from_buffers(self.nodes, graph_name, print_graph=True)
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
