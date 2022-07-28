@@ -36,6 +36,14 @@ from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 
+try:
+    from functorch._src.aot_autograd import set_model_name
+except ImportError:
+
+    def set_model_name(name):
+        pass
+
+
 log = logging.getLogger(__name__)
 
 
@@ -1414,8 +1422,6 @@ def main(runner, original_dir=None):
 
             current_name = name
             current_device = device
-            from functorch._src.aot_autograd import set_model_name
-
             set_model_name(name)
 
             if args.float32:
