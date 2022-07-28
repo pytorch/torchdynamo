@@ -463,7 +463,11 @@ def create_fx_from_buffers(nodes, fname, print_graph=False):
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        stride = node.get_stride()
+        try:
+            stride = node.get_stride()
+        except AttributeError:
+            stride = None
+        
         layout = type(node.layout)
 
         if isinstance(snode, NopKernelSchedulerNode):
