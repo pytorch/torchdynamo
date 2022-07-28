@@ -708,6 +708,9 @@ class TritonKernel(Kernel):
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
         sizes[-1] = "1"
         reduction_range_prefix = self.range_trees[-1].prefix
+        reduction_sizes = ["1" for _ in self.range_trees]
+        reduction_sizes[-1] = f"{reduction_range_prefix.upper()}BLOCK"
+
         if reduction_type == "any":
             reduction_type = "max"
 
@@ -753,8 +756,8 @@ class TritonKernel(Kernel):
                     [
                         f"{accumulator_index}_reduce = tl.reshape(",
                         f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
-                        f"{accumulator_index}_mask = (tl.arange(0, {reduction_range_prefix.upper()}BLOCK)[None, :]",
-                        f"\t == {accumulator_index}_reduce)",
+                        f"{accumulator_index}_mask = (tl.reshape(tl.arange(0, {reduction_range_prefix.upper()}BLOCK),",
+                        f"\t[{', '.join(reduction_sizes)}]) == {accumulator_index}_reduce)",
                         f"{result_var} = tl.reshape(tl.sum(",
                         f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
                     ]

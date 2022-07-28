@@ -2599,7 +2599,7 @@ class CommonTemplate:
         self.common(
             fn,
             [
-                torch.randn([32, 256]),
+                torch.randn([8, 256, 256]),
             ],
         )
 
