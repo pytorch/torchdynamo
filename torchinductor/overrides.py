@@ -140,7 +140,7 @@ def lowmem_dropout(input, p, training=True, inplace=False):
             (input, p, training),
             {},
         )
-    if not training:
+    if not training or p == 0:
         return input
     result = LowmemDropout.apply(input, p)
     if inplace:

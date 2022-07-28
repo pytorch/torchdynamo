@@ -116,12 +116,17 @@ def _allowed_function_ids():
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
+        disallowed_modules = "torch.optim."
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
         if module is None:
             return False
 
         mod_name = module.__name__
+
+        if mod_name.startswith(disallowed_modules):
+            return False
+
         return mod_name in allowed_modules or mod_name.startswith(allowed_modules_dot)
 
     def _find_torch_objects(module):
