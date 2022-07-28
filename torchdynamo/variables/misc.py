@@ -561,11 +561,37 @@ class SkipFilesVariable(VariableTracker):
                  
                 func_args_packed = args[3]
                 print(func_args_packed)
-                args = []
+                func_args = []
                 for item in func_args_packed.items:
-                    args.append(item)
-                
-                return nested_user_func.call_function(tx, args, {})
+                    # print(item)
+                    # print(item.parameter_value)
+                    # print(item.proxy.node.meta["example_value"])
+                    func_args.append(item.proxy.node.meta["example_value"])
+                print("func_args", func_args)
+                # print("fn", nested_user_func.get_function())
+                # out = tx.output.trace(nested_user_func.get_function(), args)
+                # print(out)
+                import torchdynamo
+                assert(torchdynamo.config.fake_tensor_propagation == False), "Fake Tensor Propogation must be disabled for conditional capture"
+                out_true = torchdynamo.export(args[1].get_function(), *func_args)
+                out_true_graph = out_true[0]
+                out_true_graph.root = args[1].get_function()
+
+                out_false = torchdynamo.export(args[2].get_function(), *func_args)
+                out_false_graph = out_false[0]
+                out_false_graph.root = args[2].get_function()
+
+
+                print(out_true[0].graph.print_tabular())
+                print("----")
+                print(out_false[0].graph.print_tabular())
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    torchdynamo.logic.control_flow.cond,
+                    (args[0].raw_value, out_true_graph, out_false_graph, func_args),
+                    {},
+                )
+                return proxy
 
             else:
                 print("No my name is", self.value.__name__)
