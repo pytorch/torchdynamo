@@ -370,6 +370,12 @@ class TestIndexingSimplification(unittest.TestCase):
         self.assertEqual(simplified, i0)
         self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
+        # works with a scale
+        self.assertEqual(
+            sizevars.simplify_with_ranges(2 * expr5, {}),
+            2 * i0,
+        )
+
         # divisor != 1
         expr6 = 197 * IndexingDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
         simplified = sizevars.simplify_with_ranges(expr6, {})
