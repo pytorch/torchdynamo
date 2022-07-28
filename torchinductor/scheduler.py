@@ -420,6 +420,7 @@ class NodeUser:
     def get_name(self):
         return self.node.get_name()
 
+
 def get_fake_func(name):
     def func1(*args):
         return 0
@@ -467,7 +468,7 @@ def create_fx_from_buffers(nodes, fname, print_graph=False):
             stride = node.get_stride()
         except AttributeError:
             stride = None
-        
+
         layout = type(node.layout)
 
         if isinstance(snode, NopKernelSchedulerNode):
@@ -522,7 +523,6 @@ def create_fx_from_buffers(nodes, fname, print_graph=False):
     draw_graph(gm, fname, clear_meta=False)
 
 
-
 class Scheduler:
     def __init__(self, nodes):
         super(Scheduler, self).__init__()
@@ -564,17 +564,19 @@ class Scheduler:
         self.name_to_node = {node.get_name(): node for node in self.nodes}
 
         if INDUCTOR_SCHEDULER_GRAPH:
-            
+
             try:
                 from functorch._src.aot_autograd import get_graph_being_compiled
+
                 graph_name = get_graph_being_compiled()
             except ImportError:
-                logging.warning("Could not get graph name from `get_graph_being_compiled` \
-                    in functorch, use 'model' as default")
+                logging.warning(
+                    "Could not get graph name from `get_graph_being_compiled` \
+                    in functorch, use 'model' as default"
+                )
                 graph_name = "model"
 
             create_fx_from_buffers(self.nodes, graph_name, print_graph=True)
-
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
