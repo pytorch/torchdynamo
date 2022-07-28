@@ -46,7 +46,7 @@ lint-deps:
 setup_lint: lint-deps
 
 setup:
-	pip install -r requirements.txt
+	python -m pip install -r requirements.txt
 
 setup_nightly:
 	pip install ninja
