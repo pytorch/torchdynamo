@@ -655,3 +655,15 @@ def maybe_condition(node):
     :return: True if the node's target is an operation that could be used as a conditional
     """
     return node.target == operator.lt or node.target == operator.gt or node.target == operator.ne
+
+
+class FakeRootModule(torch.nn.Module):
+    """Trick the constructor of fx.GraphModule"""
+
+    def __init__(self, nn_modules: dict):
+        super(FakeRootModule, self).__init__()
+        for k, v in nn_modules.items():
+            setattr(self, k, v)
+
+    def __repr__(self):
+        return "FakeRootModule(...)"

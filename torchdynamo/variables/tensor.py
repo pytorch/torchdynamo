@@ -11,7 +11,7 @@ from typing import List
 import torch.fx
 import torch.random
 
-from torchdynamo.utils import maybe_condition
+from torchdynamo.utils import maybe_condition, FakeRootModule
 
 from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import evaluate_conditional_with_constraints
 
@@ -50,17 +50,6 @@ try:
     HAS_Z3 = True
 except:
     HAS_Z3 = False
-
-class FakeRootModule(torch.nn.Module):
-    """Trick the constructor of fx.GraphModule"""
-
-    def __init__(self, nn_modules: dict):
-        super(FakeRootModule, self).__init__()
-        for k, v in nn_modules.items():
-            setattr(self, k, v)
-
-    def __repr__(self):
-        return "FakeRootModule(...)"
 
 @contextmanager
 def preserve_rng_state():
@@ -112,12 +101,12 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-
         if HAS_Z3:
+            annotated_graph, annotated_node = annotate_graph(tx, proxy.node.graph, proxy.node)
             if maybe_condition(proxy.node):
                 try:
                     positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules),
-                                         proxy.tracer.graph, proxy.node)
+                                                                               annotated_graph, annotated_node)
                     if positive == z3.unsat and negative == z3.sat:
                         proxy.tracer.graph.erase_node(proxy.node)
                         return variables.ConstantVariable(False)
@@ -695,3 +684,22 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+
+def annotate_graph(tx, graph, node):
+    """
+    Copies an fx graph and node and annotates them
+    """
+
+    if tx.new_annotations is not None:
+        new_graph = copy.copy(graph)
+        new_node = copy.copy(node)
+        for n in new_graph.nodes:
+            if n.name in tx.new_annotations:
+                n.type = tx.new_annotations[n.name]
+
+        if node.name in tx.new_annotations:
+            node.type = tx.new_annotations[node.name]
+
+        return new_graph, new_node
+

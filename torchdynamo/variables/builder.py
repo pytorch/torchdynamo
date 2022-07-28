@@ -351,13 +351,10 @@ class VariableBuilder:
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # user code.
             with torch._C.DisableTorchFunction():
-                current_type = type(value)
-                if self.name in self.tx.new_annotations:
-                    current_type = self.tx.new_annotations[self.name]
                 tensor_variable = TensorVariable.create(
                     tx=self.tx,
                     proxy=self.tx.output.create_graph_input(
-                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), current_type
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
                     ),
                     example_value=value,
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
