@@ -114,6 +114,11 @@ class IndexingDiv(sympy.Function):
             return sympy.Integer(0)
         if divisor == 1:
             return base
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return IndexingDiv(base - a, divisor) + a / gcd
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
         gcd = sympy.gcd(base, divisor)
