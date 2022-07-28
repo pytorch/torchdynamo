@@ -12,6 +12,7 @@ from torch import Tensor
 from torch._decomp import get_decompositions
 
 from torchinductor import config
+from torchinductor.utils import is_integer_type
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -150,10 +151,20 @@ def round_dec(x, decimals=0):
 @register_decomposition([aten.div.Tensor_mode])
 def div_mode(a, b, rounding_mode=None):
     result = aten.div(a, b)
+    is_result_integer = is_integer_type(a) and is_integer_type(b)
+
     if rounding_mode == "floor":
-        return torch.floor(result)
+        return (
+            torch.floor(result).to(torch.int64)
+            if is_result_integer
+            else torch.floor(result)
+        )
     if rounding_mode == "trunc":
-        return torch.trunc(result)
+        return (
+            torch.trunc(result).to(torch.int64)
+            if is_result_integer
+            else torch.trunc(result)
+        )
     return result
 
 
