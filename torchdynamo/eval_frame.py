@@ -245,12 +245,10 @@ def optimize(backend, nopython=False):
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
-    backend_ctx_ctor = null_context
-    if hasattr(backend, "backend_ctx_ctor"):
-        backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn=None)
+        return optimize_assert(backend, guard_export_fn=None)
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
     )
@@ -303,16 +301,12 @@ def export(f, *args, **kwargs):
 
         return result_capturing_wrapper
 
-    backend_ctx_ctor = null_context
-
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
 
     result_traced = None
 
-    with optimize_assert(
-        dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
-    ):
+    with optimize_assert(dynamo_normalization_capturing_compiler, guard_export_print):
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = f(*args, **kwargs)
 
@@ -359,15 +353,14 @@ def export(f, *args, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
+def optimize_assert(backend, guard_export_fn=None):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
-    if hasattr(backend, "backend_ctx_ctor"):
-        backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
