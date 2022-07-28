@@ -519,6 +519,8 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
 
     def call_getitem(self, tx, *args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
