@@ -2686,20 +2686,22 @@ class StorageBox(MutableBox):
                 self.realize()
 
     def num_reads(self):
-        if isinstance(
-            self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
-        ):
+        data = self.data
+        if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
             return 1
-        assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
-        read_writes = ComputedBuffer(
-            name=None,
-            layout=FlexibleLayout(
-                device=self.data.get_device(),
-                dtype=self.data.get_dtype(),
-                size=self.data.get_size(),
-            ),
-            data=self.data,
-        ).get_read_writes()
+        if isinstance(data, ComputedBuffer):
+            read_writes = data.get_read_writes()
+        else:
+            assert isinstance(data, (Pointwise, Reduction)), type(data)
+            read_writes = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=data.get_device(),
+                    dtype=data.get_dtype(),
+                    size=data.get_size(),
+                ),
+                data=data,
+            ).get_read_writes()
         return len(read_writes.reads)
 
 
