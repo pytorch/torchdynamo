@@ -109,7 +109,8 @@ class TensorVariable(VariableTracker):
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
         if maybe_condition(proxy.node):
             try:
-                positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules), proxy.tracer.graph, proxy.node)
+                positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules),
+                                     proxy.tracer.graph, proxy.node)
                 if positive == z3.unsat and negative == z3.sat:
                     proxy.tracer.graph.erase_node(proxy.node)
                     return variables.ConstantVariable(False)
@@ -117,7 +118,7 @@ class TensorVariable(VariableTracker):
                     proxy.tracer.graph.erase_node(proxy.node)
                     return variables.ConstantVariable(True)
 
-             # if a node is not a condition and we try to evaluate it as one,
+            # if a node is not a condition and we try to evaluate it as one,
             # it will trigger an assertion error
             except AssertionError:
                 pass

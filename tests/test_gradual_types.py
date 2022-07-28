@@ -34,7 +34,6 @@ class TorchDynamoUseCases(unittest.TestCase):
         self.assertEqual(cnts.op_count, 3)
         self.assertEqual(cnts.frame_count, 1)
 
-
     def test_fake_condition(self):
         """
         We use a gt node, but it is not actually
@@ -61,9 +60,3 @@ class TorchDynamoUseCases(unittest.TestCase):
 
         # nothing should change here
         self.assertEqual(cnts.op_count, 6)
-
-
-
-
-
-

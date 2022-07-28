@@ -647,6 +647,7 @@ class CompileProfiler:
 
         return rpt
 
+
 def maybe_condition(node):
     """
     Determines if a node has an operation that could potentially be a conditional

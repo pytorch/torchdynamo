@@ -20,8 +20,6 @@ from unittest.mock import patch
 
 import torch
 
-import gc
-
 import torchdynamo.side_effects
 import torchdynamo.variables.base
 from torchdynamo.source import AttrSource
@@ -1228,7 +1226,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
         )
 
-        self.new_annotations = [obj for obj in gc.get_referrers(f_code) if hasattr(obj, '__code__')][0].__annotations__
+        self.new_annotations = f_locals["self"].__class__.forward.__annotations__ if\
+            f_locals["self"].__class__.forward.__code__ is f_code else None
 
         self.one_graph: bool = one_graph
         vars = list(code_options["co_varnames"])
