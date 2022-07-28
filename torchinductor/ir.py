@@ -114,6 +114,11 @@ class IndexingDiv(sympy.Function):
             return sympy.Integer(0)
         if divisor == 1:
             return base
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return IndexingDiv(base - a, divisor) + a / gcd
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
         gcd = sympy.gcd(base, divisor)
@@ -339,7 +344,7 @@ class Reduction(Loops):
         if is_triton(device):
             reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
             numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-            if reduction_numel_hint > 8192 and numel_hint == 1:
+            if reduction_numel_hint >= 8192 and numel_hint <= 768:
                 # triton doesn't support reduce to single element well, so break it up
                 split = 128
                 return cls.create_multilayer(
