@@ -11,9 +11,6 @@ from typing import List
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
-    evaluate_conditional_with_constraints,
-)
 
 from torchdynamo.utils import FakeRootModule
 from torchdynamo.utils import maybe_condition
@@ -49,6 +46,9 @@ from .lists import SizeVariable
 
 try:
     import z3  # type: ignore[import]
+    from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
+        evaluate_conditional_with_constraints,
+    )
 
     HAS_Z3 = True
 except ImportError:
