@@ -364,6 +364,11 @@ def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
     backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    if hasattr(backend, "backend_ctx_ctor"):
+        backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
+
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
     )
