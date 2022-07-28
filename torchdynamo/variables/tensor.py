@@ -10,7 +10,6 @@ from typing import List
 
 import torch.fx
 import torch.random
-import z3
 
 from torchdynamo.utils import maybe_condition
 
@@ -45,6 +44,12 @@ from .base import typestr
 from .lists import ShapeVariable
 from .lists import SizeVariable
 
+try:
+    import z3  # type: ignore[import]
+    from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, z3_dyn, D
+    HAS_Z3 = True
+except:
+    HAS_Z3 = False
 
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
@@ -107,21 +112,23 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-        if maybe_condition(proxy.node):
-            try:
-                positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules),
-                                     proxy.tracer.graph, proxy.node)
-                if positive == z3.unsat and negative == z3.sat:
-                    proxy.tracer.graph.erase_node(proxy.node)
-                    return variables.ConstantVariable(False)
-                elif positive == z3.sat and negative == z3.unsat:
-                    proxy.tracer.graph.erase_node(proxy.node)
-                    return variables.ConstantVariable(True)
 
-            # if a node is not a condition and we try to evaluate it as one,
-            # it will trigger an assertion error
-            except AssertionError:
-                pass
+        if HAS_Z3:
+            if maybe_condition(proxy.node):
+                try:
+                    positive, negative = evaluate_conditional_with_constraints(FakeRootModule(tx.output.nn_modules),
+                                         proxy.tracer.graph, proxy.node)
+                    if positive == z3.unsat and negative == z3.sat:
+                        proxy.tracer.graph.erase_node(proxy.node)
+                        return variables.ConstantVariable(False)
+                    elif positive == z3.sat and negative == z3.unsat:
+                        proxy.tracer.graph.erase_node(proxy.node)
+                        return variables.ConstantVariable(True)
+
+                # if a node is not a condition and we try to evaluate it as one,
+                # it will trigger an assertion error
+                except AssertionError:
+                    pass
 
         if "guards" in options:
             tx.output.guards.update(options["guards"])

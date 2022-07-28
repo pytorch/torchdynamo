@@ -4,8 +4,18 @@ from torch.fx.tensor_type import Dyn
 import unittest
 import torchdynamo.testing
 
+try:
+    import z3  # type: ignore[import]
+    HAS_Z3 = True
+except ImportError:
+    HAS_Z3 = False
+
+skipIfNoZ3 = unittest.skipIf(not HAS_Z3, "no z3")
+
 
 class TorchDynamoUseCases(unittest.TestCase):
+
+    @skipIfNoZ3
     def test_reshape(self):
         """
         Here, we expect a single graph because
@@ -34,6 +44,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         self.assertEqual(cnts.op_count, 3)
         self.assertEqual(cnts.frame_count, 1)
 
+    @skipIfNoZ3
     def test_fake_condition(self):
         """
         We use a gt node, but it is not actually
