@@ -18,6 +18,7 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
+from .ir import is_triton
 from .utils import has_torchvision_roi_align
 from .utils import sympy_product
 from .virtualized import V
@@ -86,6 +87,23 @@ def decode_dtype(dtype: int):
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
+
+
+def is_integer_type(x):
+    if isinstance(x, TensorBox):
+        return x.get_dtype() in {
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        }
+    else:
+        return isinstance(x, int)
+
+
+def is_triton_device(x):
+    return isinstance(x, TensorBox) and is_triton(x.get_device())
 
 
 def decode_device(device):
@@ -2600,6 +2618,36 @@ def copy_(dst, src, non_blocking=False):
     return mutate_to(dst, src)
 
 
+@make_pointwise
+def floordiv(a, b):
+    return ops.floordiv(a, b)
+
+
+@make_pointwise
+def truncdiv(a, b):
+    return ops.truncdiv(a, b)
+
+
+@register_lowering(aten.div.Tensor_mode)
+def div_mode(a, b, rounding_mode=None):
+    both_integer = is_integer_type(a) and is_integer_type(b)
+    on_triton = is_triton_device(a) or is_triton_device(b)
+
+    # floordiv and truncdiv need special handling for integer tensors on Triton,
+    # see the discussion at https://github.com/openai/triton/issues/605
+    if rounding_mode == "floor":
+        return floordiv(a, b) if (both_integer and on_triton) else floor(div_mode(a, b))
+    if rounding_mode == "trunc":
+        return truncdiv(a, b) if (both_integer and on_triton) else trunc(div_mode(a, b))
+    if both_integer:
+        # truediv produces a float tensor even if both operands are integer types
+        return div(
+            to_dtype(a, torch.float32) if isinstance(a, TensorBox) else a,
+            to_dtype(b, torch.float32) if isinstance(b, TensorBox) else b,
+        )
+    return div(a, b)
+
+
 sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
@@ -2612,12 +2660,14 @@ register_lowering(aten.argmin)(make_reduction("argmin"))
 add = register_pointwise(aten.add)
 div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)
+floor = register_pointwise(aten.floor)
 mul = register_pointwise(aten.mul)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub)
+trunc = register_pointwise(aten.trunc)
 
 register_pointwise(aten.cos)
 register_pointwise(aten.sin)
@@ -2636,8 +2686,6 @@ register_pointwise(aten.remainder)
 register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
-register_pointwise(aten.trunc)
-register_pointwise(aten.floor)
 register_pointwise(aten.ceil)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
 register_pointwise(aten.isnan, override_dtype=torch.bool)

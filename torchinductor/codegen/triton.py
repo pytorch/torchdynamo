@@ -201,11 +201,23 @@ class TritonOverrides(OpOverrides):
             return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
 
     @staticmethod
+    def floordiv(a, b):
+        # See the comment in lowering.div_mode
+        div = f"tl.fdiv({a}.to(tl.float32), {b}.to(tl.float32), True)"
+        return f"{ops.floor(div)}"
+
+    @staticmethod
     def trunc(x):
         if has_triton_libdevice():
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # See the comment in lowering.div_mode
+        div = f"tl.fdiv({a}.to(tl.float32), {b}.to(tl.float32), True)"
+        return f"{ops.trunc(div)}"
 
     @staticmethod
     def ceil(x):

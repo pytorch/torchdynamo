@@ -155,16 +155,6 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.div.Tensor_mode])
-def div_mode(a, b, rounding_mode=None):
-    result = aten.div(a, b)
-    if rounding_mode == "floor":
-        return torch.floor(result)
-    if rounding_mode == "trunc":
-        return torch.trunc(result)
-    return result
-
-
 @register_decomposition([aten.gelu])
 def gelu(x, approximate="none"):
     if config.approximations or approximate != "none":
