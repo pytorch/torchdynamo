@@ -426,37 +426,42 @@ class VariableBuilder:
             return tensor_variable
 
     def wrap_unspecialized_primitive(self, value):
-        wrapped_value = torch.tensor(value)
-        self.tx.output.graphargs.append(
-            GraphArg(self.get_source(), wrapped_value, True)
-        )
-        if not isinstance(self.get_source(), RandomValueSource):
-            guards = self.make_guards(GuardBuilder.TYPE_MATCH)
-            options = {"guards": guards}
-            options.update({"volatile_guard": list(guards)[0]})
+        if self.name in self.tx.output.unspec_variable_map:
+            return self.tx.output.unspec_variable_map[self.name]
         else:
-            options = {}
-        options.update({"source": self.get_source()})
-        options.update({"raw_value": value})
-
-        proxy = self.tx.output.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
-        )
-
-        if isinstance(value, np.number):
-            return UnspecializedNumpyVariable.create(
-                tx=self.tx,
-                proxy=proxy,
-                example_value=wrapped_value,
-                **options,
+            wrapped_value = torch.tensor(value)
+            self.tx.output.graphargs.append(
+                GraphArg(self.get_source(), wrapped_value, True)
             )
-        else:
-            return UnspecializedPythonVariable.create(
-                tx=self.tx,
-                proxy=proxy,
-                example_value=wrapped_value,
-                **options,
+            if not isinstance(self.get_source(), RandomValueSource):
+                guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+                options = {"guards": guards}
+                options.update({"volatile_guard": list(guards)[0]})
+            else:
+                options = {}
+            options.update({"source": self.get_source()})
+            options.update({"raw_value": value})
+
+            proxy = self.tx.output.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
+
+            if isinstance(value, np.number):
+                unspec_var = UnspecializedNumpyVariable.create(
+                    tx=self.tx,
+                    proxy=proxy,
+                    example_value=wrapped_value,
+                    **options,
+                )
+            else:
+                unspec_var = UnspecializedPythonVariable.create(
+                    tx=self.tx,
+                    proxy=proxy,
+                    example_value=wrapped_value,
+                    **options,
+                )
+            self.tx.output.unspec_variable_map[self.name] = unspec_var
+            return unspec_var
 
 
 def _dataclasses_fields_lambda(obj):
