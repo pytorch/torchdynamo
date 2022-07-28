@@ -43,14 +43,12 @@ add_needs_realized_inputs(
         aten.avg_pool2d,
         aten.avg_pool2d_backward,
         aten.bmm,
-        aten.constant_pad_nd,
         aten.convolution,
         aten.convolution_backward,
         aten.grid_sampler_2d,
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
-        aten.reflection_pad2d,
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
     ]
@@ -1420,7 +1418,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
 @register_lowering(aten.upsample_nearest2d)
 def upsample_nearest2d(x, output_size=None, scale_factors=None):
-    x.realize()  # elements are reused
+    x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
 
     *batch, ih, iw = x.get_size()
@@ -1498,7 +1496,7 @@ def upsample_bilinear2d_vec(
     else:
         w_scale_factor = 0.0
 
-    input.realize()  # read many times
+    input.realize_hint()  # read many times
     input_loader = input.make_loader()
 
     def fn(index):
@@ -1560,8 +1558,8 @@ def upsample_bilinear2d_vec(
 def grid_sampler_2d(
     image, optical, interpolation_mode=0, padding_mode=0, align_corners=False
 ):
-    image.realize()  # reuse
-    optical.realize()
+    image.realize_hint()  # reuse
+    optical.realize_hint()
     image_loader = image.make_loader()
     optical_loader = optical.make_loader()
 
@@ -1667,7 +1665,6 @@ def grid_sampler_2d(
 def reflection_pad2d(x, padding):
     assert len(padding) == 4
     left, right, top, bot = padding
-    x.realize()  # elements are reused
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
@@ -1698,7 +1695,6 @@ def reflection_pad2d(x, padding):
 def constant_pad_2d(x, padding, fill_value):
     assert len(padding) == 4
     left, right, top, bot = padding
-    x.realize()  # elements are reused
 
     x_loader = constant_boundary_condition_2d(x, fill_value, padding)
     *batch, h, w = x.get_size()
@@ -1791,8 +1787,7 @@ def max_pool2d_with_indices(
     if stride is None:
         stride = kernel_size
 
-    x.realize()  # we will read this many times, so make sure it is computed
-
+    x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
@@ -1857,8 +1852,8 @@ def max_pool2d_with_indices_backward(
         stride = kernel_size
 
     # we will read this many times, so make sure it is computed
-    grad_output.realize()
-    indices.realize()
+    grad_output.realize_hint()
+    indices.realize_hint()
 
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
@@ -1964,9 +1959,7 @@ def avg_pool2d(
     assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
 
-    # TODO(jansel): realize after padding?
-    x.realize()  # we will read this many times, so make sure it is computed
-
+    x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
@@ -2043,7 +2036,7 @@ def avg_pool2d_backward(
     assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
 
-    grad_output.realize()  # we will read this many times, so make sure it is computed
+    grad_output.realize_hint()  # we will read this many times, so make sure it is computed
 
     *batch, height, width = x.get_size()
 
