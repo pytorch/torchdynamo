@@ -43,6 +43,14 @@ import torch
 import torch.utils._pytree as pytree
 import torchdynamo
 
+
+@torchdynamo.eval_frame._logical_handling
+def _cond_live(pred, t, f):
+    if pred:
+        return t
+    else:
+        return f
+
 @torchdynamo.eval_frame._logical_handling
 def cond(pred, true_fn, false_fn, inputs):
     """

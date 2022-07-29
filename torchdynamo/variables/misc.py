@@ -597,11 +597,14 @@ class SkipFilesVariable(VariableTracker):
 
                 true_source = LocalSource(out_true_graph)
                 true_source.local_name = "graph_1"
+
+                false_source = LocalSource(out_false_graph)
+                false_source.local_name = "graph_2"
                 # options = VariableTracker.propagate(self, args, kwargs.values())
                 # options["source"] = true_source
 
                 tx.output.add_submodule(out_true_graph, "true_graph", source=NNModuleSource(true_source))
-                tx.output.add_submodule(out_false_graph, "false_graph", source=NNModuleSource(true_source))
+                tx.output.add_submodule(out_false_graph, "false_graph", source=NNModuleSource(false_source))
                 
                 # source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 # from .builder import VariableBuilder
@@ -616,72 +619,72 @@ class SkipFilesVariable(VariableTracker):
                 # out_true_var = VariableBuilder(tx, true_source)(out_true_graph.forward)
                 # out_false_var = VariableBuilder(tx, false_source)(out_false_graph.forward)
                 # print("out_var", out_true_var)
-
-                true_graph_node = tx.output.create_proxy(
-                    "call_module",
-                    "true_graph",
-                    func_args_packed.as_proxy(),
-                    {},
-                )
-
-                fake_tensor_true = variables.TensorVariable.create(
-                    tx=tx,
-                    proxy=true_graph_node,
-                    nnmodule=out_true_graph
-                    # **options,
-                )
-
-                print("true_graph_node", true_graph_node)
-
-
-                false_graph_node = tx.output.create_proxy(
-                    "call_module",
-                    "false_graph",
-                    func_args_packed.as_proxy(),
-                    {},
-                )
-
-                fake_tensor_false = variables.TensorVariable.create(
-                    tx=tx,
-                    proxy=false_graph_node,
-                    nnmodule=out_false_graph
-                    # **options,
-                )
-
-                # proxy = tx.output.create_proxy(
-                #     "call_function",
-                #     torchdynamo.logic.control_flow.cond,
-                #     (args[0].raw_value, true_graph_node, false_graph_node, func_args_packed.as_proxy()),
-                #     {},
-                # )
-
-    # return TensorVariable.create(
-    #                     tx=tx,
-    #                     proxy=tx.output.create_proxy(
-    #                         "call_function",
-    #                         original_torch_or_getattr_variable.value,
-    #                         *proxy_args_kwargs(new_args, new_kwargs),
-    #                     ),
-    #                     **options,
-                    # )
-                # options = VariableTracker.propagate(self, [], )
-                
-                # with torch._C.DisableTorchFunction():
-                print("What is fake_tensor_true?", fake_tensor_true)
-                print("What is fake_tensor_false?", fake_tensor_false)
-                return variables.TensorVariable.create(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torchdynamo.logic.control_flow.cond,
-                        (args[0].value, fake_tensor_true.as_proxy(), fake_tensor_false.as_proxy(), func_args_packed.as_proxy()),
-                        # tuple(),
+                with torch._C.DisableTorchFunction():
+                    true_graph_node = tx.output.create_proxy(
+                        "call_module",
+                        "true_graph",
+                        func_args_packed.as_proxy(),
                         {},
-                    ),
-                    example_value=None
-                    # **options,
-                )
-                # return proxy
+                    )
+
+                    fake_tensor_true = variables.TensorVariable.create(
+                        tx=tx,
+                        proxy=true_graph_node,
+                        nnmodule=out_true_graph
+                        # **options,
+                    )
+
+                    print("true_graph_node", true_graph_node)
+
+
+                    false_graph_node = tx.output.create_proxy(
+                        "call_module",
+                        "false_graph",
+                        func_args_packed.as_proxy(),
+                        {},
+                    )
+
+                    fake_tensor_false = variables.TensorVariable.create(
+                        tx=tx,
+                        proxy=false_graph_node,
+                        nnmodule=out_false_graph
+                        # **options,
+                    )
+
+                    # proxy = tx.output.create_proxy(
+                    #     "call_function",
+                    #     torchdynamo.logic.control_flow.cond,
+                    #     (args[0].raw_value, true_graph_node, false_graph_node, func_args_packed.as_proxy()),
+                    #     {},
+                    # )
+
+        # return TensorVariable.create(
+        #                     tx=tx,
+        #                     proxy=tx.output.create_proxy(
+        #                         "call_function",
+        #                         original_torch_or_getattr_variable.value,
+        #                         *proxy_args_kwargs(new_args, new_kwargs),
+        #                     ),
+        #                     **options,
+                        # )
+                    # options = VariableTracker.propagate(self, [], )
+                    
+                    
+                    print("What is fake_tensor_true?", fake_tensor_true.as_proxy())
+                    print("What is fake_tensor_false?", fake_tensor_false)
+                    return variables.TensorVariable.create(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function",
+                            torchdynamo.logic.control_flow._cond_live,
+                            (args[0].value, fake_tensor_true.as_proxy(), fake_tensor_false.as_proxy()),
+                            # tuple(),
+                            {},
+                        ),
+                        example_value=None
+                        # **options,
+                    )
+                    # return proxy
 
             else:
                 print("No my name is", self.value.__name__)
