@@ -10,6 +10,7 @@ from .eval_frame import run
 from .eval_frame import skip
 from .utils import guard_failures
 from .utils import orig_code_map
+import torchdynamo
 
 __all__ = [
     "optimize",
@@ -97,3 +98,31 @@ def disallow_in_graph(fn):
     assert callable(fn), "disallow_in_graph expects a callable"
     allowed_functions._allowed_function_ids.remove(id(fn))
     allowed_functions._disallowed_function_ids.add(id(fn))
+
+
+def setup_summary():
+    import git
+    import torch
+    import os
+    from os.path import exists
+    def print_commit_hash(path, name):
+        if exists(path):
+            repo = git.Repo(path, search_parent_directories=True)
+            sha = repo.head.object.hexsha
+            print(f"{name} commit: {sha}")
+        else:
+            print(f"{name} Absent")
+    
+    print("## Commit hashes ##")
+    print_commit_hash(".", "torchdynamo")
+    print_commit_hash("../pytorch", "pytorch")
+    print_commit_hash("../functorch", "functorch")
+    print_commit_hash("../torchbenchmark", "torchbench")
+
+    print()
+    print("## TorchDynamo config flags ##")
+    for key in dir(torchdynamo.config):
+        val = getattr(torchdynamo.config, key)
+        if not key.startswith("__") and isinstance(val, bool):
+            print(f"torchdynamo.config.{key} = {val}")
+    print(f"torch: {torch.__version__}")
