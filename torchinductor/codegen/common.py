@@ -12,6 +12,8 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+from torchinductor.codegen.triton import RangeTreeEntryAlias
+
 from .. import metrics
 from ..utils import unique
 from ..virtualized import V
@@ -112,6 +114,50 @@ class ExprPrinter(Printer):
 
     def _print_CleanDiv(self, expr):
         return self._print_IndexingDiv(expr)
+
+
+def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
+    """
+    try to match src_index with dst_index
+    e.g. src_index = x5 + 387200 * x2, and range_trees[x5] is RangeTreeEntryAlias of x1,x0
+    dst_index = x1 + 3025 * x0 + 387200 * x2
+    check if `x5 = x1 + 3025 * x0` could work
+    """
+    sz = V.graph.sizevars
+    range_tree_nodes = V.kernel.range_tree_nodes
+    dst_symbols = dst_index.free_symbols
+    src_symbols = src_index.free_symbols
+    # For the same vars, check if the expr matches
+    inter_symbols = dst_symbols.intersection(src_symbols)
+    test_src_index = src_index.subs({k: 0 for k in inter_symbols})
+    test_dst_index = dst_index.subs({k: 0 for k in inter_symbols})
+    if test_src_index != test_dst_index:
+        return False
+    # For different vars, try to replace src's symbols with dst's symbols
+    src_diff_symbols = src_symbols.difference(inter_symbols) # x5
+    dst_diff_symbols = dst_symbols.difference(inter_symbols) # x1, x0
+    replacements = {}
+    for src_sym in src_diff_symbols:
+        src_range_tree_entry = range_tree_nodes(src_sym)
+        if not isinstance(src_range_tree_entry, RangeTreeEntryAlias):
+            return False
+        # check if RangeTreeEntryAlias's nodes are in dst symbols set
+        src_aliased_nodes = src_range_tree_entry.nodes
+        if not src_aliased_nodes.issubset(dst_diff_symbols):
+            return False
+        # check if the ranges of sub index matches
+        dst_sub_index = dst_index.subs({k: 0 for k in dst_symbols if k not in src_range_tree_entry.nodes})
+        if not sz.maybe_guard_equals(src_sym, dst_sub_index):
+            return False
+        replacements[src_sym] = dst_sub_index
+    test_src_index = src_index.subs(replacements)
+    if test_src_index != dst_index:
+        return False
+    for src_sym, expr in replacements:
+        src_range_tree_entry = range_tree_nodes(src_sym)
+        src_range_tree_entry.set_expr(expr)
+        V.kernel.indexing_code.writeline(f"{src_sym} = {expr}")
+    return True
 
 
 class OpOverrides:
@@ -450,7 +496,7 @@ class CSE:
         self.invalidated_stores = set()
 
     def invalidate(self, keep_vars: typing.Set[str]):
-        for name, tmp in list(self.store_cache.items()):
+        for (name, index), tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
@@ -579,16 +625,24 @@ class Kernel(CodeGen):
                 if "tmp" in str(index):
                     return self.indirect_load(name, index, upcast)
                 store_cache = self.cse.store_cache
-                if name in store_cache:
-                    return store_cache[name]
+                if (name, index) in store_cache:
+                    return store_cache[(name, index)]
+                else:
+                    for store_name, store_index in store_cache.items():
+                        # same name but different index
+                        if name == store_name:
+                            if try_match_index(index, store_index):
+                                store_cache[(name, index)] = store_cache[(name, index)]
+                                return store_cache[(name, index)]
+
                 return self.load(name, index, upcast)
 
             @staticmethod
             def store(name, index, value, mode=None):
                 if mode is None:
-                    self.cse.store_cache[name] = value
+                    self.cse.store_cache[(name, index)] = value
                     for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                        self.cse.store_cache[(other_name, index)] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 

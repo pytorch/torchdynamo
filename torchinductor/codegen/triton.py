@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import contextlib
 import dataclasses
 import functools
@@ -250,6 +251,30 @@ class RangeTree:
     def is_loop(self):
         return self.prefix == "r"
 
+    def try_split_range_tree(self, length):
+        """
+        try to split length over the exsiting RangeTree
+        return:
+        list of alised symbols in exsiting range tree: List[sympy.Symbol]
+        node: the current RangeTreeEntry
+        """
+        sv = V.graph.sizevars
+        # ordered by children RangeTreeEntry's depth
+        ordered_children = OrderedDict(sorted(self.children.items(), key=lambda t: t[1].depth))
+        if length not in self.children:
+            for child_len, child in ordered_children.items():
+                if sv.size_hint(length) > sv.size_hint(child_len):
+                    if not sv.maybe_guard_multiple_of(length, child_len):
+                        continue
+                    size1 = child_len
+                    size2 = ir.IndexingDiv(length, child_len)
+                    child_symbols, child_expr, child_range_tree = child.try_split_range_tree(size2)
+                    return child_symbols.append(child), size1 * child_expr + child.symbol(), child_range_tree
+            return [], None, None
+        else:
+            node = self.children[length]
+            return [node], node.symbol(), node
+
     def child_node(self, length):
         if length not in self.children:
             node = RangeTreeEntry(
@@ -262,6 +287,33 @@ class RangeTree:
         else:
             node = self.children[length]
         return node
+
+    def child_node_split(self, length):
+        if length not in self.children:
+            aliased_entries, expr, node = self.try_split_range_tree(length)
+            if node is None:
+                node = RangeTreeEntry(
+                    f"{self.prefix}{next(V.kernel.iter_vars_count)}", length, self
+                )
+                self.children[length] = node
+                V.kernel.range_tree_nodes[node.symbol()] = node
+                self.var_list.append(node.symbol())
+                self.var_ranges[node.symbol()] = length
+                new_node = node
+            else:
+                new_node = RangeTreeEntryAlias(
+                    f"{self.prefix}{next(V.kernel.iter_vars_count)}", length, self, aliased_entries, expr
+                )
+                self.children[length] = new_node
+                V.kernel.range_tree_nodes[new_node.symbol()] = new_node
+                self.var_list.append(new_node.symbol())
+                self.var_ranges[new_node.symbol()] = length
+                # Note: return the node in original RangeTree
+                # since new_node only codegen aliased expression
+        else:
+            node = self.children[length]
+            new_node = node
+        return node, new_node
 
 
 class RangeTreeRoot(RangeTree):
@@ -391,6 +443,29 @@ class RangeTreeEntry(RangeTree):
 
     def __eq__(self, other):
         return self.name == other.name
+
+
+class RangeTreeEntryAlias(RangeTreeEntry):
+    def __init__(
+        self, name: str, length: sympy.Expr, parent: RangeTree, aliased_entries: List[RangeTreeEntry], expr: sympy.Expr
+    ):
+        super(RangeTreeEntryAlias, self).__init__(name, length, parent)
+        # The aliased expression
+        # like in Aliased indexing, x2 = x1 * s0 + x0, expr = x1 * s0 + x0
+        self.aliased_entries = aliased_entries
+        self.expr = expr
+        self.parent = parent
+        self.codegen = functools.lru_cache(None)(self._codegen)
+        self.codegen_next = functools.lru_cache(None)(self._codegen_next)
+
+    def _codegen_next(self):
+        pass
+
+    def _codegen(self):
+        line = f"{self.name} = {self.expr}"
+        self.writeline(line)
+        return self.name
+
 
 
 def zero_vars(it):
@@ -883,7 +958,8 @@ class TritonScheduling:
             for _ in scheduler.iter_fixed_point():
                 # scheduler.pop_group will keep iterating all reachable fusable nodes
                 for node in scheduler.pop_group(groups):
-                    node.run(*kernel.set_ranges(*node.get_ranges()))
+                    # node.run(*kernel.set_ranges(*node.get_ranges()))
+                    node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     if kernel.inside_reduction:
                         reduction_nodes.append(node)
                     else:
