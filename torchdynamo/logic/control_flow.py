@@ -37,12 +37,13 @@ This operation is not yet supported in torchdynamo tracing, but will be.
 
 """
 
-from typing import Callable, Union
+from typing import Callable
+from typing import Union
 
 import torch
 import torch.utils._pytree as pytree
-import torchdynamo
 
+import torchdynamo
 
 # @torchdynamo.eval_frame._logical_handling
 # def _cond_live(pred, t, f):
@@ -62,6 +63,7 @@ def _logical_handling(fn=None):
         assert callable(fn)
         return LogicalHandlingContext()(fn)
     return LogicalHandlingContext()
+
 
 @_logical_handling
 def cond(pred, true_fn, false_fn, inputs):
@@ -88,6 +90,7 @@ def cond(pred, true_fn, false_fn, inputs):
     # import torchdynamo
     # with torchdynamo.disable():
     if pred:
+        print("Inputs??", inputs)
         print("What the fuck is true_fn?", true_fn)
         return true_fn(*inputs)
     return false_fn(*inputs)
@@ -135,7 +138,6 @@ def while_loop(cond_fn, body_fn, init_val):
         raise ValueError(
             f"control_flow.while_loop() expects all returned values to be tensors, actual outputs: {val}"
         )
-
 
     return val
 

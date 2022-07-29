@@ -60,6 +60,7 @@ class GenerationTracker:
 
     @classmethod
     def tag(cls, obj):
+        print("TAGGING")
         cls.generation_values[obj] = cls.generation
 
     @staticmethod
@@ -75,6 +76,7 @@ class GenerationTracker:
 
     @classmethod
     def check(cls, obj):
+        print("checking", obj)
         return (
             obj in cls.generation_values
             and cls.generation_values[obj] == cls.generation
@@ -83,9 +85,18 @@ class GenerationTracker:
 
 def is_dynamic_nn_module(obj):
     """Check for nn.Modules() created dynamically or mutated"""
+    print(
+        "is_dynamic_nn_module IS GET CHECK:",
+        GenerationTracker.dynamic_classes.get(type(obj)),
+    )
+    print("is_dynamic_nn_module DYN other:", GenerationTracker.check(obj))
+    print(GenerationTracker.generation_values[obj])
     return GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj
     )
+
+
+OVERRIDE_GENERATION_TAGGING = None
 
 
 def install_generation_tagging_init():
@@ -113,4 +124,9 @@ def install_generation_tagging_init():
 
         Module.___needs_generation_tag_patch = False
 
-    GenerationTracker.generation += 1
+    if OVERRIDE_GENERATION_TAGGING is not None:
+        print("OVERRIDE_GENERATION_TAGGING", OVERRIDE_GENERATION_TAGGING)
+        GenerationTracker.generation += OVERRIDE_GENERATION_TAGGING
+    else:
+        print("NO OVERRIDE_GENERATION_TAGGING")
+        GenerationTracker.generation += 1

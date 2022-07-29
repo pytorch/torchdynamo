@@ -175,6 +175,9 @@ class WrapperBackend:
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
+        print("REAL GM")
+        self.gm.graph.print_tabular()
+        print("REAL GM")
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
 

@@ -297,6 +297,7 @@ class VariableBuilder:
             )
         elif istype(value, types.FunctionType):
             from torchdynamo.logic.control_flow import cond
+
             if value is cond:
                 from torchdynamo.variables.functions import DynamoControlFlowFunction
 
