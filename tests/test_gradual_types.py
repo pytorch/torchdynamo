@@ -16,11 +16,11 @@ try:
 except ImportError:
     HAS_Z3 = False
 
-skipIfNoTorchVision = unittest.skipIf(not HAS_Z3, "no z3")
+skipIfNoZ3 = unittest.skipIf(not HAS_Z3, "no z3")
 
 
 class TorchDynamoUseCases(unittest.TestCase):
-    @skipIfNoTorchVision
+    @skipIfNoZ3
     def test_reshape(self):
         """
         Here, we expect a single graph because
@@ -50,7 +50,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         self.assertEqual(cnts.op_count, 3)
         self.assertEqual(cnts.frame_count, 1)
 
-    @skipIfNoTorchVision
+    @skipIfNoZ3
     def test_fake_condition(self):
         """
         We use a gt node, but it is not actually
