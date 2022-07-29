@@ -75,12 +75,14 @@ def cpp_prefix():
             template<>
             inline double mod(double a, double b) { return std::fmod(a, b); }
 
-            constexpr float normalize (uint32_t value) {
-                return value * static_cast<float>(1.0 / std::numeric_limits<uint32_t>::max());
+            constexpr float uint32_to_uniform_float(uint32_t value) {
+                // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
+                constexpr float scale = 4.6566127342e-10;
+                return static_cast<float>(value & 0x7FFFFFFF) * scale;
             }
 
             float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
-                return normalize(at::Philox4_32_10(seed, 0, offset)());
+                return uint32_to_uniform_float(at::Philox4_32_10(seed, 0, offset)());
             }
             """
         ),

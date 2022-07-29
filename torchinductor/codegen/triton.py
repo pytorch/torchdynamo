@@ -510,7 +510,9 @@ class TritonKernel(Kernel):
 
             return_getters_groups.append(return_getters)
 
-        assert all(s == 1 for s in remaining)
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
@@ -603,7 +605,14 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
-        line = f"tl.load({var} + {index}, {mask})"
+        if "rmask" in mask:
+            # This eviction policy heuristic is untested.
+            # ptillet suggested we should try only doing this for
+            # the first N-1 loops and not for the final loop.
+            ep = ", eviction_policy='evict_last'"
+        else:
+            ep = ""
+        line = f"tl.load({var} + {index}, {mask}{ep})"
         if upcast:
             line += ".to(tl.float32)"
 

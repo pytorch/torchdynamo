@@ -36,6 +36,14 @@ from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 
+try:
+    from functorch._src.aot_autograd import set_model_name
+except ImportError:
+
+    def set_model_name(name):
+        pass
+
+
 log = logging.getLogger(__name__)
 
 
@@ -724,6 +732,51 @@ class BenchmarkRunner:
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
+    def resolve_precision(self):
+        use_amp = False
+        model_dtype = torch.float32
+        data_dtype = torch.float32
+        if self._args.amp:
+            use_amp = True
+        elif self._args.float16:
+            model_dtype = torch.float16
+            data_dtype = torch.float16
+        # elif self._args.bfloat16:
+        #     model_dtype = torch.bfloat16
+        #     data_dtype = torch.bfloat16
+        return use_amp, model_dtype, data_dtype
+
+    def decay_batch_exp(self, batch_size, factor=0.5, divisor=16):
+        out_batch_size = batch_size * factor
+        if out_batch_size > divisor:
+            out_batch_size = (out_batch_size + 1) // divisor * divisor
+        else:
+            out_batch_size = batch_size - 1
+        return max(0, int(out_batch_size))
+
+    def batch_size_finder(
+        self, device, model_name, model_iter_fn, initial_batch_size=128
+    ):
+        batch_size = initial_batch_size
+        while batch_size >= 1:
+            torch.cuda.empty_cache()
+            try:
+                device, name, model, example_inputs = self.load_model(
+                    device,
+                    model_name,
+                    self._args.training,
+                    self._args.use_eval_mode,
+                    batch_size,
+                )
+                model_iter_fn(model, example_inputs)
+                return batch_size
+            except RuntimeError as e:
+                error_str = str(e)
+                if "channels_last" in error_str:
+                    break
+            batch_size = self.decay_batch_exp(batch_size)
+        return 1
+
     def run_one_model(
         self,
         name,
@@ -872,6 +925,12 @@ def parse_args():
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
     parser.add_argument("--float32", action="store_true", help="cast model to fp32")
+    parser.add_argument(
+        "--channels-last",
+        action="store_true",
+        default=False,
+        help="use channels last format",
+    )
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
     parser.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
@@ -1050,6 +1109,11 @@ def parse_args():
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
+    )
+    group.add_argument(
+        "--find-batch-sizes",
+        action="store_true",
+        help="finds the largest batch size that could fit on GPUs",
     )
 
     args = parser.parse_args()
@@ -1334,6 +1398,14 @@ def main(runner, original_dir=None):
 
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
+
+    if args.find_batch_sizes and args.only:
+        assert args.isolate
+        for device in args.devices:
+            batch_size = runner.batch_size_finder(device, args.only, model_iter_fn)
+            print(args.only, batch_size)
+        return
+
     if args.only:
         for device in args.devices:
             try:
@@ -1350,6 +1422,8 @@ def main(runner, original_dir=None):
 
             current_name = name
             current_device = device
+            set_model_name(name)
+
             if args.float32:
                 model, example_inputs = cast_to_fp32(model, example_inputs)
             elif args.float16:

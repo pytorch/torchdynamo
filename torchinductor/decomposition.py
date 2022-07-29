@@ -90,7 +90,9 @@ def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
-    return functorch._src.decompositions.register_decomposition(ops, decompositions)
+    return functorch._src.decompositions.register_decomposition(
+        ops, decompositions, disable_meta=True
+    )
 
 
 @register_decomposition([aten.clamp])
@@ -355,9 +357,24 @@ def index_put(self, indices, values, accumulate=False):
     return torch.index_put_(self.clone(), indices, values, accumulate)
 
 
+@register_decomposition([aten.scatter])
+def scatter(self, dim: int, index, src, **kwargs):
+    return self.clone().scatter_(dim, index, src, **kwargs)
+
+
 @register_decomposition([aten.scatter_add])
-def scatter_add(self, dim, index, src):
+def scatter_add(self, dim: int, index, src):
     return self.clone().scatter_add_(dim, index, src)
+
+
+@register_decomposition([aten.scatter_add_])
+def scatter_add_(self, dim: int, index, src):
+    return self.scatter_reduce_(dim, index, src, "sum")
+
+
+@register_decomposition([aten.scatter_reduce])
+def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
+    return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
 
 
 @register_decomposition([aten.narrow])

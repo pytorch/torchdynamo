@@ -9,6 +9,7 @@ import torch.fx
 
 from . import config
 from . import ir
+from . import overrides
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -42,14 +43,12 @@ add_needs_realized_inputs(
         aten.avg_pool2d,
         aten.avg_pool2d_backward,
         aten.bmm,
-        aten.constant_pad_nd,
         aten.convolution,
         aten.convolution_backward,
         aten.grid_sampler_2d,
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
-        aten.reflection_pad2d,
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
     ]
@@ -641,11 +640,15 @@ else:
                 offset=offset,
             ).make_indexer()
 
-            seed_buffer = V.graph.random_seed_buffer(device)
+            seed_buffer = V.graph.random_seed_buffer(device).make_loader()
 
             def inner_fn(index):
+                seed = seed_buffer([])
+                # change seed so that we don't collide with philox_rand_like()
+                # TODO(jansel): migrate everything to philox_rand_like()
+                seed = ops.bitwise_xor(seed, ops.constant(0xFFFF, torch.int32))
                 return getattr(ops, fn_name)(
-                    ops.load(seed_buffer, sympy.Integer(0)),
+                    seed,
                     ops.index_expr(random_pos(index), torch.int32),
                     dtype,
                 )
@@ -661,6 +664,41 @@ else:
 
     rand = register_lowering([aten.rand, torch.rand])(make_rand("rand"))
     randn = register_lowering([aten.randn, torch.randn])(make_rand("randn"))
+
+
+@register_lowering(overrides.philox_seed_like._overloadpacket)
+def philox_seed_like(x):
+    logging.warning("using triton random, expect difference from eager")
+    return V.graph.random_seed_buffer(x.get_device())
+
+
+@register_lowering(overrides.philox_rand_like._overloadpacket, type_promote=False)
+def philox_rand_like(x, seed, offset):
+    device = x.get_device()
+    dtype = x.get_dtype()
+    size = x.get_size()
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+        offset=sympy.expand(offset),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+
+    def inner_fn(index):
+        return ops.rand(
+            seed_loader([]),
+            ops.index_expr(random_pos(index), torch.int32),
+            dtype,
+        )
+
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
 
 
 if has_torchvision_roi_align():
@@ -1296,21 +1334,67 @@ def index_select(x, dim, indices):
     )
 
 
-@register_lowering(aten.scatter_add_, type_promote=False)
-def scatter_add_(self, dim: int, index, src):
+@register_lowering(aten.scatter_, type_promote=False)
+def scatter_(self, dim: int, index, src, *, reduce: str = None):
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        assert False, "TODO: multiply not supported"
+        reduce = "prod"
+    else:
+        assert reduce is None
+    return scatter_reduce_(self, dim, index, src, reduce)
+
+
+@register_lowering(aten.scatter_reduce_, type_promote=False)
+def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
+    # TODO: Need to support more reduction type
+    assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(self.get_size())
-    src = to_dtype(src, self.get_dtype())
+
     self.realize()
     V.graph.realize_users_of(self.get_name())
-
     index_loader = index.make_loader()
+    src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
     def output_indexer(idx):
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
         return indirect_idx
+
+    def fn(idx):
+        if src_loader:
+            return src_loader(idx)
+        else:
+            # src is a scalar
+            return ops.constant(src, self.get_dtype())
+
+    def backend_reduce_str(reduce):
+        if reduce == "sum":
+            return "atomic_add"
+        else:
+            # TODO: Need to support more reduction type
+            assert reduce is None
+            return None
+
+    if not include_self:
+        # zero out the corresponding elements first
+        zero_out = ir.Scatter(
+            device=self.get_device(),
+            dtype=self.get_dtype(),
+            inner_fn=lambda index: ops.constant(0, self.get_dtype()),
+            ranges=index.get_size(),
+            output_indexer=output_indexer,
+            scatter_mode=None,
+        )
+        buffer = ir.ComputedBuffer(
+            None,
+            ir.MutationLayout(self),
+            zero_out,
+        )
+        buffer.name = V.graph.register_buffer(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -1318,10 +1402,10 @@ def scatter_add_(self, dim: int, index, src):
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
-        inner_fn=src.make_loader(),
+        inner_fn=fn,
         ranges=index.get_size(),
         output_indexer=output_indexer,
-        scatter_mode="atomic_add",
+        scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
         None,
@@ -1334,7 +1418,7 @@ def scatter_add_(self, dim: int, index, src):
 
 @register_lowering(aten.upsample_nearest2d)
 def upsample_nearest2d(x, output_size=None, scale_factors=None):
-    x.realize()  # elements are reused
+    x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
 
     *batch, ih, iw = x.get_size()
@@ -1412,7 +1496,7 @@ def upsample_bilinear2d_vec(
     else:
         w_scale_factor = 0.0
 
-    input.realize()  # read many times
+    input.realize_hint()  # read many times
     input_loader = input.make_loader()
 
     def fn(index):
@@ -1474,8 +1558,8 @@ def upsample_bilinear2d_vec(
 def grid_sampler_2d(
     image, optical, interpolation_mode=0, padding_mode=0, align_corners=False
 ):
-    image.realize()  # reuse
-    optical.realize()
+    image.realize_hint()  # reuse
+    optical.realize_hint()
     image_loader = image.make_loader()
     optical_loader = optical.make_loader()
 
@@ -1581,7 +1665,6 @@ def grid_sampler_2d(
 def reflection_pad2d(x, padding):
     assert len(padding) == 4
     left, right, top, bot = padding
-    x.realize()  # elements are reused
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
@@ -1612,7 +1695,6 @@ def reflection_pad2d(x, padding):
 def constant_pad_2d(x, padding, fill_value):
     assert len(padding) == 4
     left, right, top, bot = padding
-    x.realize()  # elements are reused
 
     x_loader = constant_boundary_condition_2d(x, fill_value, padding)
     *batch, h, w = x.get_size()
@@ -1705,8 +1787,7 @@ def max_pool2d_with_indices(
     if stride is None:
         stride = kernel_size
 
-    x.realize()  # we will read this many times, so make sure it is computed
-
+    x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
@@ -1771,8 +1852,8 @@ def max_pool2d_with_indices_backward(
         stride = kernel_size
 
     # we will read this many times, so make sure it is computed
-    grad_output.realize()
-    indices.realize()
+    grad_output.realize_hint()
+    indices.realize_hint()
 
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
@@ -1878,9 +1959,7 @@ def avg_pool2d(
     assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
 
-    # TODO(jansel): realize after padding?
-    x.realize()  # we will read this many times, so make sure it is computed
-
+    x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
@@ -1957,7 +2036,7 @@ def avg_pool2d_backward(
     assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
 
-    grad_output.realize()  # we will read this many times, so make sure it is computed
+    grad_output.realize_hint()  # we will read this many times, so make sure it is computed
 
     *batch, height, width = x.get_size()
 

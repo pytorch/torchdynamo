@@ -168,6 +168,11 @@ class IndexingDiv(sympy.Function):
             return sympy.Integer(0)
         if divisor == 1:
             return base
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return IndexingDiv(base - a, divisor) + a / gcd
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
         gcd = sympy.gcd(base, divisor)
@@ -586,6 +591,9 @@ class BaseView(IRNode):
     def realize(self):
         return self.data.realize()
 
+    def realize_hint(self):
+        return self.data.realize_hint()
+
     def get_storage_numel(self):
         return self.data.get_storage_numel()
 
@@ -954,7 +962,7 @@ class ReinterpretView(BaseView):
         def loader(index):
             indexer = self.layout.make_indexer()
             upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype == torch.bfloat16
+                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
             )
             return ops.load(self.get_name(), indexer(index), upcast)
 
@@ -1428,6 +1436,13 @@ class ConstantBuffer(InputBuffer):
 
     def constant_to_device(self, device):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
+
+
+class RandSeedBuffer(ConstantBuffer):
+    def codegen_reference(self):
+        # Clone makes sure if we pass this from forwards to backwards
+        # the value does not get clobbered by the time backwards is run.
+        return self.get_name() + ".clone()"
 
 
 class NoneAsConstantBuffer(IRNode):
@@ -1926,6 +1941,8 @@ class ExternKernel(InputsKernel):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
             )
+        if isinstance(x, ConstantBuffer):
+            return x
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
@@ -2750,26 +2767,44 @@ class StorageBox(MutableBox):
         self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
+    def realize_hint(self):
+        """
+        Called on buffers we expect to be forced to realize later.
+        """
+        if self.num_reads() > 1:
+            self.realize()
+
     def mark_reuse(self, users):
         if users <= 1:
             return
         if isinstance(self.data, (Pointwise, Reduction)):
-            read_writes = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=self.data.get_device(),
-                    dtype=self.data.get_dtype(),
-                    size=self.data.get_size(),
-                ),
-                data=self.data,
-            ).get_read_writes()
+            num_reads = self.num_reads()
 
             # TODO(jansel): this heuristic is a wild guess
             if (
-                len(read_writes.reads) > config.realize_reads_threshold
+                num_reads > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
             ):
                 self.realize()
+
+    def num_reads(self):
+        data = self.data
+        if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
+            return 1
+        if isinstance(data, ComputedBuffer):
+            read_writes = data.get_read_writes()
+        else:
+            assert isinstance(data, (Pointwise, Reduction)), type(data)
+            read_writes = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=data.get_device(),
+                    dtype=data.get_dtype(),
+                    size=data.get_size(),
+                ),
+                data=data,
+            ).get_read_writes()
+        return len(read_writes.reads)
 
 
 class LoopBody:
@@ -2819,6 +2854,15 @@ class LoopBody:
         self.indirect_vars.append([var])
         return var
 
+    def replace_indirect(self, old, new):
+        """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
+        self.indexing = {k: v.subs({old: new}) for k, v in self.indexing.items()}
+
+    def get_index(self, name):
+        return self.indexing[name]
+
     def __call__(self, *indices):
         index = list(itertools.chain(*indices))
         assert len(index) == len(self.var_ranges)
@@ -2841,12 +2885,14 @@ class LoopBodyBlock:
     """
 
     def __init__(self, body: LoopBody, fn: Callable, args: List[Any]):
-        self.gm = None
         self.body = body
 
         def add_index(expr, category, buf_name=None):
             return tracer.create_proxy(
-                "get_attr", self.body.add_index_expr(expr, category, buf_name), (), {}
+                "call_module",
+                "get_index",
+                (self.body.add_index_expr(expr, category, buf_name),),
+                {},
             )
 
         class CaptureIndexing(V.WrapperHandler):
@@ -2892,7 +2938,7 @@ class LoopBodyBlock:
                 """
 
                 def set_indirect(new_var):
-                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
+                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
 
                 var = self.body.add_indirect()
                 tracer.create_proxy(
@@ -2914,19 +2960,8 @@ class LoopBodyBlock:
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph
 
-    def replace_indirect(self, old, new):
-        """Swap in a variable used in indirect indexing"""
-        if str(old) == str(new):
-            return
-        for name in self.body.indexing.keys():
-            expr = getattr(self.gm, name)
-            if old in expr.free_symbols:
-                setattr(self.gm, name, expr.subs({old: new}))
-
     def __call__(self):
-        self.gm = torch.fx.GraphModule(
-            {**self.body.indexing, **self.body.submodules}, self.graph
+        gm = torch.fx.GraphModule(
+            {**self.body.submodules, "get_index": self.body.get_index}, self.graph
         )
-        result = self.gm.forward(V.get_ops_handler())
-        self.gm = None
-        return result
+        return gm.forward(V.get_ops_handler())
