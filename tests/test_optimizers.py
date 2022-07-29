@@ -1,5 +1,6 @@
 #!/usr/bin/env pytest
 
+import inspect
 import unittest
 
 import torch
@@ -44,4 +45,19 @@ class OptimizerTests(torchdynamo.testing.TestCase):
             )
         )
 
-    test_adam = make_test(torch.optim.Adam)
+    test_sgd = make_test(torch.optim.SGD, lr=0.01)
+
+
+# exclude SGD because it doesn't have proper default args
+exclude = set(["SGD", "Optimizer", "SparseAdam"])
+optimizers = [
+    opt
+    for opt in torch.optim.__dict__.values()
+    if inspect.isclass(opt)
+    and issubclass(opt, torch.optim.Optimizer)
+    and opt.__name__ not in exclude
+]
+
+
+for opt in optimizers:
+    setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
