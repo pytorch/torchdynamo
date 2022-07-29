@@ -143,8 +143,10 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
         src_range_tree_entry = range_tree_nodes[src_sym]
         from torchinductor.codegen.triton import RangeTreeEntryAlias
 
+        # normal RangeTreeEntry does not need aliasing index,
+        # it is gurenteed that src_index is equivelant to dst_index
         if not isinstance(src_range_tree_entry, RangeTreeEntryAlias):
-            return False
+            return True
         # check if RangeTreeEntryAlias's nodes are in dst symbols set
         src_aliased_entries = src_range_tree_entry.aliased_entries
         src_aliased_symbols = set([entry.symbol() for entry in src_aliased_entries])
@@ -167,9 +169,7 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
         return False
     for src_sym, expr in replacements.items():
         src_range_tree_entry = range_tree_nodes[src_sym]
-        expr = expr.subs(
-            {var: V.kernel.rename_indexing(var) for var in expr.free_symbols}
-        )
+        expr = V.kernel.rename_indexing(expr)
         src_range_tree_entry.set_expr(expr)
         # use the new indexing
         src_range_tree_entry.codegen()
@@ -648,6 +648,8 @@ class Kernel(CodeGen):
                     for (store_name, store_index), tmp_name in store_cache.items():
                         # same name but different index
                         if name == store_name:
+                            if store_index == "*":
+                                return tmp_name
                             if try_match_index(index, store_index):
                                 store_cache[(name, index)] = tmp_name
                                 return tmp_name
