@@ -67,6 +67,58 @@ def stride_order2fill_order(order):
     return fill_order
 
 
+def reads_from_conv(buf, var_ranges):
+    """
+    return:
+    if reads_from_conv: boolean
+    the new memory_addr: Sympy Expression
+    """
+    if buf is None:
+        return False, None
+    if isinstance(buf, Convolution):
+        indexer = buf.layout.as_fixed().make_indexer()
+        # sizes = buf.get_size()
+        index_vars = sorted(var_ranges, key=lambda var: var.name)
+        index = indexer(index_vars)
+        return True, index
+    # for case like
+    # buf0 = conv(x, w)
+    # return torch.cat([buf0, buf1]), torch.cat([buf0, buf2])
+    # Because of ConcatKernel, it will create two bufs buf3 and 4
+    # buf3 has the AliasedLayout which reads from buf0(Convolution)
+    # but buf4 is a copy of buf3 which reads from buf3
+    # we want to know that buf4 also follows buf0 conv's layout
+    if isinstance(buf.layout, AliasedLayout):
+        reads = buf.get_read_writes().reads
+        reads_bufs = [
+            V.graph.name_to_buffer[r.name]
+            if r.name in V.graph.name_to_buffer.keys()
+            else None
+            for r in reads
+        ]
+        for reads_buf in reads_bufs:
+            read_from_conv, addr = reads_from_conv(reads_buf, var_ranges)
+            if read_from_conv:
+                return True, addr
+    return False, None
+
+
+def layout_priority_idx(reads_bufs, memory_addrs, var_ranges):
+    """
+    if reads from conv that needs to use specific layout
+    return:
+    priority_idx regarding memory_addrs idx
+    memory_addrs - update memory_addrs with the true addr if needed
+    """
+    priority_idx = []
+    for i, reads_buf in enumerate(reads_bufs):
+        read_from_conv, mem_addr = reads_from_conv(reads_buf, var_ranges)
+        if read_from_conv:
+            priority_idx.append(i)
+            memory_addrs[i] = mem_addr
+    return priority_idx, memory_addrs
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c

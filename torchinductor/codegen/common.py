@@ -127,17 +127,22 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
     src_symbols = src_index.free_symbols
     # For the same vars, check if the expr matches
     inter_symbols = dst_symbols.intersection(src_symbols)
-    test_src_index = src_index.subs({k: 0 for k in src_symbols if k not in inter_symbols})
-    test_dst_index = dst_index.subs({k: 0 for k in dst_symbols if k not in inter_symbols})
+    test_src_index = src_index.subs(
+        {k: 0 for k in src_symbols if k not in inter_symbols}
+    )
+    test_dst_index = dst_index.subs(
+        {k: 0 for k in dst_symbols if k not in inter_symbols}
+    )
     if test_src_index != test_dst_index:
         return False
     # For different vars, try to replace src's symbols with dst's symbols
-    src_diff_symbols = src_symbols.difference(inter_symbols) # x5
-    dst_diff_symbols = dst_symbols.difference(inter_symbols) # x1, x0
+    src_diff_symbols = src_symbols.difference(inter_symbols)  # x5
+    dst_diff_symbols = dst_symbols.difference(inter_symbols)  # x1, x0
     replacements = {}
     for src_sym in src_diff_symbols:
         src_range_tree_entry = range_tree_nodes[src_sym]
         from torchinductor.codegen.triton import RangeTreeEntryAlias
+
         if not isinstance(src_range_tree_entry, RangeTreeEntryAlias):
             return False
         # check if RangeTreeEntryAlias's nodes are in dst symbols set
@@ -146,8 +151,12 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
         if not src_aliased_symbols.issubset(dst_diff_symbols):
             return False
         # check if the ranges of sub index matches
-        dst_sub_index = dst_index.subs({k: 0 for k in dst_symbols if k not in src_aliased_symbols})
-        dst_sub_range = dst_sub_index.subs({e.symbol(): e.length - 1 for e in src_aliased_entries})
+        dst_sub_index = dst_index.subs(
+            {k: 0 for k in dst_symbols if k not in src_aliased_symbols}
+        )
+        dst_sub_range = dst_sub_index.subs(
+            {e.symbol(): e.length - 1 for e in src_aliased_entries}
+        )
         dst_sub_range += 1
         src_sub_range = src_range_tree_entry.length
         if not sz.maybe_guard_equals(src_sub_range, dst_sub_range):
@@ -158,6 +167,9 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
         return False
     for src_sym, expr in replacements.items():
         src_range_tree_entry = range_tree_nodes[src_sym]
+        expr = expr.subs(
+            {var: V.kernel.rename_indexing(var) for var in expr.free_symbols}
+        )
         src_range_tree_entry.set_expr(expr)
         # use the new indexing
         src_range_tree_entry.codegen()
@@ -503,7 +515,7 @@ class CSE:
     def invalidate(self, keep_vars: typing.Set[str]):
         for (name, index), tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
-                del self.store_cache[name]
+                del self.store_cache[(name, index)]
                 self.invalidated_stores.add(name)
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
@@ -644,6 +656,9 @@ class Kernel(CodeGen):
 
             @staticmethod
             def store(name, index, value, mode=None):
+                # # remove tl.zeros
+                # if isinstance(index, str):
+                #     index = re.sub(r" + tl.zeros(.+)", "", index)
                 if mode is None:
                     self.cse.store_cache[(name, index)] = value
                     for other_name in self.current_node.get_mutations():

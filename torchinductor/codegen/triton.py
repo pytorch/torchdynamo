@@ -1,4 +1,3 @@
-from collections import OrderedDict
 import contextlib
 import dataclasses
 import functools
@@ -6,6 +5,7 @@ import itertools
 import logging
 import math
 import operator
+from collections import OrderedDict
 from typing import Dict
 from typing import List
 
@@ -260,7 +260,9 @@ class RangeTree:
         """
         sv = V.graph.sizevars
         # ordered by children RangeTreeEntry's depth
-        ordered_children = OrderedDict(sorted(self.children.items(), key=lambda t: t[1].depth))
+        ordered_children = OrderedDict(
+            sorted(self.children.items(), key=lambda t: t[1].depth)
+        )
         if length not in self.children:
             for child_len, child in ordered_children.items():
                 if sv.size_hint(length) > sv.size_hint(child_len):
@@ -268,9 +270,20 @@ class RangeTree:
                         continue
                     size1 = child_len
                     size2 = ir.IndexingDiv(length, child_len)
-                    child_entries, child_expr, child_range_tree = child.try_split_range_tree(size2)
+                    (
+                        child_entries,
+                        child_expr,
+                        child_range_tree,
+                    ) = child.try_split_range_tree(size2)
+                    if child_range_tree is None:
+                        continue
                     child_entries.append(child)
-                    return child_entries, size1 * child_expr + child.symbol(), child_range_tree
+                    size1 = V.kernel.rename_indexing(size1)
+                    return (
+                        child_entries,
+                        size1 * child_expr + child.symbol(),
+                        child_range_tree,
+                    )
             return [], None, None
         else:
             node = self.children[length]
@@ -303,7 +316,11 @@ class RangeTree:
                 new_node = node
             else:
                 new_node = RangeTreeEntryAlias(
-                    f"{self.prefix}{next(V.kernel.iter_vars_count)}", length, self, aliased_entries, expr
+                    f"{self.prefix}{next(V.kernel.iter_vars_count)}",
+                    length,
+                    self,
+                    aliased_entries,
+                    expr,
                 )
                 self.children[length] = new_node
                 V.kernel.range_tree_nodes[new_node.symbol()] = new_node
@@ -448,7 +465,12 @@ class RangeTreeEntry(RangeTree):
 
 class RangeTreeEntryAlias(RangeTreeEntry):
     def __init__(
-        self, name: str, length: sympy.Expr, parent: RangeTree, aliased_entries: List[RangeTreeEntry], expr: sympy.Expr
+        self,
+        name: str,
+        length: sympy.Expr,
+        parent: RangeTree,
+        aliased_entries: List[RangeTreeEntry],
+        expr: sympy.Expr,
     ):
         super(RangeTreeEntryAlias, self).__init__(name, length, parent)
         # The aliased expression
@@ -466,10 +488,9 @@ class RangeTreeEntryAlias(RangeTreeEntry):
         pass
 
     def _codegen(self):
-        line = f"{self.name} = {self.expr}"
+        line = f"{self.name} = {texpr(self.expr)}"
         self.writeline(line)
         return self.name
-
 
 
 def zero_vars(it):
@@ -782,11 +803,12 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
+        sympy_index = index
         index, mask = self.indexing(index, result_var)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
-        self.cse.store_cache[(name, index)] = result_var
+        self.cse.store_cache[(name, sympy_index)] = result_var
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             self.suffix.writeline(
@@ -962,8 +984,8 @@ class TritonScheduling:
             for _ in scheduler.iter_fixed_point():
                 # scheduler.pop_group will keep iterating all reachable fusable nodes
                 for node in scheduler.pop_group(groups):
-                    # node.run(*kernel.set_ranges(*node.get_ranges()))
-                    node.run(*kernel.split_and_set_ranges(node.get_ranges()))
+                    node.run(*kernel.set_ranges(*node.get_ranges()))
+                    # node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     if kernel.inside_reduction:
                         reduction_nodes.append(node)
                     else:
