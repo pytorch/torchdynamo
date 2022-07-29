@@ -349,6 +349,7 @@ class OutputGraph(fx.Tracer):
         compiled_fn = torchdynamo.disable(compiled_fn)
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
+        # print(gm)
         if config.debug:
             print(f"\n{name} {gm.forward.__code__.co_filename}")
             self.graph.print_tabular()

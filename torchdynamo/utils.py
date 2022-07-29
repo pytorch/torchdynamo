@@ -654,10 +654,14 @@ def maybe_condition(node):
     :param node: current node
     :return: True if the node's target is an operation that could be used as a conditional
     """
+
     return (
         node.target == operator.lt
         or node.target == operator.gt
         or node.target == operator.ne
+        or node.target == operator.eq
+        or node.target == operator.le
+        or node.target == operator.ge
     )
 
 
