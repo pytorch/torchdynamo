@@ -682,7 +682,7 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
-    def test_div(self):
+    def test_div1(self):
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
@@ -691,6 +691,20 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
+
+    def test_div2(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("https://github.com/openai/triton/issues/605")
+
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        a = torch.randint(1, 100, [8, 8])
+        self.common(fn, (a * 2, a))
 
     def test_sum_keepdims(self):
         def fn(a, b):
