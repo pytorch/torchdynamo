@@ -44,14 +44,26 @@ import torch.utils._pytree as pytree
 import torchdynamo
 
 
-@torchdynamo.eval_frame._logical_handling
-def _cond_live(pred, t, f):
-    if pred:
-        return t
-    else:
-        return f
+# @torchdynamo.eval_frame._logical_handling
+# def _cond_live(pred, t, f):
+#     if pred:
+#         return t
+#     else:
+#         return f
 
-@torchdynamo.eval_frame._logical_handling
+
+class LogicalHandlingContext(torchdynamo.eval_frame._TorchDynamoContext):
+    def __init__(self):
+        super().__init__(callback=None)
+
+
+def _logical_handling(fn=None):
+    if fn is not None:
+        assert callable(fn)
+        return LogicalHandlingContext()(fn)
+    return LogicalHandlingContext()
+
+@_logical_handling
 def cond(pred, true_fn, false_fn, inputs):
     """
     A higher order function returning result based on passed predicate

@@ -285,6 +285,7 @@ class VariableBuilder:
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
+            print("SKIPFILE: ", getfile(value), value)
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
@@ -295,6 +296,11 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif istype(value, types.FunctionType):
+            from torchdynamo.logic.control_flow import cond
+            if value is cond:
+                from torchdynamo.variables.functions import DynamoControlFlowFunction
+
+                return DynamoControlFlowFunction(value)
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),

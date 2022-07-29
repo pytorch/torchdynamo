@@ -98,8 +98,8 @@ class _TorchDynamoContext:
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
             _fn._torchdynamo_disable = True
-        if isinstance(self, LogicalHandlingContext):
-            _fn._torchdynamo_special_logic = True
+        # if isinstance(self, LogicalHandlingContext):
+        #     _fn._torchdynamo_special_logic = True
         else:
             _fn._torchdynamo_inline = fn
 
@@ -130,12 +130,6 @@ class RunOnlyContext(_TorchDynamoContext):
 class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
-
-
-class LogicalHandlingContext(_TorchDynamoContext):
-    def __init__(self):
-        super().__init__(callback=None)
-
 
 
 def catch_errors_wrapper(callback):
@@ -369,12 +363,6 @@ def run(fn=None):
         return RunOnlyContext()(fn)
     return RunOnlyContext()
 
-
-def _logical_handling(fn=None):
-    if fn is not None:
-        assert callable(fn)
-        return LogicalHandlingContext()(fn)
-    return LogicalHandlingContext()
 
 def disable(fn=None):
     """Decorator and context manager to disable TorchDynamo"""
