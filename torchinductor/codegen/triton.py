@@ -15,6 +15,7 @@ from .. import codecache
 from .. import config
 from .. import ir
 from ..utils import has_triton_libdevice
+from ..utils import sympy_dot
 from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
@@ -235,6 +236,12 @@ class RangeTree:
         self.prefix = prefix
         self.depth = depth
         self.length = length
+        self.recursive_names = {name}
+
+    def compute_recursive_names(self):
+        for c in self.children.values():
+            c.compute_recursive_names()
+            self.recursive_names.update(c.recursive_names)
 
     def cache_clear(self):
         for child in self.children.values():
@@ -274,16 +281,43 @@ class RangeTreeRoot(RangeTree):
     def codegen_next(self):
         return self.name
 
-    def simplify(self, expr, nodes):
-        return expr
-
-    def construct(self, lengths):
+    def construct(self, lengths: List[sympy.Expr]):
         node = self
         itervars = []
         for sv in reversed(lengths):
             node = node.child_node(sv)
             itervars.append(node.symbol())
+        self.compute_recursive_names()
         return list(reversed(itervars))
+
+    def vars_and_sizes(self, index: sympy.Expr):
+        """Figure out vars from this tree used in index"""
+        symbol_names = set(map(str, index.free_symbols)) & self.recursive_names
+        if not symbol_names:
+            return [], []
+        index_vars = []
+        sizes = []
+        node = self
+        while symbol_names:
+            size, child = [
+                (s, c)
+                for s, c in node.children.items()
+                if c.recursive_names & symbol_names
+            ][0]
+            index_vars.append(child.symbol())
+            sizes.append(size)
+            if child.name in symbol_names:
+                symbol_names.remove(child.name)
+            node = child
+        if node.children:
+            # extra broadcasting dim
+            assert node.numel != 1
+            index_vars.append(node.child_node(node.numel).symbol())
+            sizes.append(node.numel)
+
+        index_vars = list(reversed(index_vars))
+        sizes = list(reversed(sizes))
+        return index_vars, sizes
 
     def ranges_code(self):
         size = self.kernel.reshape_size_str(self.index, self.prefix)
@@ -351,32 +385,6 @@ class RangeTreeEntry(RangeTree):
 
     def next_symbol(self):
         return sympy.Symbol(f"{self.name}_next")
-
-    def simplify(self, expr: sympy.Expr):
-        """
-        Merge the indexing math for contiguous dimensions
-        """
-        if isinstance(self.parent, RangeTreeRoot):
-            return expr
-
-        v1 = sympy.Symbol("subs_var1")
-        v2 = sympy.Symbol("subs_var2")
-        pl = self.parent.length
-        test_expr = sympy.expand(
-            expr.subs({self.name: 0, self.parent.name: (v1 * pl + v2)}).subs(
-                {
-                    v1: self.name,
-                    v2: self.parent.name,
-                }
-            )
-        )
-        if test_expr == sympy.expand(expr):
-            # we can compact this dimension into a a single one
-            node = self.parent.parent.child_node(self.length * self.parent.length)
-            new_expr = expr.subs({self.name: 0, self.parent.name: node.symbol()})
-            return node.simplify(new_expr)
-
-        return expr
 
     def __hash__(self):
         return hash(self.name)
@@ -524,12 +532,44 @@ class TritonKernel(Kernel):
             for v in index_vars
         )
 
+    def combine_contiguous_dims(self, index: sympy.Expr, tree: RangeTreeRoot):
+        """
+        More aggressive simplification to merge contiguous dims
+        """
+        index_vars, sizes = tree.vars_and_sizes(index)
+        if not sizes:
+            return index
+        new_sizes, reindex, prune = ir._simplify_loops(
+            index_vars,
+            sizes,
+            [
+                index,
+                # added contiguous index prevents reordering
+                sympy_dot(index_vars, ir.FlexibleLayout.contiguous_strides(sizes)),
+            ],
+        )
+        if new_sizes == sizes:
+            return index
+        new_index_vars = tree.construct(new_sizes)
+        new_index = index.subs(dict(zip(index_vars, reindex(new_index_vars))))
+        log.info(
+            "REPLACED %s with %s (sizes %s with %s)",
+            index,
+            new_index,
+            dict(zip(index_vars, sizes)),
+            dict(zip(new_index_vars, new_sizes)),
+        )
+        return new_index
+
     def indexing(self, index: sympy.Expr, copy_shape=None):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
+        index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
+        for tree in self.range_trees:
+            index = self.combine_contiguous_dims(index, tree)
         index_vars = set(index.free_symbols)
-        index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
+        index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
         indirect_indexing = self.is_indirect_indexing(index)
         need_dense = (config.triton.dense_indexing or indirect_indexing) and index != 0
         have_dense = True
@@ -571,23 +611,11 @@ class TritonKernel(Kernel):
             ),
         )
 
-    def simplify_indexing(self, expr: sympy.Expr):
+    def codegen_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
-        sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
-        nodes = [
-            self.range_tree_nodes[sym]
-            for sym in sorted_expr_symbols
-            if sym in self.range_tree_nodes
-        ]
-        if nodes:
-            nodes.sort(key=lambda x: x.depth)
-            expr = nodes[-1].simplify(expr)
-            sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
-
-        for sym in sorted_expr_symbols:
+        for sym in expr.free_symbols:
             if sym in self.range_tree_nodes:
                 self.range_tree_nodes[sym].codegen()
-
         return expr
 
     @contextlib.contextmanager
