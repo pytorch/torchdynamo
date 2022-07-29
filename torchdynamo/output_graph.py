@@ -193,6 +193,7 @@ class OutputGraph(fx.Tracer):
                 )
 
         else:
+            print("TYPE:", mod.__class__)
             assert isinstance(mod, torch.nn.Module)
             options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
 

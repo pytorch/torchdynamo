@@ -68,6 +68,7 @@ def cond(pred, true_fn, false_fn, inputs):
     # import torchdynamo
     # with torchdynamo.disable():
     if pred:
+        print("What the fuck is true_fn?", true_fn)
         return true_fn(*inputs)
     return false_fn(*inputs)
     # outputs = true_fn(*inputs) if pred else false_fn(*inputs)

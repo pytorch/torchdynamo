@@ -73,7 +73,9 @@ class TensorVariable(VariableTracker):
     @staticmethod
     def propagate_args_kwargs(node):
         def visit(n: torch.fx.Node):
-            return n.meta["example_value"]
+            print("N", n.target.__class__)
+            print("Meta", n.meta)
+            return n.meta.get("example_value", None)
 
         return torch.fx.node.map_arg((node.args, node.kwargs), visit)
 
