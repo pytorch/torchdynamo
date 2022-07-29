@@ -552,13 +552,6 @@ class TritonKernel(Kernel):
             return index
         new_index_vars = tree.construct(new_sizes)
         new_index = index.subs(dict(zip(index_vars, reindex(new_index_vars))))
-        log.info(
-            "REPLACED %s with %s (sizes %s with %s)",
-            index,
-            new_index,
-            dict(zip(index_vars, sizes)),
-            dict(zip(new_index_vars, new_sizes)),
-        )
         return new_index
 
     def indexing(self, index: sympy.Expr, copy_shape=None):
