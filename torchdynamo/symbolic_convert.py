@@ -1229,10 +1229,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.new_annotations = {}
 
         if "self" in f_locals:
-            if f_locals["self"].__class__.forward.__code__ is f_code:
-                self.new_annotations = f_locals[
-                    "self"
-                ].__class__.forward.__annotations__
+            if hasattr(f_locals["self"].__class__, "forward"):
+
+                if f_locals["self"].__class__.forward.__code__ is f_code:
+                    self.new_annotations = f_locals[
+                        "self"
+                    ].__class__.forward.__annotations__
 
         self.one_graph: bool = one_graph
         vars = list(code_options["co_varnames"])
