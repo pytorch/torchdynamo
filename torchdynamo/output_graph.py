@@ -451,7 +451,12 @@ class OutputGraph(fx.Tracer):
 
         # append stack trace to fx node
         tx = current_tx if current_tx else self.root_tx
-        frame_summary = tx.frame_summary()
-        rv.node.stack_trace = f"{frame_summary}\n  {frame_summary.line}"
+        frame_summaries: List[traceback.FrameSummary] = []
+        while tx:
+            frame_summaries.append(tx.frame_summary())
+            tx = getattr(tx, "parent", None)
+
+        msgs = reversed(traceback.StackSummary.from_list(frame_summaries).format())
+        rv.node.stack_trace = "".join(msgs)
 
         return rv
