@@ -1424,6 +1424,7 @@ def main(runner, original_dir=None):
                     args.dynamic_shapes,
                 )
             except NotImplementedError:
+                logging.warn(f"{args.only} failed to load")
                 continue  # bad benchmark implementation
 
             current_name = name

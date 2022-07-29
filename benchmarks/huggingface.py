@@ -57,8 +57,6 @@ finally:
     from transformers import ViTForImageClassification
     from transformers import ViTForMaskedImageModeling
     from transformers import ViTModel
-    from transformers import XLNetConfig
-    from transformers import XLNetLMHeadModel
 
 
 HF_FX_SUPPORTED_MODELS = dict()
@@ -164,97 +162,68 @@ def generate_inputs_for_model(
             MarianMTModel,
         ]
     ):
-        input_dict.update({"decoder_input_ids": input})
+        input_dict["decoder_input_ids"] = input
 
     if model_name.startswith("Lxmert"):
         visual_feat_dim, visual_pos_dim = (
             model.config.visual_feat_dim,
             model.config.visual_pos_dim,
         )
-        input_dict.update(
-            {
-                "visual_feats": torch.randn(bs, num_visual_features, visual_feat_dim),
-                "visual_pos": torch.randn(bs, num_visual_features, visual_pos_dim),
-            }
+        input_dict["visual_feats"] = torch.randn(
+            bs, num_visual_features, visual_feat_dim
         )
+        input_dict["visual_pos"] = torch.randn(bs, num_visual_features, visual_pos_dim)
 
     if include_loss_args:
         if model_name.endswith("PreTraining"):
             if model_cls in [ElectraForPreTraining, LxmertForPreTraining]:
-                input_dict.update(
-                    {
-                        "labels": rand_int_tensor(device, 0, 1, (bs, seq_length)),
-                    }
-                )
+                input_dict["labels"] = rand_int_tensor(device, 0, 1, (bs, seq_length))
             else:
                 label_name = (
                     "sentence_order_label"
                     if model_cls in [AlbertForPreTraining]
                     else "next_sentence_label"
                 )
-                input_dict.update(
-                    {
-                        "labels": rand_int_tensor(
-                            device, 0, vocab_size, (bs, seq_length)
-                        ),
-                        label_name: rand_int_tensor(device, 0, 1, (bs,)),
-                    }
+                input_dict["labels"] = (
+                    rand_int_tensor(device, 0, vocab_size, (bs, seq_length)),
                 )
+                input_dict[label_name] = rand_int_tensor(device, 0, 1, (bs,))
         elif model_name.endswith("QuestionAnswering"):
-            input_dict.update(
-                {
-                    "start_positions": rand_int_tensor(device, 0, seq_length, (bs,)),
-                    "end_positions": rand_int_tensor(device, 0, seq_length, (bs,)),
-                }
+            input_dict["start_positions"] = rand_int_tensor(
+                device, 0, seq_length, (bs,)
             )
+            input_dict["end_positions"] = rand_int_tensor(device, 0, seq_length, (bs,))
         elif (
             model_name.endswith("MaskedLM")
             or model_name.endswith("HeadModel")
             or model_name.endswith("CausalLM")
             or model_name.endswith("DoubleHeadsModel")
         ):
-            input_dict.update(
-                {
-                    "labels": rand_int_tensor(device, 0, vocab_size, (bs, seq_length)),
-                }
+            input_dict["labels"] = rand_int_tensor(
+                device, 0, vocab_size, (bs, seq_length)
             )
         elif model_name.endswith("TokenClassification"):
-            input_dict.update(
-                {
-                    "labels": rand_int_tensor(
-                        device, 0, model.config.num_labels - 1, (bs, seq_length)
-                    ),
-                }
+            input_dict["labels"] = rand_int_tensor(
+                device, 0, model.config.num_labels - 1, (bs, seq_length)
             )
         elif model_name.endswith("MultipleChoice"):
-            input_dict.update(
-                {
-                    "labels": rand_int_tensor(device, 0, num_choices, (bs,)),
-                }
-            )
+            input_dict["labels"] = rand_int_tensor(device, 0, num_choices, (bs,))
         elif model_name.endswith("SequenceClassification"):
-            input_dict.update(
-                {
-                    "labels": rand_int_tensor(
-                        device, 0, model.config.num_labels - 1, (bs,)
-                    ),
-                }
+            input_dict["labels"] = rand_int_tensor(
+                device, 0, model.config.num_labels - 1, (bs,)
             )
         elif model_name.endswith("NextSentencePrediction"):
-            input_dict.update(
-                {
-                    "labels": rand_int_tensor(device, 0, 1, (bs,)),
-                }
-            )
+            input_dict["labels"] = rand_int_tensor(device, 0, 1, (bs,))
         elif model_name.endswith("ForConditionalGeneration"):
-            input_dict.update(
-                {
-                    "labels": rand_int_tensor(
-                        device, 0, vocab_size - 1, (bs, seq_length)
-                    ),
-                }
+            input_dict["labels"] = rand_int_tensor(
+                device, 0, vocab_size - 1, (bs, seq_length)
+            )
+        elif model_name in EXTRA_MODELS:
+            input_dict["labels"] = rand_int_tensor(
+                device, 0, vocab_size, (bs, seq_length)
             )
         else:
+
             raise NotImplementedError(
                 f"Class {model_name} unsupported for training test "
             )
@@ -274,11 +243,6 @@ def rand_int_tensor(device, low, high, shape):
 
 
 EXTRA_MODELS = {
-    "XLNetLMHeadModel": (
-        XLNetConfig.from_pretrained("xlnet-large-cased"),
-        XLNetLMHeadModel,
-        16,
-    ),
     "AllenaiLongformerBase": (
         AutoConfig.from_pretrained("allenai/longformer-base-4096"),
         AutoModelForMaskedLM,
@@ -364,14 +328,18 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model = model_cls(config).to(device, dtype=dtype)
 
-        batch_size = batch_size or batch_size_default
-
-        if model_name in USE_SMALL_BATCH_SIZE:
-            batch_size = USE_SMALL_BATCH_SIZE[model_name]
-            logging.warn(f"Choosing smaller batch size={batch_size} for {model_name}")
-        elif USE_HALF_BATCH_SIZE:
-            batch_size = int(batch_size / 2)
-            logging.warn(f"Choosing smaller batch size={batch_size} for {model_name}")
+        if batch_size is None:
+            batch_size = batch_size_default
+            if model_name in USE_SMALL_BATCH_SIZE:
+                batch_size = USE_SMALL_BATCH_SIZE[model_name]
+                logging.warn(
+                    f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
+                )
+            elif USE_HALF_BATCH_SIZE and batch_size >= 2:
+                batch_size = int(batch_size / 2)
+                logging.warn(
+                    f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
+                )
 
         example_inputs = generate_inputs_for_model(
             model_cls, model, model_name, batch_size, device, include_loss_args=True
