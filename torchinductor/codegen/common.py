@@ -12,8 +12,6 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
-from torchinductor.codegen.triton import RangeTreeEntryAlias
-
 from .. import metrics
 from ..utils import unique
 from ..virtualized import V
@@ -129,8 +127,8 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
     src_symbols = src_index.free_symbols
     # For the same vars, check if the expr matches
     inter_symbols = dst_symbols.intersection(src_symbols)
-    test_src_index = src_index.subs({k: 0 for k in inter_symbols})
-    test_dst_index = dst_index.subs({k: 0 for k in inter_symbols})
+    test_src_index = src_index.subs({k: 0 for k in src_symbols if k not in inter_symbols})
+    test_dst_index = dst_index.subs({k: 0 for k in dst_symbols if k not in inter_symbols})
     if test_src_index != test_dst_index:
         return False
     # For different vars, try to replace src's symbols with dst's symbols
@@ -138,25 +136,32 @@ def try_match_index(src_index: sympy.Expr, dst_index: sympy.Expr):
     dst_diff_symbols = dst_symbols.difference(inter_symbols) # x1, x0
     replacements = {}
     for src_sym in src_diff_symbols:
-        src_range_tree_entry = range_tree_nodes(src_sym)
+        src_range_tree_entry = range_tree_nodes[src_sym]
+        from torchinductor.codegen.triton import RangeTreeEntryAlias
         if not isinstance(src_range_tree_entry, RangeTreeEntryAlias):
             return False
         # check if RangeTreeEntryAlias's nodes are in dst symbols set
-        src_aliased_nodes = src_range_tree_entry.nodes
-        if not src_aliased_nodes.issubset(dst_diff_symbols):
+        src_aliased_entries = src_range_tree_entry.aliased_entries
+        src_aliased_symbols = set([entry.symbol() for entry in src_aliased_entries])
+        if not src_aliased_symbols.issubset(dst_diff_symbols):
             return False
         # check if the ranges of sub index matches
-        dst_sub_index = dst_index.subs({k: 0 for k in dst_symbols if k not in src_range_tree_entry.nodes})
-        if not sz.maybe_guard_equals(src_sym, dst_sub_index):
+        dst_sub_index = dst_index.subs({k: 0 for k in dst_symbols if k not in src_aliased_symbols})
+        dst_sub_range = dst_sub_index.subs({e.symbol(): e.length - 1 for e in src_aliased_entries})
+        dst_sub_range += 1
+        src_sub_range = src_range_tree_entry.length
+        if not sz.maybe_guard_equals(src_sub_range, dst_sub_range):
             return False
         replacements[src_sym] = dst_sub_index
     test_src_index = src_index.subs(replacements)
     if test_src_index != dst_index:
         return False
-    for src_sym, expr in replacements:
-        src_range_tree_entry = range_tree_nodes(src_sym)
+    for src_sym, expr in replacements.items():
+        src_range_tree_entry = range_tree_nodes[src_sym]
         src_range_tree_entry.set_expr(expr)
-        V.kernel.indexing_code.writeline(f"{src_sym} = {expr}")
+        # use the new indexing
+        src_range_tree_entry.codegen()
+        # V.kernel.indexing_code.writeline(f"{src_sym} = {expr}")
     return True
 
 
@@ -628,12 +633,12 @@ class Kernel(CodeGen):
                 if (name, index) in store_cache:
                     return store_cache[(name, index)]
                 else:
-                    for store_name, store_index in store_cache.items():
+                    for (store_name, store_index), tmp_name in store_cache.items():
                         # same name but different index
                         if name == store_name:
                             if try_match_index(index, store_index):
-                                store_cache[(name, index)] = store_cache[(name, index)]
-                                return store_cache[(name, index)]
+                                store_cache[(name, index)] = tmp_name
+                                return tmp_name
 
                 return self.load(name, index, upcast)
 

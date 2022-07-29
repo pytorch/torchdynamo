@@ -31,7 +31,7 @@ class TritonTemplateKernel(TritonKernel):
         for k, v in self.inout_dict.items():
             self.args.output_buffers[v] = k
         if isinstance(self.node, ir.Convolution):
-            self.cse.store_cache[self.inout_dict["y"]] = "acc"
+            self.cse.store_cache[(self.inout_dict["y"], "*")] = "acc"
 
     def assign_block_numel(self):
         code = IndentedBuffer()

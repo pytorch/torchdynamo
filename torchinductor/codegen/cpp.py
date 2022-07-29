@@ -290,7 +290,7 @@ class CppKernel(Kernel):
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             self.reduction_suffix.writeline(name, f"{var}[{cexpr(index)}] = {tmpvar};")
-        self.cse.store_cache[name] = tmpvar
+        self.cse.store_cache[(name, index)] = tmpvar
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:

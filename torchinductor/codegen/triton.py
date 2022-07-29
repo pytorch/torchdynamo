@@ -268,8 +268,9 @@ class RangeTree:
                         continue
                     size1 = child_len
                     size2 = ir.IndexingDiv(length, child_len)
-                    child_symbols, child_expr, child_range_tree = child.try_split_range_tree(size2)
-                    return child_symbols.append(child), size1 * child_expr + child.symbol(), child_range_tree
+                    child_entries, child_expr, child_range_tree = child.try_split_range_tree(size2)
+                    child_entries.append(child)
+                    return child_entries, size1 * child_expr + child.symbol(), child_range_tree
             return [], None, None
         else:
             node = self.children[length]
@@ -457,6 +458,9 @@ class RangeTreeEntryAlias(RangeTreeEntry):
         self.parent = parent
         self.codegen = functools.lru_cache(None)(self._codegen)
         self.codegen_next = functools.lru_cache(None)(self._codegen_next)
+
+    def set_expr(self, expr: sympy.Expr):
+        self.expr = expr
 
     def _codegen_next(self):
         pass
@@ -782,7 +786,7 @@ class TritonKernel(Kernel):
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
-        self.cse.store_cache[name] = result_var
+        self.cse.store_cache[(name, index)] = result_var
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             self.suffix.writeline(
