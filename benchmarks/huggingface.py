@@ -63,13 +63,13 @@ finally:
 
 HF_FX_SUPPORTED_MODELS = dict()
 
-REFRESH_MODEL_NAMES = False
-
 USE_HALF_BATCH_SIZE = True
 
+# Get the list of models and their batch sizes
 filename = "huggingface_models_list.txt"
 if os.path.exists("benchmarks"):
     filename = "benchmarks/" + filename
+assert os.path.exists(filename)
 with open(filename, "r") as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
@@ -77,6 +77,7 @@ with open(filename, "r") as fh:
         model_name, batch_size = line.split(",")
         batch_size = int(batch_size)
         HF_FX_SUPPORTED_MODELS[model_name] = batch_size
+assert len(HF_FX_SUPPORTED_MODELS)
 
 
 SKIP = {
@@ -367,8 +368,10 @@ class HuggingfaceRunner(BenchmarkRunner):
 
         if model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
+            logging.warn(f"Choosing smaller batch size={batch_size} for {model_name}")
         elif USE_HALF_BATCH_SIZE:
             batch_size = int(batch_size / 2)
+            logging.warn(f"Choosing smaller batch size={batch_size} for {model_name}")
 
         example_inputs = generate_inputs_for_model(
             model_cls, model, model_name, batch_size, device, include_loss_args=True
@@ -444,7 +447,16 @@ class HuggingfaceRunner(BenchmarkRunner):
         return None
 
 
-def refresh_model_names():
+def refresh_model_names_and_batch_sizes():
+    """
+    This function reads the HF Fx tracer supported models and finds the largest
+    batch size that could fit on the GPU with PyTorch eager.
+
+    The resulting data is written in huggingface_models_list.txt.
+
+    Note - We only need to run this function if we believe that HF Fx tracer now
+    supports more models.
+    """
     import transformers.utils.fx as hf_fx
 
     family = dict()
@@ -518,13 +530,13 @@ def refresh_model_names():
                 + [f"--output={filename}"]
             )
         except subprocess.SubprocessError:
-            print("ERROR")
+            logging.warn(f"Failed to find suitable batch size for {model_name}")
 
 
 if __name__ == "__main__":
-    if REFRESH_MODEL_NAMES and "--find-batch-sizes" not in sys.argv:
-        refresh_model_names()
-    else:
-        logging.basicConfig(level=logging.WARNING)
-        warnings.filterwarnings("ignore")
-        main(HuggingfaceRunner())
+    # Code to refresh model names and batch sizes
+    # if "--find-batch-sizes" not in sys.argv:
+    #     refresh_model_names_and_batch_sizes()
+    logging.basicConfig(level=logging.WARNING)
+    warnings.filterwarnings("ignore")
+    main(HuggingfaceRunner())

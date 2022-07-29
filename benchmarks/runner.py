@@ -198,6 +198,7 @@ def pp_dataframe(df, title, output_dir, out_io=None):
 
 def build_summary(out_io):
     import git
+
     def print_commit_hash(path, name):
         if exists(path):
             repo = git.Repo(path, search_parent_directories=True)
@@ -237,7 +238,10 @@ def build_summary(out_io):
     out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
     out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
     out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
-    out_io.write(f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n")
+    out_io.write(
+        f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+    )
+
 
 def read_csv(output_filename):
     has_header = False
