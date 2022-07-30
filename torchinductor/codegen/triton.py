@@ -606,7 +606,7 @@ class TritonKernel(Kernel):
 
     def codegen_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
-        for sym in sorted(expr.free_symbols):
+        for sym in sorted(expr.free_symbols, key=str):
             if sym in self.range_tree_nodes:
                 self.range_tree_nodes[sym].codegen()
         return expr
