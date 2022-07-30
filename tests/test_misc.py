@@ -19,11 +19,11 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
 from torchdynamo import bytecode_transformation
+from torchdynamo import control_flow
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
-from torchdynamo import control_flow
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -2026,23 +2026,21 @@ class MiscTests(torchdynamo.testing.TestCase):
             model_b.foo(prefix="abc")
 
         self.assertEqual(a_names, model_b.names)
-    
 
     def test_control_flow(self):
         def when_true(f):
-            return f * f 
-        
+            return f * f
+
         def when_false(f):
             return torch.zeros([1, 1])
 
         with torchdynamo.optimize("eager", nopython=True):
             x = torch.randn([1, 1])
             y = x
-            z = torch.tensor([.5, .5])
+            z = torch.tensor([0.5, 0.5])
             r = control_flow.cond(x is y, when_true, when_false, (z,))
         print(r)
         self.assertFalse(True)
-
 
 
 class TestTracer(JitTestCase):
@@ -2072,4 +2070,3 @@ class TestTracer(JitTestCase):
         fn()
         with torchdynamo.optimize("eager"):
             fn()
-

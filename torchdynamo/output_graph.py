@@ -175,9 +175,7 @@ class OutputGraph(fx.Tracer):
             )
 
     def add_submodule(self, mod: torch.nn.Module, *names, **options):
-        print("ADDING", mod, names)
         if is_dynamic_nn_module(mod):
-            print("Dynamic")
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
         options["guards"] = set(options.get("guards", []))
@@ -194,7 +192,6 @@ class OutputGraph(fx.Tracer):
                 )
 
         else:
-            print("TYPE:", mod.__class__, names)
             assert isinstance(mod, torch.nn.Module)
             options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
 
@@ -234,7 +231,6 @@ class OutputGraph(fx.Tracer):
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
-        print("Modules?", self.nn_modules)
         root = FakeRootModule(self.nn_modules)
 
         # Add all the local vars to the "stack" so restore at the end
@@ -347,8 +343,6 @@ class OutputGraph(fx.Tracer):
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
-
-        gm.graph.print_tabular()
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = torchdynamo.disable(compiled_fn)

@@ -119,7 +119,6 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
         )
-        print("Created optimize context")
 
 
 class RunOnlyContext(_TorchDynamoContext):
@@ -299,14 +298,12 @@ def export(f, *args, **kwargs):
 
     result_traced = None
 
-    print("Oh fuck you're gonna make me trace")
     with optimize_assert(
         dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
     ):
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = f(*args, **kwargs)
 
-    print("Traced")
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
 
