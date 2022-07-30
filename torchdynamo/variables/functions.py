@@ -362,7 +362,7 @@ class DynamoControlFlowFunction(VariableTracker):
         import torchdynamo
 
         assert (
-            torchdynamo.config.fake_tensor_propagation == False
+            torchdynamo.config.fake_tensor_propagation is False
         ), "Fake Tensor Propogation must be disabled for conditional capture"
         out_true = torchdynamo.export(true_fn, *func_args)
         out_true_graph = out_true[0]

@@ -8,6 +8,7 @@ from torchdynamo.logic.control_flow import cond
 
 
 class ControlFlowTests(torchdynamo.testing.TestCase):
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_simple_condition(self):
         from_true = None
         from_false = None
@@ -40,6 +41,7 @@ class ControlFlowTests(torchdynamo.testing.TestCase):
         )  # False multiplies
 
     @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_simple_condition_nested(self):
         from_true_a = None
         from_true_b = None
