@@ -259,7 +259,6 @@ class InstructionTranslatorBase(object):
         state = self.copy_graphstate()
         try:
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-            print("Result of inline?", result)
             self.output.guards.update(fn.guards)
             return result
         except Exception:

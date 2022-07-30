@@ -246,22 +246,11 @@ class TensorVariable(VariableTracker):
                 need_unwrap=False,
                 **options,
             )
-        elif (isinstance(example_value, bool)
-            and proxy.node.target == torch.allclose
-            and config.capture_scalar_outputs):
-            return UnspecializedPythonVariable.create(
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                raw_value=example_value,
-                need_unwrap=False,
-                **options,
-            )
-            
+
         else:
             assert (
                 False
-            ), f"torch.* op returned non-Tensor {isinstance(example_value, bool)}, {proxy.node.target}, {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
 
     def __init__(
         self,
