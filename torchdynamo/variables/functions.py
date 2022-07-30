@@ -333,21 +333,11 @@ class DynamoControlFlowFunction(VariableTracker):
         assert isinstance(
             fn, types.FunctionType
         ), f"expected FunctionType {typestr(fn)} {fn}"
-        # unpack @torchdynamo.optimize()(fn) wrapped function
         self.fn = fn
-        # fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
-        # self.fn: types.FunctionType = fn
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        nested_user_func = None
-        if args[0].value:
-            # Predicate passes, use true function
-            nested_user_func = args[1]
-        else:
-            nested_user_func = args[2]
-
         func_args_packed = args[3]
         func_args = []
         for item in func_args_packed.items:
@@ -361,11 +351,16 @@ class DynamoControlFlowFunction(VariableTracker):
         out_true = torchdynamo.export(args[1].get_function(), *func_args)
         out_true_graph = out_true[0]
 
+        # `export` causes generation increments, and this means that the second exported graph 
+        # is incorrectly tagged as "dynamic". This is a disgusting hack, and we can do a little
+        # better job here probably with another type of export that avoids generational incrementing
+        # via supplying a different function on the context, rather than this.
         torchdynamo.mutation_guard.OVERRIDE_GENERATION_TAGGING = 0
         out_false = torchdynamo.export(args[2].get_function(), *func_args)
         torchdynamo.mutation_guard.OVERRIDE_GENERATION_TAGGING = None
+        
         from torchdynamo.mutation_guard import GenerationTracker
-
+        # Adjust the generation back to what it should be
         GenerationTracker.generation += 1
 
         out_false_graph = out_false[0]
@@ -399,12 +394,6 @@ class DynamoControlFlowFunction(VariableTracker):
             {},
         )
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        if not hasattr(tx.output, "root"):
-            import torch
-
-            tx.output.root = torch.nn.Module()
-
         proxied_args = [x.as_proxy() for x in func_args_packed.unpack_var_sequence(tx)]
 
         return variables.TensorVariable.create_conditional(
@@ -412,7 +401,7 @@ class DynamoControlFlowFunction(VariableTracker):
             proxy=tx.output.create_proxy(
                 "call_function",
                 torchdynamo.logic.control_flow.cond,
-                (args[0].value, true_graph_node, false_graph_node, proxied_args),
+                (args[0].as_proxy(), true_graph_node, false_graph_node, proxied_args),
                 {},
             ),
             condition={"true_graph": out_true_graph, "false_graph": out_false_graph},
