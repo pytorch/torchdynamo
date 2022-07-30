@@ -93,10 +93,19 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-        return cls.create_conditional(tx=tx, proxy=proxy, example_value=example_value, nnmodule=nnmodule, condition=None, **options)
+        return cls.create_conditional(
+            tx=tx,
+            proxy=proxy,
+            example_value=example_value,
+            nnmodule=nnmodule,
+            condition=None,
+            **options,
+        )
 
     @classmethod
-    def create_conditional(cls, tx, proxy, example_value=None, nnmodule=None, condition=None, **options):
+    def create_conditional(
+        cls, tx, proxy, example_value=None, nnmodule=None, condition=None, **options
+    ):
         if "guards" in options:
             tx.output.guards.update(options["guards"])
 

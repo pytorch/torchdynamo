@@ -242,6 +242,15 @@ def optimize(backend, nopython=False):
 def export(f, *args, **kwargs):
     import torch.utils._pytree as pytree
 
+    # TODO(voz) - We do not want to hit any caches - as hitting cached code may mean we may not invoke the
+    # dynamo_normalization_capturing_compiler. ex: Exporting the same function twice in a row.
+    # Forcing the user to call torchdynamo.reset() feels like bad UX.
+    # A longer term solution would be to introduce a mode to _eval_frame.c that would always invoke the compiler,
+    # bypassing the cache entirely for reads - but potentially stil writing.
+    import torchdynamo
+
+    torchdynamo.reset()
+
     graph = None
     out_guards = None
     graph_captured_input = None

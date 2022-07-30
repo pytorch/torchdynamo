@@ -338,9 +338,25 @@ class DynamoControlFlowFunction(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        def verify_signatures(fn_a, fn_b):
+            from inspect import signature
+
+            assert signature(fn_a) == signature(
+                fn_b
+            ), "Conditional signatures must be identical"
+
+        true_fn = args[1].get_function()
+        false_fn = args[2].get_function()
+
+        verify_signatures(true_fn, false_fn)
+
         func_args_packed = args[3]
         func_args = []
+
         for item in func_args_packed.items:
+            assert isinstance(
+                item, variables.TensorVariable
+            ), "Conditionals must take only tensor variables"
             func_args.append(item.proxy.node.meta["example_value"])
 
         import torchdynamo
@@ -348,18 +364,19 @@ class DynamoControlFlowFunction(VariableTracker):
         assert (
             torchdynamo.config.fake_tensor_propagation == False
         ), "Fake Tensor Propogation must be disabled for conditional capture"
-        out_true = torchdynamo.export(args[1].get_function(), *func_args)
+        out_true = torchdynamo.export(true_fn, *func_args)
         out_true_graph = out_true[0]
 
-        # `export` causes generation increments, and this means that the second exported graph 
+        # `export` causes generation increments, and this means that the second exported graph
         # is incorrectly tagged as "dynamic". This is a disgusting hack, and we can do a little
         # better job here probably with another type of export that avoids generational incrementing
         # via supplying a different function on the context, rather than this.
         torchdynamo.mutation_guard.OVERRIDE_GENERATION_TAGGING = 0
-        out_false = torchdynamo.export(args[2].get_function(), *func_args)
+        out_false = torchdynamo.export(false_fn, *func_args)
         torchdynamo.mutation_guard.OVERRIDE_GENERATION_TAGGING = None
-        
+
         from torchdynamo.mutation_guard import GenerationTracker
+
         # Adjust the generation back to what it should be
         GenerationTracker.generation += 1
 
