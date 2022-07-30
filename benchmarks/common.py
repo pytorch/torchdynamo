@@ -46,6 +46,8 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
+# We are primarily interested in TF32
+torch.backends.cuda.matmul.allow_tf32 = True
 
 current_name = ""
 current_device = ""
@@ -746,7 +748,7 @@ class BenchmarkRunner:
         #     data_dtype = torch.bfloat16
         return use_amp, model_dtype, data_dtype
 
-    def decay_batch_exp(self, batch_size, factor=0.5, divisor=16):
+    def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
         out_batch_size = batch_size * factor
         if out_batch_size > divisor:
             out_batch_size = (out_batch_size + 1) // divisor * divisor
@@ -1399,11 +1401,15 @@ def main(runner, original_dir=None):
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
 
+    if args.find_batch_sizes:
+        args.isolate = True
+
     if args.find_batch_sizes and args.only:
         assert args.isolate
         for device in args.devices:
             batch_size = runner.batch_size_finder(device, args.only, model_iter_fn)
             print(args.only, batch_size)
+            output_csv(output_filename, [], [args.only, batch_size])
         return
 
     if args.only:
@@ -1418,6 +1424,7 @@ def main(runner, original_dir=None):
                     args.dynamic_shapes,
                 )
             except NotImplementedError:
+                logging.warn(f"{args.only} failed to load")
                 continue  # bad benchmark implementation
 
             current_name = name

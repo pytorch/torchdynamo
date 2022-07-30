@@ -24,13 +24,18 @@ If you want to test float16
 """
 
 import argparse
+import io
 import itertools
 import os
+from os.path import exists
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import torch
 from matplotlib import rcParams
 from tabulate import tabulate
+
+import torchdynamo
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -160,9 +165,15 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         runfile.writelines([line + "\n" for line in lines])
 
 
-def pp_dataframe(df, title, output_dir):
+def pp_dataframe(df, title, output_dir, out_io=None):
     # Pretty print
-    print(tabulate(df, headers="keys", tablefmt="pretty", showindex="never"))
+    if out_io is not None:
+        out_io.write("\n")
+        out_io.write("~~~\n")
+        out_io.write(f"Results for {title}\n")
+        out_io.write(tabulate(df, headers="keys", tablefmt="pretty", showindex="never"))
+        out_io.write("\n")
+        out_io.write("~~~\n")
 
     # Save to csv, can be copy pasted in google sheets
     df.to_csv(f"{output_dir}/{title}.csv", index=False)
@@ -185,6 +196,53 @@ def pp_dataframe(df, title, output_dir):
     plt.savefig(f"{output_dir}/{title}.png")
 
 
+def build_summary(out_io):
+    import git
+
+    def print_commit_hash(path, name):
+        if exists(path):
+            repo = git.Repo(path, search_parent_directories=True)
+            sha = repo.head.object.hexsha
+            out_io.write(f"{name} commit: {sha}\n")
+        else:
+            out_io.write(f"{name} Absent\n")
+
+    def env_var(name):
+        out_io.write(f"{name} = {os.environ[name]}\n")
+
+    out_io.write("## Commit hashes ##\n")
+    print_commit_hash(".", "torchdynamo")
+    print_commit_hash("../pytorch", "pytorch")
+    print_commit_hash("../functorch", "functorch")
+    print_commit_hash("../torchbenchmark", "torchbench")
+
+    out_io.write("\n")
+    out_io.write("## TorchDynamo config flags ##\n")
+    for key in dir(torchdynamo.config):
+        val = getattr(torchdynamo.config, key)
+        if not key.startswith("__") and isinstance(val, bool):
+            out_io.write(f"torchdynamo.config.{key} = {val}\n")
+
+    out_io.write("\n")
+    out_io.write("## Torch version ##\n")
+    out_io.write(f"torch: {torch.__version__}\n")
+
+    out_io.write("\n")
+    out_io.write("## Environment variables ##\n")
+    env_var("TORCH_CUDA_ARCH_LIST")
+    env_var("CUDA_HOME")
+    env_var("USE_LLVM")
+
+    out_io.write("\n")
+    out_io.write("## GPU details ##\n")
+    out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
+    out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
+    out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
+    out_io.write(
+        f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+    )
+
+
 def read_csv(output_filename):
     has_header = False
     n_cols = 3
@@ -205,10 +263,13 @@ def read_csv(output_filename):
 
 def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
     mode = "inference" if args.inference else "training"
+    out_io = io.StringIO()
+    build_summary(out_io)
+    out_io.write("\n")
+    out_io.write("## Performance results ##\n")
     for iter in itertools.product(suites, devices, dtypes):
         suite, device, dtype = iter
         frames = []
-        best_compiler = compilers[-1]
         # Collect results from all the files
         for compiler in compilers:
             output_filename = (
@@ -226,15 +287,20 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
         if len(compilers) == 1:
             df = frames[0]
         else:
-            df = pd.merge(*frames, on=["dev", "name"])
+            df = pd.merge(frames[0], frames[1], on=["dev", "name"])
+            for idx in range(2, len(frames)):
+                df = pd.merge(df, frames[idx], on=["dev", "name"])
 
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"
         pp_dataframe(df, title, output_dir)
 
         # Sort the dataframe and pretty print
-        sorted_df = df.sort_values(by=best_compiler, ascending=False)
-        pp_dataframe(sorted_df, f"sorted_{title}", output_dir)
+        sorted_df = df.sort_values(by=list(reversed(compilers)), ascending=False)
+        pp_dataframe(sorted_df, f"sorted_{title}", output_dir, out_io=out_io)
+    print(out_io.getvalue())
+    with open(f"{output_dir}/github_comment.txt", "w") as gh_fh:
+        gh_fh.write(out_io.getvalue())
 
 
 if __name__ == "__main__":
