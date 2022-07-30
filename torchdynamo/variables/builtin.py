@@ -13,6 +13,7 @@ import torch
 from torchdynamo.guards import GuardBuilder
 from torchdynamo.variables.dicts import ConstDictVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
+from torchdynamo.variables.tensor import FakeItemVariable
 
 from .. import config
 from .. import variables
@@ -266,7 +267,7 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, *proxy_args_kwargs(args, kwargs)
+                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
                 if self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
@@ -278,20 +279,33 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
-                    need_unwrap = any(
-                        x.need_unwrap
-                        for x in itertools.chain(args, kwargs.values())
-                        if isinstance(x, variables.UnspecializedPythonVariable)
-                    )
-                    return variables.UnspecializedPythonVariable.create(
-                        tx,
-                        proxy,
-                        raw_value=raw_value,
-                        need_unwrap=need_unwrap,
-                        **options,
-                    )
+                    if any([isinstance(arg, FakeItemVariable) for arg in args]):
+                        raw_value = None
+                        need_unwrap = False
+
+                        return variables.FakeItemVariable.create(
+                            tx,
+                            proxy,
+                            **options,
+                        )
+
+                    else:
+                        _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                        raw_value = self.fn(*_args, **_kwargs)
+
+                        need_unwrap = any(
+                            x.need_unwrap
+                            for x in itertools.chain(args, kwargs.values())
+                            if isinstance(x, variables.UnspecializedPythonVariable)
+                        )
+
+                        return variables.UnspecializedPythonVariable.create(
+                            tx,
+                            proxy,
+                            raw_value=raw_value,
+                            need_unwrap=need_unwrap,
+                            **options,
+                        )
                 else:
                     return variables.TensorVariable.create(tx, proxy, **options)
 

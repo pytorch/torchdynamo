@@ -510,13 +510,13 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             b = b.to_dense()
         assert isinstance(b, torch.Tensor), f"type mismatch {type(a)} {type(b)}"
         if cos_similarity:
-            # TRT will bring error loss larger than current threshold. Use cosine similarity as replacement
             a = a.flatten().to(torch.float32)
             b = b.flatten().to(torch.float32)
+            if torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=True):
+                # early exit that handles zero/nan better
+                # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
+                return True
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
-            if res.isnan() or res == 0:
-                # Fallback to use torch.allcose
-                return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
             if res < 0.99:
                 print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99

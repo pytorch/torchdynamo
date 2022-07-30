@@ -340,21 +340,47 @@ class TestIndexingSimplification(unittest.TestCase):
             2 * ModularIndexing(i0, 1, 128),
         )
 
+        # it should work when divisor is not 1
+        expr2 = ModularIndexing(i0, 3, 32) + 32 * ModularIndexing(i0, 32 * 3, 4)
+        simplified = sizevars.simplify_with_ranges(expr2, {})
+        self.assertEqual(simplified, ModularIndexing(i0, 3, 128))
+        self.assertEqual(expr2.subs({i0: 39485}), simplified.subs({i0: 39485}))
+
         # it should not happen in this case as the modulus is wrong
-        expr2 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
-        self.assertEqual(sizevars.simplify_with_ranges(expr2, {}), expr2)
+        expr3 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr3, {}), expr3)
 
         # check that it also works with a modulus>1
-        expr3 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1, i2)
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr3, {}), ModularIndexing(i0, 10, i1 * i2)
-        )
+        expr4 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1 * 10, i2)
+        res0 = expr4.subs({i0: 24056, i1: 13, i2: 19})
+        simplified = sizevars.simplify_with_ranges(expr4, {})
+        res1 = simplified.subs({i0: 24056, i1: 13, i2: 19})
+        self.assertEqual(res0, res1)
+        self.assertEqual(simplified, ModularIndexing(i0, 10, i1 * i2))
 
         # and also works with an offset
         self.assertEqual(
-            sizevars.simplify_with_ranges(expr3 + 10, {}),
+            sizevars.simplify_with_ranges(expr4 + 10, {}),
             ModularIndexing(i0, 10, i1 * i2) + 10,
         )
+
+        # works for ModularIndexing + IndexingDiv
+        expr5 = 197 * IndexingDiv(i0, 197) + ModularIndexing(i0, 1, 197)
+        simplified = sizevars.simplify_with_ranges(expr5, {})
+        self.assertEqual(simplified, i0)
+        self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
+
+        # works with a scale
+        self.assertEqual(
+            sizevars.simplify_with_ranges(2 * expr5, {}),
+            2 * i0,
+        )
+
+        # divisor != 1
+        expr6 = 197 * IndexingDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
+        simplified = sizevars.simplify_with_ranges(expr6, {})
+        self.assertEqual(simplified, IndexingDiv(i0, 3))
+        self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
 class CommonTemplate:
@@ -621,12 +647,8 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
     def test_round_correctness(self):
-        if self.device == "cuda" and (
-            not torchinductor.utils.has_triton_libdevice()
-            # TODO(jansel): need to debug issue on V100 cards
-            or torch.cuda.get_device_capability() < (8,)
-        ):
-            raise unittest.SkipTest("requires triton.language.libdevice")
+        if self.device == "cuda":
+            raise unittest.SkipTest("need to debug tl.libdevice on A100/V100")
 
         def fn(a):
             return torch.round(a)

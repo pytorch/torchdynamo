@@ -2,6 +2,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import math
 import numbers
 import operator
 from contextlib import contextmanager
@@ -244,18 +245,26 @@ class TensorVariable(VariableTracker):
             return variables.ConstantVariable(example_value, **options)
         elif (
             isinstance(example_value, numbers.Number)
-            and proxy.node.target == "item"
+            and (proxy.node.target == "item" or proxy.node.target == math.sqrt)
             and config.capture_scalar_outputs
         ):
-            return UnspecializedPythonVariable.create(
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                raw_value=example_value,
-                need_unwrap=False,
-                **options,
-            )
-
+            if use_fake_tensors:
+                # item raw value should not be accessed
+                return FakeItemVariable.create(
+                    tx=tx,
+                    proxy=proxy,
+                    example_value=torch.tensor(example_value),
+                    **options,
+                )
+            else:
+                return UnspecializedPythonVariable.create(
+                    tx=tx,
+                    proxy=proxy,
+                    example_value=torch.tensor(example_value),
+                    raw_value=None if use_fake_tensors else example_value,
+                    need_unwrap=False,
+                    **options,
+                )
         else:
             assert (
                 False
@@ -453,7 +462,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}
+                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -467,7 +476,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}
+                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -477,6 +486,7 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + args, kwargs),
+                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         else:
@@ -493,7 +503,10 @@ class TensorVariable(VariableTracker):
             return self.__class__.create(
                 tx,
                 tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -672,3 +685,13 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+
+class FakeItemVariable(UnspecializedPythonVariable):
+    """A UnspecializedPythonVariable which prevents access to the underlying raw value.
+    This is needed if item is called on a FakeTensor."""
+
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        super(FakeItemVariable, self).__init__(proxy, **kwargs)
+        self.need_unwrap = False
+        delattr(self, "raw_value")

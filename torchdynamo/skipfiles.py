@@ -106,6 +106,16 @@ FILENAME_ALLOWLIST = {
     os.path.dirname(__file__)
     + "/logic/control_flow.py",  # TODO(voz): If this grows > 1 or 2 files, walk it properly
 }
+
+# Include optimizer code for tracing
+FILENAME_ALLOWLIST |= set(
+    [
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    ]
+)
+
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
         torch._prims.__file__,

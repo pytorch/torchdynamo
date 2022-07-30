@@ -6,6 +6,7 @@ PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
+PIP ?= python -m pip
 
 # versions used in CI
 PYTORCH_VERSION ?= dev20220710
@@ -41,31 +42,31 @@ lint:
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
-	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs pip install
+	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs $(PIP) install
 
 setup_lint: lint-deps
 
 setup:
-	pip install -r requirements.txt
+	$(PIP) install -r requirements.txt
 
 setup_nightly:
-	pip install ninja
-	pip install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	pip install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
-	pip install -r requirements.txt
+	$(PIP) install ninja
+	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	$(PIP) install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
+	$(PIP) install -r requirements.txt
 	python setup.py develop
 
 setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda113 cudatoolkit=11.3
-	pip install --pre torch==1.13.0.$(PYTORCH_VERSION) \
+	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
                       torchvision==0.14.0.$(PYTORCH_VERSION) \
                       torchaudio==0.13.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu113
-	pip install ninja
-	pip install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
-	pip install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
-	pip install -r requirements.txt
+	$(PIP) install ninja
+	$(PIP) install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
+	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
+	$(PIP) install -r requirements.txt
 	python setup.py develop
 
 clean:
@@ -81,6 +82,7 @@ clone-deps:
 		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
 		&& (test -e torchbenchmark || git clone --recursive https://github.com/jansel/benchmark torchbenchmark) \
+		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \
 	)
 
 pull-deps:
@@ -91,6 +93,7 @@ pull-deps:
 	(cd ../torchaudio     && git pull && git submodule update --init --recursive)
 	(cd ../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
+	(cd ../triton         && git pull && git submodule update --init --recursive)
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo
@@ -101,14 +104,14 @@ build-deps: clone-deps
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 
-	make setup && pip uninstall -y torch
+	make setup && $(PIP) uninstall -y torch
 	(cd ../pytorch     && python setup.py clean && python setup.py develop)
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
 	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../functorch   && python setup.py clean && python setup.py develop)
-	(cd ../torchbenchmark && python install.py)
+	(cd ../torchbenchmark && python install.py --continue_on_fail)
 	(cd ../triton/python && python setup.py clean && python setup.py develop)
 	make setup_lint
 	python setup.py develop

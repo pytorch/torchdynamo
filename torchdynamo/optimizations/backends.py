@@ -137,7 +137,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             dev = value.device
             binding.bind_input(
                 name,
-                dev,
+                dev.type,
                 dev.index or 0,
                 _NP_DTYPE[value.dtype],
                 value.size(),
@@ -148,7 +148,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             dev = value.device
             binding.bind_output(
                 name,
-                dev,
+                dev.type,
                 dev.index or 0,
                 _NP_DTYPE[value.dtype],
                 value.size(),
