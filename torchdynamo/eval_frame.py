@@ -98,8 +98,6 @@ class _TorchDynamoContext:
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
             _fn._torchdynamo_disable = True
-        # if isinstance(self, LogicalHandlingContext):
-        #     _fn._torchdynamo_special_logic = True
         else:
             _fn._torchdynamo_inline = fn
 
@@ -170,13 +168,10 @@ class WrapperBackend:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
-        print("REAL GM")
         self.gm.graph.print_tabular()
-        print("REAL GM")
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
 
