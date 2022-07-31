@@ -2027,21 +2027,6 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(a_names, model_b.names)
 
-    def test_control_flow(self):
-        def when_true(f):
-            return f * f
-
-        def when_false(f):
-            return torch.zeros([1, 1])
-
-        with torchdynamo.optimize("eager", nopython=True):
-            x = torch.randn([1, 1])
-            y = x
-            z = torch.tensor([0.5, 0.5])
-            r = control_flow.cond(x is y, when_true, when_false, (z,))
-        print(r)
-        self.assertFalse(True)
-
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
