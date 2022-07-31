@@ -1622,24 +1622,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         for k1, m2 in zip(modules, module_dict.children()):
             self.assertTrue(modules[k1] is m2)
 
-
-    def test_unspecialized_primitive_variable5(self):
-        # test inserting random output into graph only
-        def fn(shape):
-            torch.manual_seed(123)
-            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
-            return x
-
-        shape = [2, 3]
-        random.seed(1)
-        res1 = fn(shape)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            random.seed(1)
-            res2 = fn(shape)
-
-        self.assertTrue(same(res1, res2))
-
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
         # should after stack value's codegen

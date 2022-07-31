@@ -697,4 +697,3 @@ class FakeItemVariable(UnspecializedPythonVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
-

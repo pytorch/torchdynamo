@@ -78,6 +78,22 @@ class UnspecTests(torchdynamo.testing.TestCase):
             res2 = fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_insert_random_into_graph_only(self):
+        def fn(shape):
+            torch.manual_seed(123)
+            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
+            return x
+
+        shape = [2, 3]
+        random.seed(1)
+        res1 = fn(shape)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(shape)
+
+        self.assertTrue(same(res1, res2))
+
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
