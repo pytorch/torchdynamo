@@ -802,7 +802,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        sympy_index = self.rename_indexing(self.simplify_indexing(index))
+        sympy_index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
         index, mask = self.indexing(index, result_var)
         assert "rmask" not in index
         self.inside_reduction = True
