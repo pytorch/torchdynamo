@@ -19,7 +19,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
 from torchdynamo import bytecode_transformation
-from torchdynamo import control_flow
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same

@@ -1,7 +1,6 @@
 from unittest.mock import patch
 
 import torch
-import torch.utils._pytree as pytree
 
 import torchdynamo.testing
 from torchdynamo.logic.control_flow import cond
