@@ -233,8 +233,8 @@ def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=
 
 @register_lowering(prims.convert_element_type, type_promote=False)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
-    if x.get_dtype() == dtype:
-        return x
+    # if x.get_dtype() == dtype:
+    #    return x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)

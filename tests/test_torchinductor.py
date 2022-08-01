@@ -682,7 +682,7 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
-    def test_div(self):
+    def test_div1(self):
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
@@ -691,6 +691,14 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
+
+    def test_div3(self):
+        # This pattern is found in timm_efficientdet
+        def fn(a, index):
+            div = torch.div(index, 10, rounding_mode="floor")
+            return torch.gather(a, 0, div)
+
+        self.common(fn, (torch.randn(10, 10), torch.randint(0, 100, size=[10, 10])))
 
     def test_sum_keepdims(self):
         def fn(a, b):

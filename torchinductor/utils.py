@@ -1,4 +1,5 @@
 import functools
+import numbers
 import operator
 
 import sympy
@@ -52,3 +53,11 @@ def sympy_dot(seq1, seq2):
 
 def unique(it):
     return {id(x): x for x in it}.values()
+
+
+def is_integer_type(x):
+    if isinstance(x, torch.Tensor):
+        return x.dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
+    else:
+        assert isinstance(x, numbers.Number)
+        return isinstance(x, int)
