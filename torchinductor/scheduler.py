@@ -10,6 +10,7 @@ from typing import Dict
 from typing import List
 
 import numpy as np
+import sympy
 import torch
 
 from . import config
@@ -242,7 +243,7 @@ class SchedulerNode(BaseSchedulerNode):
         (
             self._sizes,
             self._body,
-        ) = node.simplify_reorder_and_tile()
+        ) = node.simplify_and_reorder()
 
         self.group = (node.get_device(), group_fn(self._sizes))
         self.set_read_writes(
@@ -331,9 +332,16 @@ class SchedulerNode(BaseSchedulerNode):
         super().allocate()
 
     def run(self, *index_vars):
+        self.mark_run()
+        self.codegen(index_vars)
+
+    def mark_run(self):
         log.info(f"RUN {self.get_name()}")
         self.allocate()
         self.scheduler.run_count += 1
+        self.scheduler.pending_buffer_names.add(self.get_name())
+
+    def codegen(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -346,7 +354,17 @@ class SchedulerNode(BaseSchedulerNode):
             SimplifyIndexing(V.get_ops_handler(), var_ranges)
         ), V.kernel.set_current_node(self):
             self._body(*index_vars)
-        self.scheduler.pending_buffer_names.add(self.get_name())
+
+    def pointwise_read_writes(self):
+        """
+        Get the memory dependencies in the non-reduction axis.
+        """
+        sizes, reduction_sizes = self._sizes
+
+        def fn(index):
+            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
+
+        return dependencies.extract_read_writes(fn, sizes)
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         if self.node.get_alias_names():
@@ -754,9 +772,11 @@ class Scheduler:
             def gc(d):
                 return {k: v for k, v in d.items() if any(v)}
 
-            log.info(f"blocked names: {gc(self.blocked_nodes.dep_to_nodes)}")
-            log.info(f"blocked deps: {gc(self.blocked_nodes.name_to_nodes)}")
-            log.info(f"new fusable_deps: {self.fusable_deps}")
+            names = gc(self.blocked_nodes.dep_to_nodes)
+            deps = gc(self.blocked_nodes.name_to_nodes)
+            if names or deps:
+                log.info(f"blocked names: {names} deps: {deps}")
+                log.info(f"new fusable_deps: {self.fusable_deps}")
 
         while self.pending_buffer_names:
             self.available_buffer_names.update(self.pending_buffer_names)

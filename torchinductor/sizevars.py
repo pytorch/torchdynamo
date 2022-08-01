@@ -217,9 +217,8 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            from .ir import ModularIndexing
-
-            self.guard_equals(ModularIndexing(numerator, 1, denominator), 0)
+            multiple = self.size_hint(numerator) // self.size_hint(denominator)
+            self.guard_equals(multiple * denominator, numerator)
             return True
         return False
 
