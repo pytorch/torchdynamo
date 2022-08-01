@@ -140,7 +140,7 @@ class Stats:
         return [cls.totals["aot_autograd"]["total"], cls.totals["aot_autograd"]["ok"]]
 
 
-def coverage_experiment(args, model_iter_fn, model, example_inputs):
+def coverage_experiment(args, model_iter_fn, model, example_inputs, first_iter_latency):
     """
     Test operator/model coverage of TorchDynamo and record statistics
     taken from a profiler.  This target is mainly intended to check
@@ -163,12 +163,14 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs):
             "total_ops",
             "pct_ops",
             "pct_time",
+            "first_iter_latency",
         ),
         [
             current_device,
             current_name,
         ]
-        + coverage_result.tocsv(),
+        + coverage_result.tocsv()
+        + [first_iter_latency],
     )
     return coverage_result
 
@@ -807,7 +809,6 @@ class BenchmarkRunner:
         skip_accuracy_check=False,
         dynamic_shapes=False,
     ):
-        t0 = time.perf_counter()
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             is_training, current_device, name
         )
@@ -852,6 +853,7 @@ class BenchmarkRunner:
                 print(" ".join(map(str, results)))
                 return 0
 
+            t0 = time.perf_counter()
             try:
                 with accuracy_ctx:
                     new_result = model_iter_fn(model, example_inputs)
@@ -885,13 +887,17 @@ class BenchmarkRunner:
             else:
                 frames_third_pass = 0
 
+            kwargs = {}
             if output_filename and "coverage" in output_filename:
+                t1 = time.perf_counter()
+                first_iter_latency = t1 - t0
                 results.append(
-                    f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:3.0f}s"
+                    f"{ok:3}/{total:3} +{frames_third_pass} frames {t1-t0:3.0f}s"
                 )
+                kwargs["first_iter_latency"] = first_iter_latency
             if not hasattr(model, name):
                 model.name = name
-            results.append(experiment(model, example_inputs))
+            results.append(experiment(model, example_inputs, **kwargs))
             print(" ".join(map(str, results)))
 
 

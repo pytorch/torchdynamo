@@ -29,7 +29,11 @@ finally:
     from timm.data import resolve_data_config
     from timm.models import create_model
 
-SKIP = set()
+SKIP = {
+    # Models taking more than 5 min to run with AOTAutograd
+    "dpn107",
+    "fbnetv3_b",
+}
 
 TIMM_MODELS = dict()
 filename = "timm_models_list.txt"
@@ -272,11 +276,9 @@ class TimmRunnner(BenchmarkRunner):
         target = self._gen_target(pred.shape[0], pred.device)
         return self.loss(pred, target)
 
-    @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
 
-    @torchdynamo.skip
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)

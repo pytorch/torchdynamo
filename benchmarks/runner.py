@@ -123,13 +123,22 @@ def parse_args():
     group_mode.add_argument(
         "--training", action="store_true", help="Only run training related tasks"
     )
+    group_mode.add_argument(
+        "--coverage", action="store_true", help="Run coverage experiments"
+    )
 
     args = parser.parse_args()
     return args
 
 
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
-    mode = "inference" if args.inference else "training"
+    if args.inference:
+        mode = "inference"
+    elif args.training:
+        mode = "training"
+    else:
+        assert args.coverage
+        mode = "coverage"
     with open("run.sh", "w") as runfile:
         lines = []
 
@@ -144,23 +153,28 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 f"# Commands for {suite} for device={device}, dtype={dtype} for {mode}"
             )
 
-            info = TABLE[mode]
-            for compiler in compilers:
-                base_cmd = info[compiler]
-                output_filename = (
-                    f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
-                )
-                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --output={output_filename} {base_cmd}"
-                if args.quick:
-                    if suite == "torchbench":
-                        cmd = f"{cmd} --only=resnet18"
-                    elif suite == "huggingface":
-                        cmd = f"{cmd} --only=BertForPreTraining_P1_bert"
-                    else:
-                        raise NotImplementedError(
-                            f"Quick not implemented for {suite}.py"
-                        )
+            if args.coverage:
+                output_filename = f"{output_dir}/{suite}_{dtype}_{mode}_{device}.csv"
+                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --output={output_filename} --coverage"
                 lines.append(cmd)
+            else:
+                info = TABLE[mode]
+                for compiler in compilers:
+                    base_cmd = info[compiler]
+                    output_filename = (
+                        f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
+                    )
+                    cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --output={output_filename} {base_cmd}"
+                    if args.quick:
+                        if suite == "torchbench":
+                            cmd = f"{cmd} --only=resnet18"
+                        elif suite == "huggingface":
+                            cmd = f"{cmd} --only=BertForPreTraining_P1_bert"
+                        else:
+                            raise NotImplementedError(
+                                f"Quick not implemented for {suite}.py"
+                            )
+                    lines.append(cmd)
             lines.append("")
         runfile.writelines([line + "\n" for line in lines])
 
@@ -262,45 +276,86 @@ def read_csv(output_filename):
 
 
 def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
-    mode = "inference" if args.inference else "training"
+    if args.inference:
+        mode = "inference"
+    elif args.training:
+        mode = "training"
+    else:
+        assert args.coverage
+        mode = "coverage"
     out_io = io.StringIO()
-    build_summary(out_io)
-    out_io.write("\n")
-    out_io.write("## Performance results ##\n")
-    for iter in itertools.product(suites, devices, dtypes):
-        suite, device, dtype = iter
-        frames = []
-        # Collect results from all the files
-        for compiler in compilers:
-            output_filename = (
-                f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
-            )
+    if mode == "coverage":
+        out_io.write("\n")
+        out_io.write("## Graph results ##\n")
+        for iter in itertools.product(suites, devices, dtypes):
+            suite, device, dtype = iter
+            frames = []
+            # Collect results from all the files
+            output_filename = f"{output_dir}/{suite}_{dtype}_{mode}_{device}.csv"
 
             df = read_csv(output_filename)
-            df.rename(
-                columns={"speedup": compiler, "ts": compiler, "ofi": f"ofi_{compiler}"},
-                inplace=True,
-            )
             frames.append(df)
 
-        # Merge the results
-        if len(compilers) == 1:
-            df = frames[0]
-        else:
-            df = pd.merge(frames[0], frames[1], on=["dev", "name"])
-            for idx in range(2, len(frames)):
-                df = pd.merge(df, frames[idx], on=["dev", "name"])
+            # Merge the results
+            if len(frames) == 1:
+                df = frames[0]
+            else:
+                df = pd.merge(frames[0], frames[1], on=["dev", "name"])
+                for idx in range(2, len(frames)):
+                    df = pd.merge(df, frames[idx], on=["dev", "name"])
 
-        # Pretty print and also write to a bargraph
-        title = f"{suite}_{dtype}_{mode}_{device}"
-        pp_dataframe(df, title, output_dir)
+            # Pretty print and also write to a bargraph
+            title = f"{suite}_{dtype}_{mode}_{device}"
+            pp_dataframe(df, title, output_dir)
 
-        # Sort the dataframe and pretty print
-        sorted_df = df.sort_values(by=list(reversed(compilers)), ascending=False)
-        pp_dataframe(sorted_df, f"sorted_{title}", output_dir, out_io=out_io)
-    print(out_io.getvalue())
-    with open(f"{output_dir}/github_comment.txt", "w") as gh_fh:
-        gh_fh.write(out_io.getvalue())
+            # Sort the dataframe and pretty print
+            sorted_df = df.sort_values(by="graphs", ascending=False)
+            pp_dataframe(sorted_df, f"sorted_{title}", output_dir, out_io=out_io)
+        print(out_io.getvalue())
+        with open(f"{output_dir}/github_comment.txt", "w") as gh_fh:
+            gh_fh.write(out_io.getvalue())
+    else:
+        build_summary(out_io)
+        out_io.write("\n")
+        out_io.write("## Performance results ##\n")
+        for iter in itertools.product(suites, devices, dtypes):
+            suite, device, dtype = iter
+            frames = []
+            # Collect results from all the files
+            for compiler in compilers:
+                output_filename = (
+                    f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
+                )
+
+                df = read_csv(output_filename)
+                df.rename(
+                    columns={
+                        "speedup": compiler,
+                        "ts": compiler,
+                        "ofi": f"ofi_{compiler}",
+                    },
+                    inplace=True,
+                )
+                frames.append(df)
+
+            # Merge the results
+            if len(compilers) == 1:
+                df = frames[0]
+            else:
+                df = pd.merge(frames[0], frames[1], on=["dev", "name"])
+                for idx in range(2, len(frames)):
+                    df = pd.merge(df, frames[idx], on=["dev", "name"])
+
+            # Pretty print and also write to a bargraph
+            title = f"{suite}_{dtype}_{mode}_{device}"
+            pp_dataframe(df, title, output_dir)
+
+            # Sort the dataframe and pretty print
+            sorted_df = df.sort_values(by=list(reversed(compilers)), ascending=False)
+            pp_dataframe(sorted_df, f"sorted_{title}", output_dir, out_io=out_io)
+        print(out_io.getvalue())
+        with open(f"{output_dir}/github_comment.txt", "w") as gh_fh:
+            gh_fh.write(out_io.getvalue())
 
 
 if __name__ == "__main__":
