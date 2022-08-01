@@ -894,12 +894,12 @@ class BenchmarkRunner:
                 results.append(
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {t1-t0:3.0f}s"
                 )
+
+            if experiment.func is coverage_experiment:
                 experiment_kwargs["start_latency"] = t1 - t0
 
             if not hasattr(model, name):
                 model.name = name
-            results.append(experiment(model, example_inputs))
-
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             print(" ".join(map(str, results)))
 
