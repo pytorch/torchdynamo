@@ -206,9 +206,16 @@ class TimmRunnner(BenchmarkRunner):
             recorded_batch_size = int(recorded_batch_size / 2)
         batch_size = batch_size or recorded_batch_size
 
-        example_inputs = torch.randn(
-            (batch_size,) + input_size, device=device, dtype=data_dtype
-        )
+        # example_inputs = torch.randn(
+        #     (batch_size,) + input_size, device=device, dtype=data_dtype
+        # )
+        input_tensor = torch.randint(
+            256, size=(batch_size,) + input_size, device=device
+        ).to(dtype=torch.float32)
+        mean = torch.mean(input_tensor)
+        std_dev = torch.std(input_tensor)
+        example_inputs = (input_tensor - mean) / std_dev
+
         if channels_last:
             example_inputs = example_inputs.contiguous(
                 memory_format=torch.channels_last
