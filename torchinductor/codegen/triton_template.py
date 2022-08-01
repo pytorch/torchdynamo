@@ -52,7 +52,7 @@ class TritonTemplateKernel(TritonKernel):
             code.writeline("XBLOCK: tl.constexpr = BLOCK_M")
             code.writeline("YBLOCK: tl.constexpr = BLOCK_N")
             code.writeline(
-                "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_h)"
+                "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_w)"
             )
             code.writeline("ynumel = KERNEL_N")
 
