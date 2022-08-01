@@ -216,6 +216,7 @@ class TimmRunnner(BenchmarkRunner):
         example_inputs = [
             example_inputs,
         ]
+        self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
         return device, model_name, model, example_inputs
@@ -269,8 +270,7 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        target = self._gen_target(pred.shape[0], pred.device)
-        return self.loss(pred, target)
+        return self.loss(pred, self.target)
 
     @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
