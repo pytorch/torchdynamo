@@ -197,6 +197,8 @@ def extract_read_writes(fn, *argsizes, normalize=False, prefix="d"):
 
     return ReadWrites(rw._reads, rw._writes, rw._index_exprs, range_vars)
 
+def merge_read_writes(a, b):
+    return ReadWrites(a.reads | b.reads, a.writes | b.writes, a.index_exprs | b.index_exprs, a.range_vars)
 
 def canonicalization_prefix():
     return "c"
