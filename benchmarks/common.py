@@ -46,6 +46,8 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
+# We are primarily interested in TF32
+torch.backends.cuda.matmul.allow_tf32 = True
 
 current_name = ""
 current_device = ""
@@ -310,23 +312,38 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     should_check_result = should_randomize_input = args.randomize_input
     is_correct = True
 
-    for rep in range(args.repeat):
-        inputs = (
-            randomize_input(copy.deepcopy(example_inputs))
-            if should_randomize_input
-            else example_inputs
-        )
+    import contextlib
 
-        # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0], expected_output = timed(
-            model, model_iter_fn, inputs, return_result=True
-        )
-        with torchdynamo.run():
-            timings[rep, 1], actual_output = timed(
+    @contextlib.contextmanager
+    def maybe_profile(*args, **kwargs):
+        if kwargs.pop("enabled", True):
+            with torch.profiler.profile(*args, **kwargs) as p:
+                yield p
+        else:
+            yield
+
+    with maybe_profile(enabled=args.export_profiler_trace) as p:
+        for rep in range(args.repeat):
+            inputs = (
+                randomize_input(copy.deepcopy(example_inputs))
+                if should_randomize_input
+                else example_inputs
+            )
+
+            # interleave the runs to handle frequency scaling and load changes
+            timings[rep, 0], expected_output = timed(
                 model, model_iter_fn, inputs, return_result=True
             )
-        if should_check_result:
-            is_correct = is_correct and same(expected_output, actual_output)
+            with torchdynamo.run():
+                timings[rep, 1], actual_output = timed(
+                    model, model_iter_fn, inputs, return_result=True
+                )
+            if should_check_result:
+                is_correct = is_correct and same(expected_output, actual_output)
+    if args.export_profiler_trace:
+        name = args.profiler_trace_name + "_" + model.name + ".json"
+        name = os.path.join(torchdynamo.config.base_dir, name)
+        p.export_chrome_trace(name)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -746,7 +763,7 @@ class BenchmarkRunner:
         #     data_dtype = torch.bfloat16
         return use_amp, model_dtype, data_dtype
 
-    def decay_batch_exp(self, batch_size, factor=0.5, divisor=16):
+    def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
         out_batch_size = batch_size * factor
         if out_batch_size > divisor:
             out_batch_size = (out_batch_size + 1) // divisor * divisor
@@ -853,8 +870,8 @@ class BenchmarkRunner:
                     return sys.exit(-1)
             ok, total = Stats.reset_counters()
             results = []
-
-            torchdynamo.reset()
+            if optimize_ctx != accuracy_ctx:
+                torchdynamo.reset()
             # run with torchdynamo few times to populate the cache
             for _ in range(3):
                 with optimize_ctx:
@@ -872,7 +889,8 @@ class BenchmarkRunner:
                 results.append(
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {time.perf_counter()-t0:3.0f}s"
                 )
-
+            if not hasattr(model, name):
+                model.name = name
             results.append(experiment(model, example_inputs))
             print(" ".join(map(str, results)))
 
@@ -987,6 +1005,12 @@ def parse_args():
         "--output",
         help="Overides the output filename",
     )
+    parser.add_argument(
+        "--export-profiler-trace",
+        action="store_true",
+        help="exports trace of kineto profiler",
+    )
+    parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
@@ -1244,6 +1268,9 @@ def main(runner, original_dir=None):
             torchinductor.config.dynamic_shapes = True
         else:
             torchinductor.config.dynamic_shapes = False
+            if args.export_profiler_trace:
+                print("Profiling requested, setting cudagraphs to False")
+                torchinductor.config.triton.cudagraphs = False
 
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
@@ -1388,8 +1415,6 @@ def main(runner, original_dir=None):
 
     runner.setup_amp()
 
-    experiment = functools.partial(experiment, args, model_iter_fn)
-
     if args.output:
         output_filename = args.output
 
@@ -1399,12 +1424,29 @@ def main(runner, original_dir=None):
     if args.minimum_call_count:
         torchdynamo.config.minimum_call_count = args.minimum_call_count
 
+    if args.find_batch_sizes:
+        args.isolate = True
+
     if args.find_batch_sizes and args.only:
         assert args.isolate
         for device in args.devices:
             batch_size = runner.batch_size_finder(device, args.only, model_iter_fn)
             print(args.only, batch_size)
+            output_csv(output_filename, [], [args.only, batch_size])
         return
+
+    if args.export_profiler_trace:
+        if args.profiler_trace_name is None:
+            if args.backend:
+                args.profiler_trace_name = args.backend
+            elif args.inductor or args.inductor_dynamic:
+                args.profiler_trace_name = "inductor"
+            else:
+                args.profiler_trace_name = "profile"
+        else:
+            args.profiler_trace_name = args.profiler_trace_name
+
+    experiment = functools.partial(experiment, args, model_iter_fn)
 
     if args.only:
         for device in args.devices:
@@ -1418,6 +1460,7 @@ def main(runner, original_dir=None):
                     args.dynamic_shapes,
                 )
             except NotImplementedError:
+                logging.warn(f"{args.only} failed to load")
                 continue  # bad benchmark implementation
 
             current_name = name

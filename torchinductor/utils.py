@@ -45,5 +45,10 @@ def sympy_product(it):
     return functools.reduce(operator.mul, it, sympy.Integer(1))
 
 
+def sympy_dot(seq1, seq2):
+    assert len(seq1) == len(seq2)
+    return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
+
+
 def unique(it):
     return {id(x): x for x in it}.values()

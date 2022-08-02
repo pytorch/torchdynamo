@@ -247,6 +247,7 @@ def clone_input(x):
         result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
+            result.requires_grad_(x.requires_grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before

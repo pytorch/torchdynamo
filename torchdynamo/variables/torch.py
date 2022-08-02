@@ -195,7 +195,10 @@ class TorchVariable(VariableTracker):
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_function", self.value, *proxy_args_kwargs(args, kwargs)
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -265,6 +268,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -328,6 +332,7 @@ class TorchVariable(VariableTracker):
                         ],
                         {},
                     ),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
