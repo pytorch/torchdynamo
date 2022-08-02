@@ -1847,7 +1847,7 @@ class ExternKernel(InputsKernel):
 
         if sum([a * b for a, b in zip(strides, rw.range_vars)]) + offset != index:
             log.debug(
-                "convert_to_reinterpret_view failed: stride=%s offset=%s index=%",
+                "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
                 strides,
                 offset,
                 index,
