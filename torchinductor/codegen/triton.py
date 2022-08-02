@@ -1077,13 +1077,6 @@ class TritonScheduling:
             if tiled_groups:
                 candidate_tiles[tiled_groups] += 1
 
-        if len(candidate_tiles) > 1:
-            log.warning(
-                "%s tiling choices: %s",
-                len(candidate_tiles),
-                list(candidate_tiles.keys()),
-            )
-
         # TODO(jansel): join two 2D tiles into a 3D tile
         # TODO(jansel): add a cost function for tiling instead of most_common
         for tiled_groups, count in candidate_tiles.most_common():
