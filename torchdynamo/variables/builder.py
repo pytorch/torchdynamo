@@ -14,6 +14,7 @@ import torch
 
 import torchdynamo
 
+from .. import config
 from .. import mutation_guard
 from .. import skipfiles
 from ..allowed_functions import is_allowed
@@ -132,8 +133,8 @@ class VariableBuilder:
             0.01,
             0.5,
             0.05,
-            # 800,  # Work around for vision_maskrcnn
-            # 1.873536229133606,
+            800,  # Work around for vision_maskrcnn
+            1.873536229133606,
         }
 
     @staticmethod
@@ -257,7 +258,7 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            if type(value) in (int, float):
+            if type(value) in (int, float) and config.unspecialized_by_default:
                 # should specialize for these conditions
                 if (
                     value in self._common_constants()
