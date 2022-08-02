@@ -12,7 +12,6 @@ from .autotune import conv_heuristics
 def _kernel_delta_x_hwc(
     x,
     w,
-    bias,
     y,
     # stride of tensor
     stride_xn,
@@ -164,14 +163,6 @@ def _kernel_delta_x_hwc(
         # ------ load w ------
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
-    # add bias if is not None
-    if bias is not None:
-        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-        bias_ptrs = bias + off_bias_k * stride_biasn
-        mask_bias = off_bias_k < KERNEL_N
-        _bias = tl.load(bias_ptrs, mask=mask_bias)
-        acc += _bias[None, :]
-
     acc = acc.to(y.dtype.element_ty)
 
     # rematerialize -- this saves some registers
@@ -211,7 +202,6 @@ def _kernel_delta_x_hwc(
 def _kernel_delta_x(
     x,
     w,
-    bias,
     y,
     # stride of tensor
     stride_xn,
@@ -343,14 +333,6 @@ def _kernel_delta_x(
         matrix_x = tl.load(x_ptrs, mask=mask_x)
         # ------ load w ------
         matrix_w = tl.load(w_ptrs, mask=mask_w)
-
-    # add bias if is not None
-    if bias is not None:
-        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-        bias_ptrs = bias + off_bias_k * stride_biasn
-        mask_bias = off_bias_k < KERNEL_N
-        _bias = tl.load(bias_ptrs, mask=mask_bias)
-        acc += _bias[None, :]
 
     acc = acc.to(y.dtype.element_ty)
 
@@ -622,7 +604,6 @@ class _conv:
             _kernel_delta_x[grid](
                 x,
                 w,
-                bias,
                 y,
                 # stride nchw for x,w,y tensor
                 stride_x[xn],
@@ -675,7 +656,6 @@ class _conv:
             _kernel_delta_x_hwc[grid](
                 x,
                 w,
-                bias,
                 y,
                 # stride nchw for x,w,y tensor
                 stride_x[xn],
@@ -724,6 +704,10 @@ class _conv:
                 GROUP_H=1,
             )
 
+        if bias is not None:
+            if len(bias.shape) == 1:
+                bias = bias.reshape([1, bias.shape[0], 1, 1])
+            y += bias
         return y
 
     @staticmethod

@@ -145,15 +145,6 @@ def {{kernel_name}}(
         # ------ load w ------
         matrix_w = tl.load(w_ptrs, mask=mask_w)
 
-    # add bias if is not None
-    if bias is not None:
-        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-        bias_ptrs = bias + off_bias_k * stride_biasn
-        mask_bias = off_bias_k < KERNEL_N
-        _bias = tl.load(bias_ptrs, mask=mask_bias)
-        acc += _bias[None, :]
-
-
     acc = acc.to({{out_def}}.dtype.element_ty)
 
     # rematerialize -- this saves some registers

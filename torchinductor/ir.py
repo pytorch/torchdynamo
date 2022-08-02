@@ -1143,13 +1143,13 @@ class Layout(IRNode):
         ), f"convert {type(self).__name__} to FixedLayout first"
         return self.as_fixed().make_indexer()
 
-    def __eq__(self, o) -> bool:
+    def __eq__(self, other) -> bool:
         return (
-            self.device == o.device
-            and self.dtype == o.dtype
-            and self.size == o.size
-            and self.stride == o.stride
-            and self.offset == o.offset
+            self.device == other.device
+            and self.dtype == other.dtype
+            and self.size == other.size
+            and self.stride == other.stride
+            and self.offset == other.offset
         )
 
 
@@ -2620,7 +2620,6 @@ class Convolution(ExternKernelAlloc):
             [
                 ("x", f"{in_args[0]}"),
                 ("w", f"{in_args[1]}"),
-                ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
                 ("y", f"{self.get_name()}"),
             ]
         )
@@ -2649,30 +2648,21 @@ class Convolution(ExternKernelAlloc):
                 ("IN_C", f"{self.inputs[0].get_size()[1]}"),
                 ("IN_H", f"{self.inputs[0].get_size()[2]}"),
                 ("IN_W", f"{self.inputs[0].get_size()[3]}"),
-                (
-                    "KERNEL_N",
-                    f"{V.graph.sizevars.size_hint(self.inputs[1].get_size()[0])}",
-                ),
-                (
-                    "KERNEL_H",
-                    f"{V.graph.sizevars.size_hint(self.inputs[1].get_size()[2])}",
-                ),
-                (
-                    "KERNEL_W",
-                    f"{V.graph.sizevars.size_hint(self.inputs[1].get_size()[3])}",
-                ),
+                ("KERNEL_N", f"{self.inputs[1].get_size()[0]}"),
+                ("KERNEL_H", f"{self.inputs[1].get_size()[2]}"),
+                ("KERNEL_W", f"{self.inputs[1].get_size()[3]}"),
                 ("OUT_H", f"{self.get_size()[2]}"),
                 ("OUT_W", f"{self.get_size()[3]}"),
-                ("stride_h", f"{V.graph.sizevars.size_hint(const_args[0][0])}"),
-                ("stride_w", f"{V.graph.sizevars.size_hint(const_args[0][1])}"),
-                ("padding_h", f"{V.graph.sizevars.size_hint(const_args[1][0])}"),
-                ("padding_w", f"{V.graph.sizevars.size_hint(const_args[1][1])}"),
-                ("dilation_h", f"{V.graph.sizevars.size_hint(const_args[2][0])}"),
-                ("dilation_w", f"{V.graph.sizevars.size_hint(const_args[2][1])}"),
+                ("stride_h", f"{const_args[0][0]}"),
+                ("stride_w", f"{const_args[0][1]}"),
+                ("padding_h", f"{const_args[1][0]}"),
+                ("padding_w", f"{const_args[1][1]}"),
+                ("dilation_h", f"{const_args[2][0]}"),
+                ("dilation_w", f"{const_args[2][1]}"),
                 # ("transposed", f"{const_args[3]}"),
-                ("output_padding_h", f"{V.graph.sizevars.size_hint(const_args[4][0])}"),
-                ("output_padding_w", f"{V.graph.sizevars.size_hint(const_args[4][1])}"),
-                ("groups", f"{V.graph.sizevars.size_hint(const_args[5])}"),
+                ("output_padding_h", f"{const_args[4][0]}"),
+                ("output_padding_w", f"{const_args[4][1]}"),
+                ("groups", f"{const_args[5]}"),
             ]
         )
 
