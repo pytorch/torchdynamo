@@ -97,11 +97,11 @@ class UnspecTests(torchdynamo.testing.TestCase):
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
-            return (torch.zeros(idx), x[idx])
+            return (torch.zeros(idx), x[idx], x[idx:])
 
         x = list(range(50))
-        ref = fn(x, 33)  # 33 is unspecialized
+        ref = fn(x, 48)  # 48 is unspecialized
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
-            res = fn(x, 33)
+            res = fn(x, 48)
         self.assertTrue(same(ref, res))

@@ -739,7 +739,17 @@ class InstructionTranslatorBase(object):
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        self.push(SliceVariable(items, **options))
+        self.push(
+            SliceVariable(
+                [
+                    x.convert_to_constant(self)
+                    if isinstance(x, UnspecializedPythonVariable)
+                    else x
+                    for x in items
+                ],
+                **options,
+            )
+        )
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
