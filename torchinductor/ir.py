@@ -1946,7 +1946,10 @@ class ExternKernel(InputsKernel):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return x
-        if isinstance(x, BaseView) and is_storage_and_layout(x.data):
+        if isinstance(x, BaseView) and (
+            is_storage_and_layout(x.data)
+            and not isinstance(x.data.data, ExternKernelAlloc)
+        ):
             try:
                 return cls.convert_to_reinterpret_view(x)
             except NotImplementedError:
