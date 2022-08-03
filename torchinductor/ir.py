@@ -1541,26 +1541,28 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
         index_formulas = [*body.indexing_exprs.values()]
-        # memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
-        # prioritize reads layout/loop_ordering over writes
-        if len(body.reads_name2expr.values()) > 0:
-            memory_addrs = [*body.reads_name2expr.values()]
-        else:
-            memory_addrs = [*body.writes_name2expr.values()]
-        priority_idx = []
-
         reads_bufs = [
             V.graph.name_to_buffer[reads_name]
             if reads_name in V.graph.name_to_buffer.keys()
             else None
             for reads_name in body.reads_name2expr.keys()
         ]
-
-        if config.triton.convolution != "aten":
+        priority_idx = []
+        if config.triton.convolution == "aten":
+            memory_addrs = [
+                *body.reads_name2expr.values(),
+                *body.writes_name2expr.values(),
+            ]
+        else:
+            # prioritize reads layout/loop_ordering over writes
+            if len(body.reads_name2expr.values()) > 0:
+                memory_addrs = [*body.reads_name2expr.values()]
+            else:
+                memory_addrs = [*body.writes_name2expr.values()]
             for i, reads_buf in enumerate(reads_bufs):
                 if isinstance(reads_buf, Convolution):
                     priority_idx.append(i)
-        # index_formulas = memory_addrs
+
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -1720,6 +1722,7 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
+            # consider both layout(strides) and reordering(reordering_reindex)
             if reordering_reindex is not None:
                 for i in range(len(memory_addrs)):
                     strides[i] = reordering_reindex[i](strides[i])
