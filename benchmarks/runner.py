@@ -33,6 +33,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 from matplotlib import rcParams
+from scipy.stats import gmean
+from scipy.stats import tmean
 from tabulate import tabulate
 
 import torchdynamo
@@ -397,6 +399,18 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"
         pp_dataframe(df, title, output_dir)
+
+        # Add geomean and mean
+        for compiler in compilers:
+            speedups = df[compiler].tolist()
+            speedups = [x if x > 1.0 else 1.0 for x in speedups]
+            geo_mean = round(gmean(speedups), 3)
+            mean = round(tmean(speedups), 3)
+            out_io.write(
+                "{:<30}: gmean_speedup = {:.2f}x, mean_speedup = {:.2f}x\n".format(
+                    compiler, geo_mean, mean
+                )
+            )
 
         # Sort the dataframe and pretty print
         sorted_df = df.sort_values(by=list(reversed(compilers)), ascending=False)
