@@ -40,6 +40,11 @@ class OptimizerTests(torchdynamo.testing.TestCase):
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
+                torchdynamo.config, "fake_tensor_propagation", True
+            )
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
                 torchdynamo.config, "raise_on_assertion_error", True
             )
         )

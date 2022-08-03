@@ -120,6 +120,35 @@ def triton_config_reduction(size_hints, x, r, num_stages=2):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
+def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
+    """
+    Construct a tile reduction triton config with some adjustment
+    heuristics based on size_hints. Size_hints is a tuple of numels in
+    each tile dimension and will be rounded up to the nearest power of 2.
+    """
+
+    target = conditional_product(x, y, r)
+    if conditional_product(*size_hints) < target:
+        target //= 8
+
+    # shrink sizes to size hints
+    x = min(x, size_hints[0])
+    y = min(y, size_hints[1])
+    r = min(r, size_hints[2])
+
+    # if we are below original block size, scale up where we can
+    while x < size_hints[0] and conditional_product(x, y, r) < target:
+        x *= 2
+    while r < size_hints[2] and conditional_product(x, y, r) < target:
+        r *= 2
+    while y < size_hints[1] and conditional_product(x, y, r) < target:
+        y *= 2
+
+    cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
+    num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
+    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
+
+
 def apply_triton_config(config):
     """
     Decorator that applies a fixed triton config using triton.heuristics.
@@ -147,13 +176,28 @@ def pointwise_heuristics(size_hints):
         return autotune(
             [
                 triton_config(size_hints, 64, 64),
-                triton_config(size_hints, 4, 256),
-                triton_config(size_hints, 256, 4),
+                triton_config(size_hints, 8, 256),
+                triton_config(size_hints, 256, 8),
+                triton_config(size_hints, 1, 1024),
+                triton_config(size_hints, 1024, 1),
             ],
             key=["xnumel", "ynumel"],
         )
     if len(size_hints) == 3:
-        return apply_triton_config(triton_config(size_hints, 16, 16, 16))
+        if not config.triton.autotune:
+            return apply_triton_config(triton_config(size_hints, 16, 16, 16))
+        return autotune(
+            [
+                triton_config(size_hints, 16, 16, 16),
+                triton_config(size_hints, 64, 8, 8),
+                triton_config(size_hints, 8, 64, 8),
+                triton_config(size_hints, 8, 8, 64),
+                triton_config(size_hints, 1024, 1, 1),
+                triton_config(size_hints, 1, 1024, 1),
+                triton_config(size_hints, 1, 1, 1024),
+            ],
+            key=["xnumel", "ynumel", "znumel"],
+        )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
@@ -165,11 +209,29 @@ def reduction_heuristics(size_hints):
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
         return autotune(
             [
-                triton_config_reduction(size_hints, 32, 128, num_stages=2),
+                triton_config_reduction(size_hints, 64, 64),
+                triton_config_reduction(size_hints, 8, 512),
                 triton_config_reduction(size_hints, 1, 2048, num_stages=1),
             ],
             key=["xnumel", "rnumel"],
         )
+    """
+    # This is not tested yet:
+    if len(size_hints) == 3:
+        if not config.triton.autotune:
+            return apply_triton_config(
+                triton_config_tiled_reduction(size_hints, 16, 16, 16)
+            )
+        return autotune(
+            [
+                triton_config_tiled_reduction(size_hints, 16, 16, 16),
+                triton_config_tiled_reduction(size_hints, 1, 32, 128),
+                triton_config_tiled_reduction(size_hints, 32, 1, 128),
+                triton_config_tiled_reduction(size_hints, 1, 1, 2048, num_stages=1),
+            ],
+            key=["xnumel", "ynumel", "rnumel"],
+        )
+    """
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 

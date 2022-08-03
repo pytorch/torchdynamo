@@ -62,6 +62,14 @@ class MemoryDep(typing.NamedTuple):
             return MemoryDep(renames[self.name], self.index, self.size)
         return self
 
+    def is_simple(self):
+        s = str(self.index)
+        if "indirect" in s:
+            return False
+        if "ModularIndexing" in s:
+            return False
+        return True
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -71,6 +79,9 @@ class StarDep(typing.NamedTuple):
         if self.name in renames:
             return StarDep(renames[self.name])
         return self
+
+    def is_simple(self):
+        return False
 
 
 class IndexExprDep(typing.NamedTuple):

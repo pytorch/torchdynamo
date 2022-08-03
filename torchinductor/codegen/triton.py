@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -10,6 +11,8 @@ from typing import List
 
 import sympy
 import torch
+
+import torchinductor
 
 from .. import codecache
 from .. import config
@@ -309,9 +312,8 @@ class RangeTreeRoot(RangeTree):
             if child.name in symbol_names:
                 symbol_names.remove(child.name)
             node = child
-        if node.children:
+        if node.children and node.numel != 1:
             # extra broadcasting dim
-            assert node.numel != 1
             index_vars.append(node.child_node(node.numel).symbol())
             sizes.append(node.numel)
 
@@ -452,22 +454,13 @@ class TritonKernel(Kernel):
             for length, ranges in zip(lengths, self.range_trees)
         ]
 
-    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
-        """
-        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
-
-        To do this we need to split up the iteration space of i0 into something like:
-            for i1 in s0:
-              for i2 in s1:
-                i0 = i1*s1 + i2
-                ....
-
-        This function matches and resplits lengths to the groups of
-        this kernel to enable tiled + non-tiled fusions.
-        """
+    @staticmethod
+    def _split_iteration_ranges(
+        groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]
+    ):
         sv = V.graph.sizevars
-        new_ranges = [[] for _ in self.range_trees]
-        remaining = [sv.simplify(rt.numel) for rt in self.range_trees]
+        new_ranges = [[] for _ in groups]
+        remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
 
         def add_range(i, expr):
@@ -491,6 +484,10 @@ class TritonKernel(Kernel):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
+                if sv.maybe_guard_equals(size, 1):
+                    return_getters.append(lambda _: sympy.Integer(0))
+                    continue
+
                 while (
                     current_group < len(remaining)
                     and sv.size_hint(remaining[current_group]) == 1
@@ -515,12 +512,48 @@ class TritonKernel(Kernel):
                     return_getters.append(
                         operator.itemgetter(add_range(current_group, size))
                     )
-
             return_getters_groups.append(return_getters)
 
         assert all(
             V.graph.sizevars.size_hint(s) == 1 for s in remaining
         ), f"failed to set ranges {remaining} {lengths}"
+
+        return new_ranges, return_getters_groups
+
+    @classmethod
+    def is_compatible(cls, groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]):
+        try:
+            cls._split_iteration_ranges(groups, lengths)
+            return True
+        except CantSplit:
+            return False
+
+    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
+        """
+        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
+
+        To do this we need to split up the iteration space of i0 into something like:
+            for i1 in s0:
+              for i2 in s1:
+                i0 = i1*s1 + i2
+                ....
+
+        This function matches and resplits lengths to the groups of
+        this kernel to enable tiled + non-tiled fusions.
+        """
+        groups = [rt.numel for rt in self.range_trees]
+        if not self.inside_reduction:
+            groups[-1] = sympy.Integer(1)
+
+        if len(lengths) == len(self.range_trees) and all(
+            V.graph.sizevars.simplify(sympy_product(x) - g) == 0
+            for x, g in zip(lengths, groups)
+        ):
+            return self.set_ranges(*lengths)
+
+        new_ranges, return_getters_groups = self._split_iteration_ranges(
+            groups, lengths
+        )
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
@@ -872,66 +905,112 @@ class TritonScheduling:
                 group += (V.graph.sizevars.simplify(sympy_product(s)),)
         return group
 
-    def codegen(self, *groups):
-        log.info(f"codegen {groups}")
+    def create_node_schedule_pointwise(self, numel: sympy.Expr):
+        """
+        Get a list of SchedulerNode to execute in a single triton kernel.
+
+        `numel` is the number of elements in the input/output
+        """
+        node_schedule = []
+        for node in self.scheduler.pop_group(
+            (numel, sympy.Integer(1)),
+        ):
+            node.mark_run()
+            node_schedule.append(node)
+            node.mark_fusable()
+        return node_schedule
+
+    def create_node_schedule_reduction(
+        self, numel: sympy.Expr, reduction_numel: sympy.Expr
+    ):
+        """
+        Get a list of SchedulerNode to execute in a single triton kernel.
+
+        `numel * reduction_numel` is the elements in the input
+        `numel` is the number of elements in the output
+        """
+        node_schedule = []
+        # nodes with incompatible dimensions we failed to schedule
+        nodes_to_reschedule = []
+
+        for _ in self.scheduler.iter_fixed_point():
+            for node in self.scheduler.pop_group(
+                (numel * reduction_numel, sympy.Integer(1)),
+            ):
+                if TritonKernel.is_compatible(
+                    (numel, reduction_numel), node.get_ranges()
+                ):
+                    node.mark_run()
+                    node_schedule.append(node)
+                    node.mark_fusable()
+                else:
+                    log.debug(
+                        "rescheduling due to not is_compatible(%s, %s)",
+                        (numel, reduction_numel),
+                        node.get_ranges(),
+                    )
+                    nodes_to_reschedule.append(node)
+
+            # scheduler.pop_group will keep iterating all reachable fusable nodes
+            reductions_to_mark_fusable = []
+            for node in self.scheduler.pop_group((numel, reduction_numel)):
+                node.mark_run()
+                node_schedule.append(node)
+                reductions_to_mark_fusable.append(node)
+            # mark reductions fusable later as they rely on the loop break below
+            for node in reductions_to_mark_fusable:
+                node.mark_fusable(broadcast_after_reduce=True)
+
+            node_schedule.append(DisableReduction)  # close reduction loop
+            # Add more pointwise with fewer dimensions
+            for node in self.scheduler.pop_group((numel, sympy.Integer(1))):
+                node.mark_run()
+                node_schedule.append(node)
+                node.mark_fusable()
+            node_schedule.append(EnableReduction)  # open new reduction loop
+
+            if self.is_better_tiling_ready(numel, reduction_numel):
+                # early exit to prevent a fusion that would result in worse tiling
+                break
+
+        self.scheduler.enqueue(nodes_to_reschedule)
+        return node_schedule
+
+    def codegen(self, numel, reduction_numel):
+        """
+        Generate a single triton kernel.  If reduction_numel != 1 this is
+        a reduction kernel, otherwise pointwise.
+        """
+        if reduction_numel == 1:
+            node_schedule = self.create_node_schedule_pointwise(numel)
+        else:
+            if self.is_better_tiling_ready(numel, reduction_numel):
+                # preempt this reduction kernel with a tiled pointwise
+                self.codegen(numel * reduction_numel, sympy.Integer(1))
+            node_schedule = self.create_node_schedule_reduction(numel, reduction_numel)
+
+        nodes = [
+            n
+            for n in node_schedule
+            if isinstance(n, torchinductor.scheduler.SchedulerNode)
+        ]
+        log.info(
+            f"codegen numel={numel} reduction_numel={reduction_numel} nodes={len(nodes)}"
+        )
+
+        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+
+        with self.scheduler.kernel(TritonKernel(*tiled_groups)) as kernel:
+            stack = contextlib.ExitStack()
+            for node in node_schedule:
+                if node is DisableReduction:
+                    stack.enter_context(kernel.disable_reduction())
+                elif node is EnableReduction:
+                    stack.close()
+                else:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+
         wrapper = V.graph.wrapper_code
-        scheduler = self.scheduler
-
-        reduction_nodes = []
-        reschedule = []
-        with scheduler.kernel(TritonKernel(*groups)) as kernel:
-            for _ in scheduler.iter_fixed_point():
-                # scheduler.pop_group will keep iterating all reachable fusable nodes
-                for node in scheduler.pop_group(groups):
-                    node.run(*kernel.set_ranges(*node.get_ranges()))
-                    if kernel.inside_reduction:
-                        reduction_nodes.append(node)
-                    else:
-                        node.mark_fusable()
-
-                # the rest of this function could be correctly removed
-                # it is various cases of horizonal fusions
-                if kernel.inside_reduction:
-                    # TODO(jansel): rewrite this to support tiled reductions
-                    group, reduction_group = groups
-
-                    # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_groups(
-                        [
-                            (group * reduction_group, sympy.Integer(1)),
-                            (group, reduction_group, sympy.Integer(1)),
-                        ]
-                    ):
-                        try:
-                            node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                            node.mark_fusable()
-                        except CantSplit:
-                            reschedule.append(node)
-
-                    # we mark reductions fusable here as they rely on the loop break below
-                    for node in reduction_nodes:
-                        node.mark_fusable(broadcast_after_reduce=True)
-                    reduction_nodes.clear()
-
-                    # Add more pointwise with fewer dimensions
-                    # disable_reduction() will close the current reduction loop
-                    with kernel.disable_reduction():
-                        for node in scheduler.pop_group((group, sympy.Integer(1))):
-                            node.run(*kernel.set_ranges(*node.get_ranges()))
-                            node.mark_fusable()
-
-                elif len(groups) == 3:
-                    tile1, tile2, _ = groups
-                    # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_group(
-                        (tile1 * tile2, sympy.Integer(1)),
-                    ):
-                        try:
-                            node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                            node.mark_fusable()
-                        except CantSplit:
-                            reschedule.append(node)
-
         if config.triton.many_files:
             kernel_name = wrapper.next_kernel_name()
             wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
@@ -944,15 +1023,121 @@ class TritonScheduling:
                 wrapper.kernels[src_code] = kernel_name
                 code = src_code.format(kernel_name=kernel_name)
                 wrapper.header.splice(code)
-
         kernel.call_kernel(wrapper, kernel_name)
 
-        scheduler.enqueue(reschedule)
-        scheduler.barrier()
-        scheduler.maybe_free_buffers()
+        self.scheduler.barrier()
+        self.scheduler.maybe_free_buffers()
+
+    @staticmethod
+    @functools.lru_cache(32)
+    def select_node_tiling(node):
+        ranges, reduction_ranges = node.get_ranges()
+        if len(ranges) <= 1:
+            return None
+
+        rw = node.pointwise_read_writes()
+        assert len(rw.range_vars) == len(ranges)
+
+        deps = [
+            dep
+            for dep in itertools.chain(rw.reads, rw.writes)
+            if dep.name not in V.graph.removed_buffers
+        ]
+        strides = [
+            V.graph.sizevars.stride_hints(dep.index, rw.range_vars) for dep in deps
+        ]
+
+        if strides:
+            tiled_ranges = ir.ComputedBuffer._tile_contiguous(ranges, strides)
+            tiled_groups = tuple(
+                V.graph.sizevars.simplify(sympy_product(x)) for x in tiled_ranges
+            )
+            if len(tiled_ranges) > 1:
+                return tiled_groups
+
+            # TODO(jansel): ir.ComputedBuffer._tile_broadcasting()?
+
+    @staticmethod
+    def select_tiling(node_schedule, numel, reduction_numel):
+        """
+        Heuristics to decide how to tile kernels.
+        Currently, we tile based on stride-1 dimensions.
+
+        Returns:
+            `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
+
+        """
+        if reduction_numel != 1:
+            # TODO(jansel): should we tile reductions?
+            return (numel, reduction_numel)
+
+        candidate_tiles = collections.Counter()
+        for node in EnableReduction.filter(node_schedule):
+            tiled_groups = TritonScheduling.select_node_tiling(node)
+            if tiled_groups:
+                candidate_tiles[tiled_groups] += 1
+
+        # TODO(jansel): join two 2D tiles into a 3D tile
+        # TODO(jansel): add a cost function for tiling instead of most_common
+        for tiled_groups, count in candidate_tiles.most_common():
+            new_groups = (*tiled_groups, reduction_numel)
+            if all(
+                TritonKernel.is_compatible(new_groups, node.get_ranges())
+                for node in node_schedule
+                if isinstance(node, torchinductor.scheduler.SchedulerNode)
+            ):
+                return new_groups
+        return (numel, reduction_numel)
+
+    def is_better_tiling_ready(self, numel, reduction_numel):
+        """
+        Check for a pending node wanting a different tiling strategy
+        than the given reduction.
+        """
+        better_tiled = False
+        nodes_to_reschedule = []
+        for node in self.scheduler.pop_group(
+            (numel * reduction_numel, sympy.Integer(1))
+        ):
+            tiling = self.select_node_tiling(node)
+            if tiling and tuple(tiling) != (numel, reduction_numel):
+                better_tiled = True
+            nodes_to_reschedule.append(node)
+        self.scheduler.enqueue(nodes_to_reschedule)
+        return better_tiled
 
     def flush(self):
         pass
+
+
+class DisableReduction:
+    """
+    Marker to invoke `kernel.disable_reduction()`.  This closes a
+    reduction loop and allows for pointwise ops to occur on the output
+    of a reduction.
+    """
+
+
+class EnableReduction:
+    """
+    Marker to end a DisableReduction block.
+    """
+
+    @staticmethod
+    def filter(node_schedule):
+        """
+        Get the nodes from node_schedule skipping those in a
+        DisableReduction block.
+        """
+        disabled = False
+        for node in node_schedule:
+            if node in (EnableReduction, DisableReduction):
+                # Don't tile stuff outside the main reduction loop
+                disabled = node is DisableReduction
+            elif disabled:
+                pass
+            else:
+                yield node
 
 
 class CantSplit(Exception):
