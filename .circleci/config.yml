@@ -35,6 +35,7 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
+            python benchmarks/torchbench.py --accuracy-aot-cudagraphs -d cuda --raise-on-assertion-error --raise-on-backend-error --training -x Super_SloMo -x moco
             python benchmarks/torchbench.py --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
       - store_artifacts:
           path: coverage.csv

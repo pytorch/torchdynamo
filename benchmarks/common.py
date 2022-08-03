@@ -1079,6 +1079,11 @@ def parse_args():
         help="Accuracy testing and speedup for AOT vs Eager",
     )
     group.add_argument(
+        "--accuracy-aot-cudagraphs",
+        action="store_true",
+        help="Accuracy testing and speedup for AOT vs CUDA Graphs",
+    )
+    group.add_argument(
         "--accuracy-aot-ts",
         action="store_true",
         help="Accuracy testing and speedup for AOT with Torchscript(NNC/NVFuser) vs Eager",
@@ -1354,6 +1359,13 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize("aot_nop", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "accuracy_aot_nop.csv"
+    elif args.accuracy_aot_cudagraphs:
+        from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
+        optimize_ctx = torchdynamo.optimize(
+            aot_autograd_cudagraphs, nopython=args.nopython
+        )
+        experiment = speedup_experiment
+        output_filename = "accuracy_aot_cudagraphs.csv"
     elif args.accuracy_aot_ts:
         optimize_ctx = torchdynamo.optimize("aot_ts", nopython=args.nopython)
         experiment = speedup_experiment

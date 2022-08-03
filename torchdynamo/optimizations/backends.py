@@ -803,3 +803,7 @@ def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
             "FX2TRT conversion failed on the subgraph. Return GraphModule forward instead"
         )
         return gm.forward
+
+
+from torch.cuda._dynamo_graphs import aot_autograd_cudagraphs
+BACKENDS["aot_autograd_cudagraphs"] = aot_autograd_cudagraphs
