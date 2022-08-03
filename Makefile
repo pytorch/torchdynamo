@@ -51,7 +51,7 @@ setup:
 setup_nightly:
 	$(PIP) install ninja
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@$(python -c "import torch.version; print(torch.version.git_version)")#subdirectory=functorch"
+	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -r requirements.txt
 	python setup.py develop
 
@@ -63,7 +63,7 @@ setup_nightly_gpu:
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu113
 	$(PIP) install ninja
-	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@$(python -c "import torch.version; print(torch.version.git_version)")#subdirectory=functorch"
+	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
 	python setup.py develop
