@@ -76,9 +76,7 @@ class triton:
     dense_indexing = True if convolution != "aten" else False
 
     # limit tiling dimensions
-    # Disable tiling until we figure out how tiling and fusion work together
     max_tiles = 2
-    tile_broadcasting = False
 
     # put each kernel in its own file
     many_files = False
