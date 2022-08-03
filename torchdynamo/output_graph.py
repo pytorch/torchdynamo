@@ -433,3 +433,30 @@ class OutputGraph(fx.Tracer):
         for node in self.graph.nodes:
             if "example_value" in node.meta:
                 del node.meta["example_value"]
+
+    def create_proxy(
+        self,
+        kind,
+        target,
+        args,
+        kwargs,
+        name=None,
+        type_expr=None,
+        proxy_factory_fn=None,
+        current_tx=None,
+    ):
+        rv = super().create_proxy(
+            kind, target, args, kwargs, name, type_expr, proxy_factory_fn
+        )
+
+        # append stack trace to fx node
+        tx = current_tx if current_tx else self.root_tx
+        frame_summaries: List[traceback.FrameSummary] = []
+        while tx:
+            frame_summaries.append(tx.frame_summary())
+            tx = getattr(tx, "parent", None)
+
+        msgs = reversed(traceback.StackSummary.from_list(frame_summaries).format())
+        rv.node.stack_trace = "".join(msgs)
+
+        return rv
