@@ -7,6 +7,8 @@ import threading
 import warnings
 
 import torch
+from torchdynamo.optimizations.backends import BACKENDS
+from torchdynamo.optimizations.distributed import DDPOptimizer
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
@@ -133,7 +135,29 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
+        def _inside_ddp_callstack(frame):
+            """
+            Totally braindead way to determine we are inside a DDP forward.
+
+            TODO replace this with some kind of push/pop context that keeps track
+            efficiently.
+            """
+            up = frame.f_back
+            while up:
+                if up.f_code.co_name == "_run_ddp_forward":
+                    return True
+                up = up.f_back
+            return False
+
         try:
+            if _inside_ddp_callstack(frame) and frame.f_code.co_name == "forward":
+                print(f"compile for ddp: {frame.f_code.co_name} {frame.f_code.co_filename}")
+                with compile_lock:
+                    # TODO(whc) find a way to get these parameters from the DDP module
+                    # and configure the backend compiler and convert_frame correctly
+                    ddp_optimizer = DDPOptimizer(bucket_cap_mb = 25, parameters_to_ignore = [], backend_compile_fn = BACKENDS["aot_autograd"])
+                    hijacked_callback = convert_frame.convert_frame(ddp_optimizer.compile_fn, guard_export_fn=None)
+                    return hijacked_callback(frame, cache_size)
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
                 if config.debug:
                     print(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
