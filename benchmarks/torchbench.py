@@ -37,19 +37,6 @@ assert exists(torchbench_dir), "../../torchbenchmark does not exist"
 original_dir = abspath(os.getcwd())
 torchbench_dir = abspath(torchbench_dir)
 
-# Tuned for an A100 with 40 GB
-LARGE_BATCH_SIZES = {}
-filename = "torchbench_models_list.txt"
-if os.path.exists("benchmarks"):
-    filename = os.path.join("benchmarks", filename)
-assert os.path.exists(filename)
-with open(filename, "r") as f:
-    lines = f.readlines()
-    lines = [i.split(",") for i in lines if len(i.strip()) > 0]
-    for val in lines:
-        model_name, b = val
-        LARGE_BATCH_SIZES[model_name] = int(b)
-
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 
@@ -287,13 +274,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 
-        if is_training and model_name in USE_SMALL_BATCH_SIZE:
+        if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
-
-        if model_name in LARGE_BATCH_SIZES:
-            batch_size = LARGE_BATCH_SIZES[model_name]
-
-        print("batch size: ", batch_size)
 
         if is_training and model_name not in ONLY_EVAL_DATASET:
             benchmark = benchmark_cls(
