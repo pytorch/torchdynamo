@@ -38,7 +38,8 @@ def should_use_template(node: ir.ExternKernel):
         type(node) in template_kernels
         and ir.is_triton(node.get_device())
         # TODO(jansel): extend this to other kernels
-        and config.triton.convolution != "aten"
+        # check the kernel rather than config
+        and node.kernel != "aten.convolution"
     )
 
 
