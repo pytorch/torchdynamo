@@ -1023,13 +1023,14 @@ def _local_scalar_dense(data):
 
 
 def _full(fill_value, device, dtype, size):
-    # if isinstance(fill_value, ir.Constant):
-    fill_value = fill_value.value
-    assert isinstance(fill_value, (int, float)), fill_value
+    value = fill_value
+    if not isinstance(fill_value, (int, float)):
+        value = value.value
+    assert isinstance(value, (int, float)), f"Expected int or float, got {value}"
     return Pointwise.create(
         device=device,
         dtype=dtype,
-        inner_fn=lambda index: ops.constant(fill_value, dtype),
+        inner_fn=lambda index: ops.constant(value, dtype),
         ranges=list(size),
     )
 
