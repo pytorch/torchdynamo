@@ -163,6 +163,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs, start_latenc
             "total_ops",
             "pct_ops",
             "pct_time",
+            "start_latency",
         ),
         [
             current_device,
