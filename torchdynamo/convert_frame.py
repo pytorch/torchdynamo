@@ -77,31 +77,15 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def _wrap_compiler_fn(compiler_fn):
-    """Expand backend strings to functions"""
-    if compiler_fn == "inductor":
-        from torchinductor.compile_fx import compile_fx
-
-        return compile_fx
-    elif isinstance(compiler_fn, str):
-        from .optimizations import BACKENDS
-
-        return wrap_compiler_fn(BACKENDS[compiler_fn])
-    else:
-        return compiler_fn
-
-
 def wrap_compiler_fn(compiler_fn):
     """WrapperBackend if config.verify_correctness is True"""
-    wrapped_compiler_fn = _wrap_compiler_fn(compiler_fn)
-
     if config.verify_correctness:
         # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(wrapped_compiler_fn)
+        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
 
         return wrapper_backend_compiler_fn
 
-    return wrapped_compiler_fn
+    return compiler_fn
 
 
 def wrap_convert_context(fn):
@@ -332,7 +316,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 guard_export_fn(output.guards)
 
             return guarded_code
-        except (Unsupported, TorchRuntimeError, BackendCompilerFailed):
+        except (Unsupported, TorchRuntimeError, BackendCompilerFailed, AssertionError):
             if config.debug or config.trace or config.print_internal_exceptions:
                 debug_print("WONT CONVERT")
             raise
@@ -363,6 +347,9 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
+        except AssertionError:
+            if config.raise_on_assertion_error:
+                raise
         except BackendCompilerFailed:
             raise
         except Exception:

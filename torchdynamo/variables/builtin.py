@@ -11,7 +11,9 @@ import numpy as np
 import torch
 
 from torchdynamo.guards import GuardBuilder
+from torchdynamo.variables.dicts import ConstDictVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
+from torchdynamo.variables.tensor import FakeItemVariable
 
 from .. import config
 from .. import variables
@@ -141,7 +143,12 @@ class BuiltinVariable(VariableTracker):
         self.fn = fn
 
     def __str__(self):
-        return f"{self.__class__.__name__}({self.fn.__name__})"
+        if self.fn is None:
+            name = "None"
+        else:
+            name = self.fn.__name__
+
+        return f"{self.__class__.__name__}({name})"
 
     def python_type(self):
         return type(self.fn)
@@ -242,7 +249,15 @@ class BuiltinVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
 
-        if self.can_insert_in_graph() and tensor_args:
+        if (
+            self.can_insert_in_graph()
+            and tensor_args
+            and not (
+                self.fn is operator.getitem
+                and isinstance(args[0], ConstDictVariable)
+                and isinstance(args[1], variables.TensorVariable)
+            )
+        ):
             try:
                 fn = self.fn
                 if self.fn is operator.iadd and isinstance(
@@ -250,10 +265,9 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
+
                 proxy = tx.output.create_proxy(
-                    "call_function",
-                    fn,
-                    *proxy_args_kwargs(args, kwargs),
+                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
                 if self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
@@ -265,20 +279,33 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
-                    need_unwrap = any(
-                        x.need_unwrap
-                        for x in itertools.chain(args, kwargs.values())
-                        if isinstance(x, variables.UnspecializedPythonVariable)
-                    )
-                    return variables.UnspecializedPythonVariable.create(
-                        tx,
-                        proxy,
-                        raw_value=raw_value,
-                        need_unwrap=need_unwrap,
-                        **options,
-                    )
+                    if any([isinstance(arg, FakeItemVariable) for arg in args]):
+                        raw_value = None
+                        need_unwrap = False
+
+                        return variables.FakeItemVariable.create(
+                            tx,
+                            proxy,
+                            **options,
+                        )
+
+                    else:
+                        _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                        raw_value = self.fn(*_args, **_kwargs)
+
+                        need_unwrap = any(
+                            x.need_unwrap
+                            for x in itertools.chain(args, kwargs.values())
+                            if isinstance(x, variables.UnspecializedPythonVariable)
+                        )
+
+                        return variables.UnspecializedPythonVariable.create(
+                            tx,
+                            proxy,
+                            raw_value=raw_value,
+                            need_unwrap=need_unwrap,
+                            **options,
+                        )
                 else:
                     return variables.TensorVariable.create(tx, proxy, **options)
 
@@ -413,6 +440,10 @@ class BuiltinVariable(VariableTracker):
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
+
+    def call_dict(self, tx, arg):
+        if isinstance(arg, variables.ConstDictVariable):
+            return arg.clone(mutable_local=MutableLocal())
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)

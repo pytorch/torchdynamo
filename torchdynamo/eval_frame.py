@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import functools
+import inspect
 import logging
 import threading
 import warnings
@@ -9,13 +10,13 @@ import torch
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import same
 
 from . import config
 from . import convert_frame
 from . import skipfiles
 from . import utils
 from .mutation_guard import install_generation_tagging_init
-from .utils import same
 
 log = logging.getLogger(__name__)
 
@@ -200,6 +201,20 @@ class WrapperBackend:
             self.restore()
 
 
+def get_compiler_fn(compiler_fn):
+    """Expand backend strings to functions"""
+    if compiler_fn == "inductor":
+        from torchinductor.compile_fx import compile_fx
+
+        return compile_fx
+    elif isinstance(compiler_fn, str):
+        from .optimizations import BACKENDS
+
+        return BACKENDS[compiler_fn]
+    else:
+        return compiler_fn
+
+
 def optimize(backend, nopython=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -228,24 +243,41 @@ def optimize(backend, nopython=False):
         with torchdynamo.optimize(my_compiler):
            ...
     """
-    backend_ctx_ctor = null_context
-    if hasattr(backend, "backend_ctx_ctor"):
-        backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn=None)
+        return optimize_assert(backend, guard_export_fn=None)
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
     )
 
 
 def export(f, *args, **kwargs):
-    from inspect import signature
-
     import torch.utils._pytree as pytree
 
     graph = None
     out_guards = None
+    graph_captured_input = None
+    graph_captured_result = None
+
+    def produce_matching(source_args, candidate_args):
+        matched_elements_positions = []
+        dict_of_source_args = dict()
+        for i in range(0, len(source_args)):
+            element_id = id(source_args[i])
+            dict_of_source_args[element_id] = i
+
+        for i in range(0, len(candidate_args)):
+            arg = candidate_args[i]
+            assert (
+                id(arg) in dict_of_source_args
+            ), "Dynamo input and output is a strict subset of traced input/output"
+            matched_elements_positions.append(dict_of_source_args[id(arg)])
+
+        return matched_elements_positions
 
     def guard_export_print(guards):
         nonlocal out_guards
@@ -256,56 +288,81 @@ def export(f, *args, **kwargs):
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
+
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        return gm.forward
 
-    backend_ctx_ctor = null_context
+        def result_capturing_wrapper(*graph_inputs):
+            nonlocal graph_captured_result
+            nonlocal graph_captured_input
 
-    result = None
-    with optimize_assert(
-        dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
-    ):
-        result = f(*args, **kwargs)
+            graph_captured_input = graph_inputs
+            graph_captured_result = graph(*graph_inputs)
+            return graph_captured_result
+
+        return result_capturing_wrapper
+
+    # TODO(voz): Handle kwargs properly?
+    flat_args, in_spec = pytree.tree_flatten(args)
+
+    result_traced = None
+
+    with optimize_assert(dynamo_normalization_capturing_compiler, guard_export_print):
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        result_traced = f(*args, **kwargs)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
 
-    out_sig = signature(graph.forward)
-    signature_types = [
-        out_sig.parameters[k].annotation for k in list(out_sig.parameters)
-    ]
+    matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
-    flat_input_types = []
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
-    for arg in flat_args:
-        flat_input_types.append(arg.__class__)
+    flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
-    _, out_spec = pytree.tree_flatten(result)
+    flat_both = list(graph_captured_result) + flat_args
+    matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
-    assert len(flat_input_types) == len(
-        out_sig.parameters
-    ), "Flattened inputs length must match out signature parameter lengths."
+    class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
+        def __init__(
+            self,
+            m,
+        ):
+            super().__init__(m)
+            arg_len = len(flat_args)
+            self.new_args = [
+                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
+                for i in range(0, arg_len)
+            ]
+            self.old_args_gen = (
+                self.new_args[i] for i in matched_input_elements_positions
+            )
 
-    for idx in range(len(out_sig.parameters)):
-        sig_type = signature_types[idx]
-        in_type = flat_input_types[idx]
-        assert (
-            sig_type == in_type
-        ), "Export produced a graph with mismatched type signature {sig_type} vs expected {in_type} for arg {idx}"
+        def placeholder(self, target, args, kwargs):
+            return next(self.old_args_gen)
 
-    # TODO(voz): A major feature gap here, atm, is that we return a graph with a flat_args signature.
-    # There is currently more work that needs to be done on the fx side before we can support the UX we want.
-    # The future UX here will not return a spec, but will rather return a graph with the original signature
-    # and return type as the passed in callable, `f`.
-    return (graph, out_guards, in_spec, out_spec)
+        def output(self, target, args, kwargs):
+            dynamo_result_flat = args[0]
+            lookup = [*dynamo_result_flat, *self.new_args]
+            new_result_flat = [lookup[i] for i in matched_output_elements_positions]
+            new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
+
+            return super().output(target, (new_result,), {})
+
+    new_graph = ChangeInputOutputSignature(
+        graph,
+    ).transform()
+
+    return (new_graph, out_guards)
 
 
-def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
+def optimize_assert(backend, guard_export_fn=None):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
     )
@@ -359,6 +416,29 @@ class TorchPatcher:
 
         if proxy_tensor is not None:
             proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
+
+        optimizers = [
+            opt
+            for opt in torch.optim.__dict__.values()
+            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
+        ]
+
+        # disable profile hook
+        for opt in optimizers:
+            opt._cuda_graph_capture_health_check = disable(
+                opt._cuda_graph_capture_health_check
+            )
+            # disable any currently set hooks
+            # Note: we only want to disable the profiling hook
+            # which is the *last* hook applied, we want to keep the no_grad hook
+            hooked = getattr(opt.step, "hooked", False)
+            if hooked:
+                unwrapped_step = getattr(opt.step, "__wrapped__", None)
+                if unwrapped_step:
+                    opt.step = unwrapped_step
+
+            # disable future hooking
+            setattr(opt.step, "hooked", True)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

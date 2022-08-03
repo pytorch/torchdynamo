@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 import operator
 import os
 import textwrap
@@ -17,9 +18,12 @@ from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
 
 from . import config
+from . import overrides
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 class CheckEachNode(torch.fx.Interpreter):
@@ -100,16 +104,18 @@ def dump_to_repro(gm, *args):
         print("wrote repro.py")
 
 
-def compile_fx(
+def compile_fx_python_key(
     model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
 ):
-    """Main entrypoint to a compile given FX graph"""
+    """Alternate version for inference only"""
     assert isinstance(model, torch.fx.GraphModule)
     assert all(isinstance(x, torch.Tensor) for x in example_inputs)
 
-    gm, wrap = python_key_normalize(
-        model, example_inputs, decompositions=decompositions
-    )
+    with overrides.patch_functions():
+        model = overrides.replace_fx(model)
+        gm, wrap = python_key_normalize(
+            model, example_inputs, decompositions=decompositions
+        )
 
     if config.dce:
         gm.graph.eliminate_dead_code()
@@ -151,20 +157,16 @@ def compile_fx_inner(
             return cudagraphify(
                 compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
             )
-        else:
-            return compiled_fn
+        elif cudagraphs and set(graph.device_types) == {"cuda"}:
+            log.warning("skipping cudagraphs due to input mutation")
+        elif cudagraphs and len(graph.device_types) > 1:
+            log.warning("skipping cudagraphs due to multple devices")
+        return compiled_fn
     except Exception:
         if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
             wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
 
         raise
-
-
-def no_compile(
-    gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-):
-    return gm.forward
 
 
 def cudagraphify(model, inputs, static_input_idxs=()):
@@ -240,25 +242,44 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-def compile_fx_training(
-    model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
-):
-    model_ = normalize_ir(model_, example_inputs_)
+def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+    """Main entrypoint to a compile given FX graph"""
+    with overrides.patch_functions():
+        model_ = normalize_ir(model_, example_inputs_)
+        model_ = overrides.replace_fx(model_)
+    num_example_inputs = len(example_inputs_)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        # model.graph.print_tabular()
-        fixed = len(example_inputs) - len(example_inputs_)
+        if config.debug:
+            print("FORWARD GRAPH:")
+            model.graph.print_tabular()
+        fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+        if config.debug:
+            print("BACKWARD GRAPH:")
+            model.graph.print_tabular()
         fixed = count_tangents(model)
         return compile_fx_inner(model, example_inputs, num_fixed=fixed)
 
-    return aot_autograd(
-        model_,
-        example_inputs_,
-        fw_compiler=fw_compiler,
-        bw_compiler=bw_compiler,
-        decompositions=decompositions,
-        partition_fn=min_cut_rematerialization_partition,
+    with overrides.patch_functions():
+        return aot_autograd(
+            model_,
+            example_inputs_,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            decompositions=decompositions,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+
+def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+    """Main entrypoint to a compile given FX graph"""
+    logging.getLogger("torchinductor").setLevel(
+        logging.DEBUG if config.debug else logging.WARNING
     )
+    if config.aot_autograd:
+        return compile_fx_aot(model_, example_inputs_)
+    else:
+        return compile_fx_python_key(model_, example_inputs_)

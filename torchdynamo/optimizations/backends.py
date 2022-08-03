@@ -137,7 +137,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             dev = value.device
             binding.bind_input(
                 name,
-                dev,
+                dev.type,
                 dev.index or 0,
                 _NP_DTYPE[value.dtype],
                 value.size(),
@@ -148,7 +148,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
             dev = value.device
             binding.bind_output(
                 name,
-                dev,
+                dev.type,
                 dev.index or 0,
                 _NP_DTYPE[value.dtype],
                 value.size(),
@@ -537,22 +537,6 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 
 @create_backend
 def aot_autograd(subgraph, **kwargs):
-    if not kwargs:
-        # from functorch._src.aot_autograd import static_argnums
-        from functorch.compile import default_decompositions
-        from functorch.compile import min_cut_rematerialization_partition
-        from functorch.compile import ts_compile
-
-        kwargs = {
-            # these are taken from memory_efficient_fusion()
-            "fw_compiler": ts_compile,
-            "bw_compiler": ts_compile,
-            "partition_fn": min_cut_rematerialization_partition,
-            "hasher_type": "StaticShapeHasher",
-            "decompositions": default_decompositions,
-            # "static_argnums": static_argnums,
-        }
-
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
         return torchdynamo.disable(bw_compiler(*args, **kwargs))

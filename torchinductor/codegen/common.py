@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import itertools
+import logging
 import math
 import re
 import textwrap
@@ -15,6 +16,8 @@ from .. import metrics
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
+
+log = logging.getLogger(__name__)
 
 
 def _simplify_loops(index_vars, sizes, index_formulas):
@@ -506,6 +509,14 @@ class Kernel(CodeGen):
         self.stores = DeferredIndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
+        self.current_node = None
+
+    @contextlib.contextmanager
+    def set_current_node(self, node):
+        prior = self.current_node
+        self.current_node = node
+        yield
+        self.current_node = prior
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
@@ -576,6 +587,8 @@ class Kernel(CodeGen):
             def store(name, index, value, mode=None):
                 if mode is None:
                     self.cse.store_cache[name] = value
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
