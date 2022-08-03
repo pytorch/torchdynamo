@@ -229,8 +229,8 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value
             return variables.ConstantVariable(example_value, **options)
         elif (
-            isinstance(example_value, numbers.Number)
-            and (proxy.node.target == "item" or proxy.node.target == math.sqrt)
+            isinstance(example_value, (numbers.Number, bool))
+            and (proxy.node.target == "item" or proxy.node.target == math.sqrt or proxy.node.target == torch.is_complex)
             and config.capture_scalar_outputs
         ):
             if use_fake_tensors:
