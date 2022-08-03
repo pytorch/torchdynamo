@@ -380,6 +380,27 @@ class SchedulerNode(BaseSchedulerNode):
         else:
             return len(self.group) - 1
 
+class FusedNode(SchedulerNode):
+    def __init__(self, scheduler: "Scheduler", scheduler_nodes):
+        super().__init__(scheduler, scheduler_nodes[0].node, lambda x: None)
+        node = scheduler_nodes[0].node
+        (
+            self._sizes,
+            _
+        ) = node.simplify_reorder_and_tile()
+        self.scheduler_nodes = scheduler_nodes
+        self.group = scheduler_nodes[0].group
+        read_writes = self.scheduler_nodes[0].read_writes
+        for node in scheduler_nodes[1:]:
+            read_writes = dependencies.merge_read_writes(read_writes, node.read_writes)
+        self.set_read_writes(read_writes)
+
+    def run(self, *index_vars):
+        for node in self.scheduler_nodes:
+            node.run(*index_vars)
+        self.scheduler.run_count -= (len(self.scheduler_nodes) - 1)
+
+
 
 @dataclasses.dataclass
 class SchedulerNodeBox:
@@ -540,6 +561,94 @@ def create_fx_from_buffers(nodes, fname, print_graph=False):
     print("starting drawing")
     draw_graph(gm, fname, clear_meta=False)
 
+def create_graph(nodes):
+    """
+    Draw a graph in fname.svg.
+    nodes is a list of SchedulerNode objects.
+    """
+
+    from torch.fx.graph_module import GraphModule
+    from torch.fx.passes.shape_prop import TensorMetadata
+    from torch.fx.passes.tools_common import legalize_graph
+
+    func_dict = {}
+    name_to_fx_node = {}
+    graph = torch.fx.Graph()
+    first_node = None
+
+    outputs = []
+    # create call_function node for each Buffer and Kernel
+    for snode in nodes:
+        node = snode.node
+        name = node.get_name()
+        if isinstance(snode, ExternKernelSchedulerNode):
+            node_type = "extern"
+            group = node_type
+        elif isinstance(snode, NopKernelSchedulerNode):
+            node_type = "nop"
+            group = node_type
+        elif isinstance(snode, SchedulerNode):
+            node_type = "compute"
+            group = snode.group[1]
+        else:
+            raise RuntimeError("Unknown node type")
+
+
+        if node_type in func_dict:
+            fake_f = func_dict[node_type]
+        else:
+            fake_f = get_fake_func(node_type)
+            func_dict[node_type] = fake_f
+
+        fx_node = graph.call_function(fake_f, args=(), kwargs=None)
+        if any([isinstance(user.node, OutputNode) for user in snode.users]):
+            outputs.append(fx_node)
+        fx_node.name = name
+
+        fx_node.meta["group"] = group
+        fx_node.meta["inductor_node"] = snode
+
+        name_to_fx_node[name] = fx_node
+        if first_node is None:
+            first_node = fx_node
+
+    # create edges between nodes
+    for snode in nodes:
+        node = snode.node
+        name = node.get_name()
+        deps = node.get_reads()
+        fx_node = name_to_fx_node[name]
+
+        new_args = []
+        for dep in deps:
+            if dep.name in name_to_fx_node:
+                dep_node = name_to_fx_node[dep.name]
+            else:
+                with graph.inserting_before(first_node):
+                    dep_node = graph.placeholder(dep.name)
+                    name_to_fx_node[dep.name] = dep_node
+            new_args.append(dep_node)
+
+        fx_node.args = tuple(new_args)
+
+    graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
+    new_nodes = [node.meta['inductor_node'] for node in graph.nodes if 'inductor_node' in node.meta]
+    scheduler = new_nodes[0].scheduler
+    def remove_nodes(nodes, values):
+        flat_values = [j for i in values for j in i]
+        return [node for idx, node in enumerate(nodes) if idx not in flat_values]
+
+    from functorch._src.aot_autograd import get_graph_being_compiled
+    if 'backward' in get_graph_being_compiled():
+        values = [[2, 5], [7, 10]]
+    else:
+        values = []
+    if len(values) > 0:
+        new_nodes = remove_nodes(nodes, values) + [FusedNode(scheduler, [nodes[_value] for _value in value]) for value in values]
+    # if 'backward' in get_graph_being_compiled():
+    #     breakpoint()
+    return new_nodes
+
 
 class Scheduler:
     def __init__(self, nodes):
@@ -581,20 +690,6 @@ class Scheduler:
                 assert False, node
         self.name_to_node = {node.get_name(): node for node in self.nodes}
 
-        if INDUCTOR_SCHEDULER_GRAPH:
-
-            try:
-                from functorch._src.aot_autograd import get_graph_being_compiled
-
-                graph_name = get_graph_being_compiled()
-            except ImportError:
-                logging.warning(
-                    "Could not get graph name from `get_graph_being_compiled` \
-                    in functorch, use 'model' as default"
-                )
-                graph_name = "model"
-
-            create_fx_from_buffers(self.nodes, graph_name, print_graph=True)
 
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -609,6 +704,21 @@ class Scheduler:
 
         self.compute_users()
         self.dead_node_elimination()
+        self.nodes = create_graph(self.nodes)
+        if INDUCTOR_SCHEDULER_GRAPH:
+
+            try:
+                from functorch._src.aot_autograd import get_graph_being_compiled
+
+                graph_name = get_graph_being_compiled()
+            except ImportError:
+                logging.warning(
+                    "Could not get graph name from `get_graph_being_compiled` \
+                    in functorch, use 'model' as default"
+                )
+                graph_name = "model"
+
+            create_fx_from_buffers(self.nodes, graph_name, print_graph=True)
         self.enqueue(self.nodes)
 
     def compute_users(self):
