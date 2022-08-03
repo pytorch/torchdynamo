@@ -18,14 +18,27 @@ class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
         super(TritonTemplateKernel, self).__init__(*groups)
         self.node = node
-        template_name = template_dict[type(node)]
+        self.template_name = template_dict[type(node)]
         env = Environment(
             loader=FileSystemLoader(os.path.dirname(__file__)),
             trim_blocks=True,
             lstrip_blocks=True,
             undefined=StrictUndefined,
         )
-        self.template = env.get_template(template_name + ".j2")
+        if isinstance(node, ir.Convolution):
+            self.map_args()
+            KERNEL_H = self.args_dict["KERNEL_H"]
+            KERNEL_W = self.args_dict["KERNEL_W"]
+            padding_h = self.args_dict["padding_h"]
+            padding_w = self.args_dict["padding_w"]
+            if ((KERNEL_H == "1" and KERNEL_W == "1")) or (
+                (padding_h == "0") and (padding_w == "0")
+            ):
+                self.template_name += "_delta_x"
+            else:
+                self.template_name += "_delta_x_hwc"
+
+        self.template = env.get_template(self.template_name + ".j2")
 
     def rename_vars(self):
         for k, v in self.inout_dict.items():
@@ -39,7 +52,7 @@ class TritonTemplateKernel(TritonKernel):
             code.writeline("XBLOCK: tl.constexpr = BLOCK_M")
             code.writeline("YBLOCK: tl.constexpr = BLOCK_N")
             code.writeline(
-                "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_h)"
+                "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_w)"
             )
             code.writeline("ynumel = KERNEL_N")
 
@@ -131,8 +144,6 @@ class TritonTemplateKernel(TritonKernel):
         """
         if isinstance(self.node, ir.Convolution):
             if self.const_dict["CONV1X1_NHWC"] == "False":
-                self.args_dict["delta_x_ptr"] = "delta_x"
-                wrapper.writeline("from torchinductor.triton_ops import _conv as _conv")
                 IN_C = self.args_dict["IN_C"]
                 KERNEL_H = self.args_dict["KERNEL_H"]
                 KERNEL_W = self.args_dict["KERNEL_W"]
@@ -145,14 +156,43 @@ class TritonTemplateKernel(TritonKernel):
                 stride_xh = self.args_dict["stride_xh"]
                 stride_xw = self.args_dict["stride_xw"]
                 device = self.other_dict["device"]
-                wrapper.writeline(
-                    "delta_x = _conv._delta_x_ptr("
-                    f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
-                    f"{dilation_h}, {dilation_w}, "
-                    f"{stride_wc}, {stride_wh}, {stride_ww}, "
-                    f"{stride_xc}, {stride_xh}, {stride_xw}, {device})"
-                )
+                if self.template_name == "triton_conv_delta_x":
+                    assert "delta_x_ptr" not in self.args_dict.keys()
+                    self.args_dict["delta_x_ptr"] = f"delta_x_{kernel_name}"
+                    wrapper.writeline(
+                        "from torchinductor.triton_ops import _conv as _conv"
+                    )
+                    wrapper.writeline(
+                        f"delta_x_{kernel_name} = _conv._delta_x_ptr("
+                        f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
+                        f"{dilation_h}, {dilation_w}, "
+                        f"{stride_wc}, {stride_wh}, {stride_ww}, "
+                        f"{stride_xc}, {stride_xh}, {stride_xw}, {device})"
+                    )
+                # triton_conv_delta_x_hwc
+                else:
+                    assert "delta_xh_ptr" not in self.args_dict.keys()
+                    assert "delta_xw_ptr" not in self.args_dict.keys()
+                    assert "delta_xc_ptr" not in self.args_dict.keys()
+                    self.args_dict["delta_xh_ptr"] = f"delta_xh_{kernel_name}"
+                    self.args_dict["delta_xw_ptr"] = f"delta_xw_{kernel_name}"
+                    self.args_dict["delta_xc_ptr"] = f"delta_xc_{kernel_name}"
+                    wrapper.writeline(
+                        "from torchinductor.triton_ops import _conv as _conv"
+                    )
+                    wrapper.writeline(
+                        f"delta_xh_{kernel_name}, delta_xw_{kernel_name}, delta_xc_{kernel_name}"
+                        f" = _conv._delta_x_ptr_hwc("
+                        f"{IN_C}, {KERNEL_H}, {KERNEL_W}, "
+                        f"{dilation_h}, {dilation_w}, "
+                        f"{stride_wc}, {stride_wh}, {stride_ww}, "
+                        f"{stride_xc}, {stride_xh}, {stride_xw}, {device})"
+                    )
+
             # else, delta_x_ptr is None
+            else:
+                assert "delta_x_ptr" not in self.args_dict.keys()
+                self.args_dict["delta_x_ptr"] = "None"
         return
 
     def gen_grid(self, name):
@@ -231,8 +271,11 @@ def template_codegen(scheduler, scheduler_node):
                 # if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
                 #     node.reorder_channel_last()
                 # make sure we force the reads of conv are channel_last layout
-                if len(node.node.get_size()) == 4:
-                    assert node.node.get_stride()[1] == 1
+                if type(node.node) in template_dict.keys() or (
+                    len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1
+                ):
+                    reschedule.append(node)
+                    continue
                 try:
                     node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                     node.mark_fusable()

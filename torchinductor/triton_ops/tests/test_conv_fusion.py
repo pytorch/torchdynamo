@@ -10,6 +10,16 @@ torchinductor.config.triton.convolution = "triton"
 torch.manual_seed(0)
 
 class Func(object):
+    @torchdynamo.optimize("inductor")
+    def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
+        return y
+
+    def conv(x, w, bias, stride, padding, dilation, groups):
+        y =  torch.conv2d(x, w, None, stride, padding, dilation, groups)
+        return y
+
+    
     # conv+bias
     @torchdynamo.optimize("inductor")
     def conv_add_torchinductor(x, w, bias, stride, padding, dilation, groups):
@@ -99,17 +109,23 @@ def test(layer_params, fusion_type="add"):
     # bias = torch.randn((1, KERNEL_N, 1, 1), dtype=dtype, device='cuda') #.to(memory_format=torch.channels_last)
     bias = torch.randn((KERNEL_N), dtype=dtype, device='cuda')
 
-    conv_fusion_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
-    conv_fusion = getattr(Func, f"conv_{fusion_type}")
+    if fusion_type == "":
+        conv_fusion_torchinductor = getattr(Func, f"conv_torchinductor")
+        conv_fusion = getattr(Func, f"conv")
+    else:
+        conv_fusion_torchinductor = getattr(Func, f"conv_{fusion_type}_torchinductor")
+        conv_fusion = getattr(Func, f"conv_{fusion_type}")
+    torchinductor.metrics.reset()
     y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
+    assert(torchinductor.metrics.generated_kernel_count == 1)
     y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
     # print("y", y[0])
     # print("y_correct", y_correct[0])
     assert(same(y, y_correct, cos_similarity=True))
 
-fusion_types = ["add", "relu", "add_relu", "bn", "bn_relu"]
+fusion_types = ["", "add", "relu", "add_relu", "bn", "bn_relu"]
 for fusion_type in fusion_types:
     print(f"testing correctness of conv+{fusion_type}")
-    for id, layer in enumerate(model.resnet50_layers[:1]):
+    for id, layer in enumerate(model.alexnet_layers):
         test(layer, fusion_type)
     print("passed")
