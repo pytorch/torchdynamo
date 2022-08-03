@@ -178,6 +178,7 @@ class OutputGraph(fx.Tracer):
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
+        options = dict(options)
         options["guards"] = set(options.get("guards", []))
         source: Source = options["source"]
         if isinstance(mod, torch.Tensor):

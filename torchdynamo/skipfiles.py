@@ -103,8 +103,6 @@ SKIP_DIRS = [
 ]
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
-    os.path.dirname(__file__)
-    + "/logic/control_flow.py",  # TODO(voz): If this grows > 1 or 2 files, walk it properly
 }
 
 # Include optimizer code for tracing

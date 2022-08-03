@@ -72,10 +72,8 @@ class TensorVariable(VariableTracker):
     ]
 
     @staticmethod
-    def propagate_args_kwargs(node, condition=None):
+    def propagate_args_kwargs(node):
         def visit(n: torch.fx.Node):
-            if condition is not None:
-                return condition.get(n.target, n.meta.get("example_value", None))
             return n.meta["example_value"]
 
         return torch.fx.node.map_arg((node.args, node.kwargs), visit)
@@ -94,19 +92,6 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-        return cls.create_conditional(
-            tx=tx,
-            proxy=proxy,
-            example_value=example_value,
-            nnmodule=nnmodule,
-            condition=None,
-            **options,
-        )
-
-    @classmethod
-    def create_conditional(
-        cls, tx, proxy, example_value=None, nnmodule=None, condition=None, **options
-    ):
         if "guards" in options:
             tx.output.guards.update(options["guards"])
 
@@ -132,7 +117,7 @@ class TensorVariable(VariableTracker):
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
-                args, kwargs = cls.propagate_args_kwargs(proxy.node, condition)
+                args, kwargs = cls.propagate_args_kwargs(proxy.node)
                 if use_fake_tensors:
                     args = tree_map(fake_wrapper, args)
                     kwargs = tree_map(fake_wrapper, kwargs)

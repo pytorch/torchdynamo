@@ -48,7 +48,7 @@ null_context = contextlib.nullcontext
 
 unset = object()
 
-compile_lock = threading.RLock()
+compile_lock = threading.Lock()
 
 
 class _TorchDynamoContext:
@@ -169,10 +169,10 @@ class WrapperBackend:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
-        self.gm.graph.print_tabular()
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
 
@@ -257,15 +257,6 @@ def optimize(backend, nopython=False):
 
 def export(f, *args, **kwargs):
     import torch.utils._pytree as pytree
-
-    # TODO(voz) - We do not want to hit any caches - as hitting cached code may mean we may not invoke the
-    # dynamo_normalization_capturing_compiler. ex: Exporting the same function twice in a row.
-    # Forcing the user to call torchdynamo.reset() feels like bad UX.
-    # A longer term solution would be to introduce a mode to _eval_frame.c that would always invoke the compiler,
-    # bypassing the cache entirely for reads - but potentially stil writing.
-    import torchdynamo
-
-    torchdynamo.reset()
 
     graph = None
     out_guards = None
