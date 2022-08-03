@@ -27,7 +27,7 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         2) fuse contiguous dimensions into a single loop
         If channel_last = True, we will prevent the last dim fused with other dims
     """
-    sizes = list(sizes)
+    sizes = list(map(V.graph.sizevars.simplify, sizes))
 
     strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
     assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
