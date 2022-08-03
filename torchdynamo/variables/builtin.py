@@ -171,6 +171,9 @@ class BuiltinVariable(VariableTracker):
         return any(
             isinstance(i, variables.TensorVariable)
             for i in itertools.chain(args, kwargs.values())
+        ) and not any(
+            isinstance(i, variables.GetAttrVariable)
+            for i in itertools.chain(args, kwargs.values())
         )
 
     def unspec_numpy_args(self, *args, **kwargs):
@@ -259,6 +262,9 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
+                # if (self.fn is operator.mul):
+                #     print("BBBB " + str(fn))
+                #     print(args)
                 if self.fn is operator.iadd and isinstance(
                     args[0], variables.ConstantVariable
                 ):
@@ -411,6 +417,13 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
+        elif isinstance(a, variables.ConstantVariable) and isinstance(
+            b, variables.ConstantVariable
+        ):
+            if self.fn is max:
+                return variables.ConstantVariable(max(a.value, b.value))
+            else:
+                return variables.ConstantVariable(min(a.value, b.value))
         else:
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
