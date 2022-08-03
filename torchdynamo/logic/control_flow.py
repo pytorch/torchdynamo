@@ -1,4 +1,4 @@
-def cond(pred, true_fn, false_fn, inputs):
+def cond(pred, true_fn, false_fn, true_inputs, false_inputs):
     """
     A conditional control flow operator, akin to if.
 
@@ -7,5 +7,5 @@ def cond(pred, true_fn, false_fn, inputs):
     pred - a condition evaluted for truthiness
     """
     if pred:
-        return true_fn(*inputs)
-    return false_fn(*inputs)
+        return true_fn(*true_inputs)
+    return false_fn(*false_inputs)
