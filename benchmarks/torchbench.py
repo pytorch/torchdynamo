@@ -299,7 +299,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
-        return device, benchmark.name, model, example_inputs
+        return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):

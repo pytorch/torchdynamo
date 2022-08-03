@@ -51,6 +51,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 current_name = ""
 current_device = ""
+current_batch_size = None
 output_filename = None
 
 
@@ -89,7 +90,7 @@ def print_summary(filename):
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
-            if col in ("dev", "name"):
+            if col in ("dev", "name", "batch_size"):
                 continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
@@ -353,8 +354,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     speedup = median[0] / median[1]
     output_csv(
         output_filename,
-        ("dev", "name", "speedup"),
-        [current_device, current_name, float(speedup)],
+        ("dev", "name", "batch_size", "speedup"),
+        [current_device, current_name, current_batch_size, float(speedup)],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -782,7 +783,7 @@ class BenchmarkRunner:
         while batch_size >= 1:
             torch.cuda.empty_cache()
             try:
-                device, name, model, example_inputs = self.load_model(
+                device, name, model, example_inputs, _ = self.load_model(
                     device,
                     model_name,
                     self._args.training,
@@ -1250,7 +1251,7 @@ def main(runner, original_dir=None):
 
     accuracy_ctx = None
     experiment = null_experiment
-    global current_name, current_device, output_filename, optimize_ctx
+    global current_name, current_device, current_batch_size, output_filename, optimize_ctx
     optimize_ctx = NullContext()
 
     if args.overhead:
@@ -1461,7 +1462,7 @@ def main(runner, original_dir=None):
     if args.only:
         for device in args.devices:
             try:
-                device, name, model, example_inputs = runner.load_model(
+                device, name, model, example_inputs, batch_size = runner.load_model(
                     device,
                     args.only,
                     args.training,
@@ -1475,6 +1476,7 @@ def main(runner, original_dir=None):
 
             current_name = name
             current_device = device
+            current_batch_size = batch_size
             set_model_name(name)
 
             if args.float32:
@@ -1518,9 +1520,10 @@ def main(runner, original_dir=None):
     else:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
-        for device, name, model, example_inputs in runner.iter_models(args):
+        for device, name, model, example_inputs, batch_size in runner.iter_models(args):
             current_name = name
             current_device = device
+            current_batch_size = batch_size
             torchdynamo.reset()
             gc.collect()
 

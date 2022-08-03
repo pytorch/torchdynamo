@@ -282,7 +282,7 @@ def read_csv(output_filename):
     else:
         assert n_cols == 3
         return pd.read_csv(
-            output_filename, names=["dev", "name", "speedup"], header=None
+            output_filename, names=["dev", "name", "batch_size", "speedup"], header=None
         )
 
 
@@ -290,7 +290,7 @@ def parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir):
     mode = "coverage"
     out_io = io.StringIO()
     out_io.write("\n")
-    out_io.write(f"## Coverage results ##\n")
+    out_io.write("## Coverage results ##\n")
     frames = []
     for iter in itertools.product(suites, devices, dtypes):
         suite, device, dtype = iter
@@ -339,7 +339,7 @@ def parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir):
     perc = percentage(low_latency_models, num_models)
 
     df_high_latency = df[df.start_latency > 5]
-    out_io.write(f"**Start Latency - Rough approximation of compile latency**\n")
+    out_io.write("**Start Latency - Rough approximation of compile latency**\n")
     out_io.write(f"Number of models = {num_models}\n")
     out_io.write(f"Number of models with low start latency = {low_latency_models}\n")
     out_io.write(f"Percentage of models with low start latency = {perc}%")
@@ -371,7 +371,7 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
 
     out_io = io.StringIO()
     out_io.write("\n")
-    out_io.write(f"## Performance results ##\n")
+    out_io.write("## Performance results ##\n")
     for iter in itertools.product(suites, devices, dtypes):
         suite, device, dtype = iter
         frames = []
@@ -392,9 +392,9 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
         if len(compilers) == 1:
             df = frames[0]
         else:
-            df = pd.merge(frames[0], frames[1], on=["dev", "name"])
+            df = pd.merge(frames[0], frames[1], on=["dev", "name", "batch_size"])
             for idx in range(2, len(frames)):
-                df = pd.merge(df, frames[idx], on=["dev", "name"])
+                df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"
@@ -402,8 +402,7 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
 
         # Add geomean and mean
         for compiler in compilers:
-            speedups = df[compiler].tolist()
-            speedups = [x if x > 1.0 else 1.0 for x in speedups]
+            speedups = df[compiler].clip(1)
             geo_mean = round(gmean(speedups), 3)
             mean = round(tmean(speedups), 3)
             out_io.write(
