@@ -23,6 +23,7 @@ from . import dependencies
 from .codegen.common import _simplify_loops
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -1523,7 +1524,13 @@ class ComputedBuffer(Buffer):
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
             sizes, reindex2, prune = _simplify_loops(
-                x_vars, sizes, index_formulas, preserver_reoredering=True
+                x_vars,
+                sizes,
+                [
+                    *index_formulas,
+                    # added contiguous index prevents reordering
+                    sympy_dot(x_vars, FlexibleLayout.contiguous_strides(sizes)),
+                ]
             )
             x_vars = prune(x_vars)
             # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
