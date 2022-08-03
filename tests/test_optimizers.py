@@ -51,5 +51,4 @@ class OptimizerTests(torchdynamo.testing.TestCase):
             )
         )
 
-    # Note - this is a regression - TODO(@voz/mlazos) get this back down to a single frame
     test_adam = make_test(torch.optim.Adam)
