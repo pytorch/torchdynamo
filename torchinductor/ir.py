@@ -23,6 +23,7 @@ from . import dependencies
 from .codegen.common import _simplify_loops
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -610,6 +611,12 @@ class BaseView(IRNode):
                 self.make_loader(),
                 self.get_size(),
             ).reads
+
+    def unwrap(self):
+        x = self
+        while isinstance(x, BaseView):
+            x = x.data
+        return x
 
 
 @dataclasses.dataclass
@@ -1740,6 +1747,7 @@ class InputsKernel(Buffer):
             {dependencies.StarDep(self.get_name())},
             set(),
             [],
+            None,
         )
 
     @staticmethod
@@ -1876,15 +1884,18 @@ class ExternKernel(InputsKernel):
         if isinstance(x, ReinterpretView):
             return x
 
-        x.data.freeze_layout()
+        x.unwrap().freeze_layout()
         rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
         assert len(rw.reads) == 1
 
-        index = V.graph.sizevars.simplify(list(rw.reads)[0].index)
+        index = V.graph.sizevars.simplify_with_ranges(
+            list(rw.reads)[0].index, rw.var_ranges
+        )
         strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
         offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+        expected = sympy_dot(rw.range_vars, strides) + offset
 
-        if sum([a * b for a, b in zip(strides, rw.range_vars)]) + offset != index:
+        if index != expected:
             log.debug(
                 "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
                 strides,
@@ -1918,14 +1929,15 @@ class ExternKernel(InputsKernel):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return x
-        if isinstance(x, BaseView) and (
-            is_storage_and_layout(x.data)
-            and not isinstance(x.data.data, ExternKernelAlloc)
-        ):
-            try:
-                return cls.convert_to_reinterpret_view(x)
-            except NotImplementedError:
-                pass
+        if isinstance(x, BaseView):
+            x.realize()
+            if is_storage_and_layout(x.unwrap()) and not isinstance(
+                x.unwrap().data, ExternKernelAlloc
+            ):
+                try:
+                    return cls.convert_to_reinterpret_view(x)
+                except NotImplementedError:
+                    pass
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()

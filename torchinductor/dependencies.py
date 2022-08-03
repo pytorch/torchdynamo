@@ -95,6 +95,7 @@ class ReadWrites:
     writes: Set[MemoryDep]
     index_exprs: Set[IndexExprDep]
     range_vars: List[sympy.Expr]
+    var_ranges: typing.Dict[sympy.Expr, sympy.Expr] = None
 
     def rename(self, renames: typing.Dict[str, str]):
         return ReadWrites(
@@ -102,6 +103,7 @@ class ReadWrites:
             {dep.rename(renames) for dep in self.writes},
             self.index_exprs,
             self.range_vars,
+            self.var_ranges,
         )
 
     def with_read(self, name: str):
@@ -111,6 +113,7 @@ class ReadWrites:
             self.writes,
             self.index_exprs,
             self.range_vars,
+            self.var_ranges,
         )
 
 
@@ -206,7 +209,7 @@ def extract_read_writes(fn, *argsizes, normalize=False, prefix="d"):
     else:
         range_vars = [*itertools.chain(*args)]
 
-    return ReadWrites(rw._reads, rw._writes, rw._index_exprs, range_vars)
+    return ReadWrites(rw._reads, rw._writes, rw._index_exprs, range_vars, var_ranges)
 
 
 def canonicalization_prefix():
