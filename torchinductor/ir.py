@@ -151,6 +151,9 @@ class ModularIndexing(sympy.Function):
             if len(new_terms) != len(base.args):
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
+        if isinstance(base, IndexingDiv):
+            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
 
 class IndexingDiv(sympy.Function):
     """
@@ -166,13 +169,16 @@ class IndexingDiv(sympy.Function):
             return sympy.Integer(0)
         if divisor == 1:
             return base
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            return base // divisor
+        if isinstance(base, IndexingDiv):
+            return IndexingDiv(base.args[0], base.args[1] * divisor)
+
         if isinstance(base, sympy.Add):
             for a in base.args:
                 gcd = sympy.gcd(a, divisor)
                 if gcd == divisor:
                     return IndexingDiv(base - a, divisor) + a / gcd
-        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-            return base // divisor
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
             return IndexingDiv(base / gcd, divisor / gcd)
@@ -2823,7 +2829,7 @@ class LoopBody:
 
     def __call__(self, *indices):
         index = list(itertools.chain(*indices))
-        assert len(index) == len(self.var_ranges)
+        assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
         self.indexing = {
