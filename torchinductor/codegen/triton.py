@@ -205,7 +205,7 @@ class TritonOverrides(OpOverrides):
 
 
 @dataclasses.dataclass
-class RangeTree:
+class IterationRanges:
     """
     Each range tree represents multiple sets of iteration indexing
     in a single tiled dimension in the output kernel.
@@ -227,51 +227,27 @@ class RangeTree:
         var_ranges: Dict[sympy.Symbol, sympy.Expr],
         numel: sympy.Expr,
         prefix: str,
-        depth=0,
+        divisor=sympy.Integer(1),
         length=sympy.Integer(1),
     ):
-        super(RangeTree, self).__init__()
+        super(IterationRanges, self).__init__()
         self.name = name
-        self.children: Dict[sympy.Expr, RangeTreeEntry] = {}
         self.var_list = var_list
         self.var_ranges = var_ranges
         self.numel = numel
         self.prefix = prefix
-        self.depth = depth
+        self.divisor = divisor
         self.length = length
-        self.recursive_names = {name}
-
-    def compute_recursive_names(self):
-        for c in self.children.values():
-            c.compute_recursive_names()
-            self.recursive_names.update(c.recursive_names)
-
-    def cache_clear(self):
-        for child in self.children.values():
-            child.cache_clear()
 
     def is_loop(self):
         return self.prefix == "r"
 
-    def child_node(self, length):
-        if length not in self.children:
-            node = RangeTreeEntry(
-                f"{self.prefix}{next(V.kernel.iter_vars_count)}", length, self
-            )
-            self.children[length] = node
-            V.kernel.range_tree_nodes[node.symbol()] = node
-            self.var_list.append(node.symbol())
-            self.var_ranges[node.symbol()] = length
-        else:
-            node = self.children[length]
-        return node
 
-
-class RangeTreeRoot(RangeTree):
+class IterationRangesRoot(IterationRanges):
     def __init__(
         self, name: str, numel: sympy.Expr, prefix: str, index: int, kernel: "Kernel"
     ):
-        super(RangeTreeRoot, self).__init__(
+        super(IterationRangesRoot, self).__init__(
             name=name,
             var_list=[],
             var_ranges={},
@@ -280,46 +256,72 @@ class RangeTreeRoot(RangeTree):
         )
         self.index = index
         self.kernel = kernel
+        # Store all the nodes in one flat list
+        self.nodes: Dict[sympy.Expr, IterationRangesEntry] = {}
 
-    def codegen_next(self):
-        return self.name
+    def cache_clear(self):
+        for node in self.nodes.values():
+            node.cache_clear()
+
+    def lookup(self, divisor, length):
+        """
+        Lookup a given RangeTreeEntry, creating it if needed
+        """
+        if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
+            expr = ir.IndexingDiv(sympy.Symbol(f"{self.prefix}index"), divisor)
+        else:
+            expr = ir.ModularIndexing(
+                sympy.Symbol(f"{self.prefix}index"), divisor, length
+            )
+
+        if expr not in self.nodes:
+            node = IterationRangesEntry(
+                f"{self.prefix}{next(V.kernel.iter_vars_count)}",
+                divisor,
+                length,
+                expr,
+                self,
+            )
+            V.kernel.range_tree_nodes[node.symbol()] = node
+            self.var_list.append(node.symbol())
+            self.var_ranges[node.symbol()] = length
+            self.nodes[expr] = node
+        return self.nodes[expr]
 
     def construct(self, lengths: List[sympy.Expr]):
-        node = self
+        divisor = sympy.Integer(1)
         itervars = []
-        for sv in reversed(lengths):
-            node = node.child_node(sv)
-            itervars.append(node.symbol())
-        self.compute_recursive_names()
+        for length in reversed(lengths):
+            itervars.append(self.lookup(divisor, length).symbol())
+            divisor = divisor * length
         return list(reversed(itervars))
 
     def vars_and_sizes(self, index: sympy.Expr):
         """Figure out vars from this tree used in index"""
-        symbol_names = set(map(str, index.free_symbols)) & self.recursive_names
-        if not symbol_names:
-            return [], []
+        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
+        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        divisor = sympy.Integer(1)
         index_vars = []
         sizes = []
-        node = self
-        while symbol_names:
-            size, child = [
-                (s, c)
-                for s, c in node.children.items()
-                if c.recursive_names & symbol_names
-            ][0]
-            index_vars.append(child.symbol())
-            sizes.append(size)
-            if child.name in symbol_names:
-                symbol_names.remove(child.name)
-            node = child
-        if node.children and node.numel != 1:
-            # extra broadcasting dim
-            index_vars.append(node.child_node(node.numel).symbol())
-            sizes.append(node.numel)
 
-        index_vars = list(reversed(index_vars))
-        sizes = list(reversed(sizes))
-        return index_vars, sizes
+        def add(node):
+            nonlocal divisor
+            index_vars.append(node.symbol())
+            sizes.append(node.length)
+            divisor = divisor * node.length
+
+        for node in nodes:
+            if not V.graph.sizevars.maybe_guard_equals(node.divisor, divisor):
+                # fill in unused index var
+                add(self.lookup(divisor, ir.IndexingDiv(node.divisor, divisor)))
+                divisor = node.divisor
+            add(node)
+        if not V.graph.sizevars.maybe_guard_equals(self.numel, divisor):
+            # fill in unused index var
+            add(self.lookup(divisor, ir.IndexingDiv(self.numel, divisor)))
+
+        return list(reversed(index_vars)), list(reversed(sizes))
 
     def ranges_code(self):
         size = self.kernel.reshape_size_str(self.index, self.prefix)
@@ -339,25 +341,30 @@ class RangeTreeRoot(RangeTree):
         code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
-class RangeTreeEntry(RangeTree):
-    def __init__(self, name: str, length: sympy.Expr, parent: RangeTree):
-        super(RangeTreeEntry, self).__init__(
+class IterationRangesEntry(IterationRanges):
+    def __init__(
+        self,
+        name: str,
+        divisor: sympy.Expr,
+        length: sympy.Expr,
+        expr: sympy.Expr,
+        parent: IterationRanges,
+    ):
+        super(IterationRangesEntry, self).__init__(
             name=name,
             numel=parent.numel / length,
             var_list=parent.var_list,
             var_ranges=parent.var_ranges,
             prefix=parent.prefix,
+            divisor=divisor,
             length=length,
-            depth=parent.depth + 1,
         )
         self.parent = parent
         self.codegen = functools.lru_cache(None)(self._codegen)
-        self.codegen_next = functools.lru_cache(None)(self._codegen_next)
+        self.expr = expr
 
     def cache_clear(self):
         self.codegen.cache_clear()
-        self.codegen_next.cache_clear()
-        super().cache_clear()
 
     def writeline(self, line):
         if self.is_loop():
@@ -366,27 +373,12 @@ class RangeTreeEntry(RangeTree):
             # lift non-reduction stores outside loop
             V.kernel.body.writeline(line)
 
-    def _codegen_next(self):
-        denom = texpr(V.kernel.rename_indexing(self.length))
-        self.writeline(
-            f"{self.name}_next = {self.parent.codegen_next()} // {TritonPrinter.paren(denom)}"
-        )
-        return f"{self.name}_next"
-
     def _codegen(self):
-        denom = texpr(V.kernel.rename_indexing(self.length))
-        if self.numel == 1:
-            line = f"{self.name} = {self.parent.codegen_next()}"
-        else:
-            line = f"{self.name} = {self.parent.codegen_next()} % {TritonPrinter.paren(denom)}"
-        self.writeline(line)
+        self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
     def symbol(self):
         return sympy.Symbol(self.name)
-
-    def next_symbol(self):
-        return sympy.Symbol(f"{self.name}_next")
 
     def __hash__(self):
         return hash(self.name)
@@ -421,7 +413,7 @@ class TritonKernel(Kernel):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
             self.range_trees.append(
-                RangeTreeRoot(names[i], self.numels[i], names[i][0], i, self)
+                IterationRangesRoot(names[i], self.numels[i], names[i][0], i, self)
             )
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
@@ -565,7 +557,7 @@ class TritonKernel(Kernel):
             for v in index_vars
         )
 
-    def combine_contiguous_dims(self, index: sympy.Expr, tree: RangeTreeRoot):
+    def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
         """
