@@ -338,21 +338,18 @@ class DynamoControlFlowFunction(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        import random
+        import string
+
         import torchdynamo.config as config
         import torchdynamo.mutation_guard as mutation_guard
         from torchdynamo.eval_frame import export
-
-        def verify_signatures(fn_a, fn_b):
-            from inspect import signature
-
-            assert signature(fn_a) == signature(
-                fn_b
-            ), "Conditional signatures must be identical"
+        from torchdynamo.mutation_guard import GenerationTracker
+        from torchdynamo.source import LocalSource
+        from torchdynamo.source import NNModuleSource
 
         true_fn = args[1].get_function()
         false_fn = args[2].get_function()
-
-        verify_signatures(true_fn, false_fn)
 
         true_func_args_packed = args[3]
         false_func_args_packed = args[4]
@@ -386,15 +383,10 @@ class DynamoControlFlowFunction(VariableTracker):
         out_false = export(false_fn, *false_func_args)
         mutation_guard.OVERRIDE_GENERATION_TAGGING = None
 
-        from torchdynamo.mutation_guard import GenerationTracker
-
         # Adjust the generation back to what it should be
         GenerationTracker.generation += 1
 
         out_false_graph = out_false[0]
-
-        from torchdynamo.source import LocalSource
-        from torchdynamo.source import NNModuleSource
 
         def rand_slug():
             return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
@@ -440,7 +432,13 @@ class DynamoControlFlowFunction(VariableTracker):
             proxy=tx.output.create_proxy(
                 "call_function",
                 torchdynamo.logic.control_flow.cond,
-                (args[0].as_proxy(), true_graph_node, false_graph_node, proxied_args),
+                (
+                    args[0].as_proxy(),
+                    true_graph_node,
+                    false_graph_node,
+                    true_proxied_args,
+                    false_proxied_args,
+                ),
                 {},
             ),
             condition={true_name: out_true_graph, false_name: out_false_graph},

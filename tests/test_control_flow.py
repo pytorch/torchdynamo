@@ -24,7 +24,7 @@ class ControlFlowTests(torchdynamo.testing.TestCase):
                 def when_false(x):
                     return x * x
 
-                return cond(pred, when_true, when_false, (z,))
+                return cond(pred, when_true, when_false, (z,), (z,))
 
             a = torch.tensor([0.5, 0.5])
 
@@ -62,14 +62,18 @@ class ControlFlowTests(torchdynamo.testing.TestCase):
                 def when_true(x):
                     inner_pred = x.item() < 0.5
                     pos_or_neg = cond(
-                        inner_pred, nested_when_true, nested_when_false, tuple()
+                        inner_pred,
+                        nested_when_true,
+                        nested_when_false,
+                        tuple(),
+                        tuple(),
                     )
                     return x * pos_or_neg
 
                 def when_false(x):
                     return x * x
 
-                return cond(pred, when_true, when_false, (z,))
+                return cond(pred, when_true, when_false, (z,), (z,))
 
             a = torch.tensor([0.5])
             b = torch.tensor([0.25])
@@ -108,14 +112,18 @@ class ControlFlowTests(torchdynamo.testing.TestCase):
                 def when_true(x):
                     inner_pred = x.item() < 0.5
                     pos_or_neg = cond(
-                        inner_pred, nested_when_true, nested_when_false, tuple()
+                        inner_pred,
+                        nested_when_true,
+                        nested_when_false,
+                        tuple(),
+                        tuple(),
                     )
                     return x * pos_or_neg
 
                 def when_false(x):
                     return x * x
 
-                return cond(pred, when_true, when_false, (z,))
+                return cond(pred, when_true, when_false, (z,), (z,))
 
             a = torch.tensor([0.5])
             b = torch.tensor([0.25])
@@ -132,3 +140,69 @@ class ControlFlowTests(torchdynamo.testing.TestCase):
         self.assertTrue(torch.allclose(from_true_a, torch.tensor([0.5])))
         self.assertTrue(torch.allclose(from_true_b, torch.tensor([-0.25])))
         self.assertTrue(torch.allclose(from_false, torch.tensor([0.25])))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_simple_condition_different_args_same_sig(self):
+        from_true = None
+        from_false = None
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def foo():
+            nonlocal from_true
+            nonlocal from_false
+
+            def compute(pred, z, y):
+                def when_true(x):
+                    return x + x
+
+                def when_false(x):
+                    return x * x
+
+                return cond(pred, when_true, when_false, (z,), (y,))
+
+            a = torch.tensor([0.5, 0.5])
+            b = torch.tensor([0.25, 0.25])
+
+            from_true = compute(True, a, b)
+            from_false = compute(False, a, b)
+
+        foo()
+        self.assertTrue(
+            torch.allclose(from_true, torch.tensor([1.0, 1.0]))
+        )  # True adds
+        self.assertTrue(
+            torch.allclose(from_false, torch.tensor([0.0625, 0.0625]))
+        )  # False multiplies
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_simple_condition_different_args_different_sig(self):
+        from_true = None
+        from_false = None
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def foo():
+            nonlocal from_true
+            nonlocal from_false
+
+            def compute(pred, z, y):
+                def when_true(x):
+                    return x + x
+
+                def when_false(x, k):
+                    return x * k
+
+                return cond(pred, when_true, when_false, (z,), (y, torch.tensor(-1)))
+
+            a = torch.tensor([0.5, 0.5])
+            b = torch.tensor([0.25, 0.25])
+
+            from_true = compute(True, a, b)
+            from_false = compute(False, a, b)
+
+        foo()
+        self.assertTrue(
+            torch.allclose(from_true, torch.tensor([1.0, 1.0]))
+        )  # True adds
+        self.assertTrue(
+            torch.allclose(from_false, torch.tensor([-0.25, -0.25]))
+        )  # False multiplies
