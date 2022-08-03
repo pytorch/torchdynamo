@@ -13,6 +13,7 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
+from ..utils import sympy_dot
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -82,6 +83,15 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         return [i for i, s in zip(index, sizes) if s is not None]
 
     return [x for x in sizes if x is not None], reindex, prune
+
+
+def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
+    from ..ir import FlexibleLayout
+
+    res = index
+    # added contiguous index prevents reordering
+    res.append(sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes)))
+    return res
 
 
 class ExprPrinter(Printer):

@@ -21,9 +21,9 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
+from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
-from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -1590,11 +1590,7 @@ class ComputedBuffer(Buffer):
             sizes, reindex2, prune = _simplify_loops(
                 x_vars,
                 sizes,
-                [
-                    *index_formulas,
-                    # added contiguous index prevents reordering
-                    sympy_dot(x_vars, FlexibleLayout.contiguous_strides(sizes)),
-                ],
+                index_prevent_reordering(index_formulas, x_vars, sizes),
             )
             x_vars = prune(x_vars)
             # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
