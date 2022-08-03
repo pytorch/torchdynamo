@@ -39,14 +39,14 @@ def _simplify_loops(index_vars, sizes, index_formulas, preserver_reoredering=Fal
 
     def can_merge_dims(a, b):
         for k in range(len(strides)):
-            if strides[k][a] * sizes[a] == strides[k][b]:
+            if V.graph.sizevars.simplify(strides[k][a] * sizes[a]) == V.graph.sizevars.simplify(strides[k][b]):
                 # approximate test passed, try sound version
                 va = index_vars[a]
                 vb = index_vars[b]
                 v = sympy.Symbol("_merge_tester")
                 expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
                 expr2 = index_formulas[k].subs({va: 0, vb: v})
-                if expr1 == expr2:
+                if V.graph.sizevars.simplify(expr1) == V.graph.sizevars.simplify(expr2):
                     continue
             return False
         return True
