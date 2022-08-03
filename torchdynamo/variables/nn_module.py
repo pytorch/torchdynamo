@@ -84,7 +84,10 @@ class NNModuleVariable(VariableTracker):
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)
-        # GenerationTracker.mark_class_dynamic(type(mod))
+
+        # Mark the class dynamic unless its module initialization
+        if tx.f_code.co_name != "__init__":
+            GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
     def var_getattr(self, tx, name):

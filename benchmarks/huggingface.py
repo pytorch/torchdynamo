@@ -10,7 +10,6 @@ import warnings
 import torch
 from common import BenchmarkRunner
 from common import main
-from transformers import ReformerConfig
 
 import torchdynamo
 from torchdynamo.testing import collect_results
@@ -21,61 +20,77 @@ def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 
+# Disable the flake warnings for the imports. Flake8 does not provide a way to
+# disable just warning for the entire file. Disabling flake8 entirely.
+# flake8: noqa
+imports = [
+    "AlbertForPreTraining",
+    "AutoConfig",
+    "AutoModelForCausalLM",
+    "AutoModelForMaskedLM",
+    "AutoModelForSeq2SeqLM",
+    "BigBirdConfig",
+    "BlenderbotForConditionalGeneration",
+    "BlenderbotModel",
+    "BlenderbotSmallForConditionalGeneration",
+    "BlenderbotSmallModel",
+    "CLIPModel",
+    "CLIPVisionModel",
+    "ElectraForPreTraining",
+    "GPT2ForSequenceClassification",
+    "GPTJForSequenceClassification",
+    "GPTNeoForSequenceClassification",
+    "HubertForSequenceClassification",
+    "LxmertForPreTraining",
+    "LxmertForQuestionAnswering",
+    "MarianForCausalLM",
+    "MarianModel",
+    "MarianMTModel",
+    "PegasusForConditionalGeneration",
+    "PegasusModel",
+    "ReformerConfig",
+    "ViTForImageClassification",
+    "ViTForMaskedImageModeling",
+    "ViTModel",
+]
+
+
 try:
-    importlib.import_module("transformers")
+    mod = importlib.import_module("transformers")
+    for cls in imports:
+        if not hasattr(mod, cls):
+            raise ModuleNotFoundError
 except ModuleNotFoundError:
     print("Installing HuggingFace Transformers...")
     pip_install("git+https://github.com/huggingface/transformers.git#egg=transformers")
 finally:
-    from transformers import AlbertForPreTraining
-    from transformers import AutoConfig
-    from transformers import AutoModelForCausalLM
-    from transformers import AutoModelForMaskedLM
-    from transformers import AutoModelForSeq2SeqLM
-    from transformers import BigBirdConfig
-    from transformers import BlenderbotForConditionalGeneration
-    from transformers import BlenderbotModel
-    from transformers import BlenderbotSmallForConditionalGeneration
-    from transformers import BlenderbotSmallModel
-    from transformers import CLIPModel
-    from transformers import CLIPVisionModel
-    from transformers import ElectraForPreTraining
-    from transformers import GPT2ForSequenceClassification
-    from transformers import GPTJForSequenceClassification
-    from transformers import GPTNeoForSequenceClassification
-    from transformers import HubertForSequenceClassification
-    from transformers import LxmertForPreTraining
-    from transformers import LxmertForQuestionAnswering
-    from transformers import MarianForCausalLM
-    from transformers import MarianModel
-    from transformers import MarianMTModel
-    from transformers import PegasusForConditionalGeneration
-    from transformers import PegasusModel
-    from transformers import SwinForImageClassification
-    from transformers import SwinForMaskedImageModeling
-    from transformers import SwinModel
-    from transformers import ViTForImageClassification
-    from transformers import ViTForMaskedImageModeling
-    from transformers import ViTModel
+    for cls in imports:
+        exec(f"from transformers import {cls}")
 
-
-HF_FX_SUPPORTED_MODELS = dict()
 
 USE_HALF_BATCH_SIZE = True
 
+
+# These models contain the models present in huggingface_models_list. It is a
+# combination of models supported by HF Fx parser and some manually supplied
+# models. For these models, we already know the largest batch size that can fit
+# on A100 GPUs - 40 GB.
+BATCH_SIZE_KNOWN_MODELS = dict()
+
+
 # Get the list of models and their batch sizes
-filename = "huggingface_models_list.txt"
+MODELS_FILENAME = "huggingface_models_list.txt"
 if os.path.exists("benchmarks"):
-    filename = "benchmarks/" + filename
-assert os.path.exists(filename)
-with open(filename, "r") as fh:
+    MODELS_FILENAME = os.path.join("benchmarks", MODELS_FILENAME)
+assert os.path.exists(MODELS_FILENAME)
+with open(MODELS_FILENAME, "r") as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(",")
         batch_size = int(batch_size)
-        HF_FX_SUPPORTED_MODELS[model_name] = batch_size
-assert len(HF_FX_SUPPORTED_MODELS)
+        BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
+assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
 SKIP = {
@@ -223,7 +238,6 @@ def generate_inputs_for_model(
                 device, 0, vocab_size, (bs, seq_length)
             )
         else:
-
             raise NotImplementedError(
                 f"Class {model_name} unsupported for training test "
             )
@@ -246,42 +260,34 @@ EXTRA_MODELS = {
     "AllenaiLongformerBase": (
         AutoConfig.from_pretrained("allenai/longformer-base-4096"),
         AutoModelForMaskedLM,
-        2,
     ),
     "Reformer": (
         ReformerConfig(),
         AutoModelForMaskedLM,
-        8,
     ),
     "T5Small": (
         AutoConfig.from_pretrained("t5-small"),
         AutoModelForSeq2SeqLM,
-        1,
     ),
     "BigBird": (
         BigBirdConfig(attention_type="block_sparse"),
         AutoModelForMaskedLM,
-        2,
     ),
     "DistillGPT2": (
         AutoConfig.from_pretrained("distilgpt2"),
         AutoModelForCausalLM,
-        16,
     ),
     "GoogleFnet": (
         AutoConfig.from_pretrained("google/fnet-base"),
         AutoModelForMaskedLM,
-        8,
     ),
     "YituTechConvBert": (
         AutoConfig.from_pretrained("YituTech/conv-bert-base"),
         AutoModelForMaskedLM,
-        8,
     ),
     "CamemBert": (
         AutoConfig.from_pretrained("camembert-base"),
         AutoModelForMaskedLM,
-        8,
     ),
 }
 
@@ -318,15 +324,22 @@ class HuggingfaceRunner(BenchmarkRunner):
             ):
                 config.pad_token_id = 0
 
-            batch_size_default = HF_FX_SUPPORTED_MODELS[model_name]
         else:
-            config, model_cls, batch_size_default = EXTRA_MODELS[model_name]
+            config, model_cls = EXTRA_MODELS[model_name]
 
         if "auto" in model_cls.__module__:
             # Handle auto classes
             model = model_cls.from_config(config).to(device, dtype=dtype)
         else:
             model = model_cls(config).to(device, dtype=dtype)
+
+        if model_name in BATCH_SIZE_KNOWN_MODELS:
+            batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
+        elif batch_size is None:
+            batch_size_default = 16
+            logging.warn(
+                "Batch size not specified for {model_name}. Setting batch_size=16"
+            )
 
         if batch_size is None:
             batch_size = batch_size_default
@@ -372,7 +385,8 @@ class HuggingfaceRunner(BenchmarkRunner):
                     continue  # bad benchmark implementation
 
     def iter_model_names(self, args):
-        model_names = list(HF_FX_SUPPORTED_MODELS.keys()) + list(EXTRA_MODELS.keys())
+        model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
+        model_names = set(model_names)
         model_names = sorted(model_names)
         for model_name in model_names:
             if (
@@ -484,10 +498,9 @@ def refresh_model_names_and_batch_sizes():
     for members in family.values():
         chosen_models.update(set(members))
 
+    # Add the EXTRA_MODELS
     chosen_models.update(set(EXTRA_MODELS.keys()))
-    filename = "huggingface_models_list.txt"
-    if os.path.exists("benchmarks"):
-        filename = "benchmarks/" + filename
+
     for model_name in sorted(chosen_models):
         try:
             subprocess.check_call(
@@ -495,7 +508,7 @@ def refresh_model_names_and_batch_sizes():
                 + sys.argv
                 + ["--find-batch-sizes"]
                 + [f"--only={model_name}"]
-                + [f"--output={filename}"]
+                + [f"--output={MODELS_FILENAME}"]
             )
         except subprocess.SubprocessError:
             logging.warn(f"Failed to find suitable batch size for {model_name}")
