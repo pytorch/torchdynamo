@@ -1530,7 +1530,7 @@ class ComputedBuffer(Buffer):
                     *index_formulas,
                     # added contiguous index prevents reordering
                     sympy_dot(x_vars, FlexibleLayout.contiguous_strides(sizes)),
-                ]
+                ],
             )
             x_vars = prune(x_vars)
             # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)

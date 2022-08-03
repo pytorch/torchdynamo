@@ -8,8 +8,8 @@ from typing import Set
 
 import sympy
 
-from .utils import sympy_dot
 from .codegen.common import _simplify_loops
+from .utils import sympy_dot
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -126,6 +126,7 @@ class RecordLoadStore(V.MockHandler):
 
     def canonicalize(self, index):
         from .ir import FlexibleLayout
+
         sizes = list(self._var_ranges.values())
         sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
@@ -142,7 +143,7 @@ class RecordLoadStore(V.MockHandler):
                 index,
                 # added contiguous index prevents reordering
                 sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes)),
-            ]
+            ],
         )
 
         # assign new variables each dimension to deal with numbering mismatches
