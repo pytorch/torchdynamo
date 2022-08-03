@@ -271,8 +271,9 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            if type(value) in (int, float) and config.unspecialized_by_default:
-                # should specialize for these conditions
+            if type(value) in (int, float) and not config.specialize_int_float:
+                # unspecializing int/float by default, but still
+                # specialize for the following conditions
                 if (
                     value in self._common_constants()
                     or isinstance(self.source, GlobalSource)
