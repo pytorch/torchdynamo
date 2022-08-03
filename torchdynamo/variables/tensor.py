@@ -12,6 +12,9 @@ from typing import List
 import torch.fx
 import torch.random
 
+from torchdynamo.utils import FakeRootModule
+from torchdynamo.utils import maybe_condition
+
 from ..utils import fake_tensors_available
 
 if fake_tensors_available:
@@ -40,6 +43,16 @@ from .base import VariableTracker
 from .base import typestr
 from .lists import ShapeVariable
 from .lists import SizeVariable
+
+try:
+    import z3  # type: ignore[import]
+    from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
+        evaluate_conditional_with_constraints,
+    )
+
+    HAS_Z3 = True
+except ImportError:
+    HAS_Z3 = False
 
 
 @contextmanager
@@ -92,6 +105,29 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
+        if HAS_Z3:
+            annotated_graph, annotated_node = annotate_graph(
+                tx, proxy.node.graph, proxy.node
+            )
+            if maybe_condition(proxy.node):
+                try:
+                    positive, negative = evaluate_conditional_with_constraints(
+                        FakeRootModule(tx.output.nn_modules),
+                        annotated_graph,
+                        annotated_node,
+                    )
+                    if positive == z3.unsat and negative == z3.sat:
+                        proxy.tracer.graph.erase_node(proxy.node)
+                        return variables.ConstantVariable(False)
+                    elif positive == z3.sat and negative == z3.unsat:
+                        proxy.tracer.graph.erase_node(proxy.node)
+                        return variables.ConstantVariable(True)
+
+                # if a node is not a condition and we try to evaluate it as one,
+                # it will trigger an assertion error
+                except AssertionError:
+                    pass
+
         if "guards" in options:
             tx.output.guards.update(options["guards"])
 
@@ -670,6 +706,21 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+
+def annotate_graph(tx, graph, node):
+    """
+    Copies an fx graph and node and annotates them
+    """
+
+    if tx.new_annotations is not None:
+        for n in graph.nodes:
+            if n.name in tx.new_annotations:
+                n.type = tx.new_annotations[n.name]
+
+        if node.name in tx.new_annotations:
+            node.type = tx.new_annotations[node.name]
+        return graph, node
 
 
 class FakeItemVariable(UnspecializedPythonVariable):

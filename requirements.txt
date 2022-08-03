@@ -12,3 +12,4 @@ pyyaml
 sympy
 tabulate
 torch>=1.12.0
+six

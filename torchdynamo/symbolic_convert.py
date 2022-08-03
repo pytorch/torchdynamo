@@ -1225,6 +1225,17 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
         )
+
+        self.new_annotations = {}
+
+        if "self" in f_locals:
+            if hasattr(f_locals["self"].__class__, "forward"):
+
+                if f_locals["self"].__class__.forward.__code__ is f_code:
+                    self.new_annotations = f_locals[
+                        "self"
+                    ].__class__.forward.__annotations__
+
         self.one_graph: bool = one_graph
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
