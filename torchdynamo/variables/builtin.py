@@ -245,6 +245,7 @@ class BuiltinVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
 
+        # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
             args[0], variables.TensorVariable
         ):
