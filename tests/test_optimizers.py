@@ -13,15 +13,24 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
-def make_test(optim_cls, exp_frame_cnt=1, **kwargs):
+def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
         nonlocal opt
+
         counter = torchdynamo.testing.CompileCounter()
 
+        if closure is not None:
+
+            def fn():
+                opt.step(closure)
+
+        else:
+            fn = opt.step
+
         with torchdynamo.optimize(counter):
-            opt.step()
+            fn()
 
         self.assertEqual(counter.frame_count, exp_frame_cnt)
 
@@ -51,10 +60,23 @@ class OptimizerTests(torchdynamo.testing.TestCase):
         )
 
     test_sgd = make_test(torch.optim.SGD, lr=0.01)
+    # lgbfs has data-dependent control and internally iterates
+    # calling the closure
+    # TODO mlazos: Add support for inlining methods
+    test_lbfgs = make_test(
+        torch.optim.LBFGS, exp_frame_cnt=3, closure=lambda: model(input).sum()
+    )
+    # RAdam has data-dependent control which breaks the graph
+    test_radam = make_test(torch.optim.RAdam, exp_frame_cnt=5)
+
+    # ASGD has a small optimization that avoids averaging
+    # This will be removed once that opt is removed
+    test_asgd = make_test(torch.optim.ASGD, exp_frame_cnt=5)
 
 
-# exclude SGD because it doesn't have proper default args
-exclude = set(["SGD", "Optimizer", "SparseAdam"])
+# exclude SparseAdam because other areas of the stack don't support it yet
+# the others are handled specially above
+exclude = set(["SGD", "Optimizer", "SparseAdam", "LBFGS", "RAdam", "ASGD"])
 optimizers = [
     opt
     for opt in torch.optim.__dict__.values()
