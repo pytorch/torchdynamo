@@ -117,7 +117,8 @@ def test(layer_params, fusion_type="add"):
         conv_fusion = getattr(Func, f"conv_{fusion_type}")
     torchinductor.metrics.reset()
     y = conv_fusion_torchinductor(x, w, bias, stride, padding, dilation, groups)
-    assert(torchinductor.metrics.generated_kernel_count == 1)
+    # 1 for layout transform, 1 for conv+
+    assert(torchinductor.metrics.generated_kernel_count <= 2)
     y_correct = conv_fusion(x, w, bias, stride, padding, dilation, groups)
     # print("y", y[0])
     # print("y_correct", y_correct[0])
