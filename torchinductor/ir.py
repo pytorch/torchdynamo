@@ -618,6 +618,12 @@ class BaseView(IRNode):
             x = x.data
         return x
 
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Pointwise(device, self.get_dtype(), loader, self.get_size())
+
 
 @dataclasses.dataclass
 class ExpandView(BaseView):
@@ -2169,19 +2175,19 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        x = cls.realize_input(x)
         if not x.is_extern() and all(
             (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
         ):
             return x.constant_to_device(device)
 
+        log.warning("DeviceCopy")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
                 dtype=x.get_dtype(),
                 size=x.get_size(),
             ),
-            [x],
+            [cls.realize_input(x)],
         )
 
     def codegen(self, wrapper):
