@@ -213,25 +213,6 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        if config.triton.convolution != "aten":
-            decided = True
-            # if any input is channel_last aka stride[1] == 1
-            # let the output to be channel_last
-            if len(sizes) == 4 and a == 1 and any(stride_lengths[:, a] == 1):
-                for i, stride_length in enumerate(stride_lengths[:, a]):
-                    if stride_length == 1 and min(stride_lengths[i, :]) < 1:
-                        # skip the case [0, 1, 0, 0]
-                        decided = False
-                if decided:
-                    return -1
-            if len(sizes) == 4 and b == 1 and any(stride_lengths[:, b] == 1):
-                for i, stride_length in enumerate(stride_lengths[:, b]):
-                    if stride_length == 1 and min(stride_lengths[i, :]) < 1:
-                        # skip the case [0, 1, 0, 0]
-                        decided = False
-                if decided:
-                    return 1
-
         a_first = np.logical_or(
             stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
         ).all()
