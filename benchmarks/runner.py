@@ -396,6 +396,7 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
             for idx in range(2, len(frames)):
                 df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
+        df["batch_size"] = df["batch_size"].astype(int)
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"
         pp_dataframe(df, title, output_dir)
