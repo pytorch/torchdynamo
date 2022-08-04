@@ -5,7 +5,7 @@ import torchinductor.config
 from torchdynamo.testing import same
 from torchdynamo.testing import rand_strided
 
-torchinductor.config.debug = True
+# torchinductor.config.debug = True
 torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
@@ -36,11 +36,11 @@ class Func(object):
 
 
 def test(shape, fusion_type="add"):
-    dtype=torch.float32
+    dtype=torch.float16
     torch.manual_seed(0)
-    # allocate inputs, nchw
-    a = rand_strided((128, 9216), (9216, 1), device='cuda', dtype=dtype)
-    b = rand_strided((9216, 4096), (4096, 1), device='cuda', dtype=dtype)
+    # allocate inputs
+    a = torch.randn(shape[0], dtype=dtype, device='cuda')
+    b = torch.randn(shape[1], dtype=dtype, device='cuda')
     bias = torch.randn((shape[0][0],shape[1][1]), dtype=dtype, device='cuda')
 
     if fusion_type == "":
@@ -57,8 +57,6 @@ def test(shape, fusion_type="add"):
     torchdynamo.reset()
     torchinductor.config.triton.use_mm = False
     y_correct = mm_fusion(a, b, bias)
-    # print("y", y[0,0:128])
-    # print("y_correct", y_correct[0,0:128])
     assert(same(y, y_correct, cos_similarity=True))
 
 fusion_types = ["", "add", "relu", "add_relu"]
@@ -79,6 +77,6 @@ shapes = [
 ]
 for fusion_type in fusion_types:
     print(f"testing correctness of mm+{fusion_type}")
-    for id, shape in enumerate(shapes[0:1]):
+    for id, shape in enumerate(shapes):
         test(shape, fusion_type)
     print("passed")

@@ -16,7 +16,6 @@ template_dict = {ir.Convolution: "triton_conv", ir.MatrixMultiply: "triton_mm"}
 
 class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
-        super(TritonTemplateKernel, self).__init__(*groups)
         self.node = node
         self.template_name = template_dict[type(node)]
         env = Environment(
@@ -25,7 +24,12 @@ class TritonTemplateKernel(TritonKernel):
             lstrip_blocks=True,
             undefined=StrictUndefined,
         )
+        pid_cache = {}
         if isinstance(node, ir.Convolution):
+            pid_cache = {
+                "tl.program_id(0)": "pid_nhw",
+                "tl.program_id(1)": "pid_k",
+            }
             self.map_args()
             KERNEL_H = self.args_dict["KERNEL_H"]
             KERNEL_W = self.args_dict["KERNEL_W"]
@@ -37,8 +41,14 @@ class TritonTemplateKernel(TritonKernel):
                 self.template_name += "_delta_x"
             else:
                 self.template_name += "_delta_x_hwc"
+        elif isinstance(node, ir.MatrixMultiply):
+            pid_cache = {
+                "tl.program_id(0)": "pid_m",
+                "tl.program_id(1)": "pid_n",
+            }
 
         self.template = env.get_template(self.template_name + ".j2")
+        super(TritonTemplateKernel, self).__init__(*groups, pid_cache=pid_cache)
 
     def rename_vars(self):
         for k, v in self.inout_dict.items():
@@ -284,7 +294,7 @@ def template_codegen(scheduler, scheduler_node):
         # mark node of TritonTemplateKernel as fusable and update fusable_deps
         scheduler_node.mark_fusable()
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
-        assert type(kernel.node) in template_dict.keys():
+        assert type(kernel.node) in template_dict.keys()
         tile1, tile2, _ = groups
         fusable_group = tile1 * tile2
 

@@ -245,7 +245,13 @@ class IterationRanges:
 
 class IterationRangesRoot(IterationRanges):
     def __init__(
-        self, name: str, numel: sympy.Expr, prefix: str, index: int, kernel: "Kernel"
+        self,
+        name: str,
+        numel: sympy.Expr,
+        prefix: str,
+        index: int,
+        kernel: "Kernel",
+        pid_cache={},
     ):
         super(IterationRangesRoot, self).__init__(
             name=name,
@@ -258,6 +264,9 @@ class IterationRangesRoot(IterationRanges):
         self.kernel = kernel
         # Store all the nodes in one flat list
         self.nodes: Dict[sympy.Expr, IterationRangesEntry] = {}
+        # This is for re-ordering program ID in triton mm template
+        # pid_cache["tl.program_id(0)"] = pid_m
+        self.pid_cache: Dict[str, str] = pid_cache
 
     def cache_clear(self):
         for node in self.nodes.values():
@@ -327,14 +336,20 @@ class IterationRangesRoot(IterationRanges):
         size = self.kernel.reshape_size_str(self.index, self.prefix)
         return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
 
+    def pid_cache_lookup(self, key):
+        if key in self.pid_cache:
+            return self.pid_cache[key]
+        return key
+
     def codegen_header(self, code):
         x = self.prefix
         if self.is_loop():
             code.writeline(f"{self.name} = {x}offset + {x}base")
         else:
+            pid = self.pid_cache_lookup(f"tl.program_id({self.index})")
             code.writelines(
                 [
-                    f"{x}offset = tl.program_id({self.index}) * {x.upper()}BLOCK",
+                    f"{x}offset = {pid} * {x.upper()}BLOCK",
                     f"{self.name} = {x}offset + {self.ranges_code()}",
                 ]
             )
@@ -395,7 +410,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups):
+    def __init__(self, *groups, pid_cache={}):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -407,13 +422,15 @@ class TritonKernel(Kernel):
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
-        self.initialize_range_tree()
+        self.initialize_range_tree(pid_cache)
 
-    def initialize_range_tree(self):
+    def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
             self.range_trees.append(
-                IterationRangesRoot(names[i], self.numels[i], names[i][0], i, self)
+                IterationRangesRoot(
+                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                )
             )
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
