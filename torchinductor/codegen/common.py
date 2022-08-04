@@ -90,7 +90,7 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 
     res = index
     # added contiguous index prevents reordering
-    res.append(sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes)))
+    return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
     return res
 
 
