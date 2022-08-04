@@ -162,4 +162,24 @@ class UnspecTests(torchdynamo.testing.TestCase):
             res = fn(x, scaler)
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
-        
+
+    def test_unspec_float_precision(self):
+        def fn(image, scale_factor):
+            image = torch.nn.functional.interpolate(
+                image[None],
+                size=None,
+                scale_factor=scale_factor,
+                mode="bilinear",
+                recompute_scale_factor=True,
+                align_corners=False,
+            )[0]
+
+            return image.shape
+
+        x = torch.rand([3, 427, 640])
+        scale_factor = 1.873536229133606
+        ref = fn(x, scale_factor)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res = fn(x, scale_factor)
+        self.assertTrue(same(ref, res))

@@ -127,9 +127,6 @@ class VariableBuilder:
             0.001,
             0.5,
             0.05,
-            800,  # Work around for vision_maskrcnn
-            1.873536229133606,
-            4.135166556742356,
             144,
             672,
             240,

@@ -309,6 +309,12 @@ class BuiltinVariable(VariableTracker):
                             **options,
                         )
                 else:
+                    # Work around for vision_maskrcnn due to precision difference
+                    # specialize the dividend when float divide by tensor
+                    if self.fn is operator.truediv and isinstance(
+                        args[0], variables.UnspecializedPythonVariable
+                    ):
+                        args[0] = args[0].convert_to_constant(tx)
                     return variables.TensorVariable.create(tx, proxy, **options)
 
             except NotImplementedError:

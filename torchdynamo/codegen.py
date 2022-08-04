@@ -321,7 +321,7 @@ class PyCodegen(object):
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if arg.is_unspecialized:
+            if arg.is_unspecialized and arg.example is not None:
                 self.extend_output(
                     [
                         self.create_load_global("torch", add=True),
