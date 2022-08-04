@@ -134,7 +134,7 @@ class VariableBuilder:
                 0.05,
                 800,
                 1.873536229133606,
-                4.135166556742356, # Work around for vision_maskrcnn where torch.clamp can't be on different devices
+                4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
             }
         )
 
