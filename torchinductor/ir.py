@@ -2664,7 +2664,6 @@ class Convolution(ExternKernelAlloc):
         self.inputs[0] = x
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
-
     def map_args(self):
         # x, w, bias
         in_args = [x.codegen_reference() for x in self.inputs]
