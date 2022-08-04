@@ -111,21 +111,7 @@ class VariableBuilder:
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return {
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            12,
-            15,
-            16,
+        return set(range(17)).union({
             20,
             30,
             40,
@@ -148,7 +134,7 @@ class VariableBuilder:
             672,
             240,
             96,
-        }
+        })
 
     @staticmethod
     def list_type(value):

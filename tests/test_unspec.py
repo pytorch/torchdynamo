@@ -49,7 +49,7 @@ UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
 
 @patch.object(torchdynamo.config, "specialize_int_float", False)
-class BasicUnspecTests(torchdynamo.testing.TestCase):
+class UnspecTests(torchdynamo.testing.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]

@@ -779,7 +779,7 @@ class ReproTests(torchdynamo.testing.TestCase):
                 640,
                 False,
             )
-        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 2)
+        self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
         self.assertEqual(
             torchdynamo.utils.counters["frames"]["total"],
             torchdynamo.utils.counters["frames"]["ok"],
