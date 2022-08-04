@@ -612,7 +612,7 @@ class BaseView(IRNode):
                 self.get_size(),
             ).reads
 
-    def unwrap(self):
+    def unwrap_view(self):
         x = self
         while isinstance(x, BaseView):
             x = x.data
@@ -1758,6 +1758,8 @@ class InputsKernel(Buffer):
                 x = x.data
             if isinstance(x, StorageBox):
                 x = x.data
+            if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
+                x = ExternKernel.realize_input(x)
             assert isinstance(x, (Buffer, ReinterpretView)), x
             inputs_new.append(x)
         return inputs_new
@@ -1884,7 +1886,7 @@ class ExternKernel(InputsKernel):
         if isinstance(x, ReinterpretView):
             return x
 
-        x.unwrap().freeze_layout()
+        x.unwrap_view().freeze_layout()
         rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
         assert len(rw.reads) == 1
 
@@ -1931,8 +1933,8 @@ class ExternKernel(InputsKernel):
             return x
         if isinstance(x, BaseView):
             x.realize()
-            if is_storage_and_layout(x.unwrap()) and not isinstance(
-                x.unwrap().data, ExternKernelAlloc
+            if is_storage_and_layout(x.unwrap_view()) and not isinstance(
+                x.unwrap_view().data, ExternKernelAlloc
             ):
                 try:
                     return cls.convert_to_reinterpret_view(x)
@@ -2168,10 +2170,8 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(x.get_device().type)
 
         x = cls.realize_input(x)
-        read_writes = x.get_read_writes()
         if not x.is_extern() and all(
-            (r.name in V.graph.constants and hasattr(r, "index"))
-            for r in read_writes.reads
+            (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
         ):
             return x.constant_to_device(device)
 
