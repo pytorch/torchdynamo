@@ -2490,7 +2490,10 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
-        self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
+        expected_kernel = 0
+        if config.triton.use_mm:
+            expected_kernel = 1
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
     @patch.object(config.triton, "cudagraphs", False)
     def test_lowmem_dropout1(self):

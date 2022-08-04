@@ -73,7 +73,7 @@ class triton:
     # in triton if loading from 1-dim tensor using 2-dim pointer offset
     # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
     # could be set as False if triton fixes the bug later
-    dense_indexing = True if convolution != "aten" else False
+    dense_indexing = False
 
     # limit tiling dimensions
     max_tiles = 2

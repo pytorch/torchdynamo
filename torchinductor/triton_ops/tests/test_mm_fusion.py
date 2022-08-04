@@ -1,4 +1,3 @@
-from benchmarks_.microbenchmarks import model as model
 import torch
 import torchdynamo
 import torchinductor.config

@@ -2002,6 +2002,8 @@ class ExternKernel(InputsKernel):
         # manually generate index formula for conv
         sizes = self.get_size()
         strides = self.get_stride()
+        sizes = [V.graph.sizevars.size_hint(x) for x in sizes]
+        strides = [V.graph.sizevars.size_hint(x) for x in strides]
         index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
@@ -2136,6 +2138,14 @@ class MatrixMultiply(ExternKernelOut):
                 ("C", f"{self.get_name()}"),
             ]
         )
+        # batch==1 bmm->mm
+        if len(self.get_stride()) == 3:
+            assert self.get_size()[0] == 1
+            stride_cm = self.get_stride()[1]
+            stride_cn = self.get_stride()[2]
+        else:
+            stride_cm = self.get_stride()[0]
+            stride_cn = self.get_stride()[1]
         args_dict = OrderedDict(
             [
                 ("M", f"{self.inputs[0].get_size()[0]}"),
@@ -2145,8 +2155,8 @@ class MatrixMultiply(ExternKernelOut):
                 ("stride_ak", f"{self.inputs[0].get_stride()[1]}"),
                 ("stride_bk", f"{self.inputs[1].get_stride()[0]}"),
                 ("stride_bn", f"{self.inputs[1].get_stride()[1]}"),
-                ("stride_cm", f"{self.get_stride()[0]}"),
-                ("stride_cn", f"{self.get_stride()[1]}"),
+                ("stride_cm", f"{stride_cm}"),
+                ("stride_cn", f"{stride_cn}"),
             ]
         )
         # accumulator types
