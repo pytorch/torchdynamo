@@ -33,6 +33,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 from matplotlib import rcParams
+from scipy.stats import gmean
+from scipy.stats import tmean
 from tabulate import tabulate
 
 import torchdynamo
@@ -53,14 +55,15 @@ TABLE = {
         "inductor_cudagraphs": "--training --inductor --use-eval-mode --isolate",
     },
     "inference": {
-        "ts_nnc": "-dcuda --isolate --speedup-ts",
-        "ts_nvfuser": "-dcuda --isolate -n100 --speedup-ts --nvfuser",
-        "trt": "-dcuda --isolate -n100 --speedup-trt",
-        "eager_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs",
-        "nnc_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
-        "ts_nvfuser_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts",
-        "inductor_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --inductor",
+        "ts_nnc": "--isolate --speedup-ts",
+        "ts_nvfuser": "--isolate -n100 --speedup-ts --nvfuser",
+        "trt": "--isolate -n100 --speedup-trt",
+        "eager_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs",
+        "nnc_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
+        "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
+        "inductor_cudagraphs": "--inductor-settings --float32 -n50 --inductor",
     },
+    "coverage": {"dynamo_eager": "--isolate --coverage"},
 }
 
 INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
@@ -69,6 +72,7 @@ TRAINING_COMPILERS = tuple(TABLE["training"].keys())
 DEFAULTS = {
     "training": ["ts_nvfuser", "aot_nvfuser", "inductor_cudagraphs"],
     "inference": ["ts_nvfuser_cudagraphs", "inductor_cudagraphs"],
+    "coverage": ["dynamo_eager"],
     "dtypes": [
         "float32",
     ],
@@ -77,6 +81,10 @@ DEFAULTS = {
         "cuda",
     ],
 }
+
+
+def percentage(part, whole):
+    return round(100 * float(part) / float(whole), 2)
 
 
 def parse_args():
@@ -123,13 +131,26 @@ def parse_args():
     group_mode.add_argument(
         "--training", action="store_true", help="Only run training related tasks"
     )
+    group_mode.add_argument(
+        "--coverage", action="store_true", help="Runs coverage experiment"
+    )
 
     args = parser.parse_args()
     return args
 
 
+def get_mode(args):
+    if args.inference:
+        return "inference"
+    elif args.training:
+        return "training"
+    else:
+        assert args.coverage
+        return "coverage"
+
+
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
-    mode = "inference" if args.inference else "training"
+    mode = get_mode(args)
     with open("run.sh", "w") as runfile:
         lines = []
 
@@ -143,7 +164,6 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
             lines.append(
                 f"# Commands for {suite} for device={device}, dtype={dtype} for {mode}"
             )
-
             info = TABLE[mode]
             for compiler in compilers:
                 base_cmd = info[compiler]
@@ -165,7 +185,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         runfile.writelines([line + "\n" for line in lines])
 
 
-def pp_dataframe(df, title, output_dir, out_io=None):
+def pp_dataframe(df, title, output_dir, out_io=None, draw_graph=True):
     # Pretty print
     if out_io is not None:
         out_io.write("\n")
@@ -179,25 +199,28 @@ def pp_dataframe(df, title, output_dir, out_io=None):
     df.to_csv(f"{output_dir}/{title}.csv", index=False)
 
     # Graph
-    labels = df.columns.values.tolist()
-    labels = labels[2:]
-    df.plot(
-        x="name",
-        y=labels,
-        kind="bar",
-        title=title,
-        ylabel="Speedup over eager",
-        xlabel="",
-        grid=True,
-        figsize=(max(len(df.index) / 4, 5), 10),
-        edgecolor="black",
-    )
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/{title}.png")
+    if draw_graph:
+        labels = df.columns.values.tolist()
+        labels = labels[2:]
+        df.plot(
+            x="name",
+            y=labels,
+            kind="bar",
+            title=title,
+            ylabel="Speedup over eager",
+            xlabel="",
+            grid=True,
+            figsize=(max(len(df.index) / 4, 5), 10),
+            edgecolor="black",
+        )
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/{title}.png")
 
 
-def build_summary(out_io):
+def build_summary():
     import git
+
+    out_io = io.StringIO()
 
     def print_commit_hash(path, name):
         if exists(path):
@@ -241,6 +264,8 @@ def build_summary(out_io):
     out_io.write(
         f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
     )
+    with open(f"{output_dir}/gh_build_summary.txt", "w") as gh_fh:
+        gh_fh.write(out_io.getvalue())
 
 
 def read_csv(output_filename):
@@ -257,14 +282,94 @@ def read_csv(output_filename):
     else:
         assert n_cols == 3
         return pd.read_csv(
-            output_filename, names=["dev", "name", "speedup"], header=None
+            output_filename, names=["dev", "name", "batch_size", "speedup"], header=None
         )
 
 
-def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
-    mode = "inference" if args.inference else "training"
+def parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir):
+    mode = "coverage"
     out_io = io.StringIO()
-    build_summary(out_io)
+    out_io.write("\n")
+    out_io.write("## Coverage results ##\n")
+    frames = []
+    for iter in itertools.product(suites, devices, dtypes):
+        suite, device, dtype = iter
+        # Collect results from all the files
+        for compiler in compilers:
+            output_filename = (
+                f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
+            )
+
+            df = read_csv(output_filename)
+            df.insert(1, "suite", suite)
+            frames.append(df)
+            print(df)
+
+    # Merge the results
+    if len(frames) == 1:
+        df = frames[0]
+    else:
+        df = pd.concat(frames)
+
+    # Analysis number of graphs
+    num_models = len(df.index)
+    no_graph_breaks = (df.graphs == 1).sum()
+    perc = percentage(no_graph_breaks, num_models)
+
+    df_graphs = df[df.graphs != 1]
+    out_io.write("**Graph Breaks**\n")
+    out_io.write(f"Number of models = {num_models}\n")
+    out_io.write(f"Number of models with no graph breaks = {no_graph_breaks}\n")
+    out_io.write(f"Percentage of models with no graph breaks = {perc}%")
+
+    # Sort the dataframe and pretty print
+    title = f"{suite}_{dtype}_{mode}_{device}"
+    sorted_df = df_graphs.sort_values(by="graphs", ascending=False)
+    pp_dataframe(
+        sorted_df,
+        f"sorted_{title}_graph_breaks",
+        output_dir,
+        out_io=out_io,
+        draw_graph=False,
+    )
+    out_io.write("\n\n")
+
+    # Analysis start_latency
+    low_latency_models = (df.start_latency < 5.0).sum()
+    perc = percentage(low_latency_models, num_models)
+
+    df_high_latency = df[df.start_latency > 5]
+    out_io.write("**Start Latency - Rough approximation of compile latency**\n")
+    out_io.write(f"Number of models = {num_models}\n")
+    out_io.write(f"Number of models with low start latency = {low_latency_models}\n")
+    out_io.write(f"Percentage of models with low start latency = {perc}%")
+
+    # Sort the dataframe and pretty print
+    title = f"{suite}_{dtype}_{mode}_{device}"
+    sorted_df = df_high_latency.sort_values(by="graphs", ascending=False)
+    pp_dataframe(
+        sorted_df,
+        f"sorted_{title}_start_latency",
+        output_dir,
+        out_io=out_io,
+        draw_graph=False,
+    )
+    out_io.write("\n")
+
+    print(out_io.getvalue())
+    with open(f"{output_dir}/gh_coverage.txt", "w") as gh_fh:
+        gh_fh.write(out_io.getvalue())
+
+
+def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
+    mode = get_mode(args)
+    build_summary()
+
+    if args.coverage:
+        parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir)
+        return
+
+    out_io = io.StringIO()
     out_io.write("\n")
     out_io.write("## Performance results ##\n")
     for iter in itertools.product(suites, devices, dtypes):
@@ -287,19 +392,31 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
         if len(compilers) == 1:
             df = frames[0]
         else:
-            df = pd.merge(frames[0], frames[1], on=["dev", "name"])
+            df = pd.merge(frames[0], frames[1], on=["dev", "name", "batch_size"])
             for idx in range(2, len(frames)):
-                df = pd.merge(df, frames[idx], on=["dev", "name"])
+                df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
+        df["batch_size"] = df["batch_size"].astype(int)
         # Pretty print and also write to a bargraph
         title = f"{suite}_{dtype}_{mode}_{device}"
         pp_dataframe(df, title, output_dir)
+
+        # Add geomean and mean
+        for compiler in compilers:
+            speedups = df[compiler].clip(1)
+            geo_mean = round(gmean(speedups), 3)
+            mean = round(tmean(speedups), 3)
+            out_io.write(
+                "{:<30}: gmean_speedup = {:.2f}x, mean_speedup = {:.2f}x\n".format(
+                    compiler, geo_mean, mean
+                )
+            )
 
         # Sort the dataframe and pretty print
         sorted_df = df.sort_values(by=list(reversed(compilers)), ascending=False)
         pp_dataframe(sorted_df, f"sorted_{title}", output_dir, out_io=out_io)
     print(out_io.getvalue())
-    with open(f"{output_dir}/github_comment.txt", "w") as gh_fh:
+    with open(f"{output_dir}/gh_performance.txt", "w") as gh_fh:
         gh_fh.write(out_io.getvalue())
 
 
@@ -315,8 +432,12 @@ if __name__ == "__main__":
 
     if args.inference:
         compilers = DEFAULTS["inference"] if args.compilers is None else args.compilers
-    else:  # args.training
+    elif args.training:  # args.training
         compilers = DEFAULTS["training"] if args.compilers is None else args.compilers
+    else:
+        assert args.coverage
+        assert args.compilers is None
+        compilers = DEFAULTS["coverage"]
 
     output_dir = args.output_dir if args.output_dir is not None else DEFAULT_OUTPUT_DIR
 
