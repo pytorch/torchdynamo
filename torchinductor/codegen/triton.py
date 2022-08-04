@@ -903,6 +903,7 @@ class TritonScheduling:
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
+    # TODO(panyj): remove this
     def group_fn_NHW_C(self, sizes):
         # group to size of NHW, C for 4d tensor
         group = ()
@@ -916,6 +917,7 @@ class TritonScheduling:
                 group += (V.graph.sizevars.simplify(sympy_product(s)),)
         return group
 
+    # TODO(panyj): remove this
     def group_fn_M_N(self, sizes):
         group = ()
         for s in sizes:
