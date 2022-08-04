@@ -961,6 +961,9 @@ def parse_args():
     )
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
     parser.add_argument(
+        "--batch_size_file", type=str, help="String to load batch size from"
+    )
+    parser.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
@@ -1456,17 +1459,42 @@ def main(runner, original_dir=None):
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
+    if args.batch_size_file:
+        if not (args.only or args.isolate):
+            raise RuntimeError("--batch-size-file requires --only or --isolate")
+
     experiment = functools.partial(experiment, args, model_iter_fn)
 
     if args.only:
+        model_name = args.only
         for device in args.devices:
+            batch_size = args.batch_size
+            if args.batch_size_file:
+                batch_size = None
+
+                filename = args.batch_size_file
+                if os.path.exists("benchmarks"):
+                    filename = os.path.join("benchmarks", filename)
+                assert os.path.exists(filename)
+                with open(filename, "r") as f:
+                    lines = f.readlines()
+                    lines = [i.split(",") for i in lines if len(i.strip()) > 0]
+                    for val in lines:
+                        cur_name, b = val
+                        if model_name == cur_name:
+                            batch_size = int(b)
+                if batch_size is None:
+                    raise RuntimeError(
+                        f"Batch size could not be found for {model_name} in {args.batch_size_file}"
+                    )
+                print(f"batch size: {batch_size}")
             try:
                 device, name, model, example_inputs = runner.load_model(
                     device,
-                    args.only,
+                    model_name,
                     args.training,
                     args.use_eval_mode,
-                    args.batch_size,
+                    batch_size,
                     args.dynamic_shapes,
                 )
             except NotImplementedError:
