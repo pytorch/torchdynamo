@@ -10,8 +10,6 @@ import torch
 import torchdynamo.testing
 from torchdynamo.testing import same
 
-from . import test_functions
-from . import test_misc
 from . import test_modules
 from . import test_repros
 
