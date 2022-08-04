@@ -388,7 +388,7 @@ class Functionalization(Transformer):
 
 
 def swap_node(graph, old_node, new_node):
-    assert(new_node.stack_trace is None), "New node must not have a "
+    assert new_node.stack_trace is None, "New node must not have a "
     new_node.stack_trace = old_node.stack_trace
     old_node.replace_all_uses_with(new_node)
     graph.erase_node(old_node)
