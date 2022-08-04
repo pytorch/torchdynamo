@@ -25,8 +25,8 @@ from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
-from ..source import GlobalWeakRefSource
 from ..source import GlobalSource
+from ..source import GlobalWeakRefSource
 from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
