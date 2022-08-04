@@ -61,6 +61,7 @@ LOGGING_CONFIG = {
             "propagate": False,
         },
     },
+    "disable_existing_loggers": False,
 }
 
 
@@ -246,6 +247,7 @@ def clone_input(x):
         result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
+            result.requires_grad_(x.requires_grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
@@ -430,6 +432,18 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def dict_param_key_ids(value):
+    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+
+
+def dict_const_keys(value):
+    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+
+
+def global_key_name(key):
+    return f"__dict_key_{id(key)}"
+
+
 def rename_implicit(v):
     """
     Usage of inline comprehensions generates a implicit ".0" variable that
@@ -497,13 +511,13 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             b = b.to_dense()
         assert isinstance(b, torch.Tensor), f"type mismatch {type(a)} {type(b)}"
         if cos_similarity:
-            # TRT will bring error loss larger than current threshold. Use cosine similarity as replacement
             a = a.flatten().to(torch.float32)
             b = b.flatten().to(torch.float32)
+            if torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=True):
+                # early exit that handles zero/nan better
+                # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
+                return True
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
-            if res.isnan() or res == 0:
-                # Fallback to use torch.allcose
-                return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
             if res < 0.99:
                 print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99

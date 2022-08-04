@@ -62,15 +62,15 @@ normalize_ir = True
 # __torch_function__ logic of the subclass.
 traceable_tensor_subclasses = set()
 
+# Raise torchdynamo internal assertions
+raise_on_assertion_error = False
+
 # Propagate backend exceptions up to torchdynamo.optimize
 raise_on_backend_error = True
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {
-    torch.nn,
-    torch.distributions,
-}
+skipfiles_inline_module_allowlist = {torch.nn, torch.distributions}
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
         torch._refs,

@@ -126,7 +126,11 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
+@patch.object(torchinductor.config.triton, "cudagraphs", False)
+@patch("torchdynamo.config.raise_on_backend_error", True)
 def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+    torchdynamo.reset()
+
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
     has_lowp_args = False
 
@@ -153,14 +157,12 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
 
     torchinductor.metrics.reset()
 
-    @torchdynamo.optimize_assert(functools.partial(compile_fx, cudagraphs=False))
+    @torchdynamo.optimize_assert(compile_fx)
     def run(*ex):
         return model(*ex)
 
-    torchdynamo.reset()
-    with unittest.mock.patch("torchdynamo.config.raise_on_backend_error", True):
-        torch.manual_seed(0)
-        actual = run(*example_inputs)
+    torch.manual_seed(0)
+    actual = run(*example_inputs)
 
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
@@ -177,6 +179,7 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
 
 
+@patch.object(torchinductor.config.triton, "cudagraphs", False)
 def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -292,6 +295,10 @@ class TestIndexingSimplification(unittest.TestCase):
             IndexingDiv(i1 + 2 * i2, 32),
         )
 
+        expr = ModularIndexing(2 * i2 + r3, 1, 64)
+        # modular indexing is removed if base is smaller than modulo
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
+
         # check the same thing but with symbolic divisor
         self.assertEqual(IndexingDiv(r3 * i0, r3), i0)
         self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
@@ -333,21 +340,47 @@ class TestIndexingSimplification(unittest.TestCase):
             2 * ModularIndexing(i0, 1, 128),
         )
 
+        # it should work when divisor is not 1
+        expr2 = ModularIndexing(i0, 3, 32) + 32 * ModularIndexing(i0, 32 * 3, 4)
+        simplified = sizevars.simplify_with_ranges(expr2, {})
+        self.assertEqual(simplified, ModularIndexing(i0, 3, 128))
+        self.assertEqual(expr2.subs({i0: 39485}), simplified.subs({i0: 39485}))
+
         # it should not happen in this case as the modulus is wrong
-        expr2 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
-        self.assertEqual(sizevars.simplify_with_ranges(expr2, {}), expr2)
+        expr3 = ModularIndexing(i0, 1, 30) + 32 * ModularIndexing(i0, 32, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr3, {}), expr3)
 
         # check that it also works with a modulus>1
-        expr3 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1, i2)
-        self.assertEqual(
-            sizevars.simplify_with_ranges(expr3, {}), ModularIndexing(i0, 10, i1 * i2)
-        )
+        expr4 = ModularIndexing(i0, 10, i1) + i1 * ModularIndexing(i0, i1 * 10, i2)
+        res0 = expr4.subs({i0: 24056, i1: 13, i2: 19})
+        simplified = sizevars.simplify_with_ranges(expr4, {})
+        res1 = simplified.subs({i0: 24056, i1: 13, i2: 19})
+        self.assertEqual(res0, res1)
+        self.assertEqual(simplified, ModularIndexing(i0, 10, i1 * i2))
 
         # and also works with an offset
         self.assertEqual(
-            sizevars.simplify_with_ranges(expr3 + 10, {}),
+            sizevars.simplify_with_ranges(expr4 + 10, {}),
             ModularIndexing(i0, 10, i1 * i2) + 10,
         )
+
+        # works for ModularIndexing + IndexingDiv
+        expr5 = 197 * IndexingDiv(i0, 197) + ModularIndexing(i0, 1, 197)
+        simplified = sizevars.simplify_with_ranges(expr5, {})
+        self.assertEqual(simplified, i0)
+        self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
+
+        # works with a scale
+        self.assertEqual(
+            sizevars.simplify_with_ranges(2 * expr5, {}),
+            2 * i0,
+        )
+
+        # divisor != 1
+        expr6 = 197 * IndexingDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
+        simplified = sizevars.simplify_with_ranges(expr6, {})
+        self.assertEqual(simplified, IndexingDiv(i0, 3))
+        self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
 class CommonTemplate:
@@ -374,6 +407,12 @@ class CommonTemplate:
             return (a / (torch.abs(a) + 1),)
 
         self.common(fn, (torch.randn(17),))
+
+    def test_sgn(self):
+        def fn(a):
+            return torch.sgn(a), torch.sgn(a + 1) - 1
+
+        self.common(fn, [torch.linspace(-10, 10, 41)])
 
     def test_max_min(self):
         def fn(a, b):
@@ -607,6 +646,19 @@ class CommonTemplate:
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
+    def test_round_correctness(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("need to debug tl.libdevice on A100/V100")
+
+        def fn(a):
+            return torch.round(a)
+
+        self.common(
+            fn,
+            [torch.arange(-10, 10, 0.1, dtype=torch.float64)],
+            check_lowp=False,
+        )
+
     def test_silu(self):
         def fn(a):
             return (torch.nn.functional.silu(a),)
@@ -730,6 +782,7 @@ class CommonTemplate:
             ),
         )
 
+    @patch.object(config, "aot_autograd", False)
     def test_unsqueeze_inplace(self):
         def fn(a):
             tmp1 = a + 1
@@ -762,6 +815,7 @@ class CommonTemplate:
             ),
         )
 
+    @patch.object(config, "aot_autograd", False)
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -770,6 +824,7 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_linear2(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 8),
@@ -1319,6 +1374,17 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @patch.object(config, "aot_autograd", False)
+    def test_layer_norm(self):
+        m = torch.nn.Sequential(
+            torch.nn.LayerNorm(32),
+            torch.nn.ReLU(),
+        )
+        m.eval()
+        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
@@ -1454,6 +1520,15 @@ class CommonTemplate:
             (torch.randn([8, 8]) + 10,),
         )
 
+    def test_log_fp64(self):
+        def fn(x):
+            return torch.log(x), torch.log2(x)
+
+        self.common(
+            fn,
+            (torch.randn([1024], dtype=torch.float64) + 10,),
+        )
+
     def test_bitwise(self):
         def fn(x, y):
             return (
@@ -1528,6 +1603,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_new_ones(self):
         def fn(a):
             return (
@@ -1695,7 +1771,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
-    def test_upsample_bilinear2d(self):
+    def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
                 aten.upsample_bilinear2d(a, [45, 45], False, None),
@@ -1703,6 +1779,17 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_bilinear2d_b(self):
+        def fn(a):
+            return aten.upsample_bilinear2d(a, None, True, [2.0, 2.0])
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2, 40, 59]),
+            ],
+        )
 
     def test_reflection_pad2d(self):
         def fn(a):
@@ -1713,6 +1800,22 @@ class CommonTemplate:
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_grid_sampler_2d(self):
+        def fn(a, b):
+            return (
+                aten.grid_sampler_2d(a, b, 0, 0, True),
+                aten.grid_sampler_2d(a, b, 0, 1, False),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([4, 3, 352, 352], dtype=torch.float32),
+                torch.rand([4, 352, 352, 2], dtype=torch.float32) * 2 - 1,
+            ),
+            check_lowp=False,
         )
 
     def test_sort(self):
@@ -1776,6 +1879,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 1, 1]),))
 
+    @patch.object(config, "aot_autograd", False)
     @patch.object(config.triton, "cudagraphs", True)
     def test_input_mutation1(self):
         def fn(a):
@@ -1799,6 +1903,7 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    @patch.object(config, "aot_autograd", False)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -1815,6 +1920,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(config, "aot_autograd", False)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -1835,6 +1941,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -1847,6 +1954,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
+    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -1905,6 +2013,15 @@ class CommonTemplate:
         self.common(
             fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
         )
+        self.common(
+            fn,
+            [
+                torch.tensor(
+                    [1, float("inf"), 2, float("-inf"), float("nan")],
+                    dtype=torch.float64,
+                )
+            ],
+        )
 
     def test_any(self):
         def fn(x):
@@ -1920,6 +2037,7 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @patch.object(config, "aot_autograd", False)
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
@@ -2069,7 +2187,49 @@ class CommonTemplate:
             ],
         )
 
-    @unittest.skip("Triton kernel fails when xnumel == 1")
+    def test_scatter1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b)
+
+        self.common(
+            fn,
+            [
+                torch.zeros(2, 3),
+                0,
+                torch.tensor([[0]]),
+                torch.ones(2, 3),
+            ],
+        )
+
+    def test_scatter2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        self.common(
+            fn,
+            [
+                torch.zeros(64, 512),
+                0,
+                torch.zeros((64, 512), dtype=torch.int64),
+                torch.ones(64, 512),
+            ],
+        )
+
+    def test_scatter3(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                0.8,  # src can be a scalar
+            ],
+        )
+
+    @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -2112,6 +2272,34 @@ class CommonTemplate:
             ],
         )
 
+    def test_scatter_reduce1(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_reduce(a, dim, index, b, "sum")
+
+        self.common(
+            fn,
+            [
+                torch.randn(5, 29, 13),
+                2,
+                torch.tensor([[[3, 5, 7, 9]]]),
+                torch.randn(1, 1, 10),
+            ],
+        )
+
+    def test_scatter_reduce2(self):
+        def fn(a, dim, index, b):
+            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+
+        self.common(
+            fn,
+            [
+                torch.randn(2, 3),
+                0,
+                torch.zeros((2, 3), dtype=torch.int64),
+                torch.randn(2, 3),
+            ],
+        )
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
@@ -2132,11 +2320,8 @@ class CommonTemplate:
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
+    @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
-        if self.device == "cpu":
-            # TODO(jansel): CPU RNG is not yet deterministic
-            raise unittest.SkipTest("CPU currently nondeterministic")
-
         @torchdynamo.optimize("inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
@@ -2145,14 +2330,14 @@ class CommonTemplate:
             with patch.object(torchinductor.config.triton, "cudagraphs", cg):
                 torchdynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float16)
+                x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 a0 = fn(x).clone()
                 a1 = fn(x).clone()
                 a2 = fn(x).clone()
 
-                torch.cuda.manual_seed(1234)
+                torch.manual_seed(1234)
                 b0 = fn(x).clone()
                 b1 = fn(x).clone()
                 b2 = fn(x).clone()
@@ -2165,6 +2350,40 @@ class CommonTemplate:
                 # different calls, different values
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
+
+    @patch.object(config, "aot_autograd", False)
+    def test_rand_like_deterministic(self):
+        @torchdynamo.optimize("inductor")
+        def fn(a):
+            return torch.rand_like(a), torch.rand_like(a)
+
+        x = torch.ones(1024, device=self.device, dtype=torch.float32)
+
+        torch.manual_seed(1234)
+        a0 = fn(x)[0].clone()
+        a1 = fn(x)[0].clone()
+        a2 = fn(x)[0].clone()
+
+        torch.manual_seed(1234)
+        b0 = fn(x)[0].clone()
+        b1 = fn(x)[0].clone()
+        b2 = fn(x)[0].clone()
+
+        # same seed, same values
+        self.assertTrue(torch.allclose(a0, b0))
+        self.assertTrue(torch.allclose(a1, b1))
+        self.assertTrue(torch.allclose(a2, b2))
+
+        # different calls, different values
+        self.assertFalse(torch.allclose(a0, a1))
+        self.assertFalse(torch.allclose(a1, a2))
+
+        c, d = fn(x)
+        self.assertFalse(torch.allclose(c, d))
+        self.assertTrue((c >= 0).all())
+        self.assertTrue((c < 1).all())
+        self.assertTrue((d >= 0).all())
+        self.assertTrue((d < 1).all())
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
@@ -2257,6 +2476,92 @@ class CommonTemplate:
                 torch.randn([1, 1, 20, 15]),
             ],
         )
+
+    @patch.object(config, "aot_autograd", False)
+    def test_mm_views(self):
+        def fn(a, b):
+            return torch.mm(a.view(32, 32), b.view(32, 32))
+
+        self.common(
+            fn,
+            (
+                torch.randn([32, 32]).transpose(0, 1),
+                torch.randn([1, 32, 32]).transpose(0, 1),
+            ),
+            check_lowp=False,
+        )
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
+
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_lowmem_dropout1(self):
+        n = 100000
+        weight = torch.ones(
+            n, device=self.device, dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(n, device=self.device, dtype=torch.float32)
+
+        @torchdynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return F.dropout(x * weight, 0.33, train)
+
+        def check(r, g):
+            rmean = r.mean().item()
+            gmean = g.mean().item()
+            rcount = len(r.nonzero())
+            gcount = len(g.nonzero())
+
+            # dropped elements should match
+            self.assertTrue(same(r.nonzero(), g.nonzero()))
+            self.assertEqual(rcount, gcount)
+
+            # dropped should be close to 0.33
+            self.assertGreater(rcount, 0.64 * n)
+            self.assertGreater(0.68 * n, rcount)
+
+            self.assertAlmostEqual(rmean, gmean)
+            self.assertAlmostEqual(rmean, 1.0, places=2)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        g1 = weight.grad.clone()
+        # eval mode should be all ones
+        self.assertTrue(same(r1, torch.ones_like(r1)))
+        self.assertTrue(same(g1, torch.ones_like(g1)))
+
+        torch.manual_seed(1234)
+        weight.grad.zero_()
+        r2 = run(ones)
+        r2.sum().backward()
+        g2 = weight.grad.clone()
+        check(r2, g2)
+
+        torch.manual_seed(1234)
+        weight.grad.zero_()
+        r3 = run(ones)
+        r3.sum().backward()
+        g3 = weight.grad.clone()
+        check(r3, g3)
+
+        # second run is same result as first
+        self.assertTrue(same(r2, r3))
+        self.assertTrue(same(g2, g3))
+
+    def test_lowmem_dropout2(self):
+        m = torch.nn.Sequential(
+            torch.nn.Linear(32, 32, bias=False),
+            torch.nn.Dropout(),
+            torch.nn.Linear(32, 32, bias=False),
+            torch.nn.Dropout(),
+        ).to(self.device)
+
+        @torchdynamo.optimize_assert("inductor")
+        def run(x):
+            return m(x)
+
+        torchinductor.metrics.generated_kernel_count = 0
+        result = run(torch.randn([8, 32], device=self.device))
+        result.sum().backward()
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 4)
 
 
 if HAS_CPU:

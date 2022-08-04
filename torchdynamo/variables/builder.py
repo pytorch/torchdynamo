@@ -24,10 +24,12 @@ from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
+from ..source import GlobalWeakRefSource
 from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..utils import getfile
+from ..utils import global_key_name
 from ..utils import is_namedtuple
 from ..utils import is_numpy_int_type
 from ..utils import istensor
@@ -165,19 +167,39 @@ class VariableBuilder:
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)
         elif istype(value, (dict, collections.OrderedDict)) and all(
-            map(ConstantVariable.is_literal, value.keys())
+            map(
+                lambda k: ConstantVariable.is_literal(k)
+                or isinstance(k, torch.nn.Parameter),
+                value.keys(),
+            )
         ):
             guards = self.make_guards(GuardBuilder.DICT_KEYS)
+
+            # store key variables in global location for reconstruction
+            for key in value.keys():
+                if isinstance(key, torch.nn.Parameter):
+                    self.tx.store_dict_key(global_key_name(key), key)
+
+            def index_source(key):
+                if isinstance(key, torch.nn.Parameter):
+                    return GlobalWeakRefSource(global_key_name(key))
+                else:
+                    return key
+
             result = dict(
-                (
-                    k,
-                    VariableBuilder(self.tx, GetItemSource(self.get_source(), k))(
-                        value[k]
-                    ).add_guards(guards),
-                )
-                for k in value.keys()
+                [
+                    (
+                        k,
+                        VariableBuilder(
+                            self.tx, GetItemSource(self.get_source(), index_source(k))
+                        )(value[k]).add_guards(guards),
+                    )
+                    for k in value.keys()
+                ]
             )
+
             result = ConstDictVariable(result, type(value), guards=guards)
+
             if istype(value, dict):
                 return self.tx.output.side_effects.track_dict(
                     self.source, value, result

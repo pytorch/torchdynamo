@@ -67,6 +67,58 @@ def stride_order2fill_order(order):
     return fill_order
 
 
+def reads_from_conv(buf, var_ranges):
+    """
+    return:
+    if reads_from_conv: boolean
+    the new memory_addr: Sympy Expression
+    """
+    if buf is None:
+        return False, None
+    if isinstance(buf, Convolution):
+        indexer = buf.layout.as_fixed().make_indexer()
+        index_vars = sorted(var_ranges, key=lambda var: var.name)
+        index = indexer(index_vars)
+        return True, index
+    # for case like
+    # buf0 = conv(x, w)
+    # return torch.cat([buf0, buf1]), torch.cat([buf0, buf2])
+    # Because of ConcatKernel, it will create two bufs buf3 and 4
+    # buf3 has the AliasedLayout which reads from buf0(Convolution)
+    # but buf4 is a copy of buf3 which reads from buf3
+    # we want to know that buf4 also follows buf0 conv's layout
+    if isinstance(buf.layout, AliasedLayout):
+        reads = buf.get_read_writes().reads
+        reads_bufs = [
+            V.graph.name_to_buffer[r.name]
+            if r.name in V.graph.name_to_buffer.keys()
+            else None
+            for r in reads
+        ]
+        for reads_buf in reads_bufs:
+            read_from_conv, addr = reads_from_conv(reads_buf, var_ranges)
+            if read_from_conv:
+                return True, addr
+    return False, None
+
+
+def layout_priority_idx(reads_bufs, memory_addrs, var_ranges):
+    """
+    if reads from conv that needs to use specific layout
+    return:
+    priority_idx regarding memory_addrs idx
+    memory_addrs - update memory_addrs with the true addr if needed
+    """
+
+    priority_idx = []
+    for i, reads_buf in enumerate(reads_bufs):
+        read_from_conv, mem_addr = reads_from_conv(reads_buf, var_ranges)
+        if read_from_conv:
+            priority_idx.append(i)
+            memory_addrs[i] = mem_addr
+    return priority_idx, memory_addrs
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c
@@ -99,6 +151,9 @@ class ModularIndexing(sympy.Function):
             if len(new_terms) != len(base.args):
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
+        if isinstance(base, IndexingDiv):
+            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
 
 class IndexingDiv(sympy.Function):
     """
@@ -116,6 +171,14 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
+        if isinstance(base, IndexingDiv):
+            return IndexingDiv(base.args[0], base.args[1] * divisor)
+
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return IndexingDiv(base - a, divisor) + a / gcd
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
             return IndexingDiv(base / gcd, divisor / gcd)
@@ -532,6 +595,9 @@ class BaseView(IRNode):
     def realize(self):
         return self.data.realize()
 
+    def realize_hint(self):
+        return self.data.realize_hint()
+
     def get_storage_numel(self):
         return self.data.get_storage_numel()
 
@@ -740,6 +806,9 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
+        if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
+            return x
+
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         if is_contiguous_storage_and_layout(x) and not isinstance(
             x.data, ExternKernelAlloc
@@ -897,7 +966,7 @@ class ReinterpretView(BaseView):
         def loader(index):
             indexer = self.layout.make_indexer()
             upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype == torch.bfloat16
+                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
             )
             return ops.load(self.get_name(), indexer(index), upcast)
 
@@ -1079,6 +1148,15 @@ class Layout(IRNode):
             FlexibleLayout.allow_indexing
         ), f"convert {type(self).__name__} to FixedLayout first"
         return self.as_fixed().make_indexer()
+
+    def __eq__(self, other) -> bool:
+        return (
+            self.device == other.device
+            and self.dtype == other.dtype
+            and self.size == other.size
+            and self.stride == other.stride
+            and self.offset == other.offset
+        )
 
 
 class FixedLayout(Layout):
@@ -1364,6 +1442,18 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class RandSeedBuffer(ConstantBuffer):
+    def codegen_reference(self):
+        # Clone makes sure if we pass this from forwards to backwards
+        # the value does not get clobbered by the time backwards is run.
+        return self.get_name() + ".clone()"
+
+
+class NoneAsConstantBuffer(IRNode):
+    def codegen_reference(self):
+        return "None"
+
+
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops
@@ -1410,7 +1500,10 @@ class ComputedBuffer(Buffer):
             ]
             priority_idx = []
             for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
+                if (
+                    isinstance(reads_buf, Convolution)
+                    and reads_buf.kernel != "aten.convolution"
+                ):
                     # prioritize Conv layout order
                     priority_idx.append(i)
             # only consider reads to buffer of same size
@@ -1433,16 +1526,15 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_reorder_and_tile(self):
+    def simplify_and_reorder(self):
         """
-        This is the main place where we do loop transformations in a
+        This is a main place where we do loop transformations in a
         backend-agnostic way.
 
         Here we:
             1) Remove any 1 dimensions
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
-            4) Split dimensions into tiles
         """
         _, args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
@@ -1463,13 +1555,14 @@ class ComputedBuffer(Buffer):
                 else None
                 for reads_name in body.reads_name2expr.keys()
             ]
+            # priority_idx, memory_addrs = layout_priority_idx(reads_bufs, memory_addrs, var_ranges)
             for i, reads_buf in enumerate(reads_bufs):
                 if isinstance(reads_buf, Convolution):
                     # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
                     # preferred_stride_order = reads_buf.preferred_stride_order
                     # preferred_order = stride_order2fill_order(preferred_stride_order)
                     priority_idx.append(i)
-
+        # index_formulas = memory_addrs
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -1507,37 +1600,6 @@ class ComputedBuffer(Buffer):
         body = LoopBody(
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
         )
-
-        # TODO(jansel): support tiling with modular indexing
-        has_modular_indexing = any(
-            ("ModularIndexing" in str(expr) or "IndexingDiv" in str(expr))
-            for expr in body.indexing_exprs.values()
-        )
-
-        if (
-            is_triton(self.get_device())
-            and not self.get_reduction_type()
-            and iter_ranges
-            and not has_modular_indexing
-            and config.triton.max_tiles > 1
-        ):
-            # TODO(jansel): should we include store strides here or just loads?
-            strides = [
-                V.graph.sizevars.stride_hints(expr, iter_vars)
-                for expr in body.reads
-                # TODO(jansel): how should we tile indirect loads?
-                if "indirect" not in str(expr)
-            ]
-            tiled_ranges = self._tile_contiguous(iter_ranges, strides)
-            if len(tiled_ranges) > 1:
-                return (*tiled_ranges, reduce_ranges), body
-
-            if config.triton.tile_broadcasting:
-                # alternate tiling heuristic
-                tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
-                if len(tiled_ranges) > 1:
-                    return (*tiled_ranges, reduce_ranges), call
-
         return (iter_ranges, reduce_ranges), body
 
     @classmethod
@@ -1677,6 +1739,7 @@ class InputsKernel(Buffer):
             {dependencies.StarDep(x.get_name()) for x in self.inputs},
             {dependencies.StarDep(self.get_name())},
             set(),
+            [],
         )
 
     @staticmethod
@@ -1803,17 +1866,66 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
+    def convert_to_reinterpret_view(cls, x):
+        """
+        In order to pass this to an extern kernel we need a
+        ReinterpretView not a View.  This allows us to avoid some
+        uneeded copies.
+        """
+        assert isinstance(x, BaseView)
+        if isinstance(x, ReinterpretView):
+            return x
+
+        x.data.freeze_layout()
+        rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
+        assert len(rw.reads) == 1
+
+        index = V.graph.sizevars.simplify(list(rw.reads)[0].index)
+        strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
+        offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+
+        if sum([a * b for a, b in zip(strides, rw.range_vars)]) + offset != index:
+            log.debug(
+                "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
+                strides,
+                offset,
+                index,
+            )
+            raise NotImplementedError()
+
+        return ReinterpretView(
+            data=x.data,
+            layout=FixedLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=x.get_size(),
+                stride=strides,
+                offset=offset,
+            ),
+        )
+
+    @classmethod
     def realize_input(cls, x):
         if x is None:
-            return V.graph.add_tensor_constant(torch.tensor(()))
+            return NoneAsConstantBuffer()
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
             )
+        if isinstance(x, ConstantBuffer):
+            return x
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return x
+        if isinstance(x, BaseView) and (
+            is_storage_and_layout(x.data)
+            and not isinstance(x.data.data, ExternKernelAlloc)
+        ):
+            try:
+                return cls.convert_to_reinterpret_view(x)
+            except NotImplementedError:
+                pass
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
@@ -2264,17 +2376,18 @@ class MultiOutput(ExternKernel):
 
 
 class Convolution(ExternKernelAlloc):
-    config_conv = config.triton.convolution
-    if config_conv == "aten":
-        kernel = "aten.convolution"
-    elif config_conv == "triton":
-        kernel = "triton_ops_conv"
-    else:
-        assert config_conv == "autotune"
-        kernel = "tuned_conv"
+    kernel = "aten.convolution"
 
-    def __init__(self, layout, inputs, constant_args=(), preferred_stride_order=None):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        preferred_stride_order=None,
+        kernel="aten.convolution",
+    ):
         super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
         self.preferred_stride_order = preferred_stride_order
 
     def codegen(self, wrapper):
@@ -2347,6 +2460,23 @@ class Convolution(ExternKernelAlloc):
 
         output_size.append(out_channels)
 
+        config_conv = config.triton.convolution
+        if (
+            config_conv == "aten"
+            or len(kernel_size) != 2
+            or not is_triton(x.get_device())
+            or groups != 1
+            or x.get_dtype() == torch.float16
+            or x.get_dtype() == torch.bfloat16
+        ):
+            kernel = "aten.convolution"
+        elif config_conv == "triton":
+            kernel = "triton_ops_conv"
+        else:
+            assert config_conv == "autotune"
+            kernel = "tuned_conv"
+        # triton conv only supports conv2d
+
         assert (
             len(stride)
             == len(padding)
@@ -2407,6 +2537,7 @@ class Convolution(ExternKernelAlloc):
                 (x, weight, bias),
                 (stride, padding, dilation, transposed, output_padding, groups),
                 stride_order,
+                kernel,
             )
         else:
             return Convolution(
@@ -2414,6 +2545,7 @@ class Convolution(ExternKernelAlloc):
                 (x, weight),
                 (bias, stride, padding, dilation, transposed, output_padding, groups),
                 stride_order,
+                kernel,
             )
 
     def apply_constraint(self):
@@ -2462,7 +2594,6 @@ class Convolution(ExternKernelAlloc):
             [
                 ("x", f"{in_args[0]}"),
                 ("w", f"{in_args[1]}"),
-                ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
                 ("y", f"{self.get_name()}"),
             ]
         )
@@ -2486,7 +2617,7 @@ class Convolution(ExternKernelAlloc):
                     if len(in_args) >= 3
                     else "None",
                 ),
-                ("delta_x_ptr", "None"),
+                # ("delta_x_ptr", "None"),
                 ("BATCH", f"{self.inputs[0].get_size()[0]}"),
                 ("IN_C", f"{self.inputs[0].get_size()[1]}"),
                 ("IN_H", f"{self.inputs[0].get_size()[2]}"),
@@ -2600,26 +2731,44 @@ class StorageBox(MutableBox):
         self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
+    def realize_hint(self):
+        """
+        Called on buffers we expect to be forced to realize later.
+        """
+        if self.num_reads() > 1:
+            self.realize()
+
     def mark_reuse(self, users):
         if users <= 1:
             return
         if isinstance(self.data, (Pointwise, Reduction)):
-            read_writes = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=self.data.get_device(),
-                    dtype=self.data.get_dtype(),
-                    size=self.data.get_size(),
-                ),
-                data=self.data,
-            ).get_read_writes()
+            num_reads = self.num_reads()
 
             # TODO(jansel): this heuristic is a wild guess
             if (
-                len(read_writes.reads) > config.realize_reads_threshold
+                num_reads > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
             ):
                 self.realize()
+
+    def num_reads(self):
+        data = self.data
+        if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
+            return 1
+        if isinstance(data, ComputedBuffer):
+            read_writes = data.get_read_writes()
+        else:
+            assert isinstance(data, (Pointwise, Reduction)), type(data)
+            read_writes = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=data.get_device(),
+                    dtype=data.get_dtype(),
+                    size=data.get_size(),
+                ),
+                data=data,
+            ).get_read_writes()
+        return len(read_writes.reads)
 
 
 class LoopBody:
@@ -2669,9 +2818,18 @@ class LoopBody:
         self.indirect_vars.append([var])
         return var
 
+    def replace_indirect(self, old, new):
+        """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
+        self.indexing = {k: v.subs({old: new}) for k, v in self.indexing.items()}
+
+    def get_index(self, name):
+        return self.indexing[name]
+
     def __call__(self, *indices):
         index = list(itertools.chain(*indices))
-        assert len(index) == len(self.var_ranges)
+        assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
         self.indexing = {
@@ -2691,12 +2849,14 @@ class LoopBodyBlock:
     """
 
     def __init__(self, body: LoopBody, fn: Callable, args: List[Any]):
-        self.gm = None
         self.body = body
 
         def add_index(expr, category, buf_name=None):
             return tracer.create_proxy(
-                "get_attr", self.body.add_index_expr(expr, category, buf_name), (), {}
+                "call_module",
+                "get_index",
+                (self.body.add_index_expr(expr, category, buf_name),),
+                {},
             )
 
         class CaptureIndexing(V.WrapperHandler):
@@ -2742,7 +2902,7 @@ class LoopBodyBlock:
                 """
 
                 def set_indirect(new_var):
-                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
+                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
 
                 var = self.body.add_indirect()
                 tracer.create_proxy(
@@ -2764,19 +2924,8 @@ class LoopBodyBlock:
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph
 
-    def replace_indirect(self, old, new):
-        """Swap in a variable used in indirect indexing"""
-        if str(old) == str(new):
-            return
-        for name in self.body.indexing.keys():
-            expr = getattr(self.gm, name)
-            if old in expr.free_symbols:
-                setattr(self.gm, name, expr.subs({old: new}))
-
     def __call__(self):
-        self.gm = torch.fx.GraphModule(
-            {**self.body.indexing, **self.body.submodules}, self.graph
+        gm = torch.fx.GraphModule(
+            {**self.body.submodules, "get_index": self.body.get_index}, self.graph
         )
-        result = self.gm.forward(V.get_ops_handler())
-        self.gm = None
-        return result
+        return gm.forward(V.get_ops_handler())

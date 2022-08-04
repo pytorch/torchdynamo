@@ -332,6 +332,8 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
+        torchdynamo.config.trace = True
+        torchdynamo.config.debug = True
         with torchdynamo.optimize(cnts):
             self.assertEqual(fn1({"a": v1, "b": v2})[0], 300)
             self.assertEqual(fn2({"a": v1, "b": v2})[0], 300)

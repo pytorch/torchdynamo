@@ -120,6 +120,7 @@ class TorchVariable(VariableTracker):
                 torch.is_tensor,
                 torch.is_floating_point,
                 torch.overrides.is_tensor_like,
+                torch.is_complex,
             )
             and isinstance(args[0], TensorVariable)
             and args[0].dtype is not None
@@ -128,6 +129,8 @@ class TorchVariable(VariableTracker):
                 return ConstantVariable(True, **options)
             elif self.value is torch.is_floating_point:
                 return ConstantVariable(args[0].dtype.is_floating_point, **options)
+            elif self.value is torch.is_complex:
+                return ConstantVariable(args[0].dtype.is_complex, **options)
             else:
                 assert False
         elif (
@@ -195,7 +198,10 @@ class TorchVariable(VariableTracker):
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_function", self.value, *proxy_args_kwargs(args, kwargs)
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -265,6 +271,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -328,6 +335,7 @@ class TorchVariable(VariableTracker):
                         ],
                         {},
                     ),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [

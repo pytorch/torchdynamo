@@ -2,6 +2,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import math
 import numbers
 import operator
 from contextlib import contextmanager
@@ -112,6 +113,7 @@ class TensorVariable(VariableTracker):
             def wrap_fake_exception(func):
                 return func()
 
+        initial_example_value = example_value
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
@@ -147,6 +149,9 @@ class TensorVariable(VariableTracker):
                     example_value = fake_wrapper(example_value)
 
         if isinstance(example_value, torch.Tensor):
+            is_parameter = isinstance(example_value, torch.nn.Parameter)
+            parameter_value = initial_example_value if is_parameter else None
+
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(example_value, FakeTensor):
                 example_value = clone_tensor(example_value)
@@ -154,10 +159,11 @@ class TensorVariable(VariableTracker):
             specialized_props = cls.specialize(example_value)
             if use_fake_tensors and isinstance(example_value, FakeTensor):
                 specialized_props["class_type"] = (
-                    torch.nn.Parameter
-                    if isinstance(example_value, torch.nn.Parameter)
-                    else torch.Tensor
+                    torch.nn.Parameter if is_parameter else torch.Tensor
                 )
+
+            specialized_props["parameter_value"] = parameter_value
+
             options.update(specialized_props)
             return cls(proxy, **options)
         elif (
@@ -224,17 +230,26 @@ class TensorVariable(VariableTracker):
             return variables.ConstantVariable(example_value, **options)
         elif (
             isinstance(example_value, numbers.Number)
-            and proxy.node.target == "item"
+            and (proxy.node.target == "item" or proxy.node.target == math.sqrt)
             and config.capture_scalar_outputs
         ):
-            return UnspecializedPythonVariable.create(
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                raw_value=example_value,
-                need_unwrap=False,
-                **options,
-            )
+            if use_fake_tensors:
+                # item raw value should not be accessed
+                return FakeItemVariable.create(
+                    tx=tx,
+                    proxy=proxy,
+                    example_value=torch.tensor(example_value),
+                    **options,
+                )
+            else:
+                return UnspecializedPythonVariable.create(
+                    tx=tx,
+                    proxy=proxy,
+                    example_value=torch.tensor(example_value),
+                    raw_value=None if use_fake_tensors else example_value,
+                    need_unwrap=False,
+                    **options,
+                )
         else:
             assert (
                 False
@@ -252,7 +267,9 @@ class TensorVariable(VariableTracker):
         is_quantized=None,
         is_contiguous=None,
         is_complex=None,
+        is_sparse=None,
         class_type=torch.Tensor,
+        parameter_value=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -266,7 +283,9 @@ class TensorVariable(VariableTracker):
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
         self.is_complex = is_complex
+        self.is_sparse = is_sparse
         self.class_type = class_type
+        self.parameter_value = parameter_value
 
     def as_proxy(self):
         return self.proxy
@@ -309,6 +328,7 @@ class TensorVariable(VariableTracker):
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
             "is_complex": value.is_complex(),
+            "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
         if not config.dynamic_shapes:
@@ -338,6 +358,8 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
             result = ConstantVariable(self.is_quantized, **options)
+        elif name == "is_sparse" and self.is_sparse is not None:
+            result = ConstantVariable(self.is_sparse, **options)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -425,7 +447,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}
+                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -439,7 +461,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}
+                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -449,6 +471,7 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + args, kwargs),
+                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         else:
@@ -465,7 +488,10 @@ class TensorVariable(VariableTracker):
             return self.__class__.create(
                 tx,
                 tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -644,3 +670,13 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+
+class FakeItemVariable(UnspecializedPythonVariable):
+    """A UnspecializedPythonVariable which prevents access to the underlying raw value.
+    This is needed if item is called on a FakeTensor."""
+
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        super(FakeItemVariable, self).__init__(proxy, **kwargs)
+        self.need_unwrap = False
+        delattr(self, "raw_value")

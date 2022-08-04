@@ -291,7 +291,11 @@ class ProfileRecordFunctionVariable(ContextWrappingVariable):
     def _call_func(self, tx, value):
         if self.enter:
             self.proxy_value = tx.output.create_proxy(
-                "call_function", torch.ops.profiler._record_function_enter, (value,), {}
+                "call_function",
+                torch.ops.profiler._record_function_enter,
+                (value,),
+                {},
+                current_tx=tx,
             )
         else:
             tx.output.create_proxy(
@@ -299,6 +303,7 @@ class ProfileRecordFunctionVariable(ContextWrappingVariable):
                 torch.ops.profiler._record_function_exit,
                 (self.proxy_value,),
                 {},
+                current_tx=tx,
             )
 
     def _func_name(self):
@@ -482,6 +487,7 @@ class GetAttrVariable(VariableTracker):
                             "call_function",
                             original_torch_or_getattr_variable.value,
                             *proxy_args_kwargs(new_args, new_kwargs),
+                            current_tx=tx,
                         ),
                         **options,
                     )
@@ -492,6 +498,7 @@ class GetAttrVariable(VariableTracker):
                             "call_method",
                             original_torch_or_getattr_variable.name,
                             *proxy_args_kwargs(new_args, new_kwargs),
+                            current_tx=tx,
                         ),
                         **options,
                     )
