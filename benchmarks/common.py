@@ -324,7 +324,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
-        np.save(f'{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy', timings)
+        np.save(
+            f'{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy',
+            timings,
+        )
     output_csv(
         output_filename,
         ("dev", "name", "speedup"),
@@ -784,7 +787,9 @@ def parse_args():
         "--isolate", action="store_true", help="run each model in its own process"
     )
     parser.add_argument(
-        "--dump-raw-metrics", action="store_true", help="dump raw timing metrics from speedup experiment"
+        "--dump-raw-metrics",
+        action="store_true",
+        help="dump raw timing metrics from speedup experiment",
     )
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
