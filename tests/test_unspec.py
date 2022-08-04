@@ -35,7 +35,7 @@ def make_unspec_cls(cls):
             fn = getattr(cls, name)
             if not callable(fn):
                 continue
-            new_name = f"{name}_dynamic_shapes"
+            new_name = f"{name}_unspec"
             fn = make_unspec_fn(fn)
             fn.__name__ = new_name
             setattr(UnspecTest, name, None)
@@ -44,7 +44,6 @@ def make_unspec_cls(cls):
     return UnspecTest
 
 
-UnspecMiscTests = make_unspec_cls(test_misc.MiscTests)
 UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
