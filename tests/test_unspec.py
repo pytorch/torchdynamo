@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 import functools
 import random
+import unittest
 from unittest.mock import patch
 
 import numpy as np
@@ -100,8 +101,23 @@ class UnspecTests(torchdynamo.testing.TestCase):
             res2 = fn(x, y, z)
         self.assertTrue(same(res1, res2))
 
-    def test_random_values(self):
-        # test random functions
+    def test_feed_random_values_into_graph_only(self):
+        def fn(shape):
+            torch.manual_seed(123)
+            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
+            return x
+
+        shape = [2, 3]
+        random.seed(1)
+        res1 = fn(shape)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            random.seed(1)
+            res2 = fn(shape)
+
+        self.assertTrue(same(res1, res2))
+
+    def test_random_values_with_graph_break(self):
         def fn(x):
             r1 = random.random()
             y = x + random.uniform(10, 20)
@@ -119,22 +135,6 @@ class UnspecTests(torchdynamo.testing.TestCase):
             res2 = fn(x)
         self.assertTrue(same(res1, res2))
 
-    def test_insert_random_into_graph_only(self):
-        def fn(shape):
-            torch.manual_seed(123)
-            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
-            return x
-
-        shape = [2, 3]
-        random.seed(1)
-        res1 = fn(shape)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            random.seed(1)
-            res2 = fn(shape)
-
-        self.assertTrue(same(res1, res2))
-
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -146,3 +146,20 @@ class UnspecTests(torchdynamo.testing.TestCase):
         with torchdynamo.optimize(cnts):
             res = fn(x, 48)
         self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_builtin_functions_on_cuda(self):
+        def fn(x, scaler):
+            m = torch.nn.ReLU()
+            y = m(x) * scaler
+            return y
+
+        x = torch.randn([3, 6], device="cuda")
+        scaler = 0.23  # 0.23 is unspecialized
+        ref = fn(x, scaler)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res = fn(x, scaler)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(ref.device, res.device)
+        
