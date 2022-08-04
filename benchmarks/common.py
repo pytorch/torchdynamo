@@ -353,7 +353,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f'{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy',
+            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
             timings,
         )
     output_csv(
