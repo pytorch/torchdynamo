@@ -110,7 +110,6 @@ def compile_fx_python_key(
     """Alternate version for inference only"""
     assert isinstance(model, torch.fx.GraphModule)
     assert all(isinstance(x, torch.Tensor) for x in example_inputs)
-
     with overrides.patch_functions():
         model = overrides.replace_fx(model)
         gm, wrap = python_key_normalize(
