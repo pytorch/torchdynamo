@@ -418,6 +418,7 @@ def check_constant_args(args, kwargs):
 
 def check_unspec_python_args(args, kwargs):
     from .variables.constant import ConstantVariable
+    from .variables.tensor import FakeItemVariable
     from .variables.tensor import UnspecializedPythonVariable
 
     return all(
@@ -431,6 +432,9 @@ def check_unspec_python_args(args, kwargs):
         for i in itertools.chain(args, kwargs.values())
     ) and any(
         isinstance(x, UnspecializedPythonVariable)
+        for x in itertools.chain(args, kwargs.values())
+    ) and not any(
+        isinstance(x, FakeItemVariable)
         for x in itertools.chain(args, kwargs.values())
     )
 

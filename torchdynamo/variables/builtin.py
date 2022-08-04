@@ -262,9 +262,6 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
-                # if (self.fn is operator.mul):
-                #     print("BBBB " + str(fn))
-                #     print(args)
                 if self.fn is operator.iadd and isinstance(
                     args[0], variables.ConstantVariable
                 ):
