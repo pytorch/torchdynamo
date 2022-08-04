@@ -1,5 +1,7 @@
 #!/usr/bin/env pytest
+import functools
 import random
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -7,8 +9,48 @@ import torch
 import torchdynamo.testing
 from torchdynamo.testing import same
 
+from . import test_functions
+from . import test_misc
+from . import test_modules
+from . import test_repros
 
-class UnspecTests(torchdynamo.testing.TestCase):
+
+def make_unspec_fn(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        with patch.object(torchdynamo.config, "specialize_int_float", False):
+            return fn(*args, **kwargs)
+
+    return _fn
+
+
+def make_unspec_cls(cls):
+    class UnspecTest(cls):
+        pass
+
+    UnspecTest.__name__ = f"Unspec{cls.__name__}"
+
+    for name in dir(cls):
+        if name.startswith("test_"):
+            fn = getattr(cls, name)
+            if not callable(fn):
+                continue
+            new_name = f"{name}_dynamic_shapes"
+            fn = make_unspec_fn(fn)
+            fn.__name__ = new_name
+            setattr(UnspecTest, name, None)
+            setattr(UnspecTest, new_name, fn)
+
+    return UnspecTest
+
+
+UnspecMiscTests = make_unspec_cls(test_misc.MiscTests)
+UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
+UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
+
+
+@patch.object(torchdynamo.config, "specialize_int_float", False)
+class BasicUnspecTests(torchdynamo.testing.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
