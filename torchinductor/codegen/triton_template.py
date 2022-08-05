@@ -313,6 +313,14 @@ def template_codegen(scheduler, scheduler_node):
             ):
                 reschedule.append(node)
                 continue
+            # because triton mm will reorder pid, we need to make sure the
+            # the pointwise fusable nodes are consumers of the kernel.node
+            if (
+                isinstance(kernel.node, ir.MatrixMultiply)
+                and scheduler_node not in node.inverse_users
+            ):
+                reschedule.append(node)
+                continue
             try:
                 node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                 node.mark_fusable()
