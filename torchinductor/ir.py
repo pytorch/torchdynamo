@@ -758,8 +758,11 @@ class SqueezeView(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        # redirect to a generic view
-        return View.create(x, [s for s in x.get_size() if s != 1])
+        if dim is None:
+            # redirect to a generic view
+            return View.create(x, [s for s in x.get_size() if s != 1])
+        else:
+            return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
     def squeezer(size):
