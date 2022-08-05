@@ -68,7 +68,6 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-        "is_complex",
     ]
 
     @staticmethod
@@ -230,7 +229,10 @@ class TensorVariable(VariableTracker):
             return variables.ConstantVariable(example_value, **options)
         elif (
             isinstance(example_value, numbers.Number)
-            and (proxy.node.target == "item" or proxy.node.target == math.sqrt)
+            and (
+                proxy.node.target == "item"
+                or proxy.node.target in {math.sqrt, math.pow}
+            )
             and config.capture_scalar_outputs
         ):
             if use_fake_tensors:
@@ -266,7 +268,6 @@ class TensorVariable(VariableTracker):
         requires_grad=None,
         is_quantized=None,
         is_contiguous=None,
-        is_complex=None,
         is_sparse=None,
         class_type=torch.Tensor,
         parameter_value=None,
@@ -282,7 +283,6 @@ class TensorVariable(VariableTracker):
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
-        self.is_complex = is_complex
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.parameter_value = parameter_value
@@ -327,7 +327,6 @@ class TensorVariable(VariableTracker):
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
-            "is_complex": value.is_complex(),
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
@@ -416,8 +415,6 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
         elif name == "is_contiguous" and self.is_contiguous is not None:
             constant_result = ConstantVariable(self.is_contiguous, **options)
-        elif name == "is_complex" and self.is_complex is not None:
-            constant_result = ConstantVariable(self.is_complex, **options)
         else:
             constant_result = None
 
@@ -680,3 +677,7 @@ class FakeItemVariable(UnspecializedPythonVariable):
         super(FakeItemVariable, self).__init__(proxy, **kwargs)
         self.need_unwrap = False
         delattr(self, "raw_value")
+
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable):
+        return FakeItemVariable(**dict(tensor_variable.__dict__))
