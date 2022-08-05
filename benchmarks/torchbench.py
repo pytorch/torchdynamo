@@ -218,6 +218,35 @@ SKIP = {
     "fambench_xlmr",
 }
 
+EXPERIMENT_BATCH_SIZES = {
+    "BERT_pytorch":128,
+    "LearningToPaint":1024,
+    "alexnet":1024,
+    "dcgan":1024,
+    "densenet121":64,
+    "hf_Albert":16,
+    "hf_Bart":8, #16
+    "hf_Bert":16,
+    "hf_GPT2":8, #16
+    "hf_T5":4,
+    "mnasnet1_0":256,
+    "mobilenet_v2":128,
+    "mobilenet_v3_large":256,
+    "nvidia_deeprecommender":1024,
+    "pytorch_unet":4,#8
+    "resnet18":512,
+    "resnet50":128,
+    "resnext50_32x4d":128,
+    "shufflenet_v2_x1_0":512,
+    "squeezenet1_1":512,
+    "timm_efficientnet":128,
+    "timm_regnet":64,
+    "timm_resnest":256,
+    "timm_vision_transformer":256,
+    "timm_vovnet":128,
+    "vgg16":128, #256
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     @property
@@ -268,12 +297,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         dynamic_shapes=False,
     ):
+        if model_name not in EXPERIMENT_BATCH_SIZES:
+            raise NotImplementedError("not a model in experiment")
+
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
-        if is_training and model_name in USE_SMALL_BATCH_SIZE:
-            batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        # if is_training and model_name in USE_SMALL_BATCH_SIZE:
+        #     batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        batch_size = EXPERIMENT_BATCH_SIZES[model_name]
 
         if is_training and model_name not in ONLY_EVAL_DATASET:
             benchmark = benchmark_cls(
@@ -299,6 +332,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+        # print(benchmark.name, benchmark.batch_size)
+        # exit(1)
         return device, benchmark.name, model, example_inputs
 
     def iter_models(self, args):
@@ -357,13 +392,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
 
-    def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
+    def forward_and_backward_pass(self, mod, inputs, collect_outputs=True, stats=None):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)
+       
         with self.autocast():
+            torch.cuda.reset_peak_memory_stats()
             pred = mod(*cloned_inputs)
+            peak_mem = torch.cuda.max_memory_allocated() /1e9
             loss = self.compute_loss(pred)
+        
         self.grad_scaler.scale(loss).backward()
+        if stats is not None:
+            assert isinstance(stats, dict)
+            stats["peak_memory"] = peak_mem
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None
