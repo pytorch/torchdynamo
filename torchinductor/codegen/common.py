@@ -13,6 +13,7 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
+from ..utils import sympy_dot
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -39,14 +40,16 @@ def _simplify_loops(index_vars, sizes, index_formulas):
 
     def can_merge_dims(a, b):
         for k in range(len(strides)):
-            if strides[k][a] * sizes[a] == strides[k][b]:
+            if V.graph.sizevars.simplify(
+                strides[k][a] * sizes[a]
+            ) == V.graph.sizevars.simplify(strides[k][b]):
                 # approximate test passed, try sound version
                 va = index_vars[a]
                 vb = index_vars[b]
                 v = sympy.Symbol("_merge_tester")
                 expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
                 expr2 = index_formulas[k].subs({va: 0, vb: v})
-                if expr1 == expr2:
+                if V.graph.sizevars.simplify(expr1) == V.graph.sizevars.simplify(expr2):
                     continue
             return False
         return True
@@ -80,6 +83,15 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         return [i for i, s in zip(index, sizes) if s is not None]
 
     return [x for x in sizes if x is not None], reindex, prune
+
+
+def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
+    from ..ir import FlexibleLayout
+
+    res = index
+    # added contiguous index prevents reordering
+    return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
+    return res
 
 
 class ExprPrinter(Printer):

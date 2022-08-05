@@ -36,6 +36,7 @@ for torchbench_dir in (
 assert exists(torchbench_dir), "../../torchbenchmark does not exist"
 original_dir = abspath(os.getcwd())
 torchbench_dir = abspath(torchbench_dir)
+
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 
@@ -272,7 +273,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
-        if is_training and model_name in USE_SMALL_BATCH_SIZE:
+
+        if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
         if is_training and model_name not in ONLY_EVAL_DATASET:
@@ -299,7 +301,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
-        return device, benchmark.name, model, example_inputs
+        return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):

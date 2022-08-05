@@ -9,6 +9,7 @@ from typing import Set
 import sympy
 
 from .codegen.common import _simplify_loops
+from .codegen.common import index_prevent_reordering
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -136,7 +137,11 @@ class RecordLoadStore(V.MockHandler):
         # convert it to the simpliest form because of the interference from
         # different indexing formulas.
         index_vars = list(self._var_ranges.keys())
-        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+        new_sizes, reindex, prune = _simplify_loops(
+            index_vars,
+            sizes,
+            index_prevent_reordering([index], index_vars, sizes),
+        )
 
         # assign new variables each dimension to deal with numbering mismatches
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1

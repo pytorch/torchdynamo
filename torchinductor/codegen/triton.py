@@ -18,7 +18,6 @@ from .. import codecache
 from .. import config
 from .. import ir
 from ..utils import has_triton_libdevice
-from ..utils import sympy_dot
 from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
@@ -27,6 +26,7 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+from .common import index_prevent_reordering
 
 log = logging.getLogger(__name__)
 
@@ -565,13 +565,7 @@ class TritonKernel(Kernel):
         if len(sizes) <= 1:
             return index
         new_sizes, reindex, prune = ir._simplify_loops(
-            index_vars,
-            sizes,
-            [
-                index,
-                # added contiguous index prevents reordering
-                sympy_dot(index_vars, ir.FlexibleLayout.contiguous_strides(sizes)),
-            ],
+            index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
             return index

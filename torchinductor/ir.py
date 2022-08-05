@@ -21,6 +21,7 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
+from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
 from .utils import sympy_dot
@@ -1559,23 +1560,28 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
         index_formulas = [*body.indexing_exprs.values()]
-        memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
+        reads_bufs = [
+            V.graph.name_to_buffer[reads_name]
+            if reads_name in V.graph.name_to_buffer.keys()
+            else None
+            for reads_name in body.reads_name2expr.keys()
+        ]
         priority_idx = []
-        if config.triton.convolution != "aten":
-            reads_bufs = [
-                V.graph.name_to_buffer[reads_name]
-                if reads_name in V.graph.name_to_buffer.keys()
-                else None
-                for reads_name in body.reads_name2expr.keys()
+        if config.triton.convolution == "aten":
+            memory_addrs = [
+                *body.reads_name2expr.values(),
+                *body.writes_name2expr.values(),
             ]
-            # priority_idx, memory_addrs = layout_priority_idx(reads_bufs, memory_addrs, var_ranges)
+        else:
+            # prioritize reads layout/loop_ordering over writes
+            if len(body.reads_name2expr.values()) > 0:
+                memory_addrs = [*body.reads_name2expr.values()]
+            else:
+                memory_addrs = [*body.writes_name2expr.values()]
             for i, reads_buf in enumerate(reads_bufs):
                 if isinstance(reads_buf, Convolution):
-                    # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
-                    # preferred_stride_order = reads_buf.preferred_stride_order
-                    # preferred_order = stride_order2fill_order(preferred_stride_order)
                     priority_idx.append(i)
-        # index_formulas = memory_addrs
+
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -1590,22 +1596,39 @@ class ComputedBuffer(Buffer):
                 reduce_vars.append(v)
                 reduce_size.append(s)
 
-        def simplify_and_reorder(x_vars, sizes):
+        # the reordering_reindex in reads' simplify_reorder_and_tile
+        reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
+        for i, reads_buf in enumerate(reads_bufs):
+            if isinstance(reads_buf, ComputedBuffer):
+                reordering_reindex[i] = reads_buf.iter_reordering_reindex
+
+        def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, sizes, memory_addrs, priority_idx
+                x_vars, sizes, memory_addrs, reordering_reindex, priority_idx
             )
+            # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex2, prune = _simplify_loops(
+                x_vars,
+                sizes,
+                index_prevent_reordering(index_formulas, x_vars, sizes),
+            )
             x_vars = prune(x_vars)
             # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
             # x_vars = prune(x_vars)
             # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
-            return sizes, reindex
+            return sizes, reindex, reindex1
 
-        iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
-        reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
+        iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
+            index_vars, index_size, reordering_reindex
+        )
+        reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
+            reduce_vars, reduce_size
+        )
 
+        # remember the reordering order
+        self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
@@ -1701,7 +1724,9 @@ class ComputedBuffer(Buffer):
             return (iter_ranges,), body
 
     @staticmethod
-    def _apply_loop_reordering(index_vars, sizes, memory_addrs, priority_idx=[]):
+    def _apply_loop_reordering(
+        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=[]
+    ):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -1716,6 +1741,10 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
+            # consider both layout(strides) and reordering(reordering_reindex)
+            if reordering_reindex is not None:
+                for i in range(len(memory_addrs)):
+                    strides[i] = reordering_reindex[i](strides[i])
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
@@ -2483,6 +2512,7 @@ class Convolution(ExternKernelAlloc):
             config_conv == "aten"
             or len(kernel_size) != 2
             or not is_triton(x.get_device())
+            or transposed
             or groups != 1
             or x.get_dtype() == torch.float16
             or x.get_dtype() == torch.bfloat16
