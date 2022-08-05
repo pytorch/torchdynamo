@@ -12,12 +12,14 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
-def make_test(optim_cls, exp_frame_cnt=1, nopython=True, **kwargs):
+def make_test(optim_cls, exp_frame_cnt=1, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
         nonlocal opt
         counter = torchdynamo.testing.CompileCounter()
+
+        nopython = exp_frame_cnt == 1
 
         with torchdynamo.optimize(counter, nopython=nopython):
             opt.step()
@@ -49,5 +51,4 @@ class OptimizerTests(torchdynamo.testing.TestCase):
             )
         )
 
-    # Note - this is a regression - TODO(@voz/mlazos) get this back down to a single frame
-    test_adam = make_test(torch.optim.Adam, exp_frame_cnt=5, nopython=False)
+    test_adam = make_test(torch.optim.Adam)
