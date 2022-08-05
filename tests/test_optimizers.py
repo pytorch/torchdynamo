@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 
 import inspect
+import sys
 import unittest
 
 import torch
@@ -67,11 +68,19 @@ class OptimizerTests(torchdynamo.testing.TestCase):
     #    torch.optim.LBFGS, exp_frame_cnt=3, closure=lambda: model(input).sum()
     # )
     # RAdam has data-dependent control which breaks the graph
-    test_radam = make_test(torch.optim.RAdam, exp_frame_cnt=5)
+    # NB: in python versions < 3.8, we don't capture graphs when
+    # breaks occur in a loop
+    test_radam = make_test(
+        torch.optim.RAdam, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 5)
+    )
 
     # ASGD has a small optimization that avoids averaging
-    # This will be removed once that opt is removed
-    test_asgd = make_test(torch.optim.ASGD, exp_frame_cnt=5)
+    # This will fully capture the graph once that optimization is removed
+    # NB: in python versions < 3.8, we don't capture graphs when breaks
+    # occur in a loop
+    test_asgd = make_test(
+        torch.optim.ASGD, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 5)
+    )
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet
