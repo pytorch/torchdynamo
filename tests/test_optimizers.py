@@ -19,9 +19,7 @@ def make_test(optim_cls, exp_frame_cnt=1, **kwargs):
         nonlocal opt
         counter = torchdynamo.testing.CompileCounter()
 
-        nopython = exp_frame_cnt == 1
-
-        with torchdynamo.optimize(counter, nopython=nopython):
+        with torchdynamo.optimize(counter):
             opt.step()
 
         self.assertEqual(counter.frame_count, exp_frame_cnt)
