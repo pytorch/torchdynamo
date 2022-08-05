@@ -178,7 +178,7 @@ def pointwise_heuristics(size_hints):
             return apply_triton_config(triton_config(size_hints, 64, 64))
         return autotune(
             [
-                triton_config(size_hints, 64, 64),
+                triton_config(size_hints, 32, 32),
                 triton_config(size_hints, 8, 256),
                 triton_config(size_hints, 256, 8),
                 triton_config(size_hints, 1, 1024),

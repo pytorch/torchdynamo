@@ -226,7 +226,7 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
-        return device, model_name, model, example_inputs
+        return device, model_name, model, example_inputs, batch_size
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
