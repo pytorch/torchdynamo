@@ -1026,7 +1026,7 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)):
         value = value.value
-    assert isinstance(value, (int, float)), f"Expected int or float, got {value}"
+    assert isinstance(value, (int, float)), f"Expected int or float"
     return Pointwise.create(
         device=device,
         dtype=dtype,
