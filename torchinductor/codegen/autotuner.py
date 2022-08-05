@@ -5,9 +5,22 @@ import triton
 
 import torchinductor
 import torchinductor.triton_ops
+from torchdynamo.testing import rand_strided
+
+from ..virtualized import V
 
 aten = torch.ops.aten
 triton_ops = torchinductor.triton_ops
+
+
+def str2func(str):
+    module, name = str.split(".")
+    if module == "aten":
+        return getattr(aten, name)
+    elif module == "triton_ops":
+        return getattr(triton_ops, name)
+    else:
+        raise Exception(f"{str} could not be called")
 
 
 class Autotuner:
@@ -26,30 +39,45 @@ autotune = Autotuner()
 
 
 def tuned_conv(
-    x, w, bias, stride, padding, dilation, transposed, output_padding, groups
+    x_shape,
+    w_shape,
+    x_stride,
+    w_stride,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    device,
+    dtype,
+    adjust_triton=0.95,
 ):
+    """
+    Return the best kernel name given inputs and layer parameters;
+    Considering potential pointwise fusion of conv, we could adjust triton timing
+    by multiplying adjust_triton (default=0.95)
+    """
 
-    BATCH, IN_C, IN_H, IN_W = x.shape
-    KERNEL_N, _, KERNEL_H, KERNEL_W = w.shape
-    stride_x = x.stride()
-    stride_w = w.stride()
+    sizevars = V.graph.sizevars
+    x_shape = [sizevars.size_hint(s) for s in x_shape]
+    w_shape = [sizevars.size_hint(s) for s in w_shape]
+    x_stride = [sizevars.size_hint(s) for s in x_stride]
+    w_stride = [sizevars.size_hint(s) for s in w_stride]
+    x = rand_strided(x_shape, x_stride, device=device, dtype=dtype)
+    w = rand_strided(w_shape, w_stride, device=device, dtype=dtype)
     # the identifiable args for the layers
     id_args = [
-        BATCH,
-        IN_C,
-        IN_H,
-        IN_W,
-        KERNEL_N,
-        KERNEL_H,
-        KERNEL_W,
+        *x_shape,
+        *w_shape,
         stride,
         padding,
         dilation,
         transposed,
         output_padding,
         groups,
-        stride_x,
-        stride_w,
+        # *x_stride,
+        # *w_stride,
     ]
     use_cuda = x.is_cuda
 
@@ -58,33 +86,36 @@ def tuned_conv(
     key = ("conv",) + key
 
     # candidate kernels
-    kernels = [aten.convolution]
+    kernels = ["aten.convolution"]
     if use_cuda:
-        kernels += [triton_ops.conv, triton_ops.conv1x1]
+        kernels += ["triton_ops.conv"]
 
     # filter kernels that args/kwargs does not meet requirements
     remove_kernels = []
     if groups > 1 or transposed:
-        remove_kernels += [triton_ops.conv, triton_ops.conv1x1]
-    # triton_ops.conv1x1 could only deal with nhwc 1x1 kernel
-    if KERNEL_H > 1 or KERNEL_W > 1:
-        remove_kernels += [triton_ops.conv1x1]
+        remove_kernels += ["triton_ops.conv"]
     kernels = [k for k in kernels if k not in remove_kernels]
 
     # if only one choice, return that kernel
     if len(kernels) == 1:
         kernel = kernels[0]
-        return kernel(
-            x, w, bias, stride, padding, dilation, transposed, output_padding, groups
-        )
+        # return kernel(
+        #     x, w, stride, padding, dilation, transposed, output_padding, groups
+        # )
+        return kernel
+    timings = {}
     if key not in autotune.cache:
         # bench_start = time.time()
-        timings = {
-            kernel: autotune._bench(
-                kernel,
+        for kernel in kernels:
+            runnable_kernel = str2func(kernel)
+            if "triton_ops" in kernel:
+                # because we use nhwc layout by default for triton conv
+                x = x.to(memory_format=torch.channels_last)
+            timing, _, _ = autotune._bench(
+                runnable_kernel,
                 x,
                 w,
-                bias,
+                None,
                 stride,
                 padding,
                 dilation,
@@ -92,16 +123,18 @@ def tuned_conv(
                 output_padding,
                 groups,
             )
-            for kernel in kernels
-        }
+            if "triton_ops" in kernel:
+                timing = timing * adjust_triton
+            timings[kernel] = timing
         # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        if torchinductor.config.debug:
-            print("for key = ", key)
-            print("timing", timings)
-            print("best_kernel", autotune.cache[key])
+        # if torchinductor.config.debug:
+        print("for key = ", key)
+        print("timing", timings)
+        print("best_kernel", autotune.cache[key])
     best_kernel = autotune.cache[key]
-    return best_kernel(
-        x, w, bias, stride, padding, dilation, transposed, output_padding, groups
-    )
+    return best_kernel
+    # return best_kernel(
+    #     x, w, stride, padding, dilation, transposed, output_padding, groups
+    # )
