@@ -312,6 +312,10 @@ def template_codegen(scheduler, scheduler_node):
             ):
                 reschedule.append(node)
                 continue
+            # does not support horizontal fusion...
+            if scheduler_node not in node.inverse_users:
+                reschedule.append(node)
+                continue
             try:
                 node.run(*kernel.split_and_set_ranges(node.get_ranges()))
                 node.mark_fusable()
