@@ -792,6 +792,71 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
+    def measure_latency_and_memory(self, device, model_name, model_iter_fn, backends):
+        get_peak_memory = lambda: torch.cuda.max_memory_allocated() / 10**9
+        backends.insert(0, "baseline")
+
+        latencies = list()
+        mems = list()
+
+        def mem_experiment(backend):
+            try:
+                # Get the context
+                if backend == "baseline":
+                    ctx = NullContext()
+                else:
+                    ctx = torchdynamo.optimize(backend)
+
+                # Reset and warmup
+                torchdynamo.reset()
+                torch.cuda.empty_cache()
+                t0 = time.perf_counter()
+                with ctx:
+                    model_iter_fn(model, example_inputs)
+                    model_iter_fn(model, example_inputs)
+                    model_iter_fn(model, example_inputs)
+                t1 = time.perf_counter()
+                latency = t1 - t0
+
+                # Measure memory
+                torch.cuda.reset_peak_memory_stats()
+                with ctx:
+                    model_iter_fn(model, example_inputs)
+                peak_memory = get_peak_memory()
+            except:
+                latency = 0
+                peak_memory = 0
+
+            latencies.append(latency)
+            mems.append(peak_memory)
+
+        assert device == "cuda"
+        try:
+            device, name, model, example_inputs, batch_size = self.load_model(
+                device,
+                model_name,
+                self._args.training,
+                self._args.use_eval_mode,
+            )
+        except NotImplementedError:
+            logging.warn(f"{model_name} failed to load")
+
+        # Collect the compile and memory latency for backend
+        for backend in backends:
+            mem_experiment(backend)
+
+        print(device, model_name, *mems)
+        output_csv(
+            output_filename.replace(".csv", "_memory.csv"),
+            ("dev", "name", "batch_size", *backends),
+            [device, model_name, batch_size, *mems],
+        )
+        output_csv(
+            output_filename.replace(".csv", "_compile_latency.csv"),
+            ("dev", "name", "batch_size", *backends),
+            [device, model_name, batch_size, *latencies],
+        )
+
     def batch_size_finder(
         self, device, model_name, model_iter_fn, initial_batch_size=128
     ):
@@ -1176,7 +1241,11 @@ def parse_args():
         action="store_true",
         help="finds the largest batch size that could fit on GPUs",
     )
-
+    group.add_argument(
+        "--peak-memory-for-backend",
+        action="append",
+        help="reports the peak memory for backends",
+    )
     args = parser.parse_args()
     return args
 
@@ -1479,6 +1548,16 @@ def main(runner, original_dir=None):
             batch_size = runner.batch_size_finder(device, args.only, model_iter_fn)
             print(args.only, batch_size)
             output_csv(output_filename, [], [args.only, batch_size])
+        return
+
+    if args.peak_memory_for_backend and args.only:
+        assert args.isolate, "Run with isolate"
+        if output_filename is None:
+            output_filename = "backends_ux.csv"
+        for device in args.devices:
+            runner.measure_latency_and_memory(
+                device, args.only, model_iter_fn, args.peak_memory_for_backend
+            )
         return
 
     if args.export_profiler_trace:
