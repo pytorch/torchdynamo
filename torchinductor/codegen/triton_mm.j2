@@ -101,15 +101,17 @@ def {{kernel_name}}(
         A_ptrs += BLOCK_K * SPLIT_K * stride_ak
         B_ptrs += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to({{out_def}}.dtype.element_ty)
+
+{% if keep_store %}
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     C_ptrs = {{out_def}} + (rm[:, None] * stride_cm + rn[None, :] * stride_cn)
     mask = (rm < M)[:, None] & (rn < N)[None, :]
+    # handles write-back with reduction-splitting
+    tl.store(C_ptrs, acc, mask=mask)
+{% endif %}
 
 {% if pointwise_code %}
 {{ pointwise_code | indent(4, true) }}
-{% else %}
-    # handles write-back with reduction-splitting
-    tl.store(C_ptrs, acc, mask=mask)
 {% endif %}

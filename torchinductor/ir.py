@@ -1734,7 +1734,7 @@ class ComputedBuffer(Buffer):
                     try:
                         strides[i] = reordering_reindex[i](strides[i])
                     # if len(order) != len(strides), do not reorder
-                    except:
+                    except AssertionError:
                         pass
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:

@@ -120,6 +120,7 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["template_inout_argdefs"] = self.template_inout_argdefs
         render_dict["extra_argdefs"] = self.extra_argdefs
         render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
+        render_dict["keep_store"] = not could_remove_kernel_buf
         render_dict["out_def"] = (
             self.out_def()
             if kernel_buf_replace_name is None
@@ -310,10 +311,6 @@ def template_codegen(scheduler, scheduler_node):
             if type(node.node) in template_dict.keys() or (
                 len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1
             ):
-                reschedule.append(node)
-                continue
-            # does not support horizontal fusion...
-            if scheduler_node not in node.inverse_users:
                 reschedule.append(node)
                 continue
             try:
