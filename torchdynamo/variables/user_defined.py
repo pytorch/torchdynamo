@@ -318,6 +318,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             name not in getattr(value, "__dict__", {})
             and type(value).__module__.startswith("torch.")
+            and "torch.optim" not in type(value).__module__
             and not callable(value)
         ):
             if not source:
@@ -331,6 +332,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     ),
                     name,
                 )
+
             return VariableBuilder(tx, source)(subobj).add_options(options)
 
         if isinstance(

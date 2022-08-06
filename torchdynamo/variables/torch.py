@@ -119,6 +119,7 @@ class TorchVariable(VariableTracker):
             in (
                 torch.is_tensor,
                 torch.is_floating_point,
+                torch.is_complex,
                 torch.overrides.is_tensor_like,
                 torch.is_complex,
             )

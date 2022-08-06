@@ -2490,7 +2490,11 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
-        self.assertEqual(torchinductor.metrics.generated_kernel_count, 0)
+        expected_kernel = 0
+        # codegen mm kernel from template
+        if config.triton.use_mm and self.device == "cuda":
+            expected_kernel = 1
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
     @patch.object(config.triton, "cudagraphs", False)
     def test_lowmem_dropout1(self):
@@ -2561,7 +2565,14 @@ class CommonTemplate:
         torchinductor.metrics.generated_kernel_count = 0
         result = run(torch.randn([8, 32], device=self.device))
         result.sum().backward()
-        self.assertEqual(torchinductor.metrics.generated_kernel_count, 4)
+
+        expected_kernel = 4
+        if config.triton.use_mm and self.device == "cuda":
+            # fwd: 2 * (mm+dropout) kernels = 2 kernels
+            # bwd: dropout + (mm) + 2 * (mm+dropout) kernels = 4 kernels
+            # expect 2 + 4 = 6 kernels
+            expected_kernel = 6
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
 
 if HAS_CPU:

@@ -22,7 +22,7 @@ from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .virtualized import V
 
-template_kernels = [ir.Convolution]
+template_kernels = [ir.Convolution, ir.MatrixMultiply]
 
 log = logging.getLogger(__name__)
 
@@ -34,13 +34,12 @@ def cmp(a, b):
 
 
 def should_use_template(node: ir.ExternKernel):
-    return (
-        type(node) in template_kernels
-        and ir.is_triton(node.get_device())
-        # TODO(jansel): extend this to other kernels
-        # check the kernel rather than config
-        and node.kernel != "aten.convolution"
-    )
+    if type(node) in template_kernels and ir.is_triton(node.get_device()):
+        if isinstance(node, ir.Convolution):
+            return node.kernel != "aten.convolution"
+        elif isinstance(node, ir.MatrixMultiply):
+            return config.triton.use_mm
+    return False
 
 
 class OutputNode:
@@ -152,7 +151,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return False
 
     def update_dep_type(self):
-        assert isinstance(self.node, ir.Convolution)
+        assert type(self.node) in template_kernels
         assert len(self.read_writes.writes) == 1
         write = self.read_writes.writes.pop()
         if isinstance(write, StarDep):
@@ -575,6 +574,8 @@ class Scheduler:
                 if should_use_template(node):
                     if isinstance(node, ir.Convolution):
                         group_fn = self.get_backend(node.get_device()).group_fn_NHW_C
+                    elif isinstance(node, ir.MatrixMultiply):
+                        group_fn = self.get_backend(node.get_device()).group_fn_M_N
                     else:
                         group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(ExternKernelSchedulerNode(self, node, group_fn))
