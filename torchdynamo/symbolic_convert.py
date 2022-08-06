@@ -73,7 +73,6 @@ from .variables.misc import UnknownVariable
 from .variables.misc import WithExitFunctionVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
-from .variables.tensor import UnspecializedPythonVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
