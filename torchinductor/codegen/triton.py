@@ -601,7 +601,10 @@ class TritonKernel(Kernel):
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
         indirect_indexing = self.is_indirect_indexing(index)
         need_dense = (
-            config.triton.dense_indexing or dense_indexing or indirect_indexing
+            config.triton.dense_indexing
+            or dense_indexing
+            or indirect_indexing
+            or self._load_mask is not None
         ) and index != 0
         have_dense = True
         have_loop_vars = False
@@ -654,7 +657,8 @@ class TritonKernel(Kernel):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         if prior:
-            mask = f"{mask} & {prior}"
+            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+
         self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):
             # TODO(jansel): do we need a reshape here?
