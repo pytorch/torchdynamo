@@ -577,6 +577,14 @@ class FunctionTests(torchdynamo.testing.TestCase):
         y = torch.jit.annotate(typing.Any, x + 1)
         return y + 2
 
+    @requires_static_shapes
+    @make_test
+    def test_is_contiguous_memory_format(tensor):
+        if torch.jit.is_scripting():
+            return None
+        elif tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return tensor + 1
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
