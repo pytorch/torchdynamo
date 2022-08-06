@@ -368,7 +368,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        return device, model_name, model, example_inputs
+        return device, model_name, model, example_inputs, batch_size
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):

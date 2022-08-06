@@ -51,6 +51,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 current_name = ""
 current_device = ""
+current_batch_size = None
 output_filename = None
 
 
@@ -89,7 +90,7 @@ def print_summary(filename):
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
-            if col in ("dev", "name"):
+            if col in ("dev", "name", "batch_size"):
                 continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
@@ -157,6 +158,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs, start_latenc
         (
             "dev",
             "name",
+            "batch_size",
             "graphs",
             "graph_calls",
             "captured_ops",
@@ -168,6 +170,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs, start_latenc
         [
             current_device,
             current_name,
+            current_batch_size,
         ]
         + coverage_result.tocsv()
         + [
@@ -276,10 +279,11 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
     eager_times, dynamo_times = timings[:, 0], timings[:, 1]
     output_csv(
         output_filename,
-        ("dev", "name", "cold-start speedup", "breakeven iters"),
+        ("dev", "name", "batch_size", "cold-start speedup", "breakeven iters"),
         [
             current_device,
             current_name,
+            current_batch_size,
             float(speedup),
             breakeven(dynamo_times, eager_times),
         ],
@@ -351,10 +355,15 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
+    if args.dump_raw_metrics:
+        np.save(
+            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            timings,
+        )
     output_csv(
         output_filename,
-        ("dev", "name", "speedup"),
-        [current_device, current_name, float(speedup)],
+        ("dev", "name", "batch_size", "speedup"),
+        [current_device, current_name, current_batch_size, float(speedup)],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -425,8 +434,15 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     )
     output_csv(
         output_filename,
-        ("dev", "name", "speedup mean", "speedup median", "speedup var"),
-        [current_device, current_name, speedups_mean, speedups_median, speedups_var],
+        ("dev", "name", "batch_size", "speedup mean", "speedup median", "speedup var"),
+        [
+            current_device,
+            current_name,
+            current_batch_size,
+            speedups_mean,
+            speedups_median,
+            speedups_var,
+        ],
     )
     return output_str
 
@@ -499,8 +515,9 @@ def baselines(models, model_iter_fn, example_inputs, args):
     )
     output_csv(
         output_filename,
-        ("dev", "name") + tuple(n for n, m in models[1:]),
-        [current_device, current_name] + [f"{x:.4f}" for x in speedup],
+        ("dev", "name", "batch_size") + tuple(n for n, m in models[1:]),
+        [current_device, current_name, current_batch_size]
+        + [f"{x:.4f}" for x in speedup],
     )
     return result
 
@@ -782,7 +799,7 @@ class BenchmarkRunner:
         while batch_size >= 1:
             torch.cuda.empty_cache()
             try:
-                device, name, model, example_inputs = self.load_model(
+                device, name, model, example_inputs, _ = self.load_model(
                     device,
                     model_name,
                     self._args.training,
@@ -949,6 +966,11 @@ def parse_args():
     )
     parser.add_argument(
         "--isolate", action="store_true", help="run each model in its own process"
+    )
+    parser.add_argument(
+        "--dump-raw-metrics",
+        action="store_true",
+        help="dump raw timing metrics from speedup experiment",
     )
 
     parser.add_argument("--float16", action="store_true", help="cast model to fp16")
@@ -1253,7 +1275,7 @@ def main(runner, original_dir=None):
 
     accuracy_ctx = None
     experiment = null_experiment
-    global current_name, current_device, output_filename, optimize_ctx
+    global current_name, current_device, current_batch_size, output_filename, optimize_ctx
     optimize_ctx = NullContext()
 
     if args.overhead:
@@ -1489,7 +1511,7 @@ def main(runner, original_dir=None):
                     )
                 print(f"batch size: {batch_size}")
             try:
-                device, name, model, example_inputs = runner.load_model(
+                device, name, model, example_inputs, batch_size = runner.load_model(
                     device,
                     model_name,
                     args.training,
@@ -1503,6 +1525,7 @@ def main(runner, original_dir=None):
 
             current_name = name
             current_device = device
+            current_batch_size = batch_size
             set_model_name(name)
 
             if args.float32:
@@ -1526,8 +1549,13 @@ def main(runner, original_dir=None):
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
                 stats_file,
-                ("dev", "name", "total_aot_graphs", "ok_aot_graphs"),
-                [current_device, current_name, *Stats.aot_summary()],
+                ("dev", "name", "batch_size", "total_aot_graphs", "ok_aot_graphs"),
+                [
+                    current_device,
+                    current_name,
+                    current_batch_size,
+                    *Stats.aot_summary(),
+                ],
             )
     elif args.isolate:
         if output_filename and os.path.exists(output_filename):
@@ -1536,19 +1564,23 @@ def main(runner, original_dir=None):
             os.chdir(original_dir)
         for name in runner.iter_model_names(args):
             current_name = name
+            placeholder_batch_size = 0
             try:
                 subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
             except subprocess.SubprocessError:
                 print("ERROR")
                 for device in args.devices:
-                    output_csv(output_filename, [], [device, name, 0.0])
+                    output_csv(
+                        output_filename, [], [device, name, placeholder_batch_size, 0.0]
+                    )
         print_summary(output_filename)
     else:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
-        for device, name, model, example_inputs in runner.iter_models(args):
+        for device, name, model, example_inputs, batch_size in runner.iter_models(args):
             current_name = name
             current_device = device
+            current_batch_size = batch_size
             torchdynamo.reset()
             gc.collect()
 
