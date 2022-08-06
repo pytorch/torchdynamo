@@ -147,6 +147,7 @@ def {{kernel_name}}(
 
     acc = acc.to({{out_def}}.dtype.element_ty)
 
+{% if keep_store %}
     # rematerialize -- this saves some registers
     # offset for output y
     off_y_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -173,6 +174,8 @@ def {{kernel_name}}(
         & (off_y_w < OUT_W + output_padding_w)[:, None]
         & (off_y_k < KERNEL_N)[None, :]
     )
+    tl.store(y_ptrs, acc, mask=mask_y)
+{% endif %}
 
 {% if pointwise_code %}
 {{ pointwise_code | indent(4, true) }}
@@ -180,13 +183,6 @@ def {{kernel_name}}(
     z = tl.load(z_ptrs, mask=mask_z)
     acc += z
     #}
-{% else %}
-    {#
-    if pointwise_code is empty, we need to code-gen
-    the final store explicitly
-    tl.store(y_ptrs, acc, mask=mask_y)
-    #}
-    tl.store(y_ptrs, acc, mask=mask_y)
 {% endif %}
 
     return

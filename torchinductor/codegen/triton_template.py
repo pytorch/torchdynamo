@@ -11,12 +11,11 @@ from .common import IndentedBuffer
 from .triton import CantSplit
 from .triton import TritonKernel
 
-template_dict = {ir.Convolution: "triton_conv"}
+template_dict = {ir.Convolution: "triton_conv", ir.MatrixMultiply: "triton_mm"}
 
 
 class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
-        super(TritonTemplateKernel, self).__init__(*groups)
         self.node = node
         self.template_name = template_dict[type(node)]
         env = Environment(
@@ -25,7 +24,12 @@ class TritonTemplateKernel(TritonKernel):
             lstrip_blocks=True,
             undefined=StrictUndefined,
         )
+        pid_cache = {}
         if isinstance(node, ir.Convolution):
+            pid_cache = {
+                "tl.program_id(0)": "pid_nhw",
+                "tl.program_id(1)": "pid_k",
+            }
             self.map_args()
             KERNEL_H = self.args_dict["KERNEL_H"]
             KERNEL_W = self.args_dict["KERNEL_W"]
@@ -37,14 +41,22 @@ class TritonTemplateKernel(TritonKernel):
                 self.template_name += "_delta_x"
             else:
                 self.template_name += "_delta_x_hwc"
+        elif isinstance(node, ir.MatrixMultiply):
+            pid_cache = {
+                "tl.program_id(0)": "pid_m",
+                "tl.program_id(1)": "pid_n",
+            }
 
         self.template = env.get_template(self.template_name + ".j2")
+        super(TritonTemplateKernel, self).__init__(*groups, pid_cache=pid_cache)
 
     def rename_vars(self):
         for k, v in self.inout_dict.items():
             self.args.output_buffers[v] = k
         if isinstance(self.node, ir.Convolution):
             self.cse.store_cache[self.inout_dict["y"]] = "acc"
+        elif isinstance(self.node, ir.MatrixMultiply):
+            self.cse.store_cache[self.inout_dict["C"]] = "acc"
 
     def assign_block_numel(self):
         code = IndentedBuffer()
@@ -55,8 +67,17 @@ class TritonTemplateKernel(TritonKernel):
                 "xnumel = BATCH * (OUT_H + 2 * output_padding_h) * (OUT_W + 2 * output_padding_w)"
             )
             code.writeline("ynumel = KERNEL_N")
+        elif isinstance(self.node, ir.MatrixMultiply):
+            code.writeline("XBLOCK: tl.constexpr = BLOCK_M")
+            code.writeline("YBLOCK: tl.constexpr = BLOCK_N")
+            code.writeline("xnumel = M")
+            code.writeline("ynumel = N")
 
         return code
+
+    def indexing(self, index: sympy.Expr, copy_shape=None, dense_indexing=True):
+        # use dense_indexing for TritonTemplateKernel to avoid map::at error
+        return super().indexing(index, copy_shape, dense_indexing)
 
     def codegen_body(
         self, name, fuse, could_remove_kernel_buf, kernel_buf_replace_name
@@ -73,8 +94,8 @@ class TritonTemplateKernel(TritonKernel):
         # current TritonTemplateKernel args
         for (argdef, call_arg) in zip(argdefs, call_args):
             if (
-                call_arg not in self.inout_dict.values()
-                and call_arg not in self.args_dict.values()
+                argdef not in self.inout_dict.keys()
+                and argdef not in self.args_dict.keys()
             ):
                 self.extra_argdefs.append(argdef)
                 self.extra_call_args.append(call_arg)
@@ -82,6 +103,8 @@ class TritonTemplateKernel(TritonKernel):
         if could_remove_kernel_buf:
             if isinstance(self.node, ir.Convolution):
                 self.inout_dict.pop("y")
+            elif isinstance(self.node, ir.MatrixMultiply):
+                self.inout_dict.pop("C")
         self.template_inout_argdefs = list(self.inout_dict.keys())
 
         if kernel_buf_replace_name is not None:
@@ -97,10 +120,19 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["template_inout_argdefs"] = self.template_inout_argdefs
         render_dict["extra_argdefs"] = self.extra_argdefs
         render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
+        render_dict["keep_store"] = not could_remove_kernel_buf
         render_dict["out_def"] = (
-            "y" if kernel_buf_replace_name is None else kernel_buf_replace_def
+            self.out_def()
+            if kernel_buf_replace_name is None
+            else kernel_buf_replace_def
         )
         self.body = self.template.render(render_dict) + "\n"
+
+    def out_def(self):
+        if isinstance(self.node, ir.Convolution):
+            return "y"
+        elif isinstance(self.node, ir.MatrixMultiply):
+            return "C"
 
     def codegen_kernel(
         self,
@@ -212,6 +244,19 @@ class TritonTemplateKernel(TritonKernel):
                         )
                     """
                 )
+        if isinstance(self.node, ir.MatrixMultiply):
+            M = self.args_dict["M"]
+            N = self.args_dict["N"]
+            with code.indent():
+                code.splice(
+                    f"""
+                    def grid_{name}(META):
+                        return (
+                            triton.cdiv({M}, META["BLOCK_M"]) * triton.cdiv({N}, META["BLOCK_N"]),
+                            META["SPLIT_K"],
+                        )
+                    """
+                )
         return code.getvalue()
 
     def call_kernel(self, wrapper, name: str):
@@ -238,13 +283,13 @@ def template_codegen(scheduler, scheduler_node):
     scheduler_node: ExternKernelSchedulerNode
     """
     wrapper = V.graph.wrapper_code
-    deivce, group = scheduler_node.group
+    _, groups = scheduler_node.group
 
     reschedule = []
     fuse = False
     could_remove_kernel_buf = False
     fusable_nodes = []
-    with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *group)) as kernel:
+    with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *groups)) as kernel:
         # map const args/ shape/ strides to kernel args
         kernel.map_args()
         # set self.args name to match the TritonTemplateKernel's args names
@@ -253,42 +298,42 @@ def template_codegen(scheduler, scheduler_node):
         scheduler_node.update_dep_type()
         # mark node of TritonTemplateKernel as fusable and update fusable_deps
         scheduler_node.mark_fusable()
-        # enqueue any nodes that became runnable after this node is run
-        # otherwise, relu after conv is in blocked_nodes that could not be in
-        # runnable_groups to be fused to conv
-        # scheduler.barrier()
-        tile1, tile2, _ = group
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
-        if isinstance(kernel.node, ir.Convolution):
-            # Add pointwise with compatible dimensions
-            for node in scheduler.pop_group(
-                (tile1 * tile2, sympy.Integer(1)),
+        assert type(kernel.node) in template_dict.keys()
+        tile1, tile2, _ = groups
+        fusable_group = tile1 * tile2
+
+        # Add pointwise with compatible dimensions
+        for node in scheduler.pop_group(
+            (fusable_group, sympy.Integer(1)),
+        ):
+            # make sure we force the reads of conv are channel_last layout
+            if type(node.node) in template_dict.keys() or (
+                len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1
             ):
-                # if not channel_last layout (data.get_stride()[1] != 1),
-                # reorder node loop ordering to channel last
-                # so that it could be fused with convolution and
-                # have correct results of split_and_set_ranges()
-                # if len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1:
-                #     node.reorder_channel_last()
-                # make sure we force the reads of conv are channel_last layout
-                if type(node.node) in template_dict.keys() or (
-                    len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1
-                ):
-                    reschedule.append(node)
-                    continue
-                try:
-                    node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                    node.mark_fusable()
-                    fuse = True
-                    fusable_nodes.append(node)
-                    # if node.output buffer has the same stride/size as kernel output buffer
-                    # replace kernel output buffer name as node.output buffer
-                    could_remove_kernel_buf = True
-                except CantSplit:
-                    reschedule.append(node)
+                reschedule.append(node)
+                continue
+            # because triton mm will reorder pid, we need to make sure the
+            # the pointwise fusable nodes are consumers of the kernel.node
+            if (
+                isinstance(kernel.node, ir.MatrixMultiply)
+                and scheduler_node not in node.inverse_users
+            ):
+                reschedule.append(node)
+                continue
+            try:
+                node.run(*kernel.split_and_set_ranges(node.get_ranges()))
+                node.mark_fusable()
+                fuse = True
+                fusable_nodes.append(node)
+                # if node.output buffer has the same stride/size as kernel output buffer
+                # replace kernel output buffer name as node.output buffer
+                could_remove_kernel_buf = True
+            except CantSplit:
+                reschedule.append(node)
 
         else:
-            for node in scheduler.pop_group(group):
+            for node in scheduler.pop_group(groups):
                 # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
                 node.run(*kernel.set_ranges(*node.get_ranges()))
                 node.mark_fusable()
