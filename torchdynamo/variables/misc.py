@@ -6,6 +6,11 @@ from typing import List
 
 import torch._C
 
+from torchdynamo.variables.functions import UserFunctionVariable
+from torchdynamo.variables.functions import UserMethodVariable
+from torchdynamo.variables.functions import WrappedUserFunctionVariable
+from torchdynamo.variables.functions import WrappedUserMethodVariable
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -240,6 +245,20 @@ class ContextWrappingVariable(ContextManagerVariable):
 
     def _initial_value(self):
         raise NotImplementedError("_initial_value called on base")
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        assert len(args) == 1
+        assert isinstance(args[0], UserMethodVariable) or isinstance(
+            args[0], UserFunctionVariable
+        )
+
+        if isinstance(args[0], UserMethodVariable):
+            return WrappedUserMethodVariable(args[0], self)
+
+        if isinstance(args[0], UserFunctionVariable):
+            return WrappedUserFunctionVariable(args[0], self)
 
 
 class GradModeVariable(ContextWrappingVariable):

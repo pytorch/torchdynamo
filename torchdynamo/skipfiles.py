@@ -114,6 +114,8 @@ FILENAME_ALLOWLIST |= set(
     ]
 )
 
+FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
         torch._prims.__file__,

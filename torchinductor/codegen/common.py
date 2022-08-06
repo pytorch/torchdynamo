@@ -28,6 +28,7 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         2) fuse contiguous dimensions into a single loop
         If channel_last = True, we will prevent the last dim fused with other dims
     """
+    sizevars = V.graph.sizevars
     sizes = list(sizes)
 
     strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
@@ -40,9 +41,9 @@ def _simplify_loops(index_vars, sizes, index_formulas):
 
     def can_merge_dims(a, b):
         for k in range(len(strides)):
-            if V.graph.sizevars.simplify(
-                strides[k][a] * sizes[a]
-            ) == V.graph.sizevars.simplify(strides[k][b]):
+            if sizevars.simplify(strides[k][a] * sizes[a]) == sizevars.simplify(
+                strides[k][b]
+            ):
                 # approximate test passed, try sound version
                 va = index_vars[a]
                 vb = index_vars[b]

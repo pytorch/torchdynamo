@@ -79,7 +79,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         super(UserFunctionVariable, self).__init__(**kwargs)
         assert isinstance(
             fn, types.FunctionType
-        ), f"expected FunctionType {typestr(fn)} {fn}"
+        ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torchdynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -201,6 +201,42 @@ class UserMethodVariable(UserFunctionVariable):
 
     def num_parameters(self):
         return super(UserMethodVariable, self).num_parameters() - 1
+
+
+class WrappedUserMethodVariable(UserMethodVariable):
+    def __init__(self, wrapped, context, **kwargs):
+        kwargs.pop("fn", None)
+        kwargs.pop("obj", None)
+        super(WrappedUserMethodVariable, self).__init__(
+            wrapped.fn, wrapped.obj, **kwargs
+        )
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
+
+
+class WrappedUserFunctionVariable(UserFunctionVariable):
+    def __init__(self, wrapped, context, **kwargs):
+        kwargs.pop("fn", None)
+        kwargs.pop("obj", None)
+        super(WrappedUserFunctionVariable, self).__init__(wrapped.fn, **kwargs)
+        self.wrapped = wrapped
+        self.context = context
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
+        self.context.exit(tx)
+        return result
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
