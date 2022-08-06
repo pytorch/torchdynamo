@@ -692,14 +692,14 @@ class UnspecializedPythonVariable(TensorVariable):
         return ConstantVariable(value=self.raw_value, guards=self.guards)
 
 
-class FakeItemVariable(UnspecializedPythonVariable):
-    """A UnspecializedPythonVariable which prevents access to the underlying raw value.
+class FakeItemVariable(TensorVariable):
+    """An unspecialized python variable which prevents access to the underlying raw value.
     This is needed if item is called on a FakeTensor."""
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        need_unwrap = kwargs.pop("need_unwrap", False)
         super(FakeItemVariable, self).__init__(proxy, **kwargs)
-        self.need_unwrap = False
-        delattr(self, "raw_value")
+        self.need_unwrap = need_unwrap
 
     @classmethod
     def from_tensor_variable(cls, tensor_variable):

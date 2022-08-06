@@ -418,14 +418,11 @@ def check_constant_args(args, kwargs):
 
 def check_unspec_python_args(args, kwargs):
     from .variables.constant import ConstantVariable
-    from .variables.tensor import FakeItemVariable
     from .variables.tensor import UnspecializedPythonVariable
 
     unspec_count = 0
     for x in itertools.chain(args, kwargs.values()):
-        if isinstance(x, FakeItemVariable):
-            return False
-        elif isinstance(x, UnspecializedPythonVariable):
+        if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
         elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
             return False

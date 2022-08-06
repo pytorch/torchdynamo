@@ -272,7 +272,13 @@ class BuiltinVariable(VariableTracker):
                 proxy = tx.output.create_proxy(
                     "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
-                if self.unspec_numpy_args(*args, **kwargs):
+                if any([isinstance(arg, FakeItemVariable) for arg in args]):
+                    return variables.FakeItemVariable.create(
+                        tx,
+                        proxy,
+                        **options,
+                    )
+                elif self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
                     return variables.UnspecializedNumpyVariable.create(
@@ -282,33 +288,22 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
-                    if any([isinstance(arg, FakeItemVariable) for arg in args]):
-                        raw_value = None
-                        need_unwrap = False
+                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                    raw_value = self.fn(*_args, **_kwargs)
 
-                        return variables.FakeItemVariable.create(
-                            tx,
-                            proxy,
-                            **options,
-                        )
+                    need_unwrap = any(
+                        x.need_unwrap
+                        for x in itertools.chain(args, kwargs.values())
+                        if isinstance(x, variables.UnspecializedPythonVariable)
+                    )
 
-                    else:
-                        _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                        raw_value = self.fn(*_args, **_kwargs)
-
-                        need_unwrap = any(
-                            x.need_unwrap
-                            for x in itertools.chain(args, kwargs.values())
-                            if isinstance(x, variables.UnspecializedPythonVariable)
-                        )
-
-                        return variables.UnspecializedPythonVariable.create(
-                            tx,
-                            proxy,
-                            raw_value=raw_value,
-                            need_unwrap=need_unwrap,
-                            **options,
-                        )
+                    return variables.UnspecializedPythonVariable.create(
+                        tx,
+                        proxy,
+                        raw_value=raw_value,
+                        need_unwrap=need_unwrap,
+                        **options,
+                    )
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
