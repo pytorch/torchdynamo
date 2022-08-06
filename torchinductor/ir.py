@@ -762,6 +762,7 @@ class SqueezeView(BaseView):
             # redirect to a generic view
             return View.create(x, [s for s in x.get_size() if s != 1])
         else:
+            assert x.get_size()[dim] == 1
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
