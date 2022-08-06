@@ -3,6 +3,7 @@ import functools
 import inspect
 import itertools
 import operator
+import typing
 
 import torch
 from torch import sub
@@ -570,6 +571,11 @@ class FunctionTests(torchdynamo.testing.TestCase):
         y = torch.rand(5, 8)
         z = x.new(y.shape)
         assert z.size() == y.size()
+
+    @make_test
+    def test_jit_annotate(x):
+        y = torch.jit.annotate(typing.Any, x + 1)
+        return y + 2
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
