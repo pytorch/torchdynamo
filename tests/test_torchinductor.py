@@ -1843,6 +1843,15 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(0, 999, size=[8, 8]),))
 
+    def test_constant_pad_1d(self):
+        def fn(a):
+            return (
+                aten.constant_pad_nd(a, [0, 1], 6.0),
+                aten.constant_pad_nd(a, [2, 3], 99.0),
+            )
+
+        self.common(fn, (torch.randint(0, 999, size=[2, 16, 31], dtype=torch.float32),))
+
     def test_constant_pad_2d(self):
         def fn(a):
             return (
@@ -1852,6 +1861,17 @@ class CommonTemplate:
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_constant_pad_3d(self):
+        def fn(a):
+            return (
+                aten.constant_pad_nd(a, [1, 2, 3, 4, 5, 6], 6.0),
+                aten.constant_pad_nd(a, [0, 0, 3, 4, 0, 0], 6.0),
+            )
+
+        self.common(
+            fn, (torch.randint(0, 999, size=[2, 4, 4, 4], dtype=torch.float32),)
         )
 
     def test_l1_loss(self):

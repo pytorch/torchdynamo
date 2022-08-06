@@ -652,8 +652,9 @@ class TritonKernel(Kernel):
     @contextlib.contextmanager
     def mask_loads(self, mask):
         """Context manager to add an additional mask to tl.load/store"""
-        assert self._load_mask is None, "TODO: nesting"
         prior = self._load_mask
+        if prior:
+            mask = f"{mask} & {prior}"
         self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):
             # TODO(jansel): do we need a reshape here?

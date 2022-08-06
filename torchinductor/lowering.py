@@ -485,6 +485,13 @@ def as_strided(x, size, stride, storage_offset=None):
     return TensorBox(ir.ReinterpretView(storage, new_layout))
 
 
+@register_lowering(aten.as_strided_)
+def as_strided_(x, size, stride, storage_offset=None):
+    assert isinstance(x, TensorBox)
+    x.data = as_strided(x, size, stride, storage_offset).data
+    return x
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
@@ -756,6 +763,27 @@ def convolution(
         bias = view(bias, [out_chan] + kernel_dims * [1])
         result = add(result, bias)
     return result
+
+
+@register_lowering(aten._convolution)
+def _convolution(
+    x,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    benchmark,
+    deterministic,
+    cudnn_enabled,
+    allow_tf32,
+):
+    return convolution(
+        x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
+    )
 
 
 @register_lowering(aten.clone)
@@ -1692,31 +1720,70 @@ def reflection_pad2d(x, padding):
     )
 
 
-def constant_pad_2d(x, padding, fill_value):
-    assert len(padding) == 4
-    left, right, top, bot = padding
+@register_lowering(aten.constant_pad_nd)
+def constant_pad_nd(x, padding, fill_value=0):
+    assert (len(padding) % 2) == 0
+    if all(p == 0 for p in padding):
+        return x
 
-    x_loader = constant_boundary_condition_2d(x, fill_value, padding)
-    *batch, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h)
-    w = V.graph.sizevars.guard_static_shape(w)
+    sizes = x.get_size()
 
-    def fn(idx):
-        *b, x, y = idx
-        return x_loader([*b, x - top, y - left])
+    bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
+    n = len(sizes) - len(bounds)
 
+    output_size = list(sizes[:n])
+    mask_sizes = []
+    for (low, high), size in zip(bounds, sizes[n:]):
+        size = V.graph.sizevars.guard_static_shape(size)
+        mask_sizes.append(size)
+        output_size.append(sympy.expand(size + low + high))
+    assert len(output_size) == len(sizes)
+
+    def mask(index):
+        mask = []
+        for idx, (low, high), length in zip(index[n:], bounds, mask_sizes):
+            if low != 0:
+                mask.append(range_mask_low(idx))
+            if high != 0:
+                mask.append(range_mask_high(idx, length))
+        mask = functools.reduce(ops.and_, mask)
+        return ops.masked(mask, lambda: x_loader(index), fill_value)
+
+    def offset_fn(index):
+        new_index = list(index[:n])
+        for idx, (low, high) in zip(index[n:], bounds):
+            new_index.append(idx - low)
+        assert len(new_index) == len(index)
+        return mask(new_index)
+
+    x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+        inner_fn=offset_fn,
+        ranges=output_size,
     )
 
 
-@register_lowering(aten.constant_pad_nd)
-def constant_pad_nd(x, padding, fill_value=0):
-    assert len(padding) == 4
-    return constant_pad_2d(x, padding, fill_value)
+def range_mask_low(i: sympy.Expr):
+    return ops.ge(
+        ops.index_expr(i, torch.int64),
+        ops.index_expr(sympy.Integer(0), torch.int64),
+    )
+
+
+def range_mask_high(i: sympy.Expr, length: sympy.Expr):
+    return ops.lt(
+        ops.index_expr(i, torch.int64),
+        ops.index_expr(length, torch.int64),
+    )
+
+
+def range_mask(i: sympy.Expr, length: sympy.Expr):
+    return ops.and_(
+        range_mask_low(i),
+        range_mask_high(i, length),
+    )
 
 
 def constant_boundary_condition_2d(x, fill_value, padding):
@@ -1726,26 +1793,8 @@ def constant_boundary_condition_2d(x, fill_value, padding):
     def load(index):
         *prefix, ih, iw = index
         mask = ops.and_(
-            ops.and_(
-                ops.ge(
-                    ops.index_expr(ih, torch.int64),
-                    ops.index_expr(sympy.Integer(0), torch.int64),
-                ),
-                ops.ge(
-                    ops.index_expr(iw, torch.int64),
-                    ops.index_expr(sympy.Integer(0), torch.int64),
-                ),
-            ),
-            ops.and_(
-                ops.lt(
-                    ops.index_expr(ih, torch.int64),
-                    ops.index_expr(h, torch.int64),
-                ),
-                ops.lt(
-                    ops.index_expr(iw, torch.int64),
-                    ops.index_expr(w, torch.int64),
-                ),
-            ),
+            range_mask(ih, h),
+            range_mask(iw, w),
         )
         return ops.masked(mask, lambda: x_loader([*prefix, ih, iw]), fill_value)
 
