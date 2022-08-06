@@ -429,9 +429,8 @@ class VariableBuilder:
                 GraphArg(self.get_source(), wrapped_value, True)
             )
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+                guards = {self.get_source().create_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
-                options.update({"volatile_guard": list(guards)[0]})
             else:
                 options = {}
             options.update({"source": self.get_source()})

@@ -546,10 +546,8 @@ class InstructionTranslatorBase(object):
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        if isinstance(left, UnspecializedPythonVariable):
-            left = left.convert_to_constant(self)
-        if isinstance(right, UnspecializedPythonVariable):
-            right = right.convert_to_constant(self)
+        left = left.as_specialized(self)
+        right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_is_const = {
@@ -741,12 +739,7 @@ class InstructionTranslatorBase(object):
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                [
-                    x.convert_to_constant(self)
-                    if isinstance(x, UnspecializedPythonVariable)
-                    else x
-                    for x in items
-                ],
+                [x.as_specialized(self) for x in items],
                 **options,
             )
         )

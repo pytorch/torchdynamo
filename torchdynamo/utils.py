@@ -421,56 +421,27 @@ def check_unspec_python_args(args, kwargs):
     from .variables.tensor import FakeItemVariable
     from .variables.tensor import UnspecializedPythonVariable
 
-    return (
-        all(
-            isinstance(
-                i,
-                (
-                    UnspecializedPythonVariable,
-                    ConstantVariable,
-                ),
-            )
-            for i in itertools.chain(args, kwargs.values())
-        )
-        and any(
-            isinstance(x, UnspecializedPythonVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
-        and not any(
-            isinstance(x, FakeItemVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
-    )
+    unspec_count = 0
+    for x in itertools.chain(args, kwargs.values()):
+        if isinstance(x, FakeItemVariable):
+            return False
+        elif isinstance(x, UnspecializedPythonVariable):
+            unspec_count += 1
+        elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
+            return False
+        else:
+            pass
+
+    return unspec_count > 0
 
 
 def specialize_args_kwargs(tx, args, kwargs):
-    from .variables.tensor import UnspecializedNumpyVariable
-    from .variables.tensor import UnspecializedPythonVariable
-
     specialized_args = []
     specialized_kwargs = {}
     for x in args:
-        if isinstance(
-            x,
-            (
-                UnspecializedNumpyVariable,
-                UnspecializedPythonVariable,
-            ),
-        ):
-            specialized_args.append(x.convert_to_constant(tx))
-        else:
-            specialized_args.append(x)
+        specialized_args.append(x.as_specialized(tx))
     for k, v in kwargs:
-        if isinstance(
-            x,
-            (
-                UnspecializedNumpyVariable,
-                UnspecializedPythonVariable,
-            ),
-        ):
-            specialized_kwargs.update({k: x.convert_to_constant(tx)})
-        else:
-            specialized_kwargs.update({k: v})
+        specialized_kwargs.update({k: x.as_specialized(tx)})
     return specialized_args, specialized_kwargs
 
 

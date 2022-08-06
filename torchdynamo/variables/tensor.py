@@ -637,10 +637,8 @@ class UnspecializedNumpyVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
-        volatile_guard = kwargs.pop("volatile_guard", None)
         super(UnspecializedNumpyVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value
-        self.volatile_guard = volatile_guard
 
     @classmethod
     def from_tensor_variable(cls, tensor_variable, raw_value):
@@ -648,6 +646,17 @@ class UnspecializedNumpyVariable(TensorVariable):
         return UnspecializedNumpyVariable(
             **dict(tensor_variable.__dict__), raw_value=raw_value
         )
+
+    def as_specialized(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+
+        for g in self.guards:
+            if g.is_volatile:
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable(value=self.raw_value, guards=self.guards)
 
 
 class UnspecializedPythonVariable(TensorVariable):
@@ -658,11 +667,9 @@ class UnspecializedPythonVariable(TensorVariable):
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
         need_unwrap = kwargs.pop("need_unwrap", True)
-        volatile_guard = kwargs.pop("volatile_guard", None)
         super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
-        self.volatile_guard = volatile_guard
 
     @classmethod
     def from_tensor_variable(cls, tensor_variable, raw_value, need_unwrap=True):
@@ -673,13 +680,13 @@ class UnspecializedPythonVariable(TensorVariable):
             need_unwrap=need_unwrap,
         )
 
-    def convert_to_constant(self, tx):
+    def as_specialized(self, tx):
         for graph_arg in tx.output.graphargs:
             if graph_arg.source is self.source:
                 graph_arg.erase()
 
         for g in self.guards:
-            if g is self.volatile_guard:
+            if g.is_volatile:
                 g.create_fn = GuardBuilder.CONSTANT_MATCH
 
         return ConstantVariable(value=self.raw_value, guards=self.guards)

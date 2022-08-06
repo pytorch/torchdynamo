@@ -25,8 +25,8 @@ _GUARD_SOURCE_NOT_NN_MODULE = {
 
 @dataclasses.dataclass
 class Source:
-    def create_guard(self, fn):
-        return Guard(self.name(), self.guard_source(), fn)
+    def create_guard(self, fn, is_volatile=False):
+        return Guard(self.name(), self.guard_source(), fn, is_volatile)
 
     def reconstruct(self, codegen):
         raise NotImplementedError()
@@ -37,8 +37,8 @@ class Source:
     def name(self):
         raise NotImplementedError()
 
-    def make_guard(self, fn):
-        return Guard(self.name(), self.guard_source(), fn)
+    def make_guard(self, fn, is_volatile=False):
+        return Guard(self.name(), self.guard_source(), fn, is_volatile)
 
     def is_nn_module(self):
         return self.guard_source() in (
