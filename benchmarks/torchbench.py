@@ -237,11 +237,11 @@ EXPERIMENT_BATCH_SIZES = {
     "resnet18":512,
     "resnet50":128,
     "resnext50_32x4d":128,
-    "shufflenet_v2_x1_0":512,
-    "squeezenet1_1":512,
+    "shufflenet_v2_x1_0":256, #512
+    "squeezenet1_1":256, #512
     "timm_efficientnet":128,
     "timm_regnet":64,
-    "timm_resnest":256,
+    "timm_resnest":128, #256
     "timm_vision_transformer":256,
     "timm_vovnet":128,
     "vgg16":128, #256
@@ -396,11 +396,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)
        
-        with self.autocast():
-            torch.cuda.reset_peak_memory_stats()
-            pred = mod(*cloned_inputs)
-            peak_mem = torch.cuda.max_memory_allocated() /1e9
-            loss = self.compute_loss(pred)
+        # with self.autocast():
+        # torch.cuda.reset_peak_memory_stats()
+        pred = mod(*cloned_inputs)
+        peak_mem = torch.cuda.memory_allocated() /1e9
+        loss = self.compute_loss(pred)
         
         self.grad_scaler.scale(loss).backward()
         if stats is not None:
