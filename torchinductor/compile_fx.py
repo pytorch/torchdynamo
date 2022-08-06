@@ -270,9 +270,8 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
             decompositions=decompositions,
-            partition_fn=functools.partial(
-                min_cut_rematerialization_partition, compiler="inductor"
-            ),
+            # Note, update this to use compiler kwarg when functorch pin is updated
+            partition_fn=min_cut_rematerialization_partition,
         )
 
 

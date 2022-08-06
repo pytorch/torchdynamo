@@ -384,7 +384,14 @@ class SchedulerNode(BaseSchedulerNode):
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
+    """
+    This is a "fake" scheduler node that represents a group of scheduler nodes
+    that are meant to be fused together. The way it does this is by maintaining
+    its unmet dependencies as the union of its constituent nodes.
+    """
+
     def __init__(self, scheduler: "Scheduler", snodes):
+        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
         self.node = None
@@ -392,18 +399,19 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.inverse_users = []
         node = snodes[0].node
         self.group = snodes[0].group
-        self.unmet_dependencies = self.snodes[0].read_writes.reads
+        reads = set(self.snodes[0].read_writes.reads)
         for node in snodes[1:]:
-            self.unmet_dependencies |= node.read_writes.reads
+            reads |= node.read_writes.reads
             assert self.group == node.group
         node_bufs = set([node.get_name() for node in snodes])
-        self.unmet_dependencies = [
-            read for read in self.unmet_dependencies if read.name not in node_bufs
-        ]
+        reads = [read for read in reads if read.name not in node_bufs]
+        # self.read_writes field shouldn't really be needed for much, but it's
+        # useful for visualization to track what buffers it reads from
+        self.set_read_writes(dependencies.ReadWrites(reads, None, None, None))
         self.prune_deps()
 
     def get_name(self):
-        return ",".join([x.get_name() for x in self.snodes])
+        return "_".join([x.get_name() for x in self.snodes])
 
     def __repr__(self):
         return f"{type(self).__name__}(nodes={self.get_name()})"
@@ -428,9 +436,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         raise NotImplementedError
 
     def get_mutations(self):
-        raise NotImplementedError
-
-    def set_read_writes(self, rw):
         raise NotImplementedError
 
     def get_device(self):
@@ -563,6 +568,12 @@ def draw_buffers(nodes, fname, print_graph=False):
 
 
 class DisjointSetUnion:
+    """
+    Maintains a disjoint set union data structure, with union-by-size (log(n) queries).
+
+    See https://cp-algorithms.com/data_structures/disjoint_set_union.html for a reference
+    """
+
     def __init__(self, n):
         self.parent = list(range(n))
         self.size = [1] * n
@@ -607,7 +618,6 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     outputs = []
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        node = snode.node
         if isinstance(snode, ExternKernelSchedulerNode):
             node_type = "extern"
             group = node_type
@@ -647,15 +657,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     # create edges between nodes
     for snode in snodes:
-        node = snode.node
         name = snode.get_name()
-        if isinstance(snode, FusedSchedulerNode):
-            deps = [x.node.get_reads() for x in snode.snodes]
-            deps = [x for x in itertools.chain.from_iterable(deps)]
-        else:
-            deps = node.get_reads()
-        fx_node = buf_to_fx_node[name]
+        deps = snode.read_writes.reads
 
+        fx_node = buf_to_fx_node[name]
         new_args = []
         for dep in deps:
             if dep.name in buf_to_fx_node:
@@ -672,6 +677,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
+# TODO: Make this support pre-fusing reductions
 def prefuse_nodes(snodes: List[BaseSchedulerNode]):
     """
     Groups together fusible scheduler nodes into a FusedSchedulerNode
@@ -717,7 +723,7 @@ def prefuse_nodes(snodes: List[BaseSchedulerNode]):
         return True
 
     def fuse_nodes(a: fx.Node, b: fx.Node):
-        a.args = tuple(set(a.args) | set(b.args) - set([a, b]))
+        a.args = tuple((set(a.args) | set(b.args)) - set([a, b]))
         b.replace_all_uses_with(a)
         a.meta["fusion_meta"].snodes.extend(b.meta["fusion_meta"].snodes)
         a.meta["fusion_meta"]._replace(type="fused")
