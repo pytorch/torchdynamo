@@ -711,7 +711,7 @@ def philox_rand_like(x, seed, offset):
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
-# TODO(jansel): we should implement decomps for these
+# TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.argmax)
@@ -728,6 +728,9 @@ make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
 make_fallback(aten.sort)
 make_fallback(aten.topk)
+make_fallback(aten.unfold)
+make_fallback(aten.upsample_bicubic2d)
+make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
 
