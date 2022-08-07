@@ -156,6 +156,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
+    def pow(a, b):
+        return f"tl.libdevice.pow({a}, {b})"
+
+    @staticmethod
     def log(x):
         if has_triton_libdevice():
             return f"tl.libdevice.log({x}) if {x}.dtype is tl.float64 else tl.log({x})"
@@ -444,7 +448,8 @@ class TritonKernel(Kernel):
     def disable_reduction(self):
         @contextlib.contextmanager
         def ctx():
-            if not self.inside_reduction:
+            if self.numels[-1] == 1:
+                assert not self.inside_reduction
                 yield
                 return
             # calling codegen_body() will flush all the pending buffers
@@ -452,6 +457,8 @@ class TritonKernel(Kernel):
             self.codegen_body()
             self.inside_reduction = False
             yield
+            # flush out any code before opening the next loop
+            self.codegen_body()
             self.inside_reduction = True
 
         return ctx()

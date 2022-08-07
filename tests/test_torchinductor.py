@@ -1426,9 +1426,18 @@ class CommonTemplate:
             ),
         )
 
-    def test_pow(self):
+    def test_pow1(self):
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_pow2(self):
+        def fn(x):
+            return aten.pow(1000, x), aten.pow(x, 1000)
 
         self.common(
             fn,

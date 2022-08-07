@@ -202,10 +202,12 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill.Scalar])
+@register_decomposition([aten.masked_fill])
 def masked_fill(value, mask, other):
     if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
+    if other.device != value.device and other.numel() == 1:
+        other = other.to(value.device)
     value, mask, other = torch.broadcast_tensors(value, mask, other)
     return torch.where(mask, other, value)
 

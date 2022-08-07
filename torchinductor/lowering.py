@@ -271,12 +271,26 @@ def _to_copy(
 
 
 @register_lowering(aten.to)
-def to(x, device_or_dtype, non_blocking=False, copy=False, memory_format=None):
+def to(
+    x,
+    device_or_dtype=None,
+    non_blocking=False,
+    copy=False,
+    memory_format=None,
+    device=None,
+    dtype=None,
+    layout=None,
+):
     assert not memory_format, "TODO"
+    assert layout in (None, torch.strided)
     if isinstance(device_or_dtype, torch.dtype):
         return to_dtype(x, device_or_dtype)
     if isinstance(device_or_dtype, torch.device):
         return to_device(x, device_or_dtype)
+    if device is not None:
+        return to_device(x, device)
+    if dtype is not None:
+        return to_dtype(x, dtype)
     assert False, device_or_dtype
 
 
@@ -850,6 +864,13 @@ def arange(
     if end is None:
         end = start
         start = 0
+
+    if isinstance(start, float) and int(start) == start:
+        start = int(start)
+    if isinstance(end, float) and int(end) == end:
+        end = int(end)
+    if isinstance(step, float) and int(step) == step:
+        step = int(step)
 
     assert isinstance(start, int)
     assert isinstance(end, int)
@@ -2367,16 +2388,19 @@ def pow_recursive(x, y, dtype):
     return result
 
 
+@make_pointwise
+def pow_native(a, b):
+    return ops.pow(a, b)
+
+
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    # see https://github.com/openai/triton/issues/506
-    # triton doesn't support pow, so need to rewrite it
-    # this is a lowering not a decomp, due to upstream pytorch being unstable
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, int) and b == 1:
         return a
-    elif isinstance(b, int):
+    elif isinstance(b, int) and -32 < b < 32:
+        # Optimize away small fixed powers
         loader = a.make_loader()
 
         def fn(idx):
@@ -2389,10 +2413,7 @@ def pow(a, b):
             ranges=a.get_size(),
         )
     else:
-        assert False, "TODO: check correctness here"
-        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
-        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
-        # else: torch.exp(torch.log(a) * b)
+        return pow_native(a, b)
 
 
 def mutate_to(changed, val):
