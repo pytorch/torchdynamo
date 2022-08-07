@@ -517,7 +517,6 @@ def roll(a, shifts, dims=tuple()):
             raise RuntimeError(
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
             )
-        assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
         first_dim_rolled = roll(a, shifts[0], dims[0])
@@ -545,10 +544,13 @@ def roll(a, shifts, dims=tuple()):
 
 @register_lowering(aten.as_strided)
 def as_strided(x, size, stride, storage_offset=None):
+    if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
+        # as_strided ignores views
+        x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_storage_and_layout(x):
+    if not ir.is_contiguous_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
-    storage, old_layout = ir.as_storage_and_layout(x)
+    storage, old_layout = ir.as_contiguous_storage_and_layout(x)
     new_layout = ir.FixedLayout(
         old_layout.device,
         old_layout.dtype,
