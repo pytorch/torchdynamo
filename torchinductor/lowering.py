@@ -485,6 +485,9 @@ def roll(a, shifts, dims=tuple()):
         dims = (dims,)
     dims = [_validate_dim(a, d) for d in dims]
 
+    if sympy_product(a.get_size()) == 0:
+        return clone(a)
+
     len_shifts = len(shifts)
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
