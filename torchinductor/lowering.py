@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+from collections.abc import Iterable
 from typing import List
 
 import sympy
@@ -469,6 +470,62 @@ def slice_(x, dim, start, end, step=1):
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
+@register_lowering(aten.roll)
+def roll(a, shifts, dims=tuple()):
+    """
+    This is based on torch._refs.roll(), but uses ir.ModularIndexing().
+
+    We can't use the ref here because it is based on multiple calls to
+    torch.cat() that this will result in terrible code.
+    """
+    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
+    if not isinstance(shifts, Iterable):
+        shifts = (shifts,)
+    if not isinstance(dims, Iterable):
+        dims = (dims,)
+    dims = [_validate_dim(a, d) for d in dims]
+
+    len_shifts = len(shifts)
+    len_dims = len(dims)
+    if len_shifts != 1 or len_dims != 1:
+        if len_shifts == 0:
+            raise RuntimeError("`shifts` required")
+        # Takes care of the case when dims is not specified (default)
+        # By default, the tensor is flattened before shifting, after which the original shape is restored
+        if len_dims == 0 and len_shifts == 1:
+            flat = view(a, [sympy_product(a.get_size())])
+            rolled = roll(flat, shifts, 0)
+            return view(rolled, list(a.get_size()))
+        if len_shifts != len_dims:
+            raise RuntimeError(
+                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
+            )
+        assert len_dims > 1
+        tail_shifts = shifts[1:]
+        tail_dims = dims[1:]
+        first_dim_rolled = roll(a, shifts[0], dims[0])
+        return roll(first_dim_rolled, tail_shifts, tail_dims)
+
+    (dim,) = dims
+    size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
+    start = (size - shifts[0]) % size
+    a_loader = a.make_loader()
+
+    def fn(index):
+        index = list(index)
+        index[dim] = ir.ModularIndexing(
+            index[dim] + start, sympy.Integer(1), sympy.expand(size)
+        )
+        return a_loader(index)
+
+    return Pointwise.create(
+        device=a.get_device(),
+        dtype=a.get_dtype(),
+        inner_fn=fn,
+        ranges=a.get_size(),
+    )
+
+
 @register_lowering(aten.as_strided)
 def as_strided(x, size, stride, storage_offset=None):
     x.realize()
@@ -546,7 +603,7 @@ def unsqueeze_(x, dim):
     return x
 
 
-def _validate_dim(x, dim, offset):
+def _validate_dim(x, dim, offset=0):
     assert isinstance(dim, int)
     ndim = len(x.get_size())
     if dim < 0:
@@ -723,6 +780,7 @@ make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bilinear2d_backward)
 make_fallback(aten.upsample_nearest2d_backward)
+make_fallback(aten.im2col)
 
 
 @register_lowering(aten.convolution)
