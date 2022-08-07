@@ -3,7 +3,7 @@ import functools
 import inspect
 import itertools
 import operator
-import typing
+from typing import Any
 
 import torch
 from torch import sub
@@ -574,7 +574,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
 
     @make_test
     def test_jit_annotate(x):
-        y = torch.jit.annotate(typing.Any, x + 1)
+        y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
     @requires_static_shapes
