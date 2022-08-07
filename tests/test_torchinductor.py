@@ -2574,6 +2574,20 @@ class CommonTemplate:
             expected_kernel = 6
         self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
+    def test_roll(self):
+        def fn(a):
+            return (
+                aten.roll(a, [-3, 10], [1, 2]),
+                aten.roll(a, [5]),
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([2, 56, 56, 16]),
+            ],
+        )
+
 
 if HAS_CPU:
 

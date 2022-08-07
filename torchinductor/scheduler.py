@@ -848,7 +848,7 @@ class Scheduler:
             prior_run_count = self.run_count
             yield
 
-    def pop_group(self, group_without_device):
+    def unordered_pop_group(self, group_without_device):
         group = (self.current_device, tuple(group_without_device))
         while group in self.runnable_nodes:
             if group in self.runnable_groups:
@@ -860,6 +860,14 @@ class Scheduler:
                 # keep poping fusable nodes as their depdencies are satisfied
                 fusable = self.blocked_nodes.pop_fusable(self.fusable_deps, group)
                 yield from fusable
+
+    def pop_group(self, group_without_device):
+        """Imposes a sorted order on unordered_pop_group"""
+        nodes = [True]
+        while nodes:
+            nodes = list(self.unordered_pop_group(group_without_device))
+            nodes.sort(key=lambda x: x.get_name())
+            yield from nodes
 
     def pop_groups(self, groups):
         keep_going = True
