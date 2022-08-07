@@ -75,11 +75,12 @@ class TorchVariable(VariableTracker):
 
     def can_constant_fold_through(self):
         if self.value in (
+            torch._assert,
             torch.device,
             torch.finfo,
             torch.iinfo,
-            torch.is_tensor,
             torch.is_floating_point,
+            torch.is_tensor,
             torch.overrides.is_tensor_like,
         ):
             return True
@@ -195,6 +196,9 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
             return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
+        elif self.value is torch.jit.annotate:
+            assert len(args) == 2
+            return args[1]
         else:
             tensor_variable = TensorVariable.create(
                 tx=tx,

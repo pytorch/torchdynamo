@@ -400,6 +400,8 @@ class TensorVariable(VariableTracker):
         from . import ConstantVariable
         from . import TupleVariable
 
+        kwargs = dict(kwargs)
+
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "stride" and self.stride is not None:
@@ -414,12 +416,18 @@ class TensorVariable(VariableTracker):
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
         elif name == "is_contiguous" and self.is_contiguous is not None:
+            if (
+                "memory_format" in kwargs
+                and kwargs["memory_format"].as_python_constant()
+                == torch.contiguous_format
+            ):
+                kwargs.pop("memory_format")
             constant_result = ConstantVariable(self.is_contiguous, **options)
         else:
             constant_result = None
 
         if constant_result:
-            assert not kwargs
+            assert not kwargs, f"Tensor.{name}() unhandled kwargs"
             if len(args) == 1:
                 return constant_result.getitem_const(args[0])
             elif args:
