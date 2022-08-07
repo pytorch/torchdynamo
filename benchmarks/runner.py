@@ -170,7 +170,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 output_filename = (
                     f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
                 )
-                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename} {base_cmd}"
+                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename}"
+                cmd = f"{cmd} {base_cmd}"
                 if args.quick:
                     if suite == "torchbench":
                         cmd = f"{cmd} --only=resnet18"
