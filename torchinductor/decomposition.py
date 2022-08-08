@@ -22,16 +22,19 @@ decompositions = get_decompositions(
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
+        aten.clamp,
         aten.clamp_max,
         aten.clamp_min,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
         aten.detach,
+        aten.elu,
         aten.elu_backward,
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
         aten._fused_moving_avg_obs_fq_helper,
+        aten.gelu,
         aten.gelu_backward,
         aten.glu_backward,
         aten.grid_sampler_2d,
@@ -68,6 +71,7 @@ decompositions = get_decompositions(
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
+        aten.t,
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
@@ -94,35 +98,9 @@ def register_decomposition(ops):
     return decomp.register_decomposition(ops, decompositions, disable_meta=True)
 
 
-@register_decomposition([aten.clamp])
-def clamp(x, min=None, max=None):
-    if min is not None:
-        x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
-    if max is not None:
-        x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
-    return x
-
-
-@register_decomposition([aten.t])
-def t(x):
-    ndim = x.ndimension()
-    if x.ndim in (0, 1):
-        return x
-    assert ndim == 2
-    return torch.transpose(x, 0, 1)
-
-
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2):
     return torch.mm(mat1, mat2) + input
-
-
-@register_decomposition([aten.elu])
-def elu(self, alpha=1, scale=1, input_scale=1):
-    negcoef = alpha * scale
-    return torch.where(
-        self <= 0, (torch.exp(self * input_scale) - 1) * negcoef, self * scale
-    )
 
 
 @register_decomposition([aten.tanh])
@@ -154,19 +132,6 @@ def div_mode(a, b, rounding_mode=None):
     if rounding_mode == "trunc":
         return torch.trunc(result)
     return result
-
-
-@register_decomposition([aten.gelu])
-def gelu(x, approximate="none"):
-    if config.approximations or approximate != "none":
-        # tanh approximation is much faster
-        return (
-            0.5
-            * x
-            * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * x * x * x)))
-        )
-    else:
-        return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
 @register_decomposition([aten.special_erf, aten.erf])
