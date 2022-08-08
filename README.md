@@ -60,26 +60,86 @@ python setup.py develop
 
 ## Usage Example
 
-Here is a basic example of how to use TorchDynamo:
+
+Here is a basic example of how to use TorchDynamo. One can decorate a function
+or a method using `torchdynamo.optimize` to enable TorchDynamo optimization.
+
 ```py
-from typing import List
 import torch
 import torchdynamo
-
-def toy_example(a, b):
-    x = a / (torch.abs(a) + 1)
-    if b.sum() < 0:
-        b = b * -1
-    return x * b
 
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     print("my_compiler() called with FX graph:")
     gm.graph.print_tabular()
     return gm.forward  # return a python callable
 
-with torchdynamo.optimize(my_compiler):
-    for _ in range(100):
-        toy_example(torch.randn(10), torch.randn(10))
+@torchdynamo.optimize(my_compiler)
+def fn(x, y):
+    a = torch.cos(x)
+    b = torch.sin(y)
+    return a + b
+
+fn(torch.randn(10), torch.randn(10))
+```
+
+Running the above example produces this output
+
+```
+my_compiler() called with FX graph:
+opcode         name    target                                                  args        kwargs
+-------------  ------  ------------------------------------------------------  ----------  --------
+placeholder    x       x                                                       ()          {}
+placeholder    y       y                                                       ()          {}
+call_function  cos     <built-in method cos of type object at 0x7f1a894649a8>  (x,)        {}
+call_function  sin     <built-in method sin of type object at 0x7f1a894649a8>  (y,)        {}
+call_function  add     <built-in function add>                                 (cos, sin)  {}
+output         output  output                                                  ((add,),)   {}
+```
+
+This works for `torch.nn.Module` as well as shown below
+
+```py
+import torch
+import torchdynamo
+
+class MockModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(torch.cos(x))
+
+mod = MockModule()
+optimized_mod = torchdynamo.optimize(my_compiler)(mod)
+optimized_mod(torch.randn(10))
+```
+
+In the above examples, TorchDynamo uses a custom compiler (also referred to as
+backend in the rest of the doc) `my_compiler` that just prints the Fx
+GraphModule extracted by TorchDynamo's bytecode analysis, and returns the
+`forward` callable. One could write new compilers in a similar fashion.
+
+Let's take a look at one more example with control flow.
+```py
+from typing import List
+import torch
+import torchdynamo
+
+def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    print("my_compiler() called with FX graph:")
+    gm.graph.print_tabular()
+    return gm.forward  # return a python callable
+
+@torchdynamo.optimize(my_compiler)
+def toy_example(a, b):
+    x = a / (torch.abs(a) + 1)
+    if b.sum() < 0:
+        b = b * -1
+    return x * b
+
+for _ in range(100):
+    toy_example(torch.randn(10), torch.randn(10))
 ```
 
 Running this example produces the following output:
@@ -117,8 +177,19 @@ output         output  output                   ((mul,),)  {}
 Note that the order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 
+### Existing Backends
+TorchDynamo has a growing list of backends, which can be found in [backends.py]
+or `torchdynamo.list_backends()`. Note many backends require installing
+additional packages. Some of the commonly used backends are
+
+* `torchdynamo.optimize("eager")` - Uses PyTorch to run the extracted GraphModule. This is quite useful in debugging TorchDynamo issues.
+* `torchdynamo.optimize("nvfuser")` -  Uses Torchscript and nvfuser.
+* `torchdynamo.optimize("ofi")` -  Uses Torchscript optimize_for_inference.
+* `torchdynamo.optimize("fx2trt")` -  Uses Nvidia TensorRT for inference optimizations.
+
+The above backends optimize inference. Let's see how TorchDynamo supports training.
+
 ### Training and AotAutograd
-The example above only covers inference (model.forward).  
 
 Torchdynamo supports training, using AotAutograd to capture backwards:
 * only the .forward() graph is captured by torchdynamo's python evalframe frontend
@@ -131,23 +202,33 @@ Current limitations:
 * optimizer ops are currently not captured at all, and thus not compiled (under investigation to add support)
 * DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
 
+Specifically, these are the exisiting backends
+
+* `torchdynamo.optimize("aot_nop")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
+* `torchdynamo.optimize("aot_nvfuser")` - Use AotAutograd with Torchscipt and nvfuser compiler.
+
+
 Example
 ```py
 # nothing special about this part
 model = ...
 optimizer = ...
 
-with torchdynamo.optimize("aot_nvfuser"):
-    for _ in range(100):
-        # forward graphs are captured, and AotAutograd generates corresponding backward graphs
-        # both forward and backward graphs are compiled at this time
-        loss = model(torch.randn(10), torch.randn(10))
-        
-        # no further compilation happens here, but eager autograd executes compiled backwards graphs from above
-        loss.backward()
-        
-        # dynamo won't compile this, currently
-        optimizer.step()
+
+@torchdynamo.optimize("aot_nvfuser")
+def training_iteration(...):
+    # forward graphs are captured, and AotAutograd generates corresponding backward graphs
+    # both forward and backward graphs are compiled at this time
+    loss = model(torch.randn(10), torch.randn(10))
+
+    # no further compilation happens here, but eager autograd executes compiled backwards graphs from above
+    loss.backward()
+
+    # dynamo won't compile this, currently
+    optimizer.step()
+
+for _ in range(100):
+    training_iteration(...)
 ```
 
 
@@ -251,8 +332,8 @@ program to debug performance issues.  You can turn graph breaks into
 errors by setting
 `nopython=True`:
 ```py
-with torchdynamo.optimize(my_compiler, nopython=True):
-    toy_example(torch.randn(10), torch.randn(10))
+@torchdynamo.optimize(my_compiler, nopython=True)
+def toy_example(a, b):
 ```
 
 Which will trigger the following error in the example program above:

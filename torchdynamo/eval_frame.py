@@ -105,7 +105,10 @@ class _TorchDynamoContext:
         # If the function is called with torchdynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
-            always_optimize_code_objects[fn.__code__] = True
+            callable_fn = fn
+            if isinstance(fn, torch.nn.Module):
+                callable_fn = fn.forward
+            always_optimize_code_objects[callable_fn.__code__] = True
 
         return _fn
 
