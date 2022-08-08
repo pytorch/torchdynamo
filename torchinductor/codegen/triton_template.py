@@ -123,7 +123,7 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["keep_store"] = not could_remove_kernel_buf
         render_dict["out_def"] = (
             self.out_def()
-            if kernel_buf_replace_name is None
+            if not could_remove_kernel_buf
             else kernel_buf_replace_def
         )
         self.body = self.template.render(render_dict) + "\n"
