@@ -2495,7 +2495,9 @@ class CommonTemplate:
         if config.triton.mm != "aten" and self.device == "cuda":
             expected_kernel = 1
         if config.triton.mm == "autotune":
-            self.assertLessEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
+            self.assertLessEqual(
+                torchinductor.metrics.generated_kernel_count, expected_kernel
+            )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
     @patch.object(config.triton, "cudagraphs", False)
@@ -2575,7 +2577,9 @@ class CommonTemplate:
             # expect 2 + 4 = 6 kernels
             expected_kernel = 6
         if config.triton.mm == "autotune":
-            self.assertLessEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
+            self.assertLessEqual(
+                torchinductor.metrics.generated_kernel_count, expected_kernel
+            )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
 
