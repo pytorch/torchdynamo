@@ -82,7 +82,12 @@ def cpp_prefix():
             }
 
             float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
-                return uint32_to_uniform_float(at::Philox4_32_10(seed, 0, offset)());
+                return uint32_to_uniform_float(at::Philox4_32(seed, 0, offset)());
+            }
+
+            float randn_cpu(uint32_t seed, uint32_t offset) {
+                at::Philox4_32 engine(seed, 0, offset);
+                return engine.randn(10);
             }
             """
         ),
@@ -233,6 +238,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
+
+    @staticmethod
+    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
 
 class CppKernel(Kernel):

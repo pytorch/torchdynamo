@@ -573,7 +573,7 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented("call torchdynamo.disable() wrapped function")
+            unimplemented(f"call torchdynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)
