@@ -973,8 +973,6 @@ def parse_args():
         help="dump raw timing metrics from speedup experiment",
     )
 
-    parser.add_argument("--float16", action="store_true", help="cast model to fp16")
-    parser.add_argument("--float32", action="store_true", help="cast model to fp32")
     parser.add_argument(
         "--channels-last",
         action="store_true",
@@ -984,9 +982,6 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
     parser.add_argument(
         "--batch_size_file", type=str, help="String to load batch size from"
-    )
-    parser.add_argument(
-        "--amp", action="store_true", help="use automatic mixed precision"
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
@@ -1046,6 +1041,13 @@ def parse_args():
         help="exports trace of kineto profiler",
     )
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+
+    group_prec = parser.add_mutually_exclusive_group()
+    group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
+    group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
+    group_prec.add_argument(
+        "--amp", action="store_true", help="use automatic mixed precision"
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
