@@ -75,14 +75,13 @@ def cpp_prefix():
             template<>
             inline double mod(double a, double b) { return std::fmod(a, b); }
 
-            constexpr float uint32_to_uniform_float(uint32_t value) {
-                // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
-                constexpr float scale = 4.6566127342e-10;
-                return static_cast<float>(value & 0x7FFFFFFF) * scale;
-            }
-
             float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
                 return uint32_to_uniform_float(at::Philox4_32_10(seed, 0, offset)());
+            }
+
+            float randn_cpu(uint32_t seed, uint32_t offset) {
+                at::Philox4_32_10 engine(seed, 0, offset);
+                return engine.randn(10); 
             }
             """
         ),
@@ -229,6 +228,12 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
+
+
+    @staticmethod
+    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
+
 
 
 class CppKernel(Kernel):
