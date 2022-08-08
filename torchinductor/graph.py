@@ -6,17 +6,20 @@ import sympy
 import torch
 import torch.fx
 from sympy import Integer
+from torch._decomp import get_decompositions
 
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
 from .exc import LoweringException
-from .exc import MissingOperator
+from .exc import MissingOperatorWithDecomp
+from .exc import MissingOperatorWithoutDecomp
 from .ir import Constant
 from .ir import FixedLayout
 from .ir import InputBuffer
 from .ir import TensorBox
 from .lowering import lowerings
+from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
 
@@ -200,7 +203,20 @@ class GraphLowering(torch.fx.Interpreter):
             return super().call_function(target, args, kwargs)
 
         if target not in lowerings:
-            raise MissingOperator(target, args, kwargs)
+            if get_decompositions([target]):
+                # There isn't a good way to dynamically patch this in
+                # since AOT Autograd already ran.  The error message tells
+                # the user how ot fix it.
+                raise MissingOperatorWithDecomp(target, args, kwargs)
+            elif config.implicit_fallbacks:
+                log.warning(
+                    "Creating implicit fallback for:\n%s",
+                    MissingOperatorWithoutDecomp.operator_str(target, args, kwargs),
+                )
+                make_fallback(target)
+            else:
+                raise MissingOperatorWithoutDecomp(target, args, kwargs)
+
         try:
             return lowerings[target](*args, **kwargs)
         except Exception as e:

@@ -38,6 +38,9 @@ fallback_random = False
 # python_key_normalize versus aot_autograd
 aot_autograd = True
 
+# automatically create fallbacks when encountering an unhandled op
+implicit_fallbacks = True
+
 
 # config specific to codegen/cpp.pp
 class cpp:
