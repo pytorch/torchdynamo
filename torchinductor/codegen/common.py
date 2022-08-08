@@ -29,7 +29,7 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         If channel_last = True, we will prevent the last dim fused with other dims
     """
     sizevars = V.graph.sizevars
-    sizes = list(sizes)
+    sizes = list(map(V.graph.sizevars.simplify, sizes))
 
     strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
     assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
@@ -89,10 +89,8 @@ def _simplify_loops(index_vars, sizes, index_formulas):
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
 
-    res = index
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
-    return res
 
 
 class ExprPrinter(Printer):

@@ -24,6 +24,7 @@ from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -621,6 +622,18 @@ class BaseView(IRNode):
                 self.get_size(),
             ).reads
 
+    def unwrap_view(self):
+        x = self
+        while isinstance(x, BaseView):
+            x = x.data
+        return x
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Pointwise(device, self.get_dtype(), loader, self.get_size())
+
 
 @dataclasses.dataclass
 class ExpandView(BaseView):
@@ -754,8 +767,12 @@ class SqueezeView(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        # redirect to a generic view
-        return View.create(x, [s for s in x.get_size() if s != 1])
+        if dim is None:
+            # redirect to a generic view
+            return View.create(x, [s for s in x.get_size() if s != 1])
+        else:
+            assert x.get_size()[dim] == 1
+            return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
     def squeezer(size):
@@ -1782,6 +1799,7 @@ class InputsKernel(Buffer):
             {dependencies.StarDep(self.get_name())},
             set(),
             [],
+            None,
         )
 
     @staticmethod
@@ -1792,6 +1810,8 @@ class InputsKernel(Buffer):
                 x = x.data
             if isinstance(x, StorageBox):
                 x = x.data
+            if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
+                x = ExternKernel.realize_input(x)
             assert isinstance(x, (Buffer, ReinterpretView)), x
             inputs_new.append(x)
         return inputs_new
@@ -1918,15 +1938,18 @@ class ExternKernel(InputsKernel):
         if isinstance(x, ReinterpretView):
             return x
 
-        x.data.freeze_layout()
+        x.unwrap_view().freeze_layout()
         rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
         assert len(rw.reads) == 1
 
-        index = V.graph.sizevars.simplify(list(rw.reads)[0].index)
+        index = V.graph.sizevars.simplify_with_ranges(
+            list(rw.reads)[0].index, rw.var_ranges
+        )
         strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
         offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+        expected = sympy_dot(rw.range_vars, strides) + offset
 
-        if sum([a * b for a, b in zip(strides, rw.range_vars)]) + offset != index:
+        if index != expected:
             log.debug(
                 "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
                 strides,
@@ -1960,14 +1983,15 @@ class ExternKernel(InputsKernel):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return x
-        if isinstance(x, BaseView) and (
-            is_storage_and_layout(x.data)
-            and not isinstance(x.data.data, ExternKernelAlloc)
-        ):
-            try:
-                return cls.convert_to_reinterpret_view(x)
-            except NotImplementedError:
-                pass
+        if isinstance(x, BaseView):
+            x.realize()
+            if is_storage_and_layout(x.unwrap_view()) and not isinstance(
+                x.unwrap_view().data, ExternKernelAlloc
+            ):
+                try:
+                    return cls.convert_to_reinterpret_view(x)
+                except NotImplementedError:
+                    pass
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
@@ -2276,21 +2300,19 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        x = cls.realize_input(x)
-        read_writes = x.get_read_writes()
         if not x.is_extern() and all(
-            (r.name in V.graph.constants and hasattr(r, "index"))
-            for r in read_writes.reads
+            (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
         ):
             return x.constant_to_device(device)
 
+        log.warning("DeviceCopy")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
                 dtype=x.get_dtype(),
                 size=x.get_size(),
             ),
-            [x],
+            [cls.realize_input(x)],
         )
 
     def codegen(self, wrapper):

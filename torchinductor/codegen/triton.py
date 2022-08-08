@@ -590,7 +590,7 @@ class TritonKernel(Kernel):
         More aggressive simplification to merge contiguous dims
         """
         index_vars, sizes = tree.vars_and_sizes(index)
-        if not sizes:
+        if len(sizes) <= 1:
             return index
         new_sizes, reindex, prune = ir._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
