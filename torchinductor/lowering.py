@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+from collections.abc import Iterable
 from typing import List
 
 import sympy
@@ -270,12 +271,26 @@ def _to_copy(
 
 
 @register_lowering(aten.to)
-def to(x, device_or_dtype, non_blocking=False, copy=False, memory_format=None):
+def to(
+    x,
+    device_or_dtype=None,
+    non_blocking=False,
+    copy=False,
+    memory_format=None,
+    device=None,
+    dtype=None,
+    layout=None,
+):
     assert not memory_format, "TODO"
+    assert layout in (None, torch.strided)
     if isinstance(device_or_dtype, torch.dtype):
         return to_dtype(x, device_or_dtype)
     if isinstance(device_or_dtype, torch.device):
         return to_device(x, device_or_dtype)
+    if device is not None:
+        return to_device(x, device)
+    if dtype is not None:
+        return to_dtype(x, dtype)
     assert False, device_or_dtype
 
 
@@ -469,12 +484,73 @@ def slice_(x, dim, start, end, step=1):
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
+@register_lowering(aten.roll)
+def roll(a, shifts, dims=tuple()):
+    """
+    This is based on torch._refs.roll(), but uses ir.ModularIndexing().
+
+    We can't use the ref here because it is based on multiple calls to
+    torch.cat() that this will result in terrible code.
+    """
+    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
+    if not isinstance(shifts, Iterable):
+        shifts = (shifts,)
+    if not isinstance(dims, Iterable):
+        dims = (dims,)
+    dims = [_validate_dim(a, d) for d in dims]
+
+    if sympy_product(a.get_size()) == 0:
+        return clone(a)
+
+    len_shifts = len(shifts)
+    len_dims = len(dims)
+    if len_shifts != 1 or len_dims != 1:
+        if len_shifts == 0:
+            raise RuntimeError("`shifts` required")
+        # Takes care of the case when dims is not specified (default)
+        # By default, the tensor is flattened before shifting, after which the original shape is restored
+        if len_dims == 0 and len_shifts == 1:
+            flat = view(a, [sympy_product(a.get_size())])
+            rolled = roll(flat, shifts, 0)
+            return view(rolled, list(a.get_size()))
+        if len_shifts != len_dims:
+            raise RuntimeError(
+                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
+            )
+        tail_shifts = shifts[1:]
+        tail_dims = dims[1:]
+        first_dim_rolled = roll(a, shifts[0], dims[0])
+        return roll(first_dim_rolled, tail_shifts, tail_dims)
+
+    (dim,) = dims
+    size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
+    start = (size - shifts[0]) % size
+    a_loader = a.make_loader()
+
+    def fn(index):
+        index = list(index)
+        index[dim] = ir.ModularIndexing(
+            index[dim] + start, sympy.Integer(1), sympy.expand(size)
+        )
+        return a_loader(index)
+
+    return Pointwise.create(
+        device=a.get_device(),
+        dtype=a.get_dtype(),
+        inner_fn=fn,
+        ranges=a.get_size(),
+    )
+
+
 @register_lowering(aten.as_strided)
 def as_strided(x, size, stride, storage_offset=None):
+    if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
+        # as_strided ignores views
+        x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_storage_and_layout(x):
+    if not ir.is_contiguous_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
-    storage, old_layout = ir.as_storage_and_layout(x)
+    storage, old_layout = ir.as_contiguous_storage_and_layout(x)
     new_layout = ir.FixedLayout(
         old_layout.device,
         old_layout.dtype,
@@ -553,7 +629,7 @@ def unsqueeze_(x, dim):
     return x
 
 
-def _validate_dim(x, dim, offset):
+def _validate_dim(x, dim, offset=0):
     assert isinstance(dim, int)
     ndim = len(x.get_size())
     if dim < 0:
@@ -715,6 +791,7 @@ if has_torchvision_roi_align():
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.argmax)
+make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -723,12 +800,16 @@ make_fallback(aten._embedding_bag)
 make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d_backward)
+make_fallback(aten.im2col)
+make_fallback(aten.im2col_backward)
 make_fallback(aten.native_batch_norm_backward)
+make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.reflection_pad2d_backward)
 make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
+make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
@@ -820,6 +901,13 @@ def arange(
     if end is None:
         end = start
         start = 0
+
+    if isinstance(start, float) and int(start) == start:
+        start = int(start)
+    if isinstance(end, float) and int(end) == end:
+        end = int(end)
+    if isinstance(step, float) and int(step) == step:
+        step = int(step)
 
     assert isinstance(start, int)
     assert isinstance(end, int)
@@ -1054,13 +1142,14 @@ def _local_scalar_dense(data):
 
 
 def _full(fill_value, device, dtype, size):
-    if isinstance(fill_value, ir.Constant):
-        fill_value = fill_value.value
-    assert isinstance(fill_value, (int, float)), fill_value
+    value = fill_value
+    if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
+        value = value.value
+    assert isinstance(value, (int, float)), "Expected int or float"
     return Pointwise.create(
         device=device,
         dtype=dtype,
-        inner_fn=lambda index: ops.constant(fill_value, dtype),
+        inner_fn=lambda index: ops.constant(value, dtype),
         ranges=list(size),
     )
 
@@ -2239,7 +2328,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
         assert (
-            reduction_type in ("sum", "amax", "amin", "any") or axis is None
+            reduction_type in ("sum", "amax", "amin", "any", "argmax", "argmin")
+            or axis is None
         ), "TODO: max with index"
         if reduction_type == "any":
             x = to_dtype(x, torch.bool)
@@ -2358,16 +2448,19 @@ def pow_recursive(x, y, dtype):
     return result
 
 
+@make_pointwise
+def pow_native(a, b):
+    return ops.pow(a, b)
+
+
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    # see https://github.com/openai/triton/issues/506
-    # triton doesn't support pow, so need to rewrite it
-    # this is a lowering not a decomp, due to upstream pytorch being unstable
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, int) and b == 1:
         return a
-    elif isinstance(b, int):
+    elif isinstance(b, int) and -32 < b < 32:
+        # Optimize away small fixed powers
         loader = a.make_loader()
 
         def fn(idx):
@@ -2380,10 +2473,7 @@ def pow(a, b):
             ranges=a.get_size(),
         )
     else:
-        assert False, "TODO: check correctness here"
-        # odd integer: torch.sign(a) * torch.exp(torch.log(torch.abs(a)) * b)
-        # even integer: torch.exp(torch.log(torch.abs(a)) * b)
-        # else: torch.exp(torch.log(a) * b)
+        return pow_native(a, b)
 
 
 def mutate_to(changed, val):
@@ -2438,6 +2528,8 @@ register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
+register_lowering(aten.argmax)(make_reduction("argmax"))
+register_lowering(aten.argmin)(make_reduction("argmin"))
 
 add = register_pointwise(aten.add)
 div = register_pointwise(aten.div)

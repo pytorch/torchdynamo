@@ -29,7 +29,7 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         If channel_last = True, we will prevent the last dim fused with other dims
     """
     sizevars = V.graph.sizevars
-    sizes = list(sizes)
+    sizes = list(map(V.graph.sizevars.simplify, sizes))
 
     strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
     assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
@@ -89,10 +89,8 @@ def _simplify_loops(index_vars, sizes, index_formulas):
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
 
-    res = index
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
-    return res
 
 
 class ExprPrinter(Printer):
@@ -300,6 +298,10 @@ class DeferredIndentedBuffer(IndentedBuffer):
             return super().writeline(line)
         assert "buf" in name
         return super().writeline(DeferredLine(name, line))
+
+    def writelines(self, name, lines):
+        for line in lines:
+            self.writeline(name, line)
 
 
 class BracesBuffer(IndentedBuffer):
@@ -622,8 +624,7 @@ class Kernel(CodeGen):
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
-        index = sympy.expand(index)
-        index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
+        index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)

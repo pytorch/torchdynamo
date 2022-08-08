@@ -150,6 +150,13 @@ class VariableTracker:
         except NotImplementedError:
             return False
 
+    def as_specialized(self, tx):
+        """
+        For specialized variables, return itself,
+        For unspecialized variables, convert to constant variable and return.
+        """
+        return self
+
     def can_create_guard(self):
         try:
             self.create_guard(None)

@@ -272,10 +272,23 @@ def export(f, *args, **kwargs):
 
         for i in range(0, len(candidate_args)):
             arg = candidate_args[i]
-            assert (
-                id(arg) in dict_of_source_args
-            ), "Dynamo input and output is a strict subset of traced input/output"
-            matched_elements_positions.append(dict_of_source_args[id(arg)])
+            # 1-element tensor arg can be unspec int/float
+            if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
+                if id(arg) in dict_of_source_args:
+                    matched_elements_positions.append(dict_of_source_args[id(arg)])
+                elif id(arg.item()) in dict_of_source_args:
+                    matched_elements_positions.append(
+                        dict_of_source_args[id(arg.item())]
+                    )
+                else:
+                    assert (
+                        False
+                    ), "Dynamo input/output is not consistent with traced input/output"
+            else:
+                assert (
+                    id(arg) in dict_of_source_args
+                ), "Dynamo input and output is a strict subset of traced input/output"
+                matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 

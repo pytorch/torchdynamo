@@ -170,7 +170,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 output_filename = (
                     f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
                 )
-                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --output={output_filename} {base_cmd}"
+                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename}"
+                cmd = f"{cmd} {base_cmd}"
                 if args.quick:
                     if suite == "torchbench":
                         cmd = f"{cmd} --only=resnet18"
@@ -201,7 +202,7 @@ def pp_dataframe(df, title, output_dir, out_io=None, draw_graph=True):
     # Graph
     if draw_graph:
         labels = df.columns.values.tolist()
-        labels = labels[2:]
+        labels = labels[3:]
         df.plot(
             x="name",
             y=labels,
@@ -287,6 +288,52 @@ def read_csv(output_filename):
 
 
 def parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir):
+    def sorted_pretty_print(df, key, out_op):
+        title = f"{suite}_{dtype}_{mode}_{device}"
+        sorted_df = df.sort_values(by=key, ascending=False)
+        col = sorted_df.pop(key)
+        sorted_df.insert(3, key, col)
+        pp_dataframe(
+            sorted_df,
+            f"sorted_{title}_{key}",
+            output_dir,
+            out_io=out_io,
+            draw_graph=False,
+        )
+        out_io.write("\n\n")
+
+    def analyze_graph_breaks(df, out_io):
+        # Analysis number of graphs
+        num_models = len(df.index)
+        no_graph_breaks = (df.graphs == 1).sum()
+        perc = percentage(no_graph_breaks, num_models)
+
+        out_io.write("**Graph Breaks**\n")
+        out_io.write(f"Number of models = {num_models}\n")
+        out_io.write(f"Number of models with no graph breaks = {no_graph_breaks}\n")
+        out_io.write(f"Percentage of models with no graph breaks = {perc}%")
+
+        # Sort the dataframe and pretty print
+        df_graphs = df[df.graphs != 1]
+        sorted_pretty_print(df_graphs, "graphs", out_io)
+
+    def analyze_start_latency(df, out_io):
+        # Analysis start_latency
+        num_models = len(df.index)
+        low_latency_models = (df.start_latency < 5.0).sum()
+        perc = percentage(low_latency_models, num_models)
+
+        out_io.write("**Start Latency - Rough approximation of compile latency**\n")
+        out_io.write(f"Number of models = {num_models}\n")
+        out_io.write(
+            f"Number of models with low start latency = {low_latency_models}\n"
+        )
+        out_io.write(f"Percentage of models with low start latency = {perc}%")
+
+        # Sort the dataframe and pretty print
+        df_high_latency = df[df.start_latency > 5]
+        sorted_pretty_print(df_high_latency, "start_latency", out_io)
+
     mode = "coverage"
     out_io = io.StringIO()
     out_io.write("\n")
@@ -303,7 +350,6 @@ def parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir):
             df = read_csv(output_filename)
             df.insert(1, "suite", suite)
             frames.append(df)
-            print(df)
 
     # Merge the results
     if len(frames) == 1:
@@ -311,50 +357,8 @@ def parse_coverage_logs(args, dtypes, suites, devices, compilers, output_dir):
     else:
         df = pd.concat(frames)
 
-    # Analysis number of graphs
-    num_models = len(df.index)
-    no_graph_breaks = (df.graphs == 1).sum()
-    perc = percentage(no_graph_breaks, num_models)
-
-    df_graphs = df[df.graphs != 1]
-    out_io.write("**Graph Breaks**\n")
-    out_io.write(f"Number of models = {num_models}\n")
-    out_io.write(f"Number of models with no graph breaks = {no_graph_breaks}\n")
-    out_io.write(f"Percentage of models with no graph breaks = {perc}%")
-
-    # Sort the dataframe and pretty print
-    title = f"{suite}_{dtype}_{mode}_{device}"
-    sorted_df = df_graphs.sort_values(by="graphs", ascending=False)
-    pp_dataframe(
-        sorted_df,
-        f"sorted_{title}_graph_breaks",
-        output_dir,
-        out_io=out_io,
-        draw_graph=False,
-    )
-    out_io.write("\n\n")
-
-    # Analysis start_latency
-    low_latency_models = (df.start_latency < 5.0).sum()
-    perc = percentage(low_latency_models, num_models)
-
-    df_high_latency = df[df.start_latency > 5]
-    out_io.write("**Start Latency - Rough approximation of compile latency**\n")
-    out_io.write(f"Number of models = {num_models}\n")
-    out_io.write(f"Number of models with low start latency = {low_latency_models}\n")
-    out_io.write(f"Percentage of models with low start latency = {perc}%")
-
-    # Sort the dataframe and pretty print
-    title = f"{suite}_{dtype}_{mode}_{device}"
-    sorted_df = df_high_latency.sort_values(by="graphs", ascending=False)
-    pp_dataframe(
-        sorted_df,
-        f"sorted_{title}_start_latency",
-        output_dir,
-        out_io=out_io,
-        draw_graph=False,
-    )
-    out_io.write("\n")
+    analyze_graph_breaks(df, out_io)
+    analyze_start_latency(df, out_io)
 
     print(out_io.getvalue())
     with open(f"{output_dir}/gh_coverage.txt", "w") as gh_fh:
@@ -392,6 +396,21 @@ def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
         if len(compilers) == 1:
             df = frames[0]
         else:
+            # Clean up batch sizes when its 0
+            batch_sizes = frames[0]["batch_size"].to_list()
+            for frame in frames[1:]:
+                frame_batch_sizes = frame["batch_size"].to_list()
+                for idx, (batch_a, batch_b) in enumerate(
+                    zip(batch_sizes, frame_batch_sizes)
+                ):
+                    assert batch_a == batch_b or batch_a == 0 or batch_b == 0, print(
+                        f"a={batch_a}, b={batch_b}"
+                    )
+                    batch_sizes[idx] = max(batch_a, batch_b)
+            for frame in frames:
+                frame["batch_size"] = batch_sizes
+
+            # Merge data frames
             df = pd.merge(frames[0], frames[1], on=["dev", "name", "batch_size"])
             for idx in range(2, len(frames)):
                 df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])

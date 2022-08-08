@@ -545,6 +545,8 @@ class InstructionTranslatorBase(object):
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
+        left = left.as_specialized(self)
+        right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_is_const = {
@@ -734,7 +736,12 @@ class InstructionTranslatorBase(object):
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        self.push(SliceVariable(items, **options))
+        self.push(
+            SliceVariable(
+                [x.as_specialized(self) for x in items],
+                **options,
+            )
+        )
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
