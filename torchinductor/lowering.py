@@ -767,7 +767,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.argmax)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -2249,7 +2248,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
         assert (
-            reduction_type in ("sum", "amax", "amin", "any") or axis is None
+            reduction_type in ("sum", "amax", "amin", "any", "argmax", "argmin")
+            or axis is None
         ), "TODO: max with index"
         if reduction_type == "any":
             x = to_dtype(x, torch.bool)
@@ -2448,6 +2448,8 @@ register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
+register_lowering(aten.argmax)(make_reduction("argmax"))
+register_lowering(aten.argmin)(make_reduction("argmin"))
 
 add = register_pointwise(aten.add)
 div = register_pointwise(aten.div)
