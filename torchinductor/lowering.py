@@ -1024,7 +1024,7 @@ def _local_scalar_dense(data):
 
 def _full(fill_value, device, dtype, size):
     value = fill_value
-    if not isinstance(fill_value, (int, float)):
+    if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
     assert isinstance(value, (int, float)), f"Expected int or float"
     return Pointwise.create(
