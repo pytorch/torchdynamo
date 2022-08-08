@@ -21,6 +21,7 @@ from sympy import Integer
 from . import config
 from . import dependencies
 from .codegen.autotuner import tuned_conv
+from .codegen.autotuner import tuned_mm
 from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
@@ -2131,14 +2132,11 @@ class InplaceBernoulliFallback(ExternKernel):
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+    def __init__(
+        self, layout, inputs, constant_args=(), output_view=None, kernel="aten.mm.out"
+    ):
         super().__init__(layout, inputs, constant_args, output_view)
-        if (
-            config.triton.use_mm
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_mm_out"
+        self.kernel = kernel
 
     @classmethod
     def create(cls, a, b):
@@ -2152,6 +2150,25 @@ class MatrixMultiply(ExternKernelOut):
         else:
             a = cls.require_stride1(a)
         b = cls.require_stride1(b)
+
+        # choose runtime kernel
+        config_mm = config.triton.mm
+        # default kernel is aten
+        kernel = "aten.mm.out"
+        if config_mm == "aten":
+            kernel = "aten.mm.out"
+        elif config_mm == "triton" and a.get_device().type == "cuda":
+            kernel = "triton_ops.matmul_out"
+        elif config_mm == "autotune":
+            kernel = tuned_mm(
+                a.get_size(),
+                b.get_size(),
+                a.get_stride(),
+                b.get_stride(),
+                a.get_device(),
+                a.get_dtype(),
+            )
+
         return MatrixMultiply(
             layout=FlexibleLayout(
                 device=a.get_device(),
@@ -2159,6 +2176,7 @@ class MatrixMultiply(ExternKernelOut):
                 size=list(m) + [n],
             ),
             inputs=[a, b],
+            kernel=kernel,
         )
 
     def map_args(self):

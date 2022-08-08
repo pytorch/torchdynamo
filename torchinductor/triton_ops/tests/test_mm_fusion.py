@@ -47,14 +47,14 @@ def test(shape, fusion_type="add"):
     else:
         mm_fusion = getattr(Func, f"mm_{fusion_type}")
     # torchinductor from template
-    torchinductor.config.triton.use_mm = True
+    torchinductor.config.triton.mm = "triton"
     torchinductor.metrics.reset()
     y = mm_fusion(a, b, bias)
     assert torchinductor.metrics.generated_kernel_count == 1, f"codegen #kernel != 1"
     # baseline
     # reset to force code gen new python code
     torchdynamo.reset()
-    torchinductor.config.triton.use_mm = False
+    torchinductor.config.triton.mm = "aten"
     y_correct = mm_fusion(a, b, bias)
     assert(same(y, y_correct, cos_similarity=True))
 

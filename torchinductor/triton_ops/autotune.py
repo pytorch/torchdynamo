@@ -288,9 +288,9 @@ def conv_heuristics():
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=4, num_warps=2
         ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
+        # triton.Config(
+        #     {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
+        # ),
     ]
     key = [
         "BATCH",

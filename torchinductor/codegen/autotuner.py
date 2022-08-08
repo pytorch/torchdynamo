@@ -14,13 +14,17 @@ triton_ops = torchinductor.triton_ops
 
 
 def str2func(str):
-    module, name = str.split(".")
+    module, *name = str.split(".")
     if module == "aten":
-        return getattr(aten, name)
+        runnable = aten
     elif module == "triton_ops":
-        return getattr(triton_ops, name)
+        runnable = triton_ops
     else:
         raise Exception(f"{str} could not be called")
+
+    for n in name:
+        runnable = getattr(runnable, n)
+    return runnable
 
 
 class Autotuner:
@@ -105,14 +109,12 @@ def tuned_conv(
         return kernel
     timings = {}
     if key not in autotune.cache:
-        # bench_start = time.time()
         for kernel in kernels:
             runnable_kernel = str2func(kernel)
             if "triton_ops" in kernel:
                 # because we use nhwc layout by default for triton conv
                 x = x.to(memory_format=torch.channels_last)
-            timing, _, _ = autotune._bench(
-                runnable_kernel,
+            run_args = (
                 x,
                 w,
                 None,
@@ -123,18 +125,78 @@ def tuned_conv(
                 output_padding,
                 groups,
             )
+            timing, _, _ = autotune._bench(runnable_kernel, *run_args)
+            if "triton_ops" in kernel:
+                timing = timing * adjust_triton
+            timings[kernel] = timing
+        autotune.cache[key] = builtins.min(timings, key=timings.get)
+        if torchinductor.config.debug:
+            print("for key = ", key)
+            print("timing", timings)
+            print("best_kernel", autotune.cache[key])
+    best_kernel = autotune.cache[key]
+    # if best_kernel == "triton_ops.conv":
+    #     print(key, best_kernel)
+    return best_kernel
+
+
+def tuned_mm(
+    a_shape,
+    b_shape,
+    a_stride,
+    b_stride,
+    device,
+    dtype,
+    adjust_triton=0.95,
+):
+    """
+    Return the best kernel name given mm input size;
+    Considering potential pointwise fusion of mm, we could adjust triton timing
+    by multiplying adjust_triton (default=0.95)
+    """
+
+    sizevars = V.graph.sizevars
+    a_shape = [sizevars.size_hint(s) for s in a_shape]
+    b_shape = [sizevars.size_hint(s) for s in b_shape]
+    a_stride = [sizevars.size_hint(s) for s in a_stride]
+    b_stride = [sizevars.size_hint(s) for s in b_stride]
+    a = rand_strided(a_shape, a_stride, device=device, dtype=dtype)
+    b = rand_strided(b_shape, b_stride, device=device, dtype=dtype)
+    c = torch.empty((a_shape[0], b_shape[1]), device=device, dtype=dtype)
+    id_args = [
+        *a_shape,
+        *b_shape,
+    ]
+    use_cuda = a.is_cuda
+
+    # gen_key
+    key = tuple([arg for arg in id_args])
+    key = ("mm",) + key
+
+    # candidate kernels
+    kernels = ["aten.mm.out"]
+    if use_cuda:
+        kernels += ["triton_ops.matmul_out"]
+    # if only one choice, return that kernel
+    if len(kernels) == 1:
+        kernel = kernels[0]
+        return kernel
+    run_args = (a, b, c)
+    timings = {}
+    if key not in autotune.cache:
+        # bench_start = time.time()
+        for kernel in kernels:
+            runnable_kernel = str2func(kernel)
+            timing, _, _ = autotune._bench(runnable_kernel, *run_args)
             if "triton_ops" in kernel:
                 timing = timing * adjust_triton
             timings[kernel] = timing
         # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        # if torchinductor.config.debug:
-        print("for key = ", key)
-        print("timing", timings)
-        print("best_kernel", autotune.cache[key])
+        if torchinductor.config.debug:
+            print("for key = ", key)
+            print("timing", timings)
+            print("best_kernel", autotune.cache[key])
     best_kernel = autotune.cache[key]
     return best_kernel
-    # return best_kernel(
-    #     x, w, stride, padding, dilation, transposed, output_padding, groups
-    # )
