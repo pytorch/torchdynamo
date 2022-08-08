@@ -5,8 +5,8 @@ from enum import Enum
 from typing import Optional
 from typing import Tuple
 
-import functorch._src.decompositions
 import torch
+import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch import Tensor
 from torch._decomp import get_decompositions
@@ -91,9 +91,7 @@ def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
-    return functorch._src.decompositions.register_decomposition(
-        ops, decompositions, disable_meta=True
-    )
+    return decomp.register_decomposition(ops, decompositions, disable_meta=True)
 
 
 @register_decomposition([aten.clamp])
