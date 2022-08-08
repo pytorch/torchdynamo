@@ -406,8 +406,7 @@ class Reduction(Loops):
             if (
                 reduction_numel_hint > 8192
                 and numel_hint == 1
-                and reduction_type != "argmax"
-                and reduction_type != "argmin"
+                and reduction_type not in {"argmax", "argmin"}
             ):
                 # triton doesn't support reduce to single element well, so break it up
                 split = 128

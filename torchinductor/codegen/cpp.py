@@ -39,9 +39,9 @@ def reduction_init(reduction_type, dtype):
     if reduction_type in ("sum", "any"):
         return 0
     # TODO(jansel): infinity for floats?
-    if reduction_type == "max" or reduction_type == "argmax":
+    if reduction_type in {"max", "argmax"}:
         return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
-    if reduction_type == "min" or reduction_type == "argmin":
+    if reduction_type in {"min", "argmin"}:
         return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
     assert False, reduction_type
 
@@ -51,10 +51,6 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} += {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
-    if reduction_type == "argmax":
-        return f"{var}_best = std::max({var}.value, {next_value})"
-    if reduction_type == "argmin":
-        return f"{var}_best = std::min({var}.value, {next_value})"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
 
 
@@ -313,7 +309,7 @@ class CppKernel(Kernel):
         self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, reduction_type, index, value):
-        argmax_or_argmin = reduction_type == "argmax" or reduction_type == "argmin"
+        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
         tmpvar = self.cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
         )

@@ -723,16 +723,16 @@ class TritonKernel(Kernel):
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
             )
             accumulator_index = None
-            if reduction_type == "argmax" or reduction_type == "argmin":
+            if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
                 self.body.writeline(
                     f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int32)"
                 )
 
             updated = value
-            if reduction_type == "min" or reduction_type == "argmin":
+            if reduction_type in {"min", "argmin"}:
                 masks.append(f"({accumulator} > {value})")
-            elif reduction_type == "max" or reduction_type == "argmax":
+            elif reduction_type in {"max", "argmax"}:
                 masks.append(f"({accumulator} < {value})")
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
