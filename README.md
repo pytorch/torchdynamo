@@ -60,26 +60,86 @@ python setup.py develop
 
 ## Usage Example
 
-Here is a basic example of how to use TorchDynamo:
+
+Here is a basic example of how to use TorchDynamo. One can decorate a function
+using `torchdynamo.optimize` to enable TorchDynamo optimization.
+
 ```py
-from typing import List
 import torch
 import torchdynamo
-
-def toy_example(a, b):
-    x = a / (torch.abs(a) + 1)
-    if b.sum() < 0:
-        b = b * -1
-    return x * b
 
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     print("my_compiler() called with FX graph:")
     gm.graph.print_tabular()
     return gm.forward  # return a python callable
 
-with torchdynamo.optimize(my_compiler):
-    for _ in range(100):
-        toy_example(torch.randn(10), torch.randn(10))
+@torchdynamo.optimize(my_compiler)
+def fn(x, y):
+    a = torch.cos(x)
+    b = torch.sin(y)
+    return a + b
+
+fn(torch.randn(10), torch.randn(10))
+```
+
+Running the above example produces this output
+
+```
+my_compiler() called with FX graph:
+opcode         name    target                                                  args        kwargs
+-------------  ------  ------------------------------------------------------  ----------  --------
+placeholder    x       x                                                       ()          {}
+placeholder    y       y                                                       ()          {}
+call_function  cos     <built-in method cos of type object at 0x7f1a894649a8>  (x,)        {}
+call_function  sin     <built-in method sin of type object at 0x7f1a894649a8>  (y,)        {}
+call_function  add     <built-in function add>                                 (cos, sin)  {}
+output         output  output                                                  ((add,),)   {}
+```
+
+This works for `torch.nn.Module` as well as shown below
+
+```py
+import torch
+import torchdynamo
+
+class MockModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(torch.cos(x))
+
+mod = MockModule()
+optimized_mod = torchdynamo.optimize(my_compiler)(mod)
+optimized_mod(torch.randn(10))
+```
+
+In the above examples, TorchDynamo uses a custom compiler `my_compiler` that
+just prints the Fx GraphModule extracted by TorchDynamo's bytecode analysis, and
+returns the `forward` callable. One could write new compilers in a similar
+fashion.
+
+Let's take a look at one more example with control flow.
+```py
+from typing import List
+import torch
+import torchdynamo
+
+def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    print("my_compiler() called with FX graph:")
+    gm.graph.print_tabular()
+    return gm.forward  # return a python callable
+
+@torchdynamo.optimize(my_compiler)
+def toy_example(a, b):
+    x = a / (torch.abs(a) + 1)
+    if b.sum() < 0:
+        b = b * -1
+    return x * b
+
+for _ in range(100):
+    toy_example(torch.randn(10), torch.randn(10))
 ```
 
 Running this example produces the following output:
