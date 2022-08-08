@@ -14,9 +14,11 @@ from .. import variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..utils import check_constant_args
+from ..utils import check_unspec_python_args
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
 
@@ -94,12 +96,14 @@ class TorchVariable(VariableTracker):
         from . import TensorVariable
 
         constant_args = check_constant_args(args, kwargs)
+        unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
-        elif self.can_constant_fold_through() and constant_args:
+        elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return ConstantVariable(
                 self.as_python_constant()(

@@ -416,6 +416,32 @@ def check_constant_args(args, kwargs):
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
 
+def check_unspec_python_args(args, kwargs):
+    from .variables.constant import ConstantVariable
+    from .variables.tensor import UnspecializedPythonVariable
+
+    unspec_count = 0
+    for x in itertools.chain(args, kwargs.values()):
+        if isinstance(x, UnspecializedPythonVariable):
+            unspec_count += 1
+        elif not isinstance(x, (UnspecializedPythonVariable, ConstantVariable)):
+            return False
+        else:
+            pass
+
+    return unspec_count > 0
+
+
+def specialize_args_kwargs(tx, args, kwargs):
+    specialized_args = []
+    specialized_kwargs = {}
+    for x in args:
+        specialized_args.append(x.as_specialized(tx))
+    for k, v in kwargs:
+        specialized_kwargs.update({k: x.as_specialized(tx)})
+    return specialized_args, specialized_kwargs
+
+
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
 tuple_iterator = type(iter(tuple()))

@@ -14,6 +14,7 @@ import torch
 
 import torchdynamo
 
+from .. import config
 from .. import mutation_guard
 from .. import skipfiles
 from ..allowed_functions import is_allowed
@@ -24,6 +25,7 @@ from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
+from ..source import GlobalSource
 from ..source import GlobalWeakRefSource
 from ..source import RandomValueSource
 from ..source import Source
@@ -105,6 +107,36 @@ class VariableBuilder:
             # TODO(jansel): add guard for alias relationship
             return self.tx.output.side_effects[value]
         return self._wrap(value).clone(**self.options())
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _common_constants():
+        return set(range(17)).union(
+            {
+                20,
+                30,
+                40,
+                32,
+                64,
+                96,
+                128,
+                144,
+                240,
+                256,
+                672,
+                1024,
+                2048,
+                4096,
+                0.1,
+                0.01,
+                0.001,
+                0.5,
+                0.05,
+                800,
+                1.873536229133606,
+                4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
+            }
+        )
 
     @staticmethod
     def list_type(value):
@@ -227,11 +259,29 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            # For these, just specialize on exact value
-            return ConstantVariable(
-                value=value,
-                guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-            )
+            if type(value) in (int, float) and not config.specialize_int_float:
+                # unspecializing int/float by default, but still
+                # specialize for the following conditions
+                if (
+                    value in self._common_constants()
+                    or isinstance(self.source, GlobalSource)
+                    or isinstance(self.source, GetItemSource)
+                    or (
+                        isinstance(self.source, AttrSource)
+                        and isinstance(self.source.base, GlobalSource)
+                    )
+                ):
+                    return ConstantVariable(
+                        value=value,
+                        guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
+                else:
+                    return self.wrap_unspecialized_primitive(value)
+            else:
+                return ConstantVariable(
+                    value=value,
+                    guards=make_guards(GuardBuilder.CONSTANT_MATCH),
+                )
         elif isinstance(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
@@ -371,35 +421,41 @@ class VariableBuilder:
             return tensor_variable
 
     def wrap_unspecialized_primitive(self, value):
-        wrapped_value = torch.tensor(value)
-        self.tx.output.graphargs.append(
-            GraphArg(self.get_source(), wrapped_value, True)
-        )
-        if not isinstance(self.get_source(), RandomValueSource):
-            guards_options = {"guards": self.make_guards(GuardBuilder.TYPE_MATCH)}
+        if self.name in self.tx.output.unspec_variable_map:
+            return self.tx.output.unspec_variable_map[self.name]
         else:
-            guards_options = {}
-
-        proxy = self.tx.output.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
-        )
-
-        if isinstance(value, np.number):
-            return UnspecializedNumpyVariable.create(
-                tx=self.tx,
-                proxy=proxy,
-                example_value=wrapped_value,
-                raw_value=value,
-                **guards_options,
+            wrapped_value = torch.tensor(value)
+            self.tx.output.graphargs.append(
+                GraphArg(self.get_source(), wrapped_value, True)
             )
-        else:
-            return UnspecializedPythonVariable.create(
-                tx=self.tx,
-                proxy=proxy,
-                example_value=wrapped_value,
-                raw_value=value,
-                **guards_options,
+            if not isinstance(self.get_source(), RandomValueSource):
+                guards = {self.get_source().create_guard(GuardBuilder.TYPE_MATCH, True)}
+                options = {"guards": guards}
+            else:
+                options = {}
+            options.update({"source": self.get_source()})
+            options.update({"raw_value": value})
+
+            proxy = self.tx.output.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
+
+            if isinstance(value, np.number):
+                unspec_var = UnspecializedNumpyVariable.create(
+                    tx=self.tx,
+                    proxy=proxy,
+                    example_value=wrapped_value,
+                    **options,
+                )
+            else:
+                unspec_var = UnspecializedPythonVariable.create(
+                    tx=self.tx,
+                    proxy=proxy,
+                    example_value=wrapped_value,
+                    **options,
+                )
+            self.tx.output.unspec_variable_map[self.name] = unspec_var
+            return unspec_var
 
 
 def _dataclasses_fields_lambda(obj):

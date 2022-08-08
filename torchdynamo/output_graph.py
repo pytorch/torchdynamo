@@ -88,6 +88,7 @@ class OutputGraph(fx.Tracer):
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
+        self.unspec_variable_map = {}
 
     @property
     def output(self):
