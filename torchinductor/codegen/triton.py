@@ -156,6 +156,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
+    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
+        return f"tl.randn({seed}, {offset})"
+
+    @staticmethod
+    def pow(a, b):
+        return f"tl.libdevice.pow({a}, {b})"
+
+    @staticmethod
     def log(x):
         if has_triton_libdevice():
             return f"tl.libdevice.log({x}) if {x}.dtype is tl.float64 else tl.log({x})"
@@ -444,7 +452,8 @@ class TritonKernel(Kernel):
     def disable_reduction(self):
         @contextlib.contextmanager
         def ctx():
-            if not self.inside_reduction:
+            if self.numels[-1] == 1:
+                assert not self.inside_reduction
                 yield
                 return
             # calling codegen_body() will flush all the pending buffers
@@ -452,6 +461,8 @@ class TritonKernel(Kernel):
             self.codegen_body()
             self.inside_reduction = False
             yield
+            # flush out any code before opening the next loop
+            self.codegen_body()
             self.inside_reduction = True
 
         return ctx()
@@ -707,6 +718,10 @@ class TritonKernel(Kernel):
             masks.append(self._load_mask)
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
         sizes[-1] = "1"
+        reduction_range_prefix = self.range_trees[-1].prefix
+        reduction_sizes = ["1" for _ in self.range_trees]
+        reduction_sizes[-1] = f"{reduction_range_prefix.upper()}BLOCK"
+
         if reduction_type == "any":
             reduction_type = "max"
 
@@ -718,11 +733,17 @@ class TritonKernel(Kernel):
             self.body.writeline(
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
             )
+            accumulator_index = None
+            if reduction_type in {"argmax", "argmin"}:
+                accumulator_index = f"_{result_var}_index"
+                self.body.writeline(
+                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int32)"
+                )
 
             updated = value
-            if reduction_type == "min":
+            if reduction_type in {"min", "argmin"}:
                 masks.append(f"({accumulator} > {value})")
-            elif reduction_type == "max":
+            elif reduction_type in {"max", "argmax"}:
                 masks.append(f"({accumulator} < {value})")
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
@@ -730,13 +751,32 @@ class TritonKernel(Kernel):
                 raise NotImplementedError(f"reduction_type {reduction_type}")
 
             cond = " & ".join(masks)
+
+            if accumulator_index:
+                # argmax or argmin
+                self.compute.writeline(
+                    f"{accumulator_index} = tl.where({cond},  {reduction_range_prefix}index, {accumulator_index})",
+                )
             self.compute.writeline(
                 f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
             )
 
-            self.suffix.writeline(
-                f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
-            )
+            if accumulator_index:
+                # argmax, argmin
+                self.suffix.writelines(
+                    [
+                        f"{accumulator_index}_reduce = tl.reshape(",
+                        f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
+                        f"{accumulator_index}_mask = (tl.reshape(tl.arange(0, {reduction_range_prefix.upper()}BLOCK),",
+                        f"\t[{', '.join(reduction_sizes)}]) == {accumulator_index}_reduce)",
+                        f"{result_var} = tl.reshape(tl.sum(",
+                        f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
+                    ]
+                )
+            else:
+                self.suffix.writeline(
+                    f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+                )
         else:
             var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")

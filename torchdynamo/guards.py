@@ -81,6 +81,7 @@ class Guard:
     name: str
     source: GuardSource
     create_fn: Callable
+    is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
     guard_types: Optional[List[str]] = None

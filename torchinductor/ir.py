@@ -403,7 +403,11 @@ class Reduction(Loops):
         if is_triton(device):
             reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
             numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-            if reduction_numel_hint > 8192 and numel_hint == 1:
+            if (
+                reduction_numel_hint > 8192
+                and numel_hint == 1
+                and reduction_type not in {"argmax", "argmin"}
+            ):
                 # triton doesn't support reduce to single element well, so break it up
                 split = 128
                 return cls.create_multilayer(
@@ -429,9 +433,14 @@ class Reduction(Loops):
 
     @staticmethod
     def default_value(reduction_type, dtype):
-        return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
-            reduction_type
-        ]
+        return {
+            "sum": 0,
+            "max": float("-inf"),
+            "min": float("inf"),
+            "any": 0,
+            "argmax": float("-inf"),
+            "argmin": float("inf"),
+        }[reduction_type]
 
     @classmethod
     def create_multilayer(

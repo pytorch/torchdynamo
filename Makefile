@@ -9,8 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220710
-FUNCTORCH_VERSION ?= 9b96f14e65ffdf64a28416054fe536ed14297fe9
+PYTORCH_VERSION ?= dev20220807
 TRITON_VERSION ?= 5b04331dd2efdd23f4475823761fa975de60a514
 
 
@@ -52,7 +51,7 @@ setup:
 setup_nightly:
 	$(PIP) install ninja
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-	$(PIP) install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
+	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -r requirements.txt
 	python setup.py develop
 
@@ -64,7 +63,7 @@ setup_nightly_gpu:
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu113
 	$(PIP) install ninja
-	$(PIP) install -v "git+https://github.com/pytorch/functorch.git@$(FUNCTORCH_VERSION)"
+	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
 	python setup.py develop
@@ -76,7 +75,6 @@ clean:
 clone-deps:
 	(cd .. \
 		&& (test -e pytorch || git clone --recursive https://github.com/pytorch/pytorch pytorch) \
-		&& (test -e functorch || git clone --recursive https://github.com/pytorch/functorch) \
 		&& (test -e torchvision || git clone --recursive https://github.com/pytorch/vision torchvision) \
 		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
 		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
@@ -87,7 +85,6 @@ clone-deps:
 
 pull-deps:
 	(cd ../pytorch        && git pull && git submodule update --init --recursive)
-	(cd ../functorch      && git pull && git submodule update --init --recursive)
 	(cd ../torchvision    && git pull && git submodule update --init --recursive)
 	(cd ../torchtext      && git pull && git submodule update --init --recursive)
 	(cd ../torchaudio     && git pull && git submodule update --init --recursive)
@@ -110,7 +107,7 @@ build-deps: clone-deps
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
 	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
-	(cd ../functorch   && python setup.py clean && python setup.py develop)
+	(cd ../pytorch/functorch   && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py --continue_on_fail)
 	(cd ../triton/python && python setup.py clean && python setup.py develop)
 	make setup_lint

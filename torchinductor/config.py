@@ -41,6 +41,9 @@ aot_autograd = True
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
+# Enables a fusion pass that groups nodes together before the scheduler
+prefuse_nodes = True
+
 
 # config specific to codegen/cpp.pp
 class cpp:
