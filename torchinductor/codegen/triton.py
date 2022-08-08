@@ -159,7 +159,6 @@ class TritonOverrides(OpOverrides):
     def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
         return f"tl.randn({seed}, {offset})"
 
-
     @staticmethod
     def log(x):
         if has_triton_libdevice():
