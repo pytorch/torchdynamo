@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import logging
 from typing import Dict
 from typing import List
 
@@ -10,6 +11,8 @@ from sympy import Integer
 from sympy import Symbol
 
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -278,7 +281,13 @@ class SizeVarAllocator(object):
         for v in index.free_symbols:
             if str(v).startswith("indirect"):
                 index = index.subs({v: 0})
-        return [self.size_hint(s) for s in self.stride_vars(index, vars)]
+        result = []
+        for s in self.stride_vars(index, vars):
+            try:
+                result.append(self.size_hint(s))
+            except TypeError:
+                result.append(0)
+        return result
 
     def stride_order(self, index: sympy.Expr, vars: List[sympy.Symbol]):
         strides = tuple(map(abs, self.stride_hints(index, vars)))

@@ -299,6 +299,10 @@ class DeferredIndentedBuffer(IndentedBuffer):
         assert "buf" in name
         return super().writeline(DeferredLine(name, line))
 
+    def writelines(self, name, lines):
+        for line in lines:
+            self.writeline(name, line)
+
 
 class BracesBuffer(IndentedBuffer):
     def indent(self, offset=1):
@@ -620,8 +624,7 @@ class Kernel(CodeGen):
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
-        index = sympy.expand(index)
-        index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
+        index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)

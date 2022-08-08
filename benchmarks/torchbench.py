@@ -298,6 +298,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             model.eval()
         gc.collect()
+        batch_size = benchmark.batch_size
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name

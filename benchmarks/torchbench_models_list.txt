@@ -23,4 +23,4 @@ timm_regnet,64
 timm_resnest,256
 timm_vision_transformer,256
 timm_vovnet,128
-vgg16,256
+vgg16,128
