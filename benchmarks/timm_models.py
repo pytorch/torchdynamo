@@ -29,8 +29,6 @@ finally:
     from timm.data import resolve_data_config
     from timm.models import create_model
 
-SKIP = set()
-
 TIMM_MODELS = dict()
 filename = "timm_models_list.txt"
 if os.path.exists("benchmarks"):
@@ -248,7 +246,7 @@ class TimmRunnner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
 

@@ -1201,9 +1201,18 @@ def main(runner, original_dir=None):
         # OOM errors on an RTX 3090 with 24gb RAM
         runner.skip_models.update(
             {
+                # torchbench
                 "hf_Longformer",
                 "timm_nfnet",
                 "timm_efficientdet",
+                # timm
+                "beit_base_patch16_224",
+                "cait_m36_384",
+                "convmixer_768_32",
+                "deit_base_distilled_patch16_224",
+                "dm_nfnet_f0",
+                "dpn107",
+                "dm_nfnet_f0",
             }
         )
         if args.training:
