@@ -3,7 +3,7 @@ LearningToPaint,1024
 alexnet,1024
 dcgan,1024
 densenet121,64
-hf_Albert,16
+hf_Albert,32
 hf_Bart,16
 hf_Bert,16
 hf_GPT2,16
@@ -19,7 +19,7 @@ resnext50_32x4d,128
 shufflenet_v2_x1_0,512
 squeezenet1_1,512
 timm_efficientnet,128
-timm_regnet,64
+timm_regnet,128
 timm_resnest,256
 timm_vision_transformer,256
 timm_vovnet,128
