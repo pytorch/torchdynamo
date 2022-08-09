@@ -1423,7 +1423,7 @@ def index_put_(self, indices, values, accumulate=False):
         output_indexer=output_indexer,
         scatter_mode="atomic_add" if accumulate else None,
     )
-    buffer = ir.ComputedBuffer(
+    buffer = ir.ComputedBuffer.create(
         None,
         ir.MutationLayout(self),
         scatter,
@@ -1510,7 +1510,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             output_indexer=output_indexer,
             scatter_mode=None,
         )
-        buffer = ir.ComputedBuffer(
+        buffer = ir.ComputedBuffer.create(
             None,
             ir.MutationLayout(self),
             zero_out,
@@ -1528,7 +1528,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         output_indexer=output_indexer,
         scatter_mode=backend_reduce_str(reduce),
     )
-    buffer = ir.ComputedBuffer(
+    buffer = ir.ComputedBuffer.create(
         None,
         ir.MutationLayout(self),
         scatter,

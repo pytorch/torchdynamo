@@ -220,6 +220,12 @@ class IRNode(object):
             self.origins = set()
         
         self.origins.add(node)
+    
+    @staticmethod
+    def associate_origin_from_lowerings(x):
+        from torchinductor import lowering
+        if lowering.current_origin is not None:
+            x.associate_origin(lowering.current_origin)
 
 
 @dataclasses.dataclass
@@ -1504,6 +1510,12 @@ class NoneAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    @classmethod
+    def create(cls, name, layout, data):
+        cb = ComputedBuffer(name=name, layout=layout, data=data)
+        IRNode.associate_origin_from_lowerings(cb)
+        return cb
+
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
@@ -1893,6 +1905,8 @@ class ConcatKernel(NopKernel):
             )
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+
+        IRNode.associate_origin_from_lowerings(kernel)
         return kernel
 
     @classmethod
@@ -2423,6 +2437,8 @@ class FallbackKernel(ExternKernelAlloc):
         if self.kernel not in ("aten.convolution_backward",):
             log.warning(f"Using FallbackKernel: {self.kernel}")
 
+        IRNode.associate_origin_from_lowerings(self)
+
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -2855,12 +2871,9 @@ class MutableBox(IRNode):
 class TensorBox(MutableBox):
     @staticmethod
     def create(data):
-        from torchinductor import lowering
         tb = TensorBox(StorageBox(data))
-
         # TensorBox types created in lowering will have an originating node associate with them
-        if lowering.current_origin is not None:
-            tb.associate_origin(lowering.current_origin)
+        IRNode.associate_origin_from_lowerings(tb)
         return tb
 
 
@@ -2871,7 +2884,7 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
-        self.data = ComputedBuffer(
+        self.data = ComputedBuffer.create(
             name=None,
             layout=FlexibleLayout(
                 device=self.data.get_device(),
@@ -2915,7 +2928,7 @@ class StorageBox(MutableBox):
             read_writes = data.get_read_writes()
         else:
             assert isinstance(data, (Pointwise, Reduction)), type(data)
-            read_writes = ComputedBuffer(
+            read_writes = ComputedBuffer.create(
                 name=None,
                 layout=FlexibleLayout(
                     device=data.get_device(),
