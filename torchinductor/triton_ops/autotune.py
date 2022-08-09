@@ -5,6 +5,7 @@ from triton import Config
 from triton import cdiv
 from triton import heuristics
 from triton import next_power_of_2
+from triton.ops.matmul import get_configs_io_bound
 from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
 
 from torchinductor import config
@@ -332,7 +333,7 @@ def mm_heuristics():
     return mm_heuristic
 
 
-def mm_autotune():
+def mm_autotune(get_io_bound_configs=False):
     configs = [
         # basic configs for compute-bound matmuls
         triton.Config(
@@ -427,8 +428,8 @@ def mm_autotune():
             num_warps=2,
         ),
     ]
-    # Do not allow SPLIT_K > 1, otherwise, the fusable add-pointwise kernels will be added multiple times
-    # + get_configs_io_bound(),
+    if get_io_bound_configs:
+        configs += get_configs_io_bound()
     key = ["M", "N", "K"]
     prune_configs_by = {
         "early_config_prune": mm_early_config_prune,
