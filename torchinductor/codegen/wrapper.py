@@ -208,8 +208,12 @@ class WrapperCodeGen(CodeGen):
                 )
 
             if config.triton.mm != "aten":
-                self.header.writeline(
-                    "from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
+                self.header.splice(
+                    #"from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
+                    """
+                    from torchinductor.triton_ops.autotune import mm_heuristics
+                    from torchinductor.triton_ops.autotune import mm_autotune
+                    """
                 )
 
             if config.triton.use_bmm:
