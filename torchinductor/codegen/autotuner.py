@@ -6,9 +6,9 @@ import triton
 import torchinductor
 import torchinductor.triton_ops
 from torchdynamo.testing import rand_strided
+
 from ..triton_ops.autotune import mm_autotune
 from ..triton_ops.autotune import mm_heuristics
-
 from ..virtualized import V
 
 aten = torch.ops.aten
@@ -191,7 +191,9 @@ def tuned_mm(
             if "triton_ops" in kernel:
                 run_args = (a, b, c)
                 run_kwargs = {}
-                inner_kernel = str2func(kernel.replace("matmul_out", "_matmul_out")+".kernel")
+                inner_kernel = str2func(
+                    kernel.replace("matmul_out", "_matmul_out") + ".kernel"
+                )
                 inner_kernel.kernel_decorators = []
                 # fix SPLIT_K = 1 for fusable kernels
                 mm_heuristics()(mm_autotune(get_io_bound_configs=False)(inner_kernel))

@@ -1,8 +1,10 @@
 import torch
 import triton
 import triton.language as tl
+
 from .autotune import mm_autotune
 from .autotune import mm_heuristics
+
 
 @mm_heuristics()
 @mm_autotune(get_io_bound_configs=True)
@@ -123,9 +125,9 @@ class _matmul_out:
             ACC_TYPE=ACC_TYPE,
         )
 
-
     @staticmethod
     def forward(a, b, out):
         return _matmul_out._call(a, b, out)
+
 
 matmul_out = _matmul_out.forward
