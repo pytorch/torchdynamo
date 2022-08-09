@@ -20,8 +20,6 @@ from sympy import Integer
 
 from . import config
 from . import dependencies
-from .codegen.autotuner import tuned_conv
-from .codegen.autotuner import tuned_mm
 from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
@@ -2160,6 +2158,7 @@ class MatrixMultiply(ExternKernelOut):
         elif config_mm == "triton" and a.get_device().type == "cuda":
             kernel = "triton_ops.matmul_out"
         elif config_mm == "autotune":
+            from .codegen.autotuner import tuned_mm
             kernel = tuned_mm(
                 a.get_size(),
                 b.get_size(),
@@ -2640,6 +2639,7 @@ class Convolution(ExternKernelAlloc):
             kernel = "triton_ops.conv"
         else:
             assert config_conv == "autotune"
+            from .codegen.autotuner import tuned_conv
             # kernel = "tuned_conv"
             kernel = tuned_conv(
                 x.get_size(),
