@@ -388,7 +388,11 @@ def run(fn=None):
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
         assert callable(fn)
-        return RunOnlyContext()(fn)
+        callable_fn = fn
+        # Check if the function is a result of torchdynamo.optimize decorator.
+        if inspect.getattr_static(fn, "_torchdynamo_inline", False):
+            callable_fn = fn._torchdynamo_inline
+        return RunOnlyContext()(callable_fn)
     return RunOnlyContext()
 
 
