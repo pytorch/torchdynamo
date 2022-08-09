@@ -1039,6 +1039,24 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts3.frame_count, 1)
         self.assertEqual(cnts3.op_count, 4)
 
+    def test_nested_optimize_run(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts, nopython=True)
+        def fn(x):
+            return torch.relu(torch.cos(x) + torch.sin(x))
+
+        fn(torch.randn(4))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 4)
+
+        fn(torch.randn(5))
+        self.assertEqual(cnts.frame_count, 2)
+
+        fn = torchdynamo.run(fn)
+        fn(torch.randn(6))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_nested_disable_decorator(self):
         cnts = torchdynamo.testing.CompileCounter()
 
