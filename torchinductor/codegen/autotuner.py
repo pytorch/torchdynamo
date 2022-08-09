@@ -181,22 +181,27 @@ def tuned_mm(
     if len(kernels) == 1:
         kernel = kernels[0]
         return kernel
-    run_args = (a, b, c)
     timings = {}
     if key not in autotune.cache:
         # bench_start = time.time()
         for kernel in kernels:
             runnable_kernel = str2func(kernel)
-            timing, _, _ = autotune._bench(runnable_kernel, *run_args)
+            if "triton_ops" in kernel:
+                run_args = (a, b, c)
+                run_kwargs = {}
+            else:
+                run_args = (a, b)
+                run_kwargs = {"out": c}
+            timing, _, _ = autotune._bench(runnable_kernel, *run_args, **run_kwargs)
             if "triton_ops" in kernel:
                 timing = timing * adjust_triton
             timings[kernel] = timing
         # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        if torchinductor.config.debug:
-            print("for key = ", key)
-            print("timing", timings)
-            print("best_kernel", autotune.cache[key])
+        # if torchinductor.config.debug:
+        print("for key = ", key)
+        print("timing", timings)
+        print("best_kernel", autotune.cache[key])
     best_kernel = autotune.cache[key]
     return best_kernel
