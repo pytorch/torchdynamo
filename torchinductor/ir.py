@@ -2159,6 +2159,7 @@ class MatrixMultiply(ExternKernelOut):
             kernel = "triton_ops.matmul_out"
         elif config_mm == "autotune":
             from .codegen.autotuner import tuned_mm
+
             kernel = tuned_mm(
                 a.get_size(),
                 b.get_size(),
@@ -2640,6 +2641,7 @@ class Convolution(ExternKernelAlloc):
         else:
             assert config_conv == "autotune"
             from .codegen.autotuner import tuned_conv
+
             # kernel = "tuned_conv"
             kernel = tuned_conv(
                 x.get_size(),
