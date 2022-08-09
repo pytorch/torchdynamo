@@ -375,7 +375,8 @@ class Functionalization(Transformer):
         if not issubclass(n.meta["type"], torch.Tensor):
             counters["nontensor"][long_name(self.module, n)] += 1
 
-        result = getattr(self, n.op)(target, args, kwargs)
+        with self._set_current_node(n):
+            result = getattr(self, n.op)(target, args, kwargs)
 
         for patch in patches:
             assert isinstance(
