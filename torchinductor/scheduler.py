@@ -18,6 +18,7 @@ from . import config
 from . import dependencies
 from . import ir
 from .codegen.triton_template import template_codegen
+from .codegen.triton import TritonScheduling
 from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
@@ -389,19 +390,20 @@ class FusedSchedulerNode(BaseSchedulerNode):
     its unmet dependencies as the union of its constituent nodes.
     """
 
-    def __init__(self, scheduler: "Scheduler", snodes):
+    def __init__(self, scheduler: "Scheduler", snodes, group):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
+        for snode in self.snodes:
+            snode.intended_group = group
         self.scheduler = scheduler
         self.node = None
         self.users = None
         self.inverse_users = []
         node = snodes[0].node
-        self.group = snodes[0].group
+        self.group = group
         reads = set(self.snodes[0].read_writes.reads)
         for node in snodes[1:]:
             reads |= node.read_writes.reads
-            assert self.group == node.group
         node_bufs = set([node.get_name() for node in snodes])
         reads = [read for read in reads if read.name not in node_bufs]
         # self.read_writes field shouldn't really be needed for much, but it's
@@ -419,6 +421,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             node.prune_deps()
         super().prune_deps()
+
+    def get_priority(self):
+        if self.group[1][1] != 1:
+            return 200
+        else:
+            return 100
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -452,8 +460,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def can_free(self):
         raise NotImplementedError
 
-    def get_priority(self):
-        raise NotImplementedError()
 
     def can_remove_buffer(self, check_group):
         raise NotImplementedError
@@ -625,10 +631,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             group = node_type
         elif isinstance(snode, SchedulerNode):
             node_type = "compute"
-            group = snode.group[1]
+            group = snode.group
         elif isinstance(snode, FusedSchedulerNode):
             node_type = "fused"
-            group = snode.group[1]
+            group = snode.group
         else:
             raise RuntimeError("Unknown node type")
         node_func = func_dict[node_type]
@@ -677,7 +683,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 
 # TODO: Make this support pre-fusing reductions
-def prefuse_nodes(snodes: List[BaseSchedulerNode]):
+def prefuse_nodes(scheduler, snodes: List[BaseSchedulerNode]):
     """
     Groups together fusible scheduler nodes into a FusedSchedulerNode
     Note: O(N^2) asymptotics
@@ -725,13 +731,45 @@ def prefuse_nodes(snodes: List[BaseSchedulerNode]):
         a.args = tuple((set(a.args) | set(b.args)) - set([a, b]))
         b.replace_all_uses_with(a)
         a.meta["fusion_meta"].snodes.extend(b.meta["fusion_meta"].snodes)
-        a.meta["fusion_meta"]._replace(type="fused")
+        a.meta["fusion_meta"] = a.meta["fusion_meta"]._replace(type="fused")
         a.name = a.name + "_" + b.name
         graph.erase_node(b)
         return a
 
-    def is_fusible(groupA, groupB):
-        return groupA == groupB
+    def get_fusion_group(metaA, metaB):
+        groupA = metaA.group
+        groupB = metaB.group
+        if groupA == groupB:
+            return groupA
+        groupA = groupA[1]
+        groupB = groupB[1]
+        is_a_reduction = groupA[1] != 1
+        is_b_reduction = groupB[1] != 1
+
+        if is_a_reduction == is_b_reduction:
+            return None
+
+        if is_b_reduction and not is_a_reduction:
+            groupA, groupB = groupB, groupA
+            metaA, metaB = metaB, metaA
+
+        assert groupB[1] == 1
+        a_pw_numel, reduction_numel = groupA
+        b_pw_numel, _ = groupB
+
+        if a_pw_numel * reduction_numel == b_pw_numel:
+            tilings = [TritonScheduling.select_node_tiling(snode) for snode in metaB.snodes]
+            if len(tilings) > 1:
+                breakpoint()
+            tiling = tilings[0]
+            if tiling and tiling != (a_pw_numel, reduction_numel):
+                return None
+            return metaA.group
+
+        if a_pw_numel == b_pw_numel:
+            return metaA.group
+
+        return None
 
     def fusion_weight(nodeA, nodeB):
         shared_reads = len(set(nodeA.args) & set(nodeB.args))
@@ -752,13 +790,11 @@ def prefuse_nodes(snodes: List[BaseSchedulerNode]):
     fusion_opportunities = []
     for idx, nodeA in enumerate(fusible_nodes):
         for nodeB in fusible_nodes[idx + 1 :]:
+            fusion_group = get_fusion_group(nodeA.meta["fusion_meta"], nodeB.meta["fusion_meta"])
             if (
-                is_fusible(
-                    nodeA.meta["fusion_meta"].group, nodeB.meta["fusion_meta"].group
-                )
-                and fusion_weight(nodeA, nodeB) > 0
+                fusion_group is not None and fusion_weight(nodeA, nodeB) > 0
             ):
-                fusion_opportunities.append([fusion_weight(nodeA, nodeB), nodeA, nodeB])
+                fusion_opportunities.append([fusion_weight(nodeA, nodeB), nodeA, nodeB, fusion_group])
 
     # NB: Python sort is stable, so this is deterministic
     fusion_opportunities = sorted(
@@ -769,13 +805,14 @@ def prefuse_nodes(snodes: List[BaseSchedulerNode]):
 
     # We greedily fuse nodes in the order of the fusion opportunities, using a
     # DSU to track which nodes are fused.
-    for _, a, b in fusion_opportunities:
+    for _, a, b, fusion_group in fusion_opportunities:
         a = nodes[mapping.find(a.order)]
         b = nodes[mapping.find(b.order)]
         if a == b:
             continue
-        if not will_create_cycle(a, b):
+        if not will_create_cycle(a, b) and get_fusion_group(a.meta["fusion_meta"], b.meta["fusion_meta"]) == fusion_group:
             fused_node = fuse_nodes(a, b)
+            fused_node.meta["fusion_meta"] = fused_node.meta["fusion_meta"]._replace(group=fusion_group)
             nodes[mapping.find(a.order)] = fused_node
             nodes[mapping.find(b.order)] = fused_node
             mapping.union(a.order, b.order)
@@ -791,7 +828,8 @@ def prefuse_nodes(snodes: List[BaseSchedulerNode]):
             if len(snode) == 1:
                 new_snodes.append(snode[0])
             else:
-                new_snodes.append(FusedSchedulerNode(scheduler, snode))
+                group = node.meta["fusion_meta"].group
+                new_snodes.append(FusedSchedulerNode(scheduler, snode, group))
     return new_snodes
 
 
@@ -852,7 +890,7 @@ class Scheduler:
         self.dead_node_elimination()
         self.num_orig_nodes = len(self.nodes)
         if config.prefuse_nodes:
-            self.nodes = prefuse_nodes(self.nodes)
+            self.nodes = prefuse_nodes(self, self.nodes)
 
         if INDUCTOR_SCHEDULER_GRAPH:
             try:
@@ -990,6 +1028,14 @@ class Scheduler:
             elif isinstance(node, NopKernelSchedulerNode):
                 node.run()  # just schedule nop kernels eagerly
             elif isinstance(node, FusedSchedulerNode):
+                print("enqueuing: ", node, node.group)
+                self.runnable_nodes[node.group].append(node)
+                old_priority, old_count = self.runnable_groups.get(node.group, (0, 0))
+                self.runnable_groups[node.group] = (
+                    max(old_priority, node.get_priority()),
+                    old_count + 1,
+                )
+
                 for subnode in node.snodes:
                     self.enqueue(subnode)
             else:  # SchedulerNode
@@ -1126,6 +1172,7 @@ class Scheduler:
         while nodes:
             nodes = list(self.unordered_pop_group(group_without_device))
             nodes.sort(key=lambda x: x.get_name())
+            nodes = [node for node in nodes if not isinstance(node, FusedSchedulerNode)]
             yield from nodes
 
     def pop_groups(self, groups):

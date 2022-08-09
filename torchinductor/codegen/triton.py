@@ -975,13 +975,23 @@ class TritonScheduling:
 
         `numel` is the number of elements in the input/output
         """
+        nodes_to_reschedule = []
         node_schedule = []
         for node in self.scheduler.pop_group(
             (numel, sympy.Integer(1)),
         ):
+            intended_group = node.intended_group if hasattr(node, "intended_group") else None
+            if intended_group is not None:
+                if intended_group[1] != (numel, 1):
+                    print(node)
+                    print("current group: ", (numel, 1))
+                    print("intended group: ", intended_group)
+                    nodes_to_reschedule.append(node)
+                    continue
             node.mark_run()
             node_schedule.append(node)
             node.mark_fusable()
+        self.scheduler.enqueue(nodes_to_reschedule)
         return node_schedule
 
     def create_node_schedule_reduction(
@@ -1001,6 +1011,14 @@ class TritonScheduling:
             for node in self.scheduler.pop_group(
                 (numel * reduction_numel, sympy.Integer(1)),
             ):
+                intended_group = node.intended_group if hasattr(node, "intended_group") else None
+                if intended_group is not None:
+                    if intended_group[1] != (numel, reduction_numel):
+                        print(node)
+                        print("current group: ", (numel, reduction_numel))
+                        print("intended group: ", intended_group)
+                        nodes_to_reschedule.append(node)
+                        continue
                 if TritonKernel.is_compatible(
                     (numel, reduction_numel), node.get_ranges()
                 ):
@@ -1045,11 +1063,13 @@ class TritonScheduling:
         Generate a single triton kernel.  If reduction_numel != 1 this is
         a reduction kernel, otherwise pointwise.
         """
+        print("doing codegen with: ", numel, reduction_numel)
         if reduction_numel == 1:
             node_schedule = self.create_node_schedule_pointwise(numel)
         else:
             if self.is_better_tiling_ready(numel, reduction_numel):
                 # preempt this reduction kernel with a tiled pointwise
+                print("better tiling ready")
                 self.codegen(numel * reduction_numel, sympy.Integer(1))
             node_schedule = self.create_node_schedule_reduction(numel, reduction_numel)
 
