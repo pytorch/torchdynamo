@@ -79,6 +79,24 @@ class _TorchDynamoContext:
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        # Optimize the forward method of torch.nn.Module object
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            optimized_forward = self(mod.forward)
+
+            class Wrapper:
+                def __getattr__(self, name):
+                    return getattr(mod, name)
+
+                def forward(self, *args, **kwargs):
+                    return optimized_forward(*args, **kwargs)
+
+                def __call__(self, *args, **kwargs):
+                    return self.forward(*args, **kwargs)
+
+            new_mod = Wrapper()
+            return new_mod
+
         assert callable(fn)
         callback = self.callback
         on_enter = self.on_enter
@@ -94,7 +112,7 @@ class _TorchDynamoContext:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                backend_ctx.__exit__()
+                backend_ctx.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -105,10 +123,7 @@ class _TorchDynamoContext:
         # If the function is called with torchdynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
-            callable_fn = fn
-            if isinstance(fn, torch.nn.Module):
-                callable_fn = fn.forward
-            always_optimize_code_objects[callable_fn.__code__] = True
+            always_optimize_code_objects[fn.__code__] = True
 
         return _fn
 
