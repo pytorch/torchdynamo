@@ -2898,7 +2898,6 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
-        print(self)
         # Move origin down a level - every StorageBox going through realization must already have origins
         for origin in self.origins:
             self.data.associate_origin(origin)
