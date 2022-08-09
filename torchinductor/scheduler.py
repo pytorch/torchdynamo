@@ -818,7 +818,6 @@ class Scheduler:
         self.check_can_free = set()
         self.fusable_deps = set()
         for node in nodes:
-            print("Node in scheduler", node)
             if node.is_no_op():
                 self.nodes.append(NopKernelSchedulerNode(self, node))
             elif isinstance(node, ir.ComputedBuffer):

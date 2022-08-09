@@ -617,11 +617,11 @@ class BaseView(IRNode):
         return self.data.realize()
 
     def realize_hint(self):
-        print("Do I have origin?", self.origins)
         res = self.data.realize_hint()
-        for origin in self.origins:
-            res.associate_origin(origin)
-        return self.data.realize_hint()
+        if res is not None:
+            for origin in self.origins:
+                res.associate_origin(origin)
+        return res
 
     def get_storage_numel(self):
         return self.data.get_storage_numel()
@@ -2109,7 +2109,7 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def __str__(self):
-        lines = [f"{field.name}={getattr(self, field.name)!r}" for field in dataclasses.fields(self)]
+        lines = [f"{field.name}={getattr(self, field.name)}" for field in dataclasses.fields(self)]
         return self.str_helper(lines)
 
 @dataclasses.dataclass
@@ -2846,7 +2846,8 @@ class MutableBox(IRNode):
 
     def associate_origin(self, node):
         super().associate_origin(node)
-        self.data.associate_origin(node)
+        if self.data is not None:
+            self.data.associate_origin(node)
 
     __repr__ = __str__
 
