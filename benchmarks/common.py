@@ -106,13 +106,13 @@ def print_summary(filename):
             pass
 
 
-def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
+def timed(model, model_iter_fn, example_inputs, times=1, return_result=False, stats=None):
     synchronize()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
-        result = model_iter_fn(model, example_inputs, collect_outputs=False)
+        result = model_iter_fn(model, example_inputs, collect_outputs=False, stats=stats)
         synchronize()
     t1 = time.perf_counter()
     return (t1 - t0, result) if return_result else t1 - t0
@@ -316,6 +316,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
 
     timings = np.zeros((args.repeat, 2), np.float64)
+    memories = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
     is_correct = True
@@ -329,6 +330,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
                 yield p
         else:
             yield
+    
+    stats = {}
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         for rep in range(args.repeat):
@@ -340,12 +343,14 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
 
             # interleave the runs to handle frequency scaling and load changes
             timings[rep, 0], expected_output = timed(
-                model, model_iter_fn, inputs, return_result=True
+                model, model_iter_fn, inputs, return_result=True, stats=stats
             )
+            memories[rep, 0] = stats["peak_memory"]
             with torchdynamo.run():
                 timings[rep, 1], actual_output = timed(
-                    model, model_iter_fn, inputs, return_result=True
+                    model, model_iter_fn, inputs, return_result=True, stats=stats
                 )
+            memories[rep, 1] = stats["peak_memory"]
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
     if args.export_profiler_trace:
@@ -353,6 +358,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         name = os.path.join(torchdynamo.config.base_dir, name)
         p.export_chrome_trace(name)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
+    memory_median = np.median(memories, axis=0)
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -362,8 +368,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         )
     output_csv(
         output_filename,
-        ("dev", "name", "batch_size", "speedup"),
-        [current_device, current_name, current_batch_size, float(speedup)],
+        ("dev", "name", "batch_size", "speedup", "eager_memory", "non_eager_memory"),
+        [current_device, current_name, current_batch_size, float(speedup), memory_median[0], memory_median[1]],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 

@@ -363,12 +363,17 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
 
-    def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
+    def forward_and_backward_pass(self, mod, inputs, collect_outputs=True, stats=None):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
+            peak_mem = torch.cuda.memory_allocated() /1e9
+        print("peak_mem", peak_mem)
+        if stats is not None:
+            assert isinstance(stats, dict)
+            stats["peak_memory"] = peak_mem
         self.grad_scaler.scale(loss).backward()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
