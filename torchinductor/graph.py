@@ -8,6 +8,8 @@ import torch.fx
 from sympy import Integer
 from torch._decomp import get_decompositions
 
+from torchinductor import lowering
+
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
@@ -22,7 +24,6 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from torchinductor import lowering
 
 log = logging.getLogger(__name__)
 
@@ -279,7 +280,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             # TODO(jansel): introduce a store vs inline choice
             result.mark_reuse(len(n.users))
-        
+
         lowering.current_origin = None
         return result
 

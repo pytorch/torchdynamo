@@ -30,6 +30,7 @@ needs_realized_inputs = set()
 
 current_origin = None
 
+
 def add_needs_realized_inputs(fn):
     if isinstance(fn, (list, tuple, set)):
         return [add_needs_realized_inputs(x) for x in fn]

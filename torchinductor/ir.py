@@ -202,7 +202,9 @@ def is_triton(device):
 
 class IRNode(object):
     def common_repr(self):
-        return [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+        return (
+            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+        )
 
     def str_helper(self, lines):
         lines = lines + self.common_repr()
@@ -218,12 +220,13 @@ class IRNode(object):
     def associate_origin(self, node):
         if not hasattr(self, "origins"):
             self.origins = set()
-        
+
         self.origins.add(node)
-    
+
     @staticmethod
     def associate_origin_from_lowerings(x):
         from torchinductor import lowering
+
         if lowering.current_origin is not None:
             x.associate_origin(lowering.current_origin)
 
@@ -653,7 +656,6 @@ class BaseView(IRNode):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(device, self.get_dtype(), loader, self.get_size())
-
 
     def associate_origin(self, node):
         super().associate_origin(node)
@@ -2123,8 +2125,12 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def __str__(self):
-        lines = [f"{field.name}={getattr(self, field.name)}" for field in dataclasses.fields(self)]
+        lines = [
+            f"{field.name}={getattr(self, field.name)}"
+            for field in dataclasses.fields(self)
+        ]
         return self.str_helper(lines)
+
 
 @dataclasses.dataclass
 class ExternKernelOut(ExternKernel):
@@ -2586,7 +2592,6 @@ class Convolution(ExternKernelAlloc):
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
-
 
     @classmethod
     def create(
