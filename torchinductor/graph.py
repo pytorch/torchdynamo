@@ -22,6 +22,7 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
+from torchinductor import lowering
 
 log = logging.getLogger(__name__)
 
@@ -267,6 +268,7 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
+        lowering.current_origin = n
         result = super().run_node(n)
         num_users = len(set(n.users))
         if num_users > 1 and isinstance(result, TensorBox):
@@ -276,6 +278,8 @@ class GraphLowering(torch.fx.Interpreter):
 
             # TODO(jansel): introduce a store vs inline choice
             result.mark_reuse(len(n.users))
+
+        lowering.current_origin = None
         return result
 
     def codegen(self):

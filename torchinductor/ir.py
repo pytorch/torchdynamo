@@ -201,7 +201,11 @@ def is_triton(device):
 
 
 class IRNode(object):
+    def common_repr(self):
+        return [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+
     def str_helper(self, lines):
+        lines = lines + self.common_repr()
         lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
@@ -210,6 +214,12 @@ class IRNode(object):
 
     def get_numel(self):
         return sympy_product(self.get_size())
+
+    def associate_origin(self, node):
+        if not hasattr(self, "origins"):
+            self.origins = set()
+        
+        self.origins.add(node)
 
 
 @dataclasses.dataclass
@@ -607,6 +617,10 @@ class BaseView(IRNode):
         return self.data.realize()
 
     def realize_hint(self):
+        print("Do I have origin?", self.origins)
+        res = self.data.realize_hint()
+        for origin in self.origins:
+            res.associate_origin(origin)
         return self.data.realize_hint()
 
     def get_storage_numel(self):
@@ -633,6 +647,11 @@ class BaseView(IRNode):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(device, self.get_dtype(), loader, self.get_size())
+
+
+    def associate_origin(self, node):
+        super().associate_origin(node)
+        self.data.associate_origin(node)
 
 
 @dataclasses.dataclass
@@ -2089,6 +2108,9 @@ class ExternKernel(InputsKernel):
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
 
+    def __str__(self):
+        lines = [f"{field.name}={getattr(self, field.name)!r}" for field in dataclasses.fields(self)]
+        return self.str_helper(lines)
 
 @dataclasses.dataclass
 class ExternKernelOut(ExternKernel):
@@ -2549,6 +2571,7 @@ class Convolution(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
+
     @classmethod
     def create(
         cls,
@@ -2821,13 +2844,23 @@ class MutableBox(IRNode):
         ]
         return "\n".join(lines)
 
+    def associate_origin(self, node):
+        super().associate_origin(node)
+        self.data.associate_origin(node)
+
     __repr__ = __str__
 
 
 class TensorBox(MutableBox):
     @staticmethod
     def create(data):
-        return TensorBox(StorageBox(data))
+        from torchinductor import lowering
+        tb = TensorBox(StorageBox(data))
+
+        # TensorBox types created in lowering will have an originating node associate with them
+        if lowering.current_origin is not None:
+            tb.associate_origin(lowering.current_origin)
+        return tb
 
 
 class StorageBox(MutableBox):
@@ -2846,6 +2879,10 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
+        print(self)
+        # Move origin down a level - every StorageBox going through realization must already have origins
+        for origin in self.origins:
+            self.data.associate_origin(origin)
         self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
