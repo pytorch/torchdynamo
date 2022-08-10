@@ -173,7 +173,7 @@ def compile_fx_inner(
 
             if set(graph.device_types) == {"cuda"}:
                 log.warning("skipping cudagraphs due to input mutation")
-            else:
+            elif set(graph.device_types) != {"cpu"}:
                 log.warning("skipping cudagraphs due to multiple devices")
         return compiled_fn
     except Exception:
