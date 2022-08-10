@@ -1048,14 +1048,45 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
 
         fn(torch.randn(4, 4))
         self.assertEqual(cnts.frame_count, 2)
 
+        # Test that run works on a decorated fn
         fn = torchdynamo.run(fn)
         fn(torch.randn(4, 4, 4))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_nested_optimize(self):
+        cnts1 = torchdynamo.testing.CompileCounter()
+        cnts2 = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            return torch.relu(torch.cos(x) + torch.sin(x))
+
+        fn1 = torchdynamo.optimize(cnts1, nopython=True)(fn)
+        fn2 = torchdynamo.optimize(cnts2, nopython=True)(fn1)
+
+        # The first optimize in the nesting should be ignored
+        fn2(torch.randn(4))
+        self.assertEqual(cnts2.frame_count, 1)
+        self.assertEqual(cnts1.frame_count, 0)
+
+        # Since the fn code object is already compiled, calling fn1 should
+        # directly call the compiled_fn callable.
+        fn1(torch.randn(4))
+        self.assertEqual(cnts1.frame_count, 0)
+
+        # Test same behavior by reversing the calls
+        torchdynamo.reset()
+        cnts1 = torchdynamo.testing.CompileCounter()
+        cnts2 = torchdynamo.testing.CompileCounter()
+        fn1 = torchdynamo.optimize(cnts1, nopython=True)(fn)
+        fn2 = torchdynamo.optimize(cnts2, nopython=True)(fn1)
+        fn1(torch.randn(4))
+        self.assertEqual(cnts1.frame_count, 1)
+        fn2(torch.randn(4))
+        self.assertEqual(cnts2.frame_count, 0)
 
     def test_nested_disable_decorator(self):
         cnts = torchdynamo.testing.CompileCounter()
