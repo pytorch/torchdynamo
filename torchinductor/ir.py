@@ -2526,11 +2526,6 @@ class Convolution(ExternKernelAlloc):
             wrapper.header.writeline(
                 f"import torchinductor.triton_ops.conv as {self.kernel}"
             )
-        # # choose from different conv kernels
-        # elif self.kernel == "tuned_conv":
-        #     wrapper.header.writeline(
-        #         f"from torchinductor.codegen.autotuner import {self.kernel}"
-        #     )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
