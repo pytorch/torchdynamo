@@ -285,13 +285,16 @@ def to(
     assert layout in (None, torch.strided)
     if isinstance(device_or_dtype, torch.dtype):
         return to_dtype(x, device_or_dtype)
-    if isinstance(device_or_dtype, torch.device):
+    elif isinstance(device_or_dtype, torch.device):
         return to_device(x, device_or_dtype)
+    else:
+        assert device_or_dtype is None, device_or_dtype
+
     if device is not None:
-        return to_device(x, device)
+        x = to_device(x, device)
     if dtype is not None:
-        return to_dtype(x, dtype)
-    assert False, device_or_dtype
+        x = to_dtype(x, dtype)
+    return x
 
 
 def ops_wrapper(name):
@@ -1071,8 +1074,9 @@ def _unwrap(x):
     return x
 
 
-@register_lowering(torch.tensor)
-def tensor(data, *, dtype=None, device=None):
+@register_lowering([torch.tensor, aten.scalar_tensor])
+def tensor(data, *, dtype=None, device=None, layout=None):
+    assert layout in (None, torch.strided)
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:

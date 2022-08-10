@@ -2648,6 +2648,17 @@ class CommonTemplate:
             ],
         )
 
+    def test_vdd_clamp(self):
+        def fn(x):
+            return torch.clamp_min(x, 3)
+
+        self.common(
+            fn,
+            [
+                torch.randn([16], requires_grad=True) * 10,
+            ],
+        )
+
 
 if HAS_CPU:
 
