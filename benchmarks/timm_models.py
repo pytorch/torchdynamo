@@ -11,7 +11,6 @@ import torch
 from common import BenchmarkRunner
 from common import main
 
-import torchdynamo
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
 

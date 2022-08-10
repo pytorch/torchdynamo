@@ -51,6 +51,14 @@ unset = object()
 compile_lock = threading.Lock()
 
 
+def find_unaltered_fn(fn):
+    unaltered_fn = fn
+    while hasattr(unaltered_fn, "_torchdyname_orig_callable"):
+        unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
+        assert callable(unaltered_fn)
+    return unaltered_fn
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -79,6 +87,7 @@ class _TorchDynamoContext:
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        fn = find_unaltered_fn(fn)
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
@@ -95,6 +104,9 @@ class _TorchDynamoContext:
                     return self.forward(*args, **kwargs)
 
             new_mod = Wrapper()
+            # Save the function pointer to find the original callable while nesting
+            # of decorators.
+            new_mod._torchdynamo_orig_callable = mod
             return new_mod
 
         assert callable(fn)
@@ -119,6 +131,10 @@ class _TorchDynamoContext:
             _fn._torchdynamo_disable = True
         else:
             _fn._torchdynamo_inline = fn
+
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn
 
         # If the function is called with torchdynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -402,18 +418,16 @@ def optimize_assert(backend, guard_export_fn=None):
 def run(fn=None):
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
+        fn = find_unaltered_fn(fn)
         assert callable(fn)
-        callable_fn = fn
-        # Check if the function is a result of torchdynamo.optimize decorator.
-        if inspect.getattr_static(fn, "_torchdynamo_inline", False):
-            callable_fn = fn._torchdynamo_inline
-        return RunOnlyContext()(callable_fn)
+        return RunOnlyContext()(fn)
     return RunOnlyContext()
 
 
 def disable(fn=None):
     """Decorator and context manager to disable TorchDynamo"""
     if fn is not None:
+        fn = find_unaltered_fn(fn)
         assert callable(fn)
         return DisableContext()(fn)
     return DisableContext()
@@ -426,6 +440,7 @@ def skip(fn=None):
     """
     if fn is None:
         return skip
+    fn = find_unaltered_fn(fn)
     assert callable(fn)
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True

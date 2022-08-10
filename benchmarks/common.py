@@ -150,8 +150,9 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs, start_latenc
     Writes to ./coverage.csv
     """
     profiler = Profiler()
-    with profiler.prof, torchdynamo.run():
-        model_iter_fn(model, example_inputs)
+    frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
+    with profiler.prof:
+        frozen_model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
     output_csv(
         output_filename,
@@ -331,6 +332,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
             yield
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
+        frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
         for rep in range(args.repeat):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -342,10 +344,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
             timings[rep, 0], expected_output = timed(
                 model, model_iter_fn, inputs, return_result=True
             )
-            with torchdynamo.run():
-                timings[rep, 1], actual_output = timed(
-                    model, model_iter_fn, inputs, return_result=True
-                )
+            timings[rep, 1], actual_output = timed(
+                model, frozen_model_iter_fn, inputs, return_result=True
+            )
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
     if args.export_profiler_trace:
