@@ -1,5 +1,6 @@
 import sys
 import textwrap
+
 import pandas as pd
 
 
@@ -17,9 +18,9 @@ def check_aot_nop():
         if speedup == 0:
             status = "FAIL"
             failed.append(model_name)
-        
+
         print(f"{model_name:34} {status}")
-    
+
     if failed:
         print(
             textwrap.dedent(
@@ -29,6 +30,8 @@ def check_aot_nop():
                 """
             )
         )
+        sys.exit(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     check_aot_nop()
