@@ -209,15 +209,12 @@ class IRNode(object):
     @staticmethod
     @contextlib.contextmanager
     def current_origins(origins: Set[torch.fx.Node]):
-        print("Enter origins", origins)
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
         yield
         IRNode._current_origins = old
-        print("Exit origins")
 
     def __post_init__(self):
-        print("Init called")
         self.origins = set(self._current_origins)
 
     def common_repr(self):
