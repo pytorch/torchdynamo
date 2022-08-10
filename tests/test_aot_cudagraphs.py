@@ -1,14 +1,10 @@
 # Owner(s): ["module: cuda graphs"]
 
 import functools
-import sys
 import unittest
 from unittest.mock import patch
 
-import functorch
 import torch
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import run_tests
 
 import torchdynamo
 import torchdynamo.testing
