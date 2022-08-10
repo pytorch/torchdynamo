@@ -245,10 +245,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return SKIP_TRAIN
 
     @property
-    def failing_python_key_models(self):
-        return AOT_AUTOGRAD_NOT_YET_WORKING | {"maml_omniglot", "moco"}
-
-    @property
     def failing_torchinductor_models(self):
         if self.args.training:
             return INDUCTOR_TRAINING_NOT_YET_WORKING

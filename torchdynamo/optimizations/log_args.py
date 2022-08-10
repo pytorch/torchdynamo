@@ -3,8 +3,6 @@ import os
 
 import torch
 
-from torchdynamo.optimizations.python_key import python_key_normalize
-
 aten = torch.ops.aten
 
 
@@ -69,7 +67,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
 
 def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs):
     # lowering graph
-    gm, wrap = python_key_normalize(gm, example_inputs)
+    gm = make_fx(gm)(*example_inputs)
     # use Interpreter to logs the args of conv
-    wrap(ConvArgsAnalysis(gm).run)(*example_inputs)
-    return wrap(gm.forward)
+    ConvArgsAnalysis(gm).run(*example_inputs)
+    return gm

@@ -29,7 +29,6 @@ from torchdynamo.optimizations.inference import fixed_strategy2
 from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.inference import online_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
-from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import dummy_fx_compile
@@ -806,10 +805,6 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def failing_python_key_models(self):
-        return set()
-
-    @property
     def failing_torchinductor_models(self):
         return set()
 
@@ -1429,12 +1424,6 @@ def main(runner, original_dir=None):
         experiment = speedup_experiment
         output_filename = "speedups.csv"
         args.isolate = True
-    elif args.python_key:
-        optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "pythonkey.csv"
-        if not args.no_skip:
-            runner.skip_models.update(runner.failing_python_key_models)
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
