@@ -7,6 +7,8 @@ from typing import List
 import sympy
 import torch
 import torch.fx
+from torch._prims_common import is_boolean_dtype
+from torch._prims_common import is_integer_dtype
 
 from . import config
 from . import ir
@@ -91,19 +93,9 @@ def decode_dtype(dtype: int):
 
 def is_integer_type(x):
     if isinstance(x, TensorBox):
-        return x.get_dtype() in {
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-        }
+        return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, int)
-
-
-def is_triton_device(x):
-    return isinstance(x, TensorBox) and is_triton(x.get_device())
 
 
 def decode_device(device):
@@ -2631,7 +2623,7 @@ def truncdiv(a, b):
 @register_lowering(aten.div.Tensor_mode)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
-    on_triton = is_triton_device(a) or is_triton_device(b)
+    on_triton = is_triton(a) or is_triton(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
     # see the discussion at https://github.com/openai/triton/issues/605
@@ -2642,8 +2634,8 @@ def div_mode(a, b, rounding_mode=None):
     if both_integer:
         # truediv produces a float tensor even if both operands are integer types
         return div(
-            to_dtype(a, torch.float32) if isinstance(a, TensorBox) else a,
-            to_dtype(b, torch.float32) if isinstance(b, TensorBox) else b,
+            to_dtype(a, torch.get_default_dtype()) if isinstance(a, TensorBox) else a,
+            to_dtype(b, torch.get_default_dtype()) if isinstance(b, TensorBox) else b,
         )
     return div(a, b)
 

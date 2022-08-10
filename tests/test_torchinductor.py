@@ -735,7 +735,37 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode="trunc"),
             )
 
+        # divide a scalar
         self.common(fn, (torch.randint(-100, 0, [8, 8]), 16))
+
+    def test_div6(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        # treat boolean as integer
+        self.common(
+            fn, (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8]))
+        )
+
+    def test_div7(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(2**32, 2**40, [100, 100]),
+                torch.randint(-10, -1, [100, 100]),
+            ),
+        )
 
     def test_sum_keepdims(self):
         def fn(a, b):

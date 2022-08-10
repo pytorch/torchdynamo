@@ -197,9 +197,13 @@ class CleanDiv(IndexingDiv):
     pass
 
 
-def is_triton(device):
+def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
-    return device.type == "cuda"
+    if getattr(x, "get_device", None):
+        return is_triton(x.get_device())
+    if isinstance(x, torch.device):
+        return x.type == "cuda"
+    return False
 
 
 @dataclasses.dataclass
