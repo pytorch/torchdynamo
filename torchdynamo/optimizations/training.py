@@ -5,9 +5,9 @@ from typing import Set
 
 import torch
 from torch.fx import GraphModule
-from torch.nn import Module
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.nn import Module
 from torch.utils._pytree import tree_map
 
 import torchdynamo
@@ -326,15 +326,15 @@ class CudaGraphModule(Module):
 
 
 def find_input_mutations(g):
-    FK = 'fake_result'
+    FK = "fake_result"
     inputs = defaultdict(set)
     input_idx = 0
     mutated_inputs = set()
     for n in g.nodes:
-        if n.op == 'placeholder':
+        if n.op == "placeholder":
             inputs[StorageWeakRef(n.meta[FK].storage())].add(input_idx)
             input_idx += 1
-        elif n.op == 'call_function':
+        elif n.op == "call_function":
             if n.target is operator.getitem:
                 continue
             schema = n.target._schema
@@ -352,7 +352,9 @@ def find_input_mutations(g):
                 if mut_arg:
                     # TODO: not correct for args that contain tensors in a struct
                     # like list
-                    mutated_inputs |= inputs[StorageWeakRef(argument.meta[FK].storage())]
+                    mutated_inputs |= inputs[
+                        StorageWeakRef(argument.meta[FK].storage())
+                    ]
         # TODO: error on unrecognized nodes
     return mutated_inputs
 
@@ -360,7 +362,7 @@ def find_input_mutations(g):
 # Mutates input graph
 def apply_cuda_graphs(gm):
     for n in gm.graph.nodes:
-        if n.op == 'call_module':
+        if n.op == "call_module":
             assert not n.kwargs
             submod = gm.get_submodule(n.target)
             gm.delete_submodule(n.target)
