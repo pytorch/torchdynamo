@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -9,6 +10,7 @@ from typing import Any
 from typing import Callable
 from typing import List
 from typing import Optional
+from typing import Set
 from unittest.mock import patch
 
 import numpy
@@ -200,7 +202,24 @@ def is_triton(device):
     return device.type == "cuda"
 
 
+@dataclasses.dataclass
 class IRNode(object):
+    _current_origins = set()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_origins(origins: Set[torch.fx.Node]):
+        print("Enter origins", origins)
+        old = IRNode._current_origins
+        IRNode._current_origins = old | origins
+        yield
+        IRNode._current_origins = old
+        print("Exit origins")
+
+    def __post_init__(self):
+        print("Init called")
+        self.origins = set(self._current_origins)
+
     def common_repr(self):
         return (
             [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
@@ -216,19 +235,6 @@ class IRNode(object):
 
     def get_numel(self):
         return sympy_product(self.get_size())
-
-    def associate_origin(self, node):
-        if not hasattr(self, "origins"):
-            self.origins = set()
-
-        self.origins.add(node)
-
-    @staticmethod
-    def associate_origin_from_lowerings(x):
-        from torchinductor import lowering
-
-        if lowering.current_origin is not None:
-            x.associate_origin(lowering.current_origin)
 
 
 @dataclasses.dataclass
@@ -626,11 +632,7 @@ class BaseView(IRNode):
         return self.data.realize()
 
     def realize_hint(self):
-        res = self.data.realize_hint()
-        if res is not None:
-            for origin in self.origins:
-                res.associate_origin(origin)
-        return res
+        return self.data.realize_hint()
 
     def get_storage_numel(self):
         return self.data.get_storage_numel()
@@ -656,10 +658,6 @@ class BaseView(IRNode):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(device, self.get_dtype(), loader, self.get_size())
-
-    def associate_origin(self, node):
-        super().associate_origin(node)
-        self.data.associate_origin(node)
 
 
 @dataclasses.dataclass
@@ -1512,12 +1510,6 @@ class NoneAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
-    @classmethod
-    def create(cls, name, layout, data):
-        cb = ComputedBuffer(name=name, layout=layout, data=data)
-        IRNode.associate_origin_from_lowerings(cb)
-        return cb
-
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
@@ -1908,7 +1900,6 @@ class ConcatKernel(NopKernel):
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
-        IRNode.associate_origin_from_lowerings(kernel)
         return kernel
 
     @classmethod
@@ -2443,8 +2434,6 @@ class FallbackKernel(ExternKernelAlloc):
         if self.kernel not in ("aten.convolution_backward",):
             log.warning(f"Using FallbackKernel: {self.kernel}")
 
-        IRNode.associate_origin_from_lowerings(self)
-
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -2865,21 +2854,13 @@ class MutableBox(IRNode):
         ]
         return "\n".join(lines)
 
-    def associate_origin(self, node):
-        super().associate_origin(node)
-        if self.data is not None:
-            self.data.associate_origin(node)
-
     __repr__ = __str__
 
 
 class TensorBox(MutableBox):
     @staticmethod
     def create(data):
-        tb = TensorBox(StorageBox(data))
-        # TensorBox types created in lowering will have an originating node associate with them
-        IRNode.associate_origin_from_lowerings(tb)
-        return tb
+        return TensorBox(StorageBox(data))
 
 
 class StorageBox(MutableBox):
@@ -2889,7 +2870,7 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
-        self.data = ComputedBuffer.create(
+        self.data = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
                 device=self.data.get_device(),
@@ -2898,9 +2879,6 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
-        # Move origin down a level - every StorageBox going through realization must already have origins
-        for origin in self.origins:
-            self.data.associate_origin(origin)
         self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
@@ -2932,7 +2910,7 @@ class StorageBox(MutableBox):
             read_writes = data.get_read_writes()
         else:
             assert isinstance(data, (Pointwise, Reduction)), type(data)
-            read_writes = ComputedBuffer.create(
+            read_writes = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
                     device=data.get_device(),
