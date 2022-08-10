@@ -792,15 +792,18 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def measure_latency_and_memory(self, device, model_name, model_iter_fn, backends):
+    def measure_latency_and_memory(self, device, model_name, model_iter_fn, backends, batch_size):
         get_peak_memory = lambda: torch.cuda.max_memory_allocated() / 10**9
-        backends.insert(0, "baseline")
+        # backends.insert(0, "baseline")
 
         latencies = list()
         mems = list()
 
+        stats = {}
+
         def mem_experiment(backend):
             try:
+                stats = {}
                 # Get the context
                 if backend == "baseline":
                     ctx = NullContext()
@@ -821,8 +824,9 @@ class BenchmarkRunner:
                 # Measure memory
                 torch.cuda.reset_peak_memory_stats()
                 with ctx:
-                    model_iter_fn(model, example_inputs)
-                peak_memory = get_peak_memory()
+                    model_iter_fn(model, example_inputs, stats=stats)
+                # peak_memory = get_peak_memory()
+                peak_memory = stats["peak_memory"]
             except:
                 latency = 0
                 peak_memory = 0
@@ -837,6 +841,7 @@ class BenchmarkRunner:
                 model_name,
                 self._args.training,
                 self._args.use_eval_mode,
+                batch_size
             )
         except NotImplementedError:
             logging.warn(f"{model_name} failed to load")
@@ -1554,9 +1559,30 @@ def main(runner, original_dir=None):
         assert args.isolate, "Run with isolate"
         if output_filename is None:
             output_filename = "backends_ux.csv"
+        batch_size = args.batch_size
+        if args.batch_size_file:
+            model_name = args.only
+            batch_size = None
+
+            filename = args.batch_size_file
+            if os.path.exists("benchmarks"):
+                filename = os.path.join("benchmarks", filename)
+            assert os.path.exists(filename)
+            with open(filename, "r") as f:
+                lines = f.readlines()
+                lines = [i.split(",") for i in lines if len(i.strip()) > 0]
+                for val in lines:
+                    cur_name, b = val
+                    if model_name == cur_name:
+                        batch_size = int(b)
+            if batch_size is None:
+                raise RuntimeError(
+                    f"Batch size could not be found for {model_name} in {args.batch_size_file}"
+                )
+            print(f"batch size: {batch_size}")
         for device in args.devices:
             runner.measure_latency_and_memory(
-                device, args.only, model_iter_fn, args.peak_memory_for_backend
+                device, args.only, model_iter_fn, args.peak_memory_for_backend, batch_size
             )
         return
 
