@@ -50,6 +50,7 @@ from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import istype
+from .utils import pretty_error
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
@@ -312,21 +313,8 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (
-            exc.BackendCompilerFailed,
-            exc.RestartAnalysis,
-            exc.SkipFrame,
-            exc.TorchRuntimeError,
-            exc.Unsupported,
-        ):
-            raise
         except Exception as e:
-            if config.debug or config.trace or config.print_internal_exceptions:
-                sys.stderr.write(
-                    f"ERROR FROM offset={self.current_instruction.offset} "
-                    f"filename {self.code_options.get('co_filename')} "
-                    f"{self.lineno} {typestr(e)}\n"
-                )
+            e.fs = self.frame_summary()
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -772,6 +760,7 @@ class InstructionTranslatorBase(object):
             assert isinstance(k, ConstantVariable) or (
                 isinstance(k, TensorVariable) and k.parameter_value is not None
             )
+
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
