@@ -198,9 +198,21 @@ class WrapperCodeGen(CodeGen):
                 """
             )
 
-            if config.triton.use_mm:
-                self.header.writeline(
-                    "from torchinductor.triton_ops.matmul import matmul_out as triton_mm_out"
+            if config.triton.convolution != "aten":
+                self.header.splice(
+                    """
+                    from torchinductor.triton_ops.conv_perf_model import early_config_prune
+                    from torchinductor.triton_ops.conv_perf_model import estimate_conv_time
+                    from torchinductor.triton_ops.autotune import conv_heuristics
+                    """
+                )
+
+            if config.triton.mm != "aten":
+                self.header.splice(
+                    """
+                    from torchinductor.triton_ops.autotune import mm_heuristics
+                    from torchinductor.triton_ops.autotune import mm_autotune
+                    """
                 )
 
             if config.triton.use_bmm:

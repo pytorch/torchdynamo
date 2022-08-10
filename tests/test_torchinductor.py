@@ -1323,7 +1323,7 @@ class CommonTemplate:
         y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
 
-    @patch.object(config.triton, "use_mm", True)
+    @patch.object(config.triton, "mm", "triton")
     def test_triton_mm2(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def fn(x, y):
@@ -2525,8 +2525,12 @@ class CommonTemplate:
         )
         expected_kernel = 0
         # codegen mm kernel from template
-        if config.triton.use_mm and self.device == "cuda":
+        if config.triton.mm != "aten" and self.device == "cuda":
             expected_kernel = 1
+        if config.triton.mm == "autotune":
+            self.assertLessEqual(
+                torchinductor.metrics.generated_kernel_count, expected_kernel
+            )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
     @patch.object(config.triton, "cudagraphs", False)
@@ -2600,11 +2604,15 @@ class CommonTemplate:
         result.sum().backward()
 
         expected_kernel = 4
-        if config.triton.use_mm and self.device == "cuda":
+        if config.triton.mm != "aten" and self.device == "cuda":
             # fwd: 2 * (mm+dropout) kernels = 2 kernels
             # bwd: dropout + (mm) + 2 * (mm+dropout) kernels = 4 kernels
             # expect 2 + 4 = 6 kernels
             expected_kernel = 6
+        if config.triton.mm == "autotune":
+            self.assertLessEqual(
+                torchinductor.metrics.generated_kernel_count, expected_kernel
+            )
         self.assertEqual(torchinductor.metrics.generated_kernel_count, expected_kernel)
 
     def test_roll(self):

@@ -33,20 +33,20 @@ def test_total_time(shapes):
         a = torch.randn(a_shape, device="cuda", dtype=torch.float16)
         b = torch.randn(b_shape, device="cuda", dtype=a.dtype)
 
-        config.triton.use_mm = False
+        config.triton.mm = "aten"
         inductor_aten_mm(a, b)
 
-        config.triton.use_mm = True
+        config.triton.mm = "triton"
         inductor_triton_mm(a, b)
 
         torch_ms = time_with_torch_timer(torch_mm, (a, b)).mean * 1000
 
         triton_ms = time_with_torch_timer(triton_mm, (a, b)).mean * 1000
 
-        config.triton.use_mm = False
+        config.triton.mm = "aten"
         ind_aten_ms = time_with_torch_timer(inductor_aten_mm, (a, b)).mean * 1000
 
-        config.triton.use_mm = True
+        config.triton.mm = "triton"
         ind_triton_ms = time_with_torch_timer(inductor_triton_mm, (a, b)).mean * 1000
 
         print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
@@ -62,10 +62,10 @@ def test_GPU_time(shapes):
         a = torch.randn(a_shape, device="cuda", dtype=torch.float16)
         b = torch.randn(b_shape, device="cuda", dtype=a.dtype)
 
-        config.triton.use_mm = False
+        config.triton.mm = "aten"
         inductor_aten_mm(a, b)
 
-        config.triton.use_mm = True
+        config.triton.mm = "triton"
         inductor_triton_mm(a, b)
 
         torch_ms, _, _ = triton.testing.do_bench(lambda: torch_mm(a, b))

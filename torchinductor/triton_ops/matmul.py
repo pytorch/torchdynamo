@@ -1,119 +1,13 @@
 import torch
 import triton
 import triton.language as tl
-from triton.ops.matmul import get_configs_io_bound
-from triton.ops.matmul_perf_model import early_config_prune
-from triton.ops.matmul_perf_model import estimate_matmul_time
+
+from .autotune import mm_autotune
+from .autotune import mm_heuristics
 
 
-@triton.heuristics(
-    {
-        "EVEN_K": lambda args: args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0,
-    }
-)
-@triton.autotune(
-    configs=[
-        # basic configs for compute-bound matmuls
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=5,
-            num_warps=2,
-        ),
-        # good for int8
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=5,
-            num_warps=2,
-        ),
-    ]
-    + get_configs_io_bound(),
-    key=["M", "N", "K"],
-    prune_configs_by={
-        "early_config_prune": early_config_prune,
-        "perf_model": estimate_matmul_time,
-        "top_k": 10,
-    },
-)
+@mm_heuristics()
+@mm_autotune(get_io_bound_configs=True)
 @triton.jit
 def _kernel(
     A,
@@ -180,49 +74,60 @@ def _kernel(
         tl.atomic_add(C, acc, mask=mask)
 
 
-def matmul_out(a, b, out):
-    # handle non-contiguous inputs if necessary
-    if a.stride(0) > 1 and a.stride(1) > 1:
-        a = a.contiguous()
-    if b.stride(0) > 1 and b.stride(1) > 1:
-        b = b.contiguous()
-    # checks constraints
-    assert a.shape[1] == b.shape[0], "incompatible dimensions"
-    M, K = a.shape
-    _, N = b.shape
-    # allocates output
-    c = out
-    # accumulator types
-    ACC_TYPE = (
-        tl.float32
-        if a.dtype in [torch.float16, torch.bfloat16, torch.float32]
-        else tl.int32
-    )
+class _matmul_out:
+    kernel = _kernel
 
-    # launch kernel (grid defined as using def instead of lambda to pass `make lint`)
-    def grid(META):
-        return (
-            triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-            META["SPLIT_K"],
+    @staticmethod
+    def _call(a, b, out):
+        # handle non-contiguous inputs if necessary
+        if a.stride(0) > 1 and a.stride(1) > 1:
+            a = a.contiguous()
+        if b.stride(0) > 1 and b.stride(1) > 1:
+            b = b.contiguous()
+        # checks constraints
+        assert a.shape[1] == b.shape[0], "incompatible dimensions"
+        M, K = a.shape
+        _, N = b.shape
+        # allocates output
+        c = out
+        # accumulator types
+        ACC_TYPE = (
+            tl.float32
+            if a.dtype in [torch.float16, torch.bfloat16, torch.float32]
+            else tl.int32
         )
 
-    # grid = lambda META: (
-    #     triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-    #     META["SPLIT_K"],
-    # )
-    _kernel[grid](
-        a,
-        b,
-        c,
-        M,
-        N,
-        K,
-        a.stride(0),
-        a.stride(1),
-        b.stride(0),
-        b.stride(1),
-        c.stride(0),
-        c.stride(1),
-        GROUP_M=8,
-        ACC_TYPE=ACC_TYPE,
-    )
+        # launch kernel (grid defined as using def instead of lambda to pass `make lint`)
+        def grid(META):
+            return (
+                triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+                META["SPLIT_K"],
+            )
+
+        # grid = lambda META: (
+        #     triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+        #     META["SPLIT_K"],
+        # )
+        _kernel[grid](
+            a,
+            b,
+            c,
+            M,
+            N,
+            K,
+            a.stride(0),
+            a.stride(1),
+            b.stride(0),
+            b.stride(1),
+            c.stride(0),
+            c.stride(1),
+            GROUP_M=8,
+            ACC_TYPE=ACC_TYPE,
+        )
+
+    @staticmethod
+    def forward(a, b, out):
+        return _matmul_out._call(a, b, out)
+
+
+matmul_out = _matmul_out.forward

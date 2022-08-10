@@ -2163,14 +2163,11 @@ class InplaceBernoulliFallback(ExternKernel):
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+    def __init__(
+        self, layout, inputs, constant_args=(), output_view=None, kernel="aten.mm.out"
+    ):
         super().__init__(layout, inputs, constant_args, output_view)
-        if (
-            config.triton.use_mm
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_mm_out"
+        self.kernel = kernel
 
     @classmethod
     def create(cls, a, b):
@@ -2184,6 +2181,27 @@ class MatrixMultiply(ExternKernelOut):
         else:
             a = cls.require_stride1(a)
         b = cls.require_stride1(b)
+
+        # choose runtime kernel
+        config_mm = config.triton.mm
+        # default kernel is aten
+        kernel = "aten.mm.out"
+        if config_mm == "aten":
+            kernel = "aten.mm.out"
+        elif config_mm == "triton" and a.get_device().type == "cuda":
+            kernel = "triton_ops.matmul_out"
+        elif config_mm == "autotune":
+            from .codegen.autotuner import tuned_mm
+
+            kernel = tuned_mm(
+                a.get_size(),
+                b.get_size(),
+                a.get_stride(),
+                b.get_stride(),
+                a.get_device(),
+                a.get_dtype(),
+            )
+
         return MatrixMultiply(
             layout=FlexibleLayout(
                 device=a.get_device(),
@@ -2191,6 +2209,7 @@ class MatrixMultiply(ExternKernelOut):
                 size=list(m) + [n],
             ),
             inputs=[a, b],
+            kernel=kernel,
         )
 
     def map_args(self):
@@ -2534,14 +2553,9 @@ class Convolution(ExternKernelAlloc):
         self.preferred_stride_order = preferred_stride_order
 
     def codegen(self, wrapper):
-        if self.kernel == "triton_ops_conv":
+        if self.kernel == "triton_ops.conv":
             wrapper.header.writeline(
                 f"import torchinductor.triton_ops.conv as {self.kernel}"
-            )
-        # choose from different conv kernels
-        elif self.kernel == "tuned_conv":
-            wrapper.header.writeline(
-                f"from torchinductor.codegen.autotuner import {self.kernel}"
             )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
@@ -2603,24 +2617,6 @@ class Convolution(ExternKernelAlloc):
 
         output_size.append(out_channels)
 
-        config_conv = config.triton.convolution
-        if (
-            config_conv == "aten"
-            or len(kernel_size) != 2
-            or not is_triton(x.get_device())
-            or transposed
-            or groups != 1
-            or x.get_dtype() == torch.float16
-            or x.get_dtype() == torch.bfloat16
-        ):
-            kernel = "aten.convolution"
-        elif config_conv == "triton":
-            kernel = "triton_ops_conv"
-        else:
-            assert config_conv == "autotune"
-            kernel = "tuned_conv"
-        # triton conv only supports conv2d
-
         assert (
             len(stride)
             == len(padding)
@@ -2654,12 +2650,42 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        # for conv2d or conv3d, prefer channels last format
+        # choose runtime kernel
+        config_conv = config.triton.convolution
         if (
-            len(kernel_size) > 1
-            and is_triton(x.get_device())
-            and config.triton.convolution != "aten"
+            config_conv == "aten"
+            or len(kernel_size) != 2  # triton conv only supports conv2d
+            or not is_triton(x.get_device())
+            or transposed
+            or groups != 1
+            # or x.get_dtype() == torch.float16
+            # or x.get_dtype() == torch.bfloat16
         ):
+            kernel = "aten.convolution"
+        elif config_conv == "triton":
+            kernel = "triton_ops.conv"
+        else:
+            assert config_conv == "autotune"
+            from .codegen.autotuner import tuned_conv
+
+            # kernel = "tuned_conv"
+            kernel = tuned_conv(
+                x.get_size(),
+                weight.get_size(),
+                x.get_stride(),
+                weight.get_stride(),
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                x.get_device(),
+                x.get_dtype(),
+            )
+
+        # for conv2d or conv3d, prefer channels last format
+        if kernel == "triton_ops.conv":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists

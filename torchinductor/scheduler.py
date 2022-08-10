@@ -39,7 +39,7 @@ def should_use_template(node: ir.ExternKernel):
         if isinstance(node, ir.Convolution):
             return node.kernel != "aten.convolution"
         elif isinstance(node, ir.MatrixMultiply):
-            return config.triton.use_mm
+            return node.kernel != "aten.mm.out"
     return False
 
 

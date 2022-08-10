@@ -74,6 +74,9 @@ class triton:
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 
+    # choose mm backend, "aten" or "triton" or "autotune"
+    mm = "aten"
+
     # Always load full blocks (rather than broadcasting inside the block)
     # Set default as True because otherwise will encouter `map::at` error
     # in triton if loading from 1-dim tensor using 2-dim pointer offset
@@ -89,8 +92,5 @@ class triton:
 
     # use triton.autotune?
     autotune = True
-
-    # enable codegen to use Triton's mm
-    use_mm = False
 
     use_bmm = False
