@@ -207,9 +207,9 @@ def tuned_mm(
         # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        # if torchinductor.config.debug:
-        print("for key = ", key)
-        print("timing", timings)
-        print("best_kernel", autotune.cache[key])
+        if torchinductor.config.debug:
+            print("for key = ", key)
+            print("timing", timings)
+            print("best_kernel", autotune.cache[key])
     best_kernel = autotune.cache[key]
     return best_kernel
