@@ -8,8 +8,6 @@ import torch.fx
 from sympy import Integer
 from torch._decomp import get_decompositions
 
-from torchinductor import lowering
-
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
