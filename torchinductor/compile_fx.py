@@ -10,7 +10,6 @@ from functorch.compile import min_cut_rematerialization_partition
 
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
-from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
@@ -70,28 +69,46 @@ class CheckEachNode(torch.fx.Interpreter):
         return expected
 
 
-def compile_fx_python_key(
-    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
-):
-    """Alternate version for inference only"""
-    assert isinstance(model, torch.fx.GraphModule)
-    assert all(isinstance(x, torch.Tensor) for x in example_inputs)
-
-    with overrides.patch_functions():
-        model = overrides.replace_fx(model)
-        gm, wrap = python_key_normalize(
-            model, example_inputs, decompositions=decompositions
+def dump_to_repro(gm, *args):
+    with open(os.path.join(torchdynamo.config.base_dir, "repro.py"), "w") as fd:
+        fd.write(
+            textwrap.dedent(
+                """
+                import torch
+                import torchdynamo
+                from torchdynamo.testing import rand_strided, same
+                """
+            )
         )
+        fd.write("class Repro:\n")
+        for i in itertools.count():
+            try:
+                val = getattr(gm, f"_tensor_constant{i}")
+            except AttributeError:
+                break
+            fd.write(f"    _tensor_constant{i} = {val.item()!r}\n")
+        fd.write(textwrap.indent(gm.code, "    "))
+        fd.write("\n")
 
-    if config.dce:
-        gm.graph.eliminate_dead_code()
-    if config.debug:
-        gm.graph.print_tabular()
-
-    if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
-        wrap(CheckEachNode(gm).run)(*example_inputs)
-
-    return compile_fx_inner(gm, example_inputs, wrap=wrap, cudagraphs=cudagraphs)
+        fd.write("args = (\n")
+        for arg in args:
+            fd.write(
+                f"  rand_strided({tuple(arg.size())!r}, {tuple(arg.stride())!r},"
+                f" {arg.dtype!r}, {arg.device.type!r}),"
+            )
+            fd.write("\n")
+        fd.write(")\n")
+        fd.write(
+            textwrap.dedent(
+                """
+                expected = Repro().forward(*args)
+                with torchdynamo.optimize("inductor", nopython=True):
+                    actual = Repro().forward(*args)
+                assert same(actual, expected)
+                """
+            )
+        )
+        print("wrote repro.py")
 
 
 def compile_fx_inner(
@@ -265,7 +282,4 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     logging.getLogger("torchinductor").setLevel(
         logging.DEBUG if config.debug else logging.WARNING
     )
-    if config.aot_autograd:
-        return compile_fx_aot(model_, example_inputs_)
-    else:
-        return compile_fx_python_key(model_, example_inputs_)
+    return compile_fx_aot(model_, example_inputs_)
