@@ -171,6 +171,15 @@ class AotMemEfficientFusion(AotAutogradStrategy):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 
+class AotMemEfficientFusionNop(AotAutogradStrategy):
+    """Use Min cut rematerilization and NVFuser with AOT Autograd"""
+
+    def candidate(self):
+        from functorch.compile import nop
+        kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
+        kwargs["fw_compiler"] = nop
+        kwargs["bw_compiler"] = nop
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 
 class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
     """Use Min cut rematerilization and NVFuser with AOT Autograd"""
@@ -183,12 +192,15 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
 class AOTMemEfficientFusionWithContext:
     """Pass nvfuser context to TorchDynamo"""
 
-    def __init__(self, use_decomps=True):
+    def __init__(self, use_decomps=True, nop=False):
         self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
         self.use_decomps = use_decomps
+        self.nop = nop
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         if self.use_decomps:
+            if self.nop:
+                return AotMemEfficientFusionNop.compile_fn(gm, example_inputs)
             return AotMemEfficientFusion.compile_fn(gm, example_inputs)
         else:
             return AotMemEfficientFusionNoDecomps.compile_fn(gm, example_inputs)
@@ -196,6 +208,7 @@ class AOTMemEfficientFusionWithContext:
 
 aot_mem_efficient_fusion = AOTMemEfficientFusionWithContext(True)
 aot_mem_efficient_fusion_no_decomp = AOTMemEfficientFusionWithContext(False)
+aot_mem_efficient_fusion_nop = AOTMemEfficientFusionWithContext(True, True)
 
 
 class AotPrimsNvfuser(AotAutogradStrategy):
@@ -430,6 +443,8 @@ def create_aot_backends():
     # compiler backend. This is the most optimized setting with nvfuser for
     # training.
     BACKENDS["aot_nvfuser"] = aot_mem_efficient_fusion
+
+    BACKENDS["aot_nvfuser_nop"] = aot_mem_efficient_fusion_nop
 
     # Similar to aot_nvfuser, but disables the decompositions. Decompositions
     # can cause accuracy deviations. This setting allows us to compare accuracy
