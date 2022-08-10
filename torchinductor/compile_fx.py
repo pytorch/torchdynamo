@@ -1,3 +1,4 @@
+import dataclasses
 import functools
 import itertools
 import logging
@@ -24,6 +25,14 @@ from .graph import GraphLowering
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class BoxedBool:
+    value: bool
+
+    def __bool__(self):
+        return self.value
 
 
 class CheckEachNode(torch.fx.Interpreter):
@@ -157,10 +166,15 @@ def compile_fx_inner(
             return cudagraphify(
                 compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
             )
-        elif cudagraphs and set(graph.device_types) == {"cuda"}:
-            log.warning("skipping cudagraphs due to input mutation")
-        elif cudagraphs and len(graph.device_types) > 1:
-            log.warning("skipping cudagraphs due to multple devices")
+        elif cudagraphs:
+            if isinstance(cudagraphs, BoxedBool):
+                # Disable cudagraphs in the backwards pass too:
+                cudagraphs.value = False
+
+            if set(graph.device_types) == {"cuda"}:
+                log.warning("skipping cudagraphs due to input mutation")
+            elif set(graph.device_types) != {"cpu"}:
+                log.warning("skipping cudagraphs due to multiple devices")
         return compiled_fn
     except Exception:
         if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
@@ -248,20 +262,25 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
     num_example_inputs = len(example_inputs_)
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         if config.debug:
             print("FORWARD GRAPH:")
             model.graph.print_tabular()
         fixed = len(example_inputs) - num_example_inputs
-        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+        return compile_fx_inner(
+            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+        )
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         if config.debug:
             print("BACKWARD GRAPH:")
             model.graph.print_tabular()
         fixed = count_tangents(model)
-        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+        return compile_fx_inner(
+            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+        )
 
     with overrides.patch_functions():
         return aot_autograd(
