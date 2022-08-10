@@ -12,12 +12,6 @@ jobs:
           name: Setup
           command: |
             source .circleci/setup_env.sh
-      - run:
-          name: Tests
-          command: |
-            source .circleci/setup_env.sh
-            mkdir test-results
-            pytest -v --junitxml=test-results/junit.xml
       - store_test_results:
           path: test-results
       - run:
@@ -35,7 +29,7 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco --isolate
+            python benchmarks/torchbench.py --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco --isolate --use-eval-mode
 
 workflows:
   gpu:
