@@ -294,21 +294,25 @@ class GradModeVariable(ContextWrappingVariable):
 
 class ProfileRecordFunctionVariable(ContextWrappingVariable):
     def __init__(self, target_value, initial_value=None, **kwargs):
-        kwargs_edited = kwargs
+        self.entered = kwargs.pop("entered", False)
+        proxy_value = kwargs.pop("proxy_value", None)
+        if proxy_value is not None:
+            self.proxy_value = proxy_value
+
         super(ProfileRecordFunctionVariable, self).__init__(
-            target_value=target_value, initial_value=initial_value, **kwargs_edited
+            target_value=target_value, initial_value=initial_value, **kwargs
         )
 
     def enter(self, tx):
-        self.enter = True
+        self.entered = True
         super(ProfileRecordFunctionVariable, self).enter(tx)
 
     def exit(self, tx, *args):
-        self.enter = False
+        self.entered = False
         super(ProfileRecordFunctionVariable, self).exit(tx)
 
     def _call_func(self, tx, value):
-        if self.enter:
+        if self.entered:
             self.proxy_value = tx.output.create_proxy(
                 "call_function",
                 torch.ops.profiler._record_function_enter,
@@ -326,7 +330,7 @@ class ProfileRecordFunctionVariable(ContextWrappingVariable):
             )
 
     def _func_name(self):
-        if self.enter:
+        if self.entered:
             return "torch.ops.profiler._record_function_enter"
         else:
             return "torch.ops.profiler._record_function_exit"
