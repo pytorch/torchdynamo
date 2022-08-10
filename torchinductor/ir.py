@@ -2632,8 +2632,8 @@ class Convolution(ExternKernelAlloc):
             or not is_triton(x.get_device())
             or transposed
             or groups != 1
-            or x.get_dtype() == torch.float16
-            or x.get_dtype() == torch.bfloat16
+            # or x.get_dtype() == torch.float16
+            # or x.get_dtype() == torch.bfloat16
         ):
             kernel = "aten.convolution"
         elif config_conv == "triton":
