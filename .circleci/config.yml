@@ -29,8 +29,14 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco --isolate --use-eval-mode
-
+            python benchmarks/torchbench.py --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer --isolate --use-eval-mode --output=aot_nop.csv
+      - store_artifacts:
+          path: aot_nop.csv
+      - run:
+          name: TorchBench AotAutograd eager compiler accuracy
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_aot.py
 workflows:
   gpu:
     jobs:
