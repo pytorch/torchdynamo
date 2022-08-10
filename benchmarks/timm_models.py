@@ -277,11 +277,9 @@ class TimmRunnner(BenchmarkRunner):
     def compute_loss(self, pred):
         return self.loss(pred, self.target)
 
-    @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
 
-    @torchdynamo.skip
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)

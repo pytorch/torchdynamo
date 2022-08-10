@@ -1050,11 +1050,11 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
-        fn(torch.randn(5))
+        fn(torch.randn(4, 4))
         self.assertEqual(cnts.frame_count, 2)
 
         fn = torchdynamo.run(fn)
-        fn(torch.randn(6))
+        fn(torch.randn(4, 4, 4))
         self.assertEqual(cnts.frame_count, 2)
 
     def test_nested_disable_decorator(self):
