@@ -9,7 +9,7 @@ def check_aot_nop():
     Basic accuracy checking. If a model fails, the speedup will be 0.
     """
 
-    actual = pd.read_csv("aot_nop.csv")
+    actual = pd.read_csv("aot_eager.csv")
 
     failed = []
     for model_name in actual["name"]:
