@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -9,6 +10,7 @@ from typing import Any
 from typing import Callable
 from typing import List
 from typing import Optional
+from typing import Set
 from unittest.mock import patch
 
 import numpy
@@ -200,8 +202,28 @@ def is_triton(device):
     return device.type == "cuda"
 
 
+@dataclasses.dataclass
 class IRNode(object):
+    _current_origins = set()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_origins(origins: Set[torch.fx.Node]):
+        old = IRNode._current_origins
+        IRNode._current_origins = old | origins
+        yield
+        IRNode._current_origins = old
+
+    def __post_init__(self):
+        self.origins = set(self._current_origins)
+
+    def common_repr(self):
+        return (
+            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+        )
+
     def str_helper(self, lines):
+        lines = lines + self.common_repr()
         lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
@@ -1651,91 +1673,6 @@ class ComputedBuffer(Buffer):
         )
         return (iter_ranges, reduce_ranges), body
 
-    @classmethod
-    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides):
-        """
-        Break iter_ranges up into at most max_tiles tiles based on stride==1
-        dimensions.
-
-        Transformation on iter_range like:
-            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
-
-        Where each group will be tiled in a different dimension in the
-        output kernel.
-        """
-        tiles = []
-        current_tile = []
-        max_tiles = config.triton.max_tiles
-
-        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
-        for i in range(len(iter_ranges)):
-            current_tile.append(iter_ranges[i])
-            # break tiles on stride 1
-            if any(stride[i] == 1 for stride in strides):
-                tiles.append(current_tile)
-                current_tile = []
-
-        if current_tile:
-            tiles.append(current_tile)
-
-        if len(tiles) > max_tiles:
-            split = len(tiles) - max_tiles + 1
-            tiles = [[*itertools.chain(*tiles[:split])]] + tiles[split:]
-            assert len(tiles) == max_tiles, (len(tiles), max_tiles, split)
-
-        return tiles
-
-    @classmethod
-    def _tile_broadcasting(cls, iter_ranges: List[sympy.Expr], body, strides):
-        """
-        Break ranges up so that one dimension is all broadcasting.
-
-        Transformation on iter_ranges like:
-            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
-
-        Where each group will be tiled in a different dimension in the
-        output kernel.
-        """
-        broadcasting_strides = [
-            stride for stride in strides if any(s == 0 for s in stride)
-        ]
-        if not broadcasting_strides:
-            return (iter_ranges,), body
-
-        # TODO(jansel): consider another load?  for now just take first one
-        broadcasting_stride = broadcasting_strides[0]
-
-        broadcast_ranges = []
-        broadcast_index = []
-        other_ranges = []
-        other_index = []
-
-        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
-        for i in range(len(iter_ranges)):
-            if broadcasting_stride[i] == 0:
-                broadcast_index.append(i)
-                broadcast_ranges.append(iter_ranges[i])
-            else:
-                other_index.append(i)
-                other_ranges.append(iter_ranges[i])
-
-        def call(broadcast, other, reduction=None):
-            assert not reduction
-            assert len(broadcast) == len(broadcast_index)
-            assert len(other) == len(other_index)
-            args = [None] * len(iter_ranges)
-            for i, v in itertools.chain(
-                zip(broadcast_index, broadcast),
-                zip(other_index, other),
-            ):
-                args[i] = v
-            return body(args)
-
-        if broadcast_ranges and other_ranges:
-            return (broadcast_ranges, other_ranges), call
-        else:
-            return (iter_ranges,), body
-
     @staticmethod
     def _apply_loop_reordering(
         index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=[]
@@ -1874,6 +1811,7 @@ class ConcatKernel(NopKernel):
             )
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+
         return kernel
 
     @classmethod
@@ -2088,6 +2026,13 @@ class ExternKernel(InputsKernel):
 
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
+
+    def __str__(self):
+        lines = [
+            f"{field.name}={getattr(self, field.name)}"
+            for field in dataclasses.fields(self)
+        ]
+        return self.str_helper(lines)
 
 
 @dataclasses.dataclass
