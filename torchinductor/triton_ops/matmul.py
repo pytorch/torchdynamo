@@ -58,7 +58,7 @@ def _kernel(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.0)
             b = tl.load(B, mask=rk[:, None] < k, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=False)
+        acc += tl.dot(a, b)
         A += BLOCK_K * SPLIT_K * stride_ak
         B += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to(C.dtype.element_ty)
