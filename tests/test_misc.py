@@ -1018,6 +1018,32 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_optimize_on_module(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def custom_member(self):
+                # Just for checking that Dynamo returned mod object can redirect
+                # to this method
+                pass
+
+            def forward(self, x):
+                return self.relu(x)
+
+        cnts1 = torchdynamo.testing.CompileCounter()
+        mod = MockModule()
+        optimized_mod = torchdynamo.optimize(cnts1, nopython=True)(mod)
+
+        a = torch.randn(10)
+        ref = mod(a)
+        res = optimized_mod(a)
+
+        optimized_mod.custom_member()
+
+        self.assertTrue(same(ref, res))
+
     def test_nested_optimize_decorator(self):
         cnts2 = torchdynamo.testing.CompileCounter()
         cnts3 = torchdynamo.testing.CompileCounter()

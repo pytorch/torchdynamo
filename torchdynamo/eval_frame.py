@@ -98,7 +98,13 @@ class _TorchDynamoContext:
             mod = fn
             optimized_forward = self(mod.forward)
 
-            class Wrapper:
+            class TorchDynamoNNModuleWrapper:
+                """
+                A wrapper that redirects the forward call to the optimized
+                forward, while for rest it redirects the calls to the original
+                module.
+                """
+
                 def __getattr__(self, name):
                     return getattr(mod, name)
 
@@ -108,7 +114,7 @@ class _TorchDynamoContext:
                 def __call__(self, *args, **kwargs):
                     return self.forward(*args, **kwargs)
 
-            new_mod = Wrapper()
+            new_mod = TorchDynamoNNModuleWrapper()
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod
