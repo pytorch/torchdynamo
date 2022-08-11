@@ -808,7 +808,6 @@ make_fallback(aten.im2col_backward)
 make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
-make_fallback(aten.reflection_pad2d_backward)
 make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
@@ -1813,6 +1812,78 @@ def reflection_pad2d(x, padding):
         dtype=x.get_dtype(),
         inner_fn=fn,
         ranges=[*batch, sympy.Integer(h + top + bot), sympy.Integer(w + left + right)],
+    )
+
+
+@register_lowering(aten.reflection_pad2d_backward)
+def reflection_pad2d_backward(grad_output, x, padding):
+    assert len(padding) == 4
+    left, right, top, bot = padding
+
+    *_, h, w = x.get_size()
+    h = V.graph.sizevars.guard_static_shape(h) - 1
+    w = V.graph.sizevars.guard_static_shape(w) - 1
+    grad_loader = grad_output.make_loader()
+
+    def fn(idx):
+        *b, x, y = idx
+
+        def load_from_output(x, y):
+            x = ops.indirect_indexing(ops.index_expr(x, torch.int32))
+            y = ops.indirect_indexing(ops.index_expr(y, torch.int32))
+            return grad_loader([*b, x, y])
+
+        def index_range_condition(index_range):
+            i, lb, ub = index_range
+            i = ops.index_expr(i, torch.int32)
+            return ops.and_(ops.ge(i, lb), ops.le(i, ub))
+
+        def accumulate(out_x, out_y, *index_ranges):
+            nonlocal grad
+            cond = index_range_condition(index_ranges[0])
+            for r in index_ranges[1:]:
+                cond = ops.and_(cond, index_range_condition(r))
+            g = ops.where(
+                cond,
+                load_from_output(out_x, out_y),
+                ops.constant(0.0, grad_output.get_dtype()),
+            )
+            grad = ops.add(grad, g)
+
+        # Areas after reflection:
+        #
+        #   top-left    |   top     |   top-right
+        # -----------------------------------------
+        #   left        |   center  |   right
+        # -----------------------------------------
+        #   bottom-left |   bottom  |   bottom-right
+        #
+        # The center area is the orignial matrix. Other areas are reflections.
+
+        center_x, center_y = x + top, y + left
+        top_reflect_x, left_reflect_y = top - x, left - y
+        bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
+
+        # Accumulate gradients from different areas
+        grad = load_from_output(center_x, center_y)
+        accumulate(center_x, left_reflect_y, (y, 1, left))
+        accumulate(center_x, right_reflect_y, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top))
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1))
+        accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
+        accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
+        accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
+        accumulate(
+            bot_reflect_x, right_reflect_y, (x, h - bot, h - 1), (y, w - right, w - 1)
+        )
+
+        return grad
+
+    return Pointwise.create(
+        device=grad_output.get_device(),
+        dtype=grad_output.get_dtype(),
+        inner_fn=fn,
+        ranges=list(x.get_size()),
     )
 
 
