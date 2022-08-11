@@ -28,8 +28,6 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 needs_realized_inputs = set()
 
-current_origin = None
-
 
 def add_needs_realized_inputs(fn):
     if isinstance(fn, (list, tuple, set)):
