@@ -2,6 +2,7 @@ import json
 import os
 
 import torch
+from torch.fx.experimental.proxy_tensor import make_fx
 
 aten = torch.ops.aten
 
@@ -35,7 +36,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         result = super().run_node(n)
 
         if n.op == "call_function":
-            if n.target == aten.convolution:
+            if n.target == aten.convolution.default:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 assert len(args) == len(
                     self.conv_arg_names
@@ -65,9 +66,16 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         return result
 
 
+# TODO: Remove when https://github.com/pytorch/pytorch/pull/83210 lands
+def fake_signature(fn, nargs):
+    """FX gets confused by varargs, de-confuse it"""
+    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
+
+
 def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs):
     # lowering graph
-    gm = make_fx(gm)(*example_inputs)
+    gm = make_fx(fake_signature(gm, len(example_inputs)))(*example_inputs)
     # use Interpreter to logs the args of conv
     ConvArgsAnalysis(gm).run(*example_inputs)
     return gm

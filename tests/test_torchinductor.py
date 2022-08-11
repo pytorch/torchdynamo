@@ -784,7 +784,6 @@ class CommonTemplate:
             ),
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_unsqueeze_inplace(self):
         def fn(a):
             tmp1 = a + 1
@@ -817,7 +816,6 @@ class CommonTemplate:
             ),
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -826,7 +824,6 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
-    @patch.object(config, "aot_autograd", False)
     def test_linear2(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 8),
@@ -1376,7 +1373,6 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -1622,7 +1618,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
-    @patch.object(config, "aot_autograd", False)
     def test_new_ones(self):
         def fn(a):
             return (
@@ -1933,7 +1928,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 1, 1]),))
 
-    @patch.object(config, "aot_autograd", False)
     @patch.object(config.triton, "cudagraphs", True)
     def test_input_mutation1(self):
         def fn(a):
@@ -1957,7 +1951,6 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
-    @patch.object(config, "aot_autograd", False)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -1974,7 +1967,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(config, "aot_autograd", False)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -1997,7 +1989,6 @@ class CommonTemplate:
 
     # TODO(voz): Figure out why, re-enable
     @unittest.skip("Disabled during functorch bump")
-    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -2010,7 +2001,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
-    @patch.object(config, "aot_autograd", False)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -2093,7 +2083,6 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
-    @patch.object(config, "aot_autograd", False)
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
@@ -2376,7 +2365,6 @@ class CommonTemplate:
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
-    @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
         @torchdynamo.optimize("inductor")
         def fn(a):
@@ -2407,7 +2395,6 @@ class CommonTemplate:
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
 
-    @patch.object(config, "aot_autograd", False)
     def test_rand_like_deterministic(self):
         @torchdynamo.optimize("inductor")
         def fn(a):
@@ -2533,7 +2520,6 @@ class CommonTemplate:
             ],
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
