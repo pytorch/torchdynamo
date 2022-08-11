@@ -1938,6 +1938,21 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(a_names, model_b.names)
 
+    def test_numpy_variable_isinstance(self):
+        def fn(x, m):
+            if isinstance(m, np.ndarray):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.tensor([2.3])
+        m = np.array([1, 2, 3])
+        ref = fn(x, m)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res = fn(x, m)
+        self.assertEqual(ref, res)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
