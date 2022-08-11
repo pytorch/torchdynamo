@@ -128,7 +128,7 @@ class _matmul_out:
         )
 
     @staticmethod
-    def forward(a, b, out, allow_tf32=torch.backends.cuda.matmul.allow_tf32):
+    def forward(a, b, out, allow_tf32=True):
         return _matmul_out._call(a, b, out, allow_tf32)
 
 
