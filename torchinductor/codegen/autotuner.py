@@ -21,6 +21,8 @@ def str2func(str):
         runnable = aten
     elif module == "triton_ops":
         runnable = triton_ops
+    elif module == "torch":
+        runnable = torch
     else:
         raise Exception(f"{str} could not be called")
 
@@ -213,3 +215,63 @@ def tuned_mm(
             print("best_kernel", autotune.cache[key])
     best_kernel = autotune.cache[key]
     return best_kernel
+
+
+def tuned_conv_layout(
+    kernel,
+    x_shape,
+    w_shape,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    device,
+    dtype,
+):
+    sizevars = V.graph.sizevars
+    x_shape = [sizevars.size_hint(s) for s in x_shape]
+    w_shape = [sizevars.size_hint(s) for s in w_shape]
+    x = torch.randn(x_shape, device=device, dtype=dtype)
+    w = torch.randn(w_shape, device=device, dtype=dtype)
+    id_args = [
+        *x_shape,
+        *w_shape,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+    ]
+
+    # gen_key
+    key = tuple([arg for arg in id_args])
+    key = ("conv_layout",) + key
+    runnable_kernel = str2func(kernel)
+
+    timings = {}
+    if key not in autotune.cache:
+        for memory_format in ["torch.contiguous_format", "torch.channels_last"]:
+            x = x.to(memory_format=str2func(memory_format))
+            run_args = (
+                x,
+                w,
+                None,
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+            )
+            timing, _, _ = autotune._bench(runnable_kernel, *run_args)
+            timings[memory_format] = timing
+        autotune.cache[key] = builtins.min(timings, key=timings.get)
+        if torchinductor.config.debug:
+            print("for key = ", key)
+            print("timing", timings)
+            print("best_layout", autotune.cache[key])
+    best_layout = autotune.cache[key]
+    return best_layout
