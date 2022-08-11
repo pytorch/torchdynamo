@@ -792,7 +792,7 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def measure_latency_and_memory(self, device, model_name, model_iter_fn, backends, batch_size, args):
+    def measure_latency_and_memory(self, device, model_name, model_iter_fn, backends, batch_size):
         get_peak_memory = lambda: torch.cuda.max_memory_allocated() / 10**9
         # backends.insert(0, "baseline")
 
@@ -802,34 +802,34 @@ class BenchmarkRunner:
         stats = {}
 
         def mem_experiment(backend):
-            try:
-                stats = {}
-                # Get the context
-                if backend == "baseline":
-                    ctx = NullContext()
-                else:
-                    ctx = torchdynamo.optimize(backend)
+            # try:
+            stats = {}
+            # Get the context
+            if backend == "baseline":
+                ctx = NullContext()
+            else:
+                ctx = torchdynamo.optimize(backend)
 
-                # Reset and warmup
-                torchdynamo.reset()
-                torch.cuda.empty_cache()
-                t0 = time.perf_counter()
-                with ctx:
-                    model_iter_fn(model, example_inputs)
-                    model_iter_fn(model, example_inputs)
-                    model_iter_fn(model, example_inputs)
-                t1 = time.perf_counter()
-                latency = t1 - t0
+            # Reset and warmup
+            torchdynamo.reset()
+            torch.cuda.empty_cache()
+            t0 = time.perf_counter()
+            with ctx:
+                model_iter_fn(model, example_inputs)
+                model_iter_fn(model, example_inputs)
+                model_iter_fn(model, example_inputs)
+            t1 = time.perf_counter()
+            latency = t1 - t0
 
-                # Measure memory
-                torch.cuda.reset_peak_memory_stats()
-                with ctx:
-                    model_iter_fn(model, example_inputs, stats=stats)
-                # peak_memory = get_peak_memory()
-                peak_memory = stats["peak_memory"]
-            except:
-                latency = 0
-                peak_memory = 0
+            # Measure memory
+            torch.cuda.reset_peak_memory_stats()
+            with ctx:
+                model_iter_fn(model, example_inputs, stats=stats)
+            # peak_memory = get_peak_memory()
+            peak_memory = stats["peak_memory"]
+            # except:
+            #     latency = 0
+            #     peak_memory = 0
 
             latencies.append(latency)
             mems.append(peak_memory)
@@ -846,9 +846,9 @@ class BenchmarkRunner:
         except NotImplementedError:
             logging.warn(f"{model_name} failed to load")
 
-        if args.float32:
+        if self._args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
-        elif args.float16:
+        elif self._args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
         # Collect the compile and memory latency for backend
         for backend in backends:
@@ -1586,7 +1586,7 @@ def main(runner, original_dir=None):
             print(f"batch size: {batch_size}")
         for device in args.devices:
             runner.measure_latency_and_memory(
-                device, args.only, model_iter_fn, args.peak_memory_for_backend, batch_size, args
+                device, args.only, model_iter_fn, args.peak_memory_for_backend, batch_size
             )
         return
 
