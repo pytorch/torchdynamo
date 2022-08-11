@@ -17,8 +17,10 @@ import warnings
 import numpy as np
 import pandas as pd
 import torch
+from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
 
 import torchdynamo
@@ -972,7 +974,11 @@ def parse_args():
         action="store_true",
         help="dump raw timing metrics from speedup experiment",
     )
-
+    parser.add_argument(
+        "--log-operator-inputs",
+        action="store_true",
+        default=False,
+    )
     parser.add_argument(
         "--channels-last",
         action="store_true",
@@ -1544,6 +1550,10 @@ def main(runner, original_dir=None):
             elif args.float16:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
 
+            if args.log_operator_inputs:
+                log_operator_inputs(model, example_inputs, model_iter_fn, name, args)
+                continue
+
             runner.run_one_model(
                 name,
                 model,
@@ -1599,6 +1609,11 @@ def main(runner, original_dir=None):
                 model, example_inputs = cast_to_fp32(model, example_inputs)
             elif args.float16:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
+
+            if args.log_operator_inputs:
+                log_operator_inputs(model, example_inputs, model_iter_fn, name, args)
+                continue
+
             runner.run_one_model(
                 name,
                 model,
@@ -1614,6 +1629,44 @@ def main(runner, original_dir=None):
 
         Stats.print_summary()
         print_summary(output_filename)
+
+
+def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
+    output_split = args.output.split("/")
+    if "." in output_split[-1]:
+        output_split = output_split[:-1]
+    output_dir = "/".join(output_split).strip("/")
+    mode = "training" if args.training else "eval"
+    output = f"/{output_dir}/{name}_{mode}.json"
+
+    # TODO - add option for coalescing inputs over multiple runs
+    if os.path.exists(output):
+        print(f"Skipping {name}, {output} already exists")
+        return
+
+    print(f"Running {name}")
+
+    operator_mode = OperatorInputsMode()
+    fake_tensor_mode = FakeTensorMode()
+
+    with torch._subclasses.fake_tensor.FakeCopyMode(fake_tensor_mode):
+        model_fake = copy.deepcopy(model)
+        example_inputs_fake = copy.deepcopy(example_inputs)
+    try:
+        with fake_tensor_mode, operator_mode:
+            model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
+    except Exception as e:
+        print(f"{name} failed to run with fake tensors, trying real. Exception: {e}")
+        operator_mode = OperatorInputsMode()
+        try:
+            with operator_mode:
+                model_iter_fn(model, example_inputs, collect_outputs=False)
+        except Exception as e2:
+            print(f"{name} failed to run with real. Exception: {e2}")
+            raise e2
+
+    print(f"Writing output to {output}")
+    operator_mode.log_to_file(output)
 
 
 if __name__ == "__main__":
