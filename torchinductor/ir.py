@@ -2069,7 +2069,7 @@ class ExternKernel(InputsKernel):
         sizevars = V.graph.sizevars
         sizes = self.get_size()
         strides = self.get_stride()
-        strides = [sizevars.guard_static_shape(x) for x in strides]
+        strides = [sizevars.size_hint(x) for x in strides]
         index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
