@@ -10,6 +10,12 @@ torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
 
+# The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+torch.backends.cuda.matmul.allow_tf32 = True
+# The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+torch.backends.cudnn.allow_tf32 = True
+
+
 class Func(object):
     # mm
     @torchdynamo.optimize("inductor")
