@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -9,6 +10,7 @@ from typing import Any
 from typing import Callable
 from typing import List
 from typing import Optional
+from typing import Set
 from unittest.mock import patch
 
 import numpy
@@ -200,8 +202,28 @@ def is_triton(device):
     return device.type == "cuda"
 
 
+@dataclasses.dataclass
 class IRNode(object):
+    _current_origins = set()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_origins(origins: Set[torch.fx.Node]):
+        old = IRNode._current_origins
+        IRNode._current_origins = old | origins
+        yield
+        IRNode._current_origins = old
+
+    def __post_init__(self):
+        self.origins = set(self._current_origins)
+
+    def common_repr(self):
+        return (
+            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+        )
+
     def str_helper(self, lines):
+        lines = lines + self.common_repr()
         lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
@@ -1874,6 +1896,7 @@ class ConcatKernel(NopKernel):
             )
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+
         return kernel
 
     @classmethod
@@ -2088,6 +2111,13 @@ class ExternKernel(InputsKernel):
 
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
+
+    def __str__(self):
+        lines = [
+            f"{field.name}={getattr(self, field.name)}"
+            for field in dataclasses.fields(self)
+        ]
+        return self.str_helper(lines)
 
 
 @dataclasses.dataclass
