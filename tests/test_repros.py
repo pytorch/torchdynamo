@@ -1437,3 +1437,30 @@ class ReproTests(torchdynamo.testing.TestCase):
             m.forward(listy)
 
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_vdd_duplicate_error(self):
+        def fn(a, dt):
+            keys = list(dt._jt_dict.keys())
+            p = torch.cos(dt._jt_dict[keys[0]]._value)
+            q = torch.sin(a)
+            r = torch.sigmoid(dt._jt_dict[keys[0]]._value)
+            return p + q + r
+
+        class Value:
+            def __init__(self):
+                self._value = torch.randn(4)
+
+        class Sample:
+            def __init__(self):
+                self._jt_dict = {}
+                self._jt_dict["POSITION_ID"] = Value()
+
+        a = torch.randn(4)
+        sample = Sample()
+
+        ref = fn(a, sample)
+
+        optimized_fn = torchdynamo.optimize("eager", nopython=True)(fn)
+        res = optimized_fn(a, sample)
+
+        self.assertTrue(same(ref, res))
