@@ -7,6 +7,15 @@ batch_size_file="\$(realpath benchmarks/torchbench_models_list.txt)"
 
 EXP="$1"
 
+
+methods=("eager")
+for method in "${methods[@]}"; do
+    cmd="AOT_PARTITIONER_DEBUG=1 PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python benchmarks/torchbench.py --training --devices=cuda --isolate --skip-accuracy-check --${fp} --peak-memory-for-backend=${method} --output=exp.csv --batch_size_file ${batch_size_file} ${datasets}"
+    echo "$cmd"
+    eval "$cmd"
+done
+exit 1
+
 if [[ "inductor" == "$EXP" ]]; then
     cmd="AOT_PARTITIONER_DEBUG=1 PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python benchmarks/torchbench.py --training --devices=cuda --inductor --isolate --skip-accuracy-check --${fp} --batch_size_file ${batch_size_file} --repeat $repeat ${datasets}"
     echo "$cmd"
