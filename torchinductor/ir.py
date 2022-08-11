@@ -2256,6 +2256,7 @@ class MatrixMultiply(ExternKernelOut):
             [
                 ("GROUP_M", "8"),
                 ("ACC_TYPE", ACC_TYPE),
+                ("allow_tf32", f"{torch.backends.cuda.matmul.allow_tf32}"),
             ]
         )
 
