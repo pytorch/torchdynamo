@@ -48,15 +48,6 @@ class Unsupported(RuntimeError):
         self.category = None
         self.add_to_stats()
 
-    def __str__(self):
-        msgs = [super(Unsupported, self).__str__()]
-        if self.real_stack:
-            msgs.append("\nProcessing original code:\n")
-            msgs.extend(
-                reversed(traceback.StackSummary.from_list(self.real_stack).format())
-            )
-        return "".join(msgs)
-
     def remove_from_stats(self):
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
