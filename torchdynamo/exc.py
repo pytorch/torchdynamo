@@ -1,10 +1,7 @@
 import dataclasses
 import os
-import traceback
 
-import torchdynamo.config as config
 from torchdynamo.utils import counters
-from torchdynamo.utils import log_warning
 
 
 class InternalTorchDynamoError(RuntimeError):

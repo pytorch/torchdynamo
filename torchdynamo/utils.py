@@ -340,12 +340,12 @@ def torchscript(model, example_inputs, verbose=True):
         return torch.jit.trace(model, example_inputs)
     except Exception:
         if verbose:
-            log.exception("jit error")
+            log_error("jit error")
         try:
             return torch.jit.script(model)
         except Exception:
             if verbose:
-                log.exception("jit error")
+                log_error("jit error")
     return None
 
 

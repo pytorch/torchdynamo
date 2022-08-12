@@ -29,7 +29,6 @@ from torchdynamo.source import GlobalWeakRefSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
-from . import config
 from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
@@ -329,7 +328,7 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except Exception as e:
+        except Exception:
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
