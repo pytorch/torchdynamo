@@ -13,12 +13,12 @@ try:
 except ImportError:
     HAS_REFS_PRIMS = False
 
-# log level (lower levels print what it says + all higher levels)
+# log level (levels print what it says + all levels listed below it)
 # DEBUG print full traces <-- lowest level + print tracing of every instruction
 # INFO print compiled functions + graphs
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
-log_level = logging.DEBUG
+log_level = logging.WARNING
 log_name = "torchdynamo"
 
 # verify the correctness of optimized backend
