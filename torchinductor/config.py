@@ -1,3 +1,5 @@
+import os
+
 # add some debug printouts
 debug = False
 
@@ -46,6 +48,9 @@ prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
+
+# Inductor compilation debug info
+repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
 
 
 # config specific to codegen/cpp.pp
