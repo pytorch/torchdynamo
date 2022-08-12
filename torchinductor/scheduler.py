@@ -5,6 +5,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 from typing import Any
 from typing import Dict
 from typing import List
@@ -109,6 +110,12 @@ class BaseSchedulerNode:
 
     def get_name(self):
         return self.node.get_name()
+
+    def get_sort_order(self):
+        name = self.get_name()
+        m = re.search(r"(\d+)$", name)
+        assert m, f"expected '{name}' to end with a number"
+        return int(m.group(1))
 
     def get_device(self):
         return self.node.get_device()
@@ -1128,7 +1135,7 @@ class Scheduler:
         nodes = [True]
         while nodes:
             nodes = list(self.unordered_pop_group(group_without_device))
-            nodes.sort(key=lambda x: x.get_name())
+            nodes.sort(key=lambda x: x.get_sort_order())
             yield from nodes
 
     def pop_groups(self, groups):

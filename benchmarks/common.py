@@ -653,6 +653,61 @@ def speedup_experiment_trt(args, model_iter_fn, model, example_inputs):
     )
 
 
+def read_batch_size_from_file(args, filename, model_name):
+    batch_size = None
+    if os.path.exists("benchmarks"):
+        filename = os.path.join("benchmarks", filename)
+    assert os.path.exists(filename), filename
+    with open(filename, "r") as f:
+        lines = f.readlines()
+        lines = [i.split(",") for i in lines if len(i.strip()) > 0]
+        for val in lines:
+            cur_name, b = val
+            if model_name == cur_name:
+                batch_size = int(b)
+    if batch_size is None:
+        raise RuntimeError(
+            f"Batch size could not be found for {model_name} in {args.batch_size_file}"
+        )
+    print(f"batch size: {batch_size}")
+    return batch_size
+
+
+def compilation_profiling_experiment(
+    model_iter_fn, model, example_inputs, backend="pytorch"
+):
+    # Get the context
+    if backend == "pytorch":
+        ctx = NullContext()
+    else:
+        ctx = torchdynamo.optimize(backend)
+
+    def get_peak_memory():
+        return torch.cuda.max_memory_allocated() / 10**9
+
+    try:
+        # Reset and warmup
+        torchdynamo.reset()
+        torch.cuda.empty_cache()
+        t0 = time.perf_counter()
+        with ctx:
+            model_iter_fn(model, example_inputs)
+            model_iter_fn(model, example_inputs)
+            model_iter_fn(model, example_inputs)
+        t1 = time.perf_counter()
+        compilation_latency = t1 - t0
+
+        # Measure memory
+        torch.cuda.reset_peak_memory_stats()
+        with ctx:
+            model_iter_fn(model, example_inputs)
+        peak_memory = get_peak_memory()
+    except Exception:
+        compilation_latency = 0
+        peak_memory = 0
+    return compilation_latency, peak_memory
+
+
 def null_experiment(args, model_iter_fn, model, example_inputs):
     """
     A no-op experiment useful for making sure TorchBenchark alone works properly.
@@ -791,6 +846,46 @@ class BenchmarkRunner:
         else:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
+
+    def profile_compilation(self, device, model_name, model_iter_fn, backend):
+        """
+        Profiles compilation characteristics, e.g., compilation latency and memory.
+        """
+
+        try:
+            batch_size = None
+            if self.args.batch_size_file:
+                batch_size = read_batch_size_from_file(
+                    self.args, self.args.batch_size_file, model_name
+                )
+            elif self.args.batch_size:
+                batch_size = self.args.batch_size
+            device, name, model, example_inputs, batch_size = self.load_model(
+                device,
+                model_name,
+                self._args.training,
+                self._args.use_eval_mode,
+                batch_size,
+            )
+        except NotImplementedError:
+            logging.warn(f"{model_name} failed to load")
+
+        assert (
+            device == "cuda"
+        ), "The memory measurement is currently specific to CUDA devices"
+        experiment = functools.partial(
+            compilation_profiling_experiment,
+            model_iter_fn=model_iter_fn,
+            model=model,
+            example_inputs=example_inputs,
+        )
+        time, memory = experiment(backend=backend)
+
+        output_csv(
+            output_filename,
+            ("dev", "name", "batch_size", "time", "memory"),
+            [device, model_name, batch_size, time, memory],
+        )
 
     def batch_size_finder(
         self, device, model_name, model_iter_fn, initial_batch_size=128
@@ -1176,7 +1271,11 @@ def parse_args():
         action="store_true",
         help="finds the largest batch size that could fit on GPUs",
     )
-
+    group.add_argument(
+        "--profile-backend",
+        type=str,
+        help="reports the peak memory and compilation latency for a backend",
+    )
     args = parser.parse_args()
     return args
 
@@ -1481,6 +1580,16 @@ def main(runner, original_dir=None):
             output_csv(output_filename, [], [args.only, batch_size])
         return
 
+    if args.profile_backend and args.only:
+        assert args.isolate, "Use --isolate or --only to enable isolation"
+        if output_filename is None:
+            output_filename = "backends_profile.csv"
+        for device in args.devices:
+            runner.profile_compilation(
+                device, args.only, model_iter_fn, args.profile_backend
+            )
+        return
+
     if args.export_profiler_trace:
         if args.profiler_trace_name is None:
             if args.backend:
@@ -1503,24 +1612,9 @@ def main(runner, original_dir=None):
         for device in args.devices:
             batch_size = args.batch_size
             if args.batch_size_file:
-                batch_size = None
-
-                filename = args.batch_size_file
-                if os.path.exists("benchmarks"):
-                    filename = os.path.join("benchmarks", filename)
-                assert os.path.exists(filename)
-                with open(filename, "r") as f:
-                    lines = f.readlines()
-                    lines = [i.split(",") for i in lines if len(i.strip()) > 0]
-                    for val in lines:
-                        cur_name, b = val
-                        if model_name == cur_name:
-                            batch_size = int(b)
-                if batch_size is None:
-                    raise RuntimeError(
-                        f"Batch size could not be found for {model_name} in {args.batch_size_file}"
-                    )
-                print(f"batch size: {batch_size}")
+                batch_size = read_batch_size_from_file(
+                    args, args.batch_size_file, model_name
+                )
             try:
                 device, name, model, example_inputs, batch_size = runner.load_model(
                     device,

@@ -1387,6 +1387,14 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
 
+    def test_move_arange(self):
+        def fn(x):
+            return torch.arange(len(x), device="cpu").to(x.device) + x
+
+        self.common(fn, (torch.randn([32]),), check_lowp=False)
+        # if we have a copy there will be more than 1 kernel
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
@@ -1812,6 +1820,21 @@ class CommonTemplate:
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
+
+    def test_reflection_pad2d_backward(self):
+        def template(size, padding):
+            def fn(grad_output, x):
+                return aten.reflection_pad2d_backward(grad_output, x, padding)
+
+            x = torch.randint(0, 999, size=size, dtype=torch.float32)
+            result = aten.reflection_pad2d(x, padding)
+            grad_output = torch.randn_like(result)
+
+            self.common(fn, (grad_output, x))
+
+        template([1, 1, 8, 8], [0, 0, 0, 0])
+        template([1, 1, 8, 8], [1, 1, 1, 1])
+        template([1, 1, 8, 8], [1, 2, 3, 4])
 
     def test_grid_sampler_2d(self):
         def fn(a, b):

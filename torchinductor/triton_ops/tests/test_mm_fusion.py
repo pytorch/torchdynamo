@@ -8,6 +8,9 @@ from torchdynamo.testing import rand_strided
 torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
+# The flag below controls whether to allow TF32 on matmul.
+torch.backends.cuda.matmul.allow_tf32 = True
+
 class Func(object):
     @torchdynamo.optimize("inductor")
     def mm(x, w, bias):
