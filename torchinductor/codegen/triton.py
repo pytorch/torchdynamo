@@ -1151,7 +1151,7 @@ class TritonScheduling:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
 
         """
-        if reduction_numel != 1:
+        if reduction_numel != 1 or config.triton.max_tiles <= 1:
             # TODO(jansel): should we tile reductions?
             return (numel, reduction_numel)
 
@@ -1164,22 +1164,24 @@ class TritonScheduling:
                 seen_names.add(tiling.name)
                 candidate_tiles[tiling.tiling] += tiling.score
 
-        # Add one 3D tiling choice
         ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
-        for i in range(1, len(ranked_tilings)):
-            a0, a1 = ranked_tilings[0]
-            b0, b1 = ranked_tilings[i]
-            if V.graph.sizevars.size_hint(a1 - b1) == 0:
-                continue
-            if V.graph.sizevars.size_hint(a1 - b1) < 0:
-                # swap so a0 is bigger
-                a0, a1 = ranked_tilings[i]
-                b0, b1 = ranked_tilings[0]
-            assert V.graph.sizevars.size_hint(a1 - b1) > 0
-            if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
-                tiling = (a0, ir.IndexingDiv(a1, b1), b1)
-                ranked_tilings = [tiling] + ranked_tilings
-                break  # only 1 choice for now
+
+        if config.triton.max_tiles >= 3:
+            # Add one 3D tiling choice
+            for i in range(1, len(ranked_tilings)):
+                a0, a1 = ranked_tilings[0]
+                b0, b1 = ranked_tilings[i]
+                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+                    continue
+                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                    # swap so a0 is bigger
+                    a0, a1 = ranked_tilings[i]
+                    b0, b1 = ranked_tilings[0]
+                assert V.graph.sizevars.size_hint(a1 - b1) > 0
+                if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
+                    tiling = (a0, ir.IndexingDiv(a1, b1), b1)
+                    ranked_tilings = [tiling] + ranked_tilings
+                    break  # only 1 choice for now
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)
