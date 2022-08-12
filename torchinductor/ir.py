@@ -404,6 +404,149 @@ class Reduction(Loops):
             self.reduction_type,
         )
 
+    @staticmethod
+    def num_splits(
+        device,
+        dtype,
+        inner_fn,
+        ranges,
+        reduction_ranges,
+        reduction_type,
+        reduction_numel,
+    ):
+        num_sm = torch.cuda.get_device_properties(device).multi_processor_count
+        min_elements_per_thread = 32
+        max_elements_per_thread = 512
+        threads_per_sm = 2048
+        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
+        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
+
+        def inner_reduction_splits(reduction_numel_hint, numel_hint):
+            # do heuristics that's close to eager mode for split inner reduction
+            # we leak reduction autotune configs here, and will need to refactor to avoid this later
+            num_warps = 8
+            num_threads = 32 * num_warps
+            if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
+                return 1
+            if reduction_numel_hint <= 8192:
+                return 1
+            if reduction_numel_hint * numel_hint <= min_elements_per_device:
+                split_size = min_elements_per_thread
+            elif reduction_numel_hint * numel_hint < max_elements_per_device:
+                target_blocks = num_sm * threads_per_sm // (2 * num_threads)
+                blocks_per_output = (target_blocks + numel_hint - 1) // numel_hint
+                tmp_split_size = (
+                    reduction_numel_hint + num_threads * blocks_per_output - 1
+                ) // (num_threads * blocks_per_output)
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
+                if abs(closest - tmp_split_size) < 30:
+                    # prefer even splits, but never smalle than min_elements_per_thread
+                    split_size = max(closest, min_elements_per_thread)
+                else:
+                    split_size = tmp_split_size
+            else:
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
+                if abs(closest - max_elements_per_thread) < 50:
+                    # prefer even splits
+                    split_size = closest
+                else:
+                    split_size = max_elements_per_thread
+            return (reduction_numel_hint + split_size * num_threads - 1) // (
+                split_size * num_threads
+            )
+
+        def outer_reduction_splits(reduction_numel_hint, numel_hint):
+            # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
+            # extend to even smaller number of outputs
+            num_warps = 8
+            num_threads = num_warps * 32
+            rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
+            xvals_per_block = 128
+            xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
+            if reduction_numel_hint * numel_hint < min_elements_per_device:
+                split_size = min_elements_per_thread
+            elif reduction_numel_hint * numel_hint < max_elements_per_device:
+                target_blocks = num_sm * threads_per_sm // (num_threads)
+                target_blocks = (target_blocks + xblocks - 1) // xblocks
+                tmp_split_size = (
+                    reduction_numel_hint + rvals_per_thread * target_blocks - 1
+                ) // (rvals_per_thread * target_blocks)
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
+                if abs(tmp_split_size - closest) < 20:
+                    split_size = max(closest, min_elements_per_thread)
+                else:
+                    split_size = tmp_split_size
+            else:
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
+                if abs(closest - max_elements_per_thread) < 50:
+                    # prefer even splits
+                    split_size = closest
+                else:
+                    split_size = max_elements_per_thread
+
+            return (reduction_numel_hint + rvals_per_thread * split_size - 1) // (
+                rvals_per_thread * split_size
+            )
+
+        reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        # easy cases
+        if numel_hint == 1:
+            return inner_reduction_splits(reduction_numel_hint, numel_hint)
+        if (
+            reduction_numel_hint <= min_elements_per_thread
+            or numel_hint >= num_sm * 2 * 32
+        ):
+            return 1
+
+        r = Reduction(
+            device,
+            dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+        )
+        read_writes = ComputedBuffer(
+            name=None,
+            layout=FlexibleLayout(
+                device=r.get_device(),
+                dtype=r.get_dtype(),
+                size=r.get_size(),
+            ),
+            data=r,
+        ).get_read_writes()
+        # try finding the full size producer
+        # TODO this will fail for something like ((1, N) * (N, 1)).sum()
+        # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
+        # TODO maybe go over all full size producers and pick the most common one?
+        range_vars = [
+            r
+            for r in read_writes.range_vars
+            if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
+        ]
+        index = None
+        for md in read_writes.reads:
+            if all([r in md.index.free_symbols for r in range_vars]):
+                index = md.index
+                break
+        if not index:
+            # TODO determine splits when all inputs are broadcasted
+            return 1
+        reduction_vars = [
+            rv for rv in range_vars if read_writes.var_ranges[rv] in reduction_ranges
+        ]
+        strides = V.graph.sizevars.stride_hints(index, reduction_vars)
+        outer = all([s > 1 for s in strides])
+        if not outer:
+            return inner_reduction_splits(reduction_numel_hint, numel_hint)
+        else:  # outer reduction
+            return outer_reduction_splits(reduction_numel_hint, numel_hint)
+
     @classmethod
     def create(
         cls,
@@ -423,16 +566,19 @@ class Reduction(Loops):
 
             return Pointwise.create(device, dtype, fn, ranges)
 
-        if is_triton(device):
-            reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
-            numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-            if (
-                reduction_numel_hint > 8192
-                and numel_hint == 1
-                and reduction_type not in {"argmax", "argmin"}
-            ):
+        if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
+            # triton doesn't support reduce to single element well, so break it up
+            split = cls.num_splits(
+                device,
+                dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                reduction_numel,
+            )
+            if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
-                split = 128
                 return cls.create_multilayer(
                     device,
                     dtype,
