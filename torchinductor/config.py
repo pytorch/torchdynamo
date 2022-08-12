@@ -44,6 +44,9 @@ implicit_fallbacks = True
 # Enables a fusion pass that groups nodes together before the scheduler
 prefuse_nodes = True
 
+# Use the graph inputs' device (should be unique) as factory ops' output device
+use_graph_device_for_factory_ops = True
+
 
 # config specific to codegen/cpp.pp
 class cpp:

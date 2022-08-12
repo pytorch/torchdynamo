@@ -89,6 +89,10 @@ def decode_dtype(dtype: int):
 
 
 def decode_device(device):
+    if config.use_graph_device_for_factory_ops and len(V.graph.device_types) == 1:
+        # If this optimization is on, we make all factory ops generate
+        # tensors on the same unique device as the graph inputs.
+        return torch.device(list(V.graph.device_types)[0])
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
