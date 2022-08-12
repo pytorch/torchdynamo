@@ -2262,13 +2262,13 @@ class BatchMatrixMultiply(ExternKernelOut):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
-        V.graph.device_types.add(device.type)
-        V.graph.device_types.add(x.get_device().type)
-
         if not x.is_extern() and all(
             (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
         ):
             return x.constant_to_device(device)
+
+        V.graph.device_types.add(device.type)
+        V.graph.device_types.add(x.get_device().type)
 
         log.warning("DeviceCopy")
         return DeviceCopy(

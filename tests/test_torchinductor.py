@@ -1387,6 +1387,14 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
 
+    def test_move_arange(self):
+        def fn(x):
+            return torch.arange(len(x), device="cpu").to(x.device) + x
+
+        self.common(fn, (torch.randn([32]),), check_lowp=False)
+        # if we have a copy there will be more than 1 kernel
+        self.assertEqual(torchinductor.metrics.generated_kernel_count, 1)
+
     def test_leaky_relu(self):
         def fn(x):
             return aten.leaky_relu(x, 0.2) + 2, aten.leaky_relu(x + 1)
