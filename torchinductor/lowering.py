@@ -2637,17 +2637,30 @@ def div_mode(a, b, rounding_mode=None):
     # see the discussion at https://github.com/openai/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if (both_integer and on_triton) else floor(div_mode(a, b))
+        return floordiv(a, b) if (both_integer and on_triton) else floor(div(a, b))
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
-        return truncdiv(a, b) if (both_integer and on_triton) else trunc(div_mode(a, b))
-    if both_integer:
-        # truediv produces a float tensor even if both operands are integer types
-        return div(
-            to_dtype(a, torch.get_default_dtype()) if isinstance(a, TensorBox) else a,
-            to_dtype(b, torch.get_default_dtype()) if isinstance(b, TensorBox) else b,
-        )
+        return truncdiv(a, b) if (both_integer and on_triton) else trunc(div(a, b))
     return div(a, b)
+
+
+@register_lowering(aten.div)
+def div(a, b):
+    def fn(*args):
+        return ops.div(*args)
+
+    both_integer = is_integer_type(a) and is_integer_type(b)
+    # truediv produces a float tensor even if both operands are integer types
+    dtype = (
+        torch.get_default_dtype()
+        if both_integer
+        else torch.promote_types(a.get_dtype(), b.get_dtype())
+    )
+
+    return make_pointwise(fn, override_dtype=dtype)(
+        to_dtype(a, dtype) if isinstance(a, TensorBox) else a,
+        to_dtype(b, dtype) if isinstance(b, TensorBox) else b,
+    )
 
 
 sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
@@ -2660,7 +2673,6 @@ register_lowering(aten.argmax)(make_reduction("argmax"))
 register_lowering(aten.argmin)(make_reduction("argmin"))
 
 add = register_pointwise(aten.add)
-div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)
 floor = register_pointwise(aten.floor)
 mul = register_pointwise(aten.mul)
