@@ -1821,6 +1821,21 @@ class CommonTemplate:
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_reflection_pad2d_backward(self):
+        def template(size, padding):
+            def fn(grad_output, x):
+                return aten.reflection_pad2d_backward(grad_output, x, padding)
+
+            x = torch.randint(0, 999, size=size, dtype=torch.float32)
+            result = aten.reflection_pad2d(x, padding)
+            grad_output = torch.randn_like(result)
+
+            self.common(fn, (grad_output, x))
+
+        template([1, 1, 8, 8], [0, 0, 0, 0])
+        template([1, 1, 8, 8], [1, 1, 1, 1])
+        template([1, 1, 8, 8], [1, 2, 3, 4])
+
     def test_grid_sampler_2d(self):
         def fn(a, b):
             return (
