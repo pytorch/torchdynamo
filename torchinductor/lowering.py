@@ -2644,18 +2644,18 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering(aten.div)
+@register_lowering([aten.div, prims.div])
 def div(a, b):
     def fn(*args):
         return ops.div(*args)
 
-    both_integer = is_integer_type(a) and is_integer_type(b)
-    # truediv produces a float tensor even if both operands are integer types
-    dtype = (
-        torch.get_default_dtype()
-        if both_integer
-        else torch.promote_types(a.get_dtype(), b.get_dtype())
+    dtype = torch.result_type(
+        a if isinstance(a, (float, int)) else torch.tensor(0, dtype=a.get_dtype()),
+        b if isinstance(b, (float, int)) else torch.tensor(0, dtype=b.get_dtype()),
     )
+    # truediv produces a float tensor even if both operands are integer types
+    if is_integer_type(a) and is_integer_type(b):
+        dtype = torch.get_default_dtype()
 
     return make_pointwise(fn, override_dtype=dtype)(
         to_dtype(a, dtype) if isinstance(a, TensorBox) else a,
