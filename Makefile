@@ -2,7 +2,7 @@
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
             $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
-            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py)
+            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py) $(wildcard .circleci/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
