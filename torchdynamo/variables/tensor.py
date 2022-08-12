@@ -112,6 +112,7 @@ user_constraint_mt5model = [True,
                             z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
                             z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
                             z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            # True,
                             z3.And([dimension_var2 == 2]),
                             z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
                             z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
@@ -312,7 +313,7 @@ class TensorVariable(VariableTracker):
                         FakeRootModule(tx.output.nn_modules),
                         proxy.node.graph,
                         proxy.node,
-                        user_constraints=user_constraints_M2M100Model[COUNT]
+                        user_constraints=user_constraints_XGLM[COUNT]
                     )
 
                     print(positive)
@@ -328,7 +329,7 @@ class TensorVariable(VariableTracker):
 
                     else:
                         pass
-
+        #
         except Exception as e:
             print(e)
 

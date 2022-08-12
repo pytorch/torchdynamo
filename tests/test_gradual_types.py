@@ -6,19 +6,10 @@ from torch.fx.tensor_type import Dyn
 import torchdynamo
 import torchdynamo.testing
 
-
-
 import inspect
-from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints
-from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D
-from torch.fx import GraphModule
 from enum import Enum
-from torch.fx.tensor_type import TensorType as TT
 from torch.fx.tensor_type import Dyn
-
 from transformers import *
-import transformers.utils.fx  as fx
-
 
 try:
     import z3  # noqa
@@ -31,9 +22,6 @@ except ImportError:
     HAS_Z3 = False
 
 skipIfNoZ3 = unittest.skipIf(not HAS_Z3, "no z3")
-
-
-
 
 
 bs = 4
@@ -208,11 +196,14 @@ class TorchDynamoUseCases(unittest.TestCase):
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
 
+
+
         with torchdynamo.optimize(cnts):
             m = generate_hf_model(XGLMModel, hidden_layers=1)
             m.forward(torch.ones([4, 32], dtype=torch.long))
 
         print(cnts.frame_count)
+        # print(CompileProfiler)
         self.assertEqual(cnts.frame_count, 5)
 
 
@@ -223,7 +214,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         cnts = torchdynamo.testing.CompileCounter()
 
         with torchdynamo.optimize(cnts):
-            m = generate_hf_model(M2M100Model, hidden_layers=1)
+            m = generate_hf_model(M2M100Model, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
 
         # before was 47
@@ -299,7 +290,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
-            m = generate_hf_model(T5Model, hidden_layers=1)
+            m = generate_hf_model(T5Model, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
 
         print(cnts.frame_count)
@@ -327,4 +318,4 @@ class TorchDynamoUseCases(unittest.TestCase):
         with torchdynamo.optimize(cnts):
             m = generate_hf_model(MarianModel, hidden_layers=1)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
-        print(cnts.frame_count)
+        self.assertEqual(cnts.frame_count, 30)

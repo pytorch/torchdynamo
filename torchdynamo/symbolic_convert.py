@@ -1250,7 +1250,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         # has its associated guards. At the end, we will accumulate these
         # guards.
         #
-        # One way of handling these guards is to just accumulate all of them
+        # One way of handling these guards is to just accumulate all of themƒ
         # right now. However, many f_locals might not be used in the frame and
         # thus can unnecessarily increase guard execution overhead.  Therefore,
         # we selectively update output.guards as we run the Python Bytecode
