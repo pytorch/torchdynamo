@@ -49,8 +49,10 @@ from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
+from .utils import filter_stack
 from .utils import istype
-from .utils import pretty_error
+from .utils import log_debug
+from .utils import log_warning
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
@@ -153,6 +155,16 @@ def break_graph_if_unsupported(*, push):
             except Unsupported as exc:
                 if not self.should_compile_partial_graph():
                     raise
+                user_stack = "".join(
+                    traceback.format_list(
+                        filter_stack(traceback.extract_stack())
+                        + [self.frame_summary()]
+                        + list(reversed(exc.real_stack))
+                    )
+                )
+
+                log_warning(f"Graph break: {exc} from user code at:\n {user_stack}")
+
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
             self.restore_graphstate(state)
@@ -282,8 +294,7 @@ class InstructionTranslatorBase(object):
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
-        if config.trace:
-            print("TRACE", inst.opname, inst.argval, self.stack)
+        log_debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
 
         try:
             if not hasattr(self, inst.opname):
@@ -294,6 +305,11 @@ class InstructionTranslatorBase(object):
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
                 raise
+        except Exception as exc:
+            real_stack = getattr(exc, "real_stack", [])
+            real_stack.append(self.frame_summary())
+            exc.real_stack = real_stack
+            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -314,7 +330,6 @@ class InstructionTranslatorBase(object):
             ):
                 pass
         except Exception as e:
-            e.fs = self.frame_summary()
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -1359,7 +1374,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as exc:
-            print(func.get_filename(), func.get_function(), args, kwargs, exc)
+            log_warning(
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
+            )
             unimplemented("arg mismatch inlining")
 
         for v in itertools.chain(sub_locals.values(), closure_cells.values()):
@@ -1370,10 +1387,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        if config.trace:
-            print("INLINING ", code)
-            dis.dis(code)
-            print()
+        log_debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -1392,8 +1406,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        if config.trace:
-            print("DONE INLINING", code)
+        log_debug(f"DONE INLINING {code}")
 
         if is_generator(code):
             assert tracer.symbolic_result.as_python_constant() is None

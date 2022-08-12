@@ -3,7 +3,6 @@ import functools
 import itertools
 import logging
 import os
-import sys
 import traceback
 import types
 import typing
@@ -34,10 +33,15 @@ from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import filter_stack
 from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
 from .utils import istype
+from .utils import log_debug
+from .utils import log_error
+from .utils import log_info
+from .utils import log_warning
 from .utils import orig_code_map
 from .utils import troubleshooting_url
 
@@ -172,31 +176,33 @@ def has_tensor_in_frame(frame):
         if has_tensor(value):
             return True
 
-    if config.debug:
-        print(
-            "skipping because no torch.*",
-            frame.f_code.co_name,
-            frame.f_code.co_filename,
-            frame.f_code.co_firstlineno,
-        )
+    log_debug(
+        f"skipping because no torch.* {frame.f_code.co_name} \
+            {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+    )
+
     return False
 
 
-def _print_exc(exc, frame):
-
-    print("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
-    traceback.print_exc()
-    print(
+def format_exception(exc, frame):
+    msg = os.linesep * 2
+    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    msg += traceback.format_exc()
+    msg += (
         "\n"
         + "=" * 10
         + " The above exception occurred while processing the following code "
         + "=" * 10
         + "\n"
     )
-    print(
-        "".join(traceback.format_list(traceback.extract_stack(frame)[:-2] + [exc.fs]))
+    msg += "".join(
+        traceback.format_list(
+            filter_stack(traceback.extract_stack(frame))
+            + list(reversed(exc.real_stack))
+        )
     )
-    print("=" * 10)
+    msg += "=" * 10
+    return msg
 
 
 def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
@@ -252,11 +258,11 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 return f"{str(guard_failures[code][-1])}"
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log.warning(
+            log_warning(
                 f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                f"   function: {format_func_info(code)}\n"
-                f"   reasons:  {format_guard_failures(code)}\n"
-                f"to diagnose recompilation issues, see {troubleshooting_url}."
+                + f"   function: {format_func_info(code)}\n"
+                + f"   reasons:  {format_guard_failures(code)}\n"
+                + f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
         output = None
@@ -287,17 +293,9 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        def debug_print(prefix):
-            if not config.debug:
-                return
-            print(
-                f"\n{prefix}",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-            )
-            # print(dis.Bytecode(frame.f_code).info())
-            print(dis.Bytecode(frame.f_code).dis())
+        def format_bytecode(prefix, bytecode):
+            return f"{prefix} {code.co_name} {code.co_filename} \
+                {code.co_firstlineno} \n{dis.Bytecode(bytecode).dis()}\n "
 
         try:
             for attempt in itertools.count():
@@ -311,23 +309,23 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 except exc.SkipFrame:
                     return None
             output_codes.add(code)
-            if config.debug:
-                debug_print("ORIGINAL BYTECODE")
-                print("MODIFIED BYTECODE")
-                # print(dis.Bytecode(code).info())
-                print(dis.Bytecode(code).dis())
+
+            log_info(format_bytecode("ORIGINAL BYTECODE", frame.f_code))
+            log_info(format_bytecode("MODIFIED BYTECODE", code))
 
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             check_fn = CheckFunctionManager(
                 output.guards, frame.f_locals, frame.f_globals
             )
+
             guarded_code = GuardedCode(code, check_fn.check_fn)
-            if config.debug:
-                print("\nGUARDS:")
-                for guard in sorted(output.guards):
-                    print(" -", str(guard))
-                print()
+            guard_str = "GUARDS:\n"
+            guard_str += "\n".join(
+                [f" - {str(guard)}" for guard in sorted(output.guards)]
+            )
+
+            log_info(guard_str)
 
             if guard_export_fn is not None:
                 guard_export_fn(output.guards)
@@ -339,14 +337,16 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             BackendCompilerFailed,
             AssertionError,
         ) as e:
-            if config.debug or config.trace or config.print_internal_exceptions:
-                debug_print("WONT CONVERT")
-                _print_exc(e, frame)
+            log_error(
+                format_bytecode("WONT CONVERT", frame.f_code)
+                + format_exception(e, frame)
+            )
             raise
-        except Exception:
-            if config.debug or config.trace or config.print_internal_exceptions:
-                debug_print("WONT CONVERT")
-                _print_exc(e, frame)
+        except Exception as e:
+            log_error(
+                format_bytecode("WONT CONVERT", frame.f_code)
+                + format_exception(e, frame)
+            )
             raise InternalTorchDynamoError()
 
     return wrap_convert_context(_convert_frame_assert)

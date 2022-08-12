@@ -29,7 +29,6 @@ import torchdynamo.config
 
 from . import config
 
-log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
@@ -39,7 +38,7 @@ troubleshooting_url = (
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "%(levelname)s %(name)s: %(message)s"},
+        "torchdynamo_format": {"format": "[%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
@@ -65,10 +64,59 @@ LOGGING_CONFIG = {
 }
 
 
-@functools.lru_cache(None)
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
+        logger = logging.getLogger(config.log_name)
+        logger.setLevel(config.log_level)
+
+
+def get_logger():
+    return logging.getLogger(config.log_name)
+
+
+def log_warning(msg, *args, **kwargs):
+    get_logger().warning(msg, *args, **kwargs)
+
+
+def log_error(msg, *args, **kwargs):
+    get_logger().error(msg, *args, **kwargs)
+
+
+def log_info(msg, *args, **kwargs):
+    get_logger().info(msg, *args, **kwargs)
+
+
+def log_debug(msg, *args, **kwargs):
+    get_logger().debug(msg, *args, **kwargs)
+
+
+# filter out all frames after entering dynamo
+def filter_stack(stack):
+    user_stack = []
+    for frame in stack:
+        if "convert_frame" in frame.filename:
+            break
+        if "eval_frame" in frame.filename:
+            continue
+        user_stack.append(frame)
+
+    return user_stack
+
+
+def format_graph_tabular(graph):
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        log_warning(
+            "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
+            "which could not be found on this machine. Run `pip "
+            "install tabulate` to install the library."
+        )
+        raise
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
+    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
 
 
 def count_calls(g: fx.Graph):
@@ -527,7 +575,7 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         for k in a.keys():
             if not (same(a[k], b[k], cos_similarity, tol, equal_nan=equal_nan)):
-                print("Accuracy failed for key name", k)
+                log_info("Accuracy failed for key name", k)
                 return False
         return True
     elif isinstance(a, torch.Tensor):
@@ -545,7 +593,7 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
                 return True
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().detach().item()}")
+                log_info(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)

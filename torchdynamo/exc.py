@@ -4,6 +4,7 @@ import traceback
 
 import torchdynamo.config as config
 from torchdynamo.utils import counters
+from torchdynamo.utils import log_warning
 
 
 class InternalTorchDynamoError(RuntimeError):
@@ -67,8 +68,6 @@ class Unsupported(RuntimeError):
 
 
 def unimplemented(msg: str):
-    if config.debug:
-        print("Unimplemented - causing graph break:", msg)
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
 

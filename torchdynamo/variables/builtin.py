@@ -25,6 +25,7 @@ from ..source import TypeSource
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
+from ..utils import log_warning
 from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import MutableLocal
@@ -326,8 +327,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                if config.debug:
-                    print("WARN: incorrect arg count", handler, exc)
+                log_warning(f"incorrect arg count {handler} {exc}")
                 handler = None
 
         if handler:
