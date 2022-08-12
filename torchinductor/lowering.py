@@ -98,6 +98,13 @@ def is_integer_type(x):
         return isinstance(x, int)
 
 
+def is_boolean_type(x):
+    if isinstance(x, TensorBox):
+        return is_boolean_dtype(x.get_dtype())
+    else:
+        return isinstance(x, bool)
+
+
 def decode_device(device):
     if device is None:
         return torch.tensor(0.0).device  # default device
@@ -2623,13 +2630,16 @@ def truncdiv(a, b):
 @register_lowering(aten.div.Tensor_mode)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
+    both_boolean = is_boolean_type(a) and is_boolean_type(b)
     on_triton = is_triton(a) or is_triton(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
     # see the discussion at https://github.com/openai/triton/issues/605
     if rounding_mode == "floor":
+        assert not both_boolean, "floordiv operands can not be boolean at the same time"
         return floordiv(a, b) if (both_integer and on_triton) else floor(div_mode(a, b))
     if rounding_mode == "trunc":
+        assert not both_boolean, "truncdiv operands can not be boolean at the same time"
         return truncdiv(a, b) if (both_integer and on_triton) else trunc(div_mode(a, b))
     if both_integer:
         # truediv produces a float tensor even if both operands are integer types
