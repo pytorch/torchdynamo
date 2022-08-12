@@ -8,6 +8,7 @@ import io
 import itertools
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
+from torchdynamo.testing import CompileCounterWithBackend
 from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
@@ -672,19 +674,53 @@ def read_batch_size_from_file(args, filename, model_name):
     return batch_size
 
 
+class TimeOutException(Exception):
+    pass
+
+
+def alarm_handler(signum, frame):
+    raise TimeOutException()
+
+
+def exit_after(s):
+    """
+    Decorator to raise TimeoutException if the fn is taking more than s seconds
+    to run.
+    """
+
+    def outer(fn):
+        def inner(*args, **kwargs):
+            signal.signal(signal.SIGALRM, alarm_handler)
+            signal.alarm(s)
+            try:
+                result = fn(*args, **kwargs)
+            finally:
+                signal.alarm(0)
+            return result
+
+        return inner
+
+    return outer
+
+
 def compilation_profiling_experiment(
     model_iter_fn, model, example_inputs, backend="pytorch"
 ):
     # Get the context
+    cnt = CompileCounterWithBackend(backend)
     if backend == "pytorch":
         ctx = NullContext()
     else:
-        ctx = torchdynamo.optimize(backend)
+        ctx = torchdynamo.optimize(cnt)
 
     def get_peak_memory():
         return torch.cuda.max_memory_allocated() / 10**9
 
-    try:
+    # Exit the process after 600 seconds
+    timeout = 600
+
+    @exit_after(timeout)
+    def wrapper():
         # Reset and warmup
         torchdynamo.reset()
         torch.cuda.empty_cache()
@@ -701,10 +737,22 @@ def compilation_profiling_experiment(
         with ctx:
             model_iter_fn(model, example_inputs)
         peak_memory = get_peak_memory()
+        graphs = cnt.frame_count
+        return compilation_latency, peak_memory, graphs
+
+    try:
+        compilation_latency, peak_memory, graphs = wrapper()
+    except TimeOutException:
+        print(f"Timeout: {backend} took more than {timeout} seconds to compile")
+        compilation_latency = timeout
+        peak_memory = 0
+        graphs = 0
     except Exception:
         compilation_latency = 0
         peak_memory = 0
-    return compilation_latency, peak_memory
+        graphs = 0
+
+    return compilation_latency, peak_memory, graphs
 
 
 def null_experiment(args, model_iter_fn, model, example_inputs):
@@ -878,12 +926,12 @@ class BenchmarkRunner:
             model=model,
             example_inputs=example_inputs,
         )
-        time, memory = experiment(backend=backend)
+        time, memory, graphs = experiment(backend=backend)
 
         output_csv(
             output_filename,
-            ("dev", "name", "batch_size", "time", "memory"),
-            [device, model_name, batch_size, time, memory],
+            ("dev", "name", "batch_size", "time", "memory", "graphs"),
+            [device, model_name, batch_size, time, memory, graphs],
         )
 
     def batch_size_finder(

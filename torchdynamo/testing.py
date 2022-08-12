@@ -18,6 +18,7 @@ from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
 from .guards import CheckFunctionManager
 from .guards import GuardedCode
+from .optimizations import BACKENDS
 from .utils import same
 
 unsupported = torchdynamo.eval_frame.unsupported
@@ -116,6 +117,24 @@ class CompileCounter:
     def clear(self):
         self.frame_count = 0
         self.op_count = 0
+
+
+class CompileCounterWithBackend:
+    def __init__(self, backend):
+        self.frame_count = 0
+        self.op_count = 0
+        self.backend = backend
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.frame_count += 1
+        for node in gm.graph.nodes:
+            if "call" in node.op:
+                self.op_count += 1
+        if self.backend == "inductor":
+            from torchinductor.compile_fx import compile_fx
+
+            return compile_fx(gm, example_inputs)
+        return BACKENDS[self.backend](gm, example_inputs)
 
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
