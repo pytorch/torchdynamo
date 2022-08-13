@@ -29,6 +29,7 @@ from ..utils import tensortype_to_dtype
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
 
+
 log = logging.getLogger(__name__)
 
 
