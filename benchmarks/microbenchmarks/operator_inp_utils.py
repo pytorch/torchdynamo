@@ -17,7 +17,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_map
 
-
 OP_INP_DIRECTORY = os.path.join(os.path.dirname(__file__), "operator_inp_logs")
 
 TIMM_FILE = os.path.join(OP_INP_DIRECTORY, "timm_train_inps")
