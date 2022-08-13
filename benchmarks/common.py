@@ -150,8 +150,9 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs, start_latenc
     Writes to ./coverage.csv
     """
     profiler = Profiler()
-    with profiler.prof, torchdynamo.run():
-        model_iter_fn(model, example_inputs)
+    frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
+    with profiler.prof:
+        frozen_model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
     output_csv(
         output_filename,
@@ -233,6 +234,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
     should_check_result = should_randomize_input = args.randomize_input
     is_correct = True
 
+    optimized_model_iter_fn = optimize_ctx(model_iter_fn)
     for rep in range(total_iters):
         inputs = (
             randomize_input(copy.deepcopy(example_inputs))
@@ -244,10 +246,9 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
         timings[rep, 0], expected_output = timed(
             model, model_iter_fn, inputs, return_result=True
         )
-        with optimize_ctx:
-            timings[rep, 1], actual_output = timed(
-                model, model_iter_fn, inputs, return_result=True
-            )
+        timings[rep, 1], actual_output = timed(
+            model, optimized_model_iter_fn, inputs, return_result=True
+        )
         if should_check_result:
             is_correct = is_correct and same(expected_output, actual_output)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
@@ -331,6 +332,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
             yield
 
     with maybe_profile(enabled=args.export_profiler_trace) as p:
+        frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
         for rep in range(args.repeat):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -342,10 +344,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
             timings[rep, 0], expected_output = timed(
                 model, model_iter_fn, inputs, return_result=True
             )
-            with torchdynamo.run():
-                timings[rep, 1], actual_output = timed(
-                    model, model_iter_fn, inputs, return_result=True
-                )
+            timings[rep, 1], actual_output = timed(
+                model, frozen_model_iter_fn, inputs, return_result=True
+            )
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
     if args.export_profiler_trace:
@@ -389,9 +390,9 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     for rep in range(args.repeat):
         # Start each rep fresh, e.g. only warmup on example 0
         torchdynamo.reset()
+        optimized_model_iter_fn = optimize_ctx(model_iter_fn)
         for _ in range(nwarmup):
-            with optimize_ctx:
-                model_iter_fn(model, example_inputs[0])
+            optimized_model_iter_fn(model, example_inputs[0])
 
         for input_idx, inputs in enumerate(example_inputs):
             # interleave the runs to handle frequency scaling and load changes
@@ -399,10 +400,9 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
                 model, model_iter_fn, inputs, return_result=False
             )
             # different from regular speedup_experiment, we _DO_ want to allow recompilation
-            with optimize_ctx:
-                timings[rep, input_idx, 1] = timed(
-                    model, model_iter_fn, inputs, return_result=False
-                )
+            timings[rep, input_idx, 1] = timed(
+                model, optimized_model_iter_fn, inputs, return_result=False
+            )
     medians = np.median(timings, axis=0)
     speedups = list(medians[:, 0] / medians[:, 1])
     speedups_mean = np.mean(speedups)
@@ -970,8 +970,8 @@ class BenchmarkRunner:
                 return 0
 
             try:
-                with accuracy_ctx:
-                    new_result = model_iter_fn(model, example_inputs)
+                accuracy_model_iter_fn = accuracy_ctx(model_iter_fn)
+                new_result = accuracy_model_iter_fn(model, example_inputs)
             except Exception:
                 logging.exception("unhandled error")
                 print("ERROR")
@@ -990,14 +990,13 @@ class BenchmarkRunner:
             if optimize_ctx != accuracy_ctx:
                 torchdynamo.reset()
             # run with torchdynamo few times to populate the cache
+            optimized_model_iter_fn = optimize_ctx(model_iter_fn)
             for _ in range(3):
-                with optimize_ctx:
-                    model_iter_fn(model, example_inputs)
+                optimized_model_iter_fn(model, example_inputs)
             _, frames_second_pass = Stats.reset_counters()  # should be 0
 
             if frames_second_pass > 0:
-                with optimize_ctx:
-                    model_iter_fn(model, example_inputs)
+                optimized_model_iter_fn(model, example_inputs)
                 _, frames_third_pass = Stats.reset_counters()  # should be 0
             else:
                 frames_third_pass = 0
