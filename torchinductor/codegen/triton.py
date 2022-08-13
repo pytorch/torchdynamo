@@ -1118,6 +1118,11 @@ class TritonScheduling:
                 split = strides.index(1) + 1
                 if split == len(ranges):
                     continue
+                if all(s == 0 for s in strides[split:]):
+                    # if this is a broadcasted tensor and all dimensions after split are broadcast,
+                    # this is not a real split
+                    continue
+
             except ValueError:
                 continue
             tiled_groups = (
