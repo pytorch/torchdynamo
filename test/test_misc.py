@@ -2506,6 +2506,19 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.torch.float16)
 
+    def test_generate_tensor_from_list_of_numpy_primitive_type(self):
+        # Test sth like torch.LongTensor(list(np.int64, np.int64, ...))
+        def fn():
+            x = np.array([1, 2, 3, 4, 5, 6], dtype=np.int64)
+            y = list((x[0], x[2], x[4]))
+            z = torch.LongTensor(y)
+            return z
+
+        ref = fn()
+        opt_fn = torchdynamo.optimize("eager")(fn)
+        res = opt_fn()
+        self.assertTrue(same(ref, res))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
