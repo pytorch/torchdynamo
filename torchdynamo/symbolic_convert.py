@@ -439,12 +439,12 @@ class InstructionTranslatorBase(object):
 
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
-        if level.as_python_constant() != 0:
-            unimplemented("IMPORT_NAME with level")
-
-        # Import name imports the top level package
-        module_name = inst.argval.split(".")[0]
-        value = importlib.import_module(module_name)
+        module_name = inst.argval
+        value = __import__(
+            module_name,
+            fromlist=fromlist.as_python_constant(),
+            level=level.as_python_constant(),
+        )
         source = self.import_source(module_name)
 
         if is_allowed(value):
