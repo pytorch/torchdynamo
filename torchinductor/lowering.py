@@ -7,6 +7,7 @@ from typing import List
 import sympy
 import torch
 import torch.fx
+from torch._prims_common import Number
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
 
@@ -111,6 +112,20 @@ def decode_device(device):
     if isinstance(device, str):
         return torch.device(device)
     return device
+
+
+def get_promoted_dtype(*args):
+    # TODO: fix other dtype places in this file
+    def construct_input(inp):
+        if isinstance(inp, Number):
+            return inp
+        else:
+            assert hasattr(inp, "get_dtype")
+            dim = len(inp.get_size())
+            # construct a tmp tensor to feed into torch.result_type
+            return torch.zeros([1] * dim, dtype=inp.get_dtype())
+
+    return functools.reduce(torch.result_type, [construct_input(arg) for arg in args])
 
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
@@ -2644,22 +2659,18 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering([aten.div, prims.div])
+@register_lowering([aten.div, prims.div], broadcast=True)
 def div(a, b):
     def fn(*args):
         return ops.div(*args)
 
-    dtype = torch.result_type(
-        a if isinstance(a, (float, int)) else torch.tensor(0, dtype=a.get_dtype()),
-        b if isinstance(b, (float, int)) else torch.tensor(0, dtype=b.get_dtype()),
-    )
+    dtype = get_promoted_dtype(a, b)
     # truediv produces a float tensor even if both operands are integer types
     if is_integer_type(a) and is_integer_type(b):
         dtype = torch.get_default_dtype()
-
     return make_pointwise(fn, override_dtype=dtype)(
-        to_dtype(a, dtype) if isinstance(a, TensorBox) else a,
-        to_dtype(b, dtype) if isinstance(b, TensorBox) else b,
+        a if isinstance(a, Number) else to_dtype(a, dtype),
+        b if isinstance(b, Number) else to_dtype(b, dtype),
     )
 
 
