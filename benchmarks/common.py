@@ -1632,12 +1632,8 @@ def main(runner, original_dir=None):
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
-    output_split = args.output.split("/")
-    if "." in output_split[-1]:
-        output_split = output_split[:-1]
-    output_dir = "/".join(output_split).strip("/")
     mode = "training" if args.training else "eval"
-    output = f"/{output_dir}/{name}_{mode}.json"
+    output = os.path.join(os.path.dirname(args.output), f"{name}_{mode}.json")
 
     # TODO - add option for coalescing inputs over multiple runs
     if os.path.exists(output):
@@ -1663,7 +1659,7 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
                 model_iter_fn(model, example_inputs, collect_outputs=False)
         except Exception as e2:
             print(f"{name} failed to run with real. Exception: {e2}")
-            raise e2
+            raise
 
     print(f"Writing output to {output}")
     operator_mode.log_to_file(output)

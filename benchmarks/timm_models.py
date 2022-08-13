@@ -10,6 +10,7 @@ import warnings
 import torch
 from common import BenchmarkRunner
 from common import main
+from torch._subclasses import FakeTensor
 
 import torchdynamo
 from torchdynamo.testing import collect_results
@@ -275,8 +276,10 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        # calling lift so modes enabled for forward/backward can handle self.target
-        return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
+        if isinstance(pred, FakeTensor) and not isinstance(self.target, FakeTensor):
+            return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
+        else:
+            return self.loss(pred, self.target)
 
     @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
