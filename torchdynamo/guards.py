@@ -192,8 +192,10 @@ class GuardBuilder:
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_getattr_getitem(strip_function_call(strip_getattr_getitem(name)))
         if base not in self.argnames:
+            if re.match(r"^\d+$", base):
+                log.warning(f"invalid var name: {guard}")
             self.argnames.append(base)
 
         return name
