@@ -57,6 +57,9 @@ decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
+        aten.new_empty,
+        aten.new_full,
+        aten.new_ones,
         aten.nll_loss_backward,
         aten.norm,
         aten.reflection_pad2d_backward,
@@ -92,6 +95,11 @@ def register_decomposition(ops):
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
     return decomp.register_decomposition(ops, decompositions, disable_meta=True)
+
+
+@register_decomposition([aten.detach_])
+def detach_(x):
+    return x
 
 
 @register_decomposition([aten.clamp])

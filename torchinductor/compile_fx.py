@@ -1,16 +1,13 @@
 import dataclasses
 import functools
-import itertools
 import logging
 import operator
 import os
-import textwrap
 from typing import List
 
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
-import torchdynamo.config
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize

@@ -1,14 +1,9 @@
-import inspect
 import os
 import subprocess
 import textwrap
 import uuid
-from functools import wraps
-
-import torch
 
 import torchdynamo
-from torchinductor import config
 from torchinductor.codecache import cache_dir
 
 
@@ -56,56 +51,59 @@ def dump_to_repro(gm, args):
         print("wrote repro.py")
 
 
-def isolate_checker(f):
-    @wraps(f)
-    def isolated_f(fx_g, args):
-        subdir = f"{cache_dir()}/minimizer"
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-        file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
-        with open(file_name, "w") as fd:
-            fd.write(generate_repro_string(fx_g, args))
-            fd.write(
-                textwrap.dedent(
-                    """
-                    from torchinductor.debug_utils import inductor_fails
-                    isolate_checker = lambda f: f
-                    """
-                )
+def isolate_inductor_fails(fx_g, args, env=None):
+    if env is None:
+        env = {}
+    subdir = f"{cache_dir()}/minimizer"
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+    file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
+    with open(file_name, "w") as fd:
+        fd.write(generate_repro_string(fx_g, args))
+        fd.write(
+            textwrap.dedent(
+                """
+                from torchinductor.debug_utils import inductor_fails
+                """
             )
-            fd.write(inspect.getsource(f))
-            fd.write(f"graph_fails = {f.__name__}")
-            fd.write(
-                textwrap.dedent(
-                    """
-                    if graph_fails(mod, args):
-                        exit(1)
-                    else:
-                        exit(0)
-                    """
-                )
-            )
-        p = subprocess.Popen(
-            ["python", file_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        out, err = p.communicate()
-        if p.returncode != 0:
-            print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
-            print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
-            return True
-        return False
-
-    return isolated_f
+        fd.write(
+            textwrap.dedent(
+                """
+                if inductor_fails(mod, args):
+                    exit(1)
+                else:
+                    exit(0)
+                """
+            )
+        )
+    new_env = os.environ.copy()
+    new_env = {**new_env, **env}
+    p = subprocess.Popen(
+        ["python", file_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=new_env,
+    )
+    out, err = p.communicate()
+    if p.returncode != 0:
+        print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
+        print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
+        return True
+    return False
 
 
 def inductor_fails(fx_g, args, check_str=None):
+    from torchinductor import config
     from torchinductor.compile_fx import compile_fx_inner
+
+    config.autotune = False
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod = compile_mod(*args)
     except Exception as e:
-        if check_str is not None and check_str not in str(e):
+        if check_str is not None and check_str in str(e):
             return False
         print(e)
         return True
@@ -121,12 +119,15 @@ def dump_to_minify(gm, args):
         fd.write(
             textwrap.dedent(
                 """
-                import torchdynamo
-                from torchinductor.debug_utils import inductor_fails
+                from functools import partial
+
+                from torchinductor.debug_utils import inductor_fails, isolate_inductor_fails
 
                 from functorch.compile import minifier
 
-                minifier(mod, args, inductor_fails)
+                env_variables = {"CUDA_VISIBLE_DEVICES": "1"}
+
+                minifier(mod, args, partial(isolate_inductor_fails, env=env_variables))
                 """
             )
         )
