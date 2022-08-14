@@ -2760,7 +2760,6 @@ class Convolution(ExternKernelAlloc):
             assert config_conv == "autotune"
             from .codegen.autotuner import tuned_conv
 
-            # kernel = "tuned_conv"
             kernel = tuned_conv(
                 x.get_size(),
                 weight.get_size(),
@@ -2778,11 +2777,31 @@ class Convolution(ExternKernelAlloc):
 
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
+            output_layout = "torch.channels_last"
+        elif config.tune_layout:
+            from .codegen.autotuner import tuned_conv_layout
+
+            output_layout = tuned_conv_layout(
+                kernel,
+                x.get_size(),
+                weight.get_size(),
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                x.get_device(),
+                x.get_dtype(),
+            )
+        else:
+            output_layout = "torch.contiguous_format"
+
+        if output_layout == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
-        # for conv1d, output layout is not preserved with inputs
         else:
             stride_order = list(reversed(range(len(output_size))))
 

@@ -44,6 +44,9 @@ implicit_fallbacks = True
 # Enables a fusion pass that groups nodes together before the scheduler
 prefuse_nodes = True
 
+# do bench to decide best layout, currently only for aten.conv
+tune_layout = False
+
 
 # config specific to codegen/cpp.pp
 class cpp:
