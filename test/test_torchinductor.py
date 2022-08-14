@@ -2067,7 +2067,6 @@ class CommonTemplate:
         with torchdynamo.optimize_assert(compile_fx):
             actual1 = fn(arg2)
             actual2 = fn(arg4)
-
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(actual2, correct2))
         self.assertTrue(same(arg1, arg2))
