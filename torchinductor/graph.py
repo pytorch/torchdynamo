@@ -151,7 +151,7 @@ class GraphLowering(torch.fx.Interpreter):
     def add_tensor_constant(self, data):
         def allocate():
             for name, value in self.constants.items():
-                if data is value:
+                if data.size() == value.size() and torch.allclose(data, value):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
@@ -170,11 +170,14 @@ class GraphLowering(torch.fx.Interpreter):
         If device_override doesn't match the constant's device, then
         copy it and return a different name.
         """
+        # import pdb
+        # pdb.set_trace()
         if self.constants[name].device == device_override or device_override is None:
             return name
         alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
         if alt_name not in self.constants:
             self.constants[alt_name] = self.constants[name].to(device_override)
+        print("ALT CONSTANT NAME", name, alt_name)
         return alt_name
 
     def placeholder(self, target, args, kwargs):
@@ -297,6 +300,7 @@ class GraphLowering(torch.fx.Interpreter):
         mod = PyCodeCache.load(code)
 
         for name, value in self.constants.items():
+            print("GOT A CONSTANT", name)
             setattr(mod, name, value)
 
         return mod.call
