@@ -749,7 +749,7 @@ class TritonKernel(Kernel):
         result_var = self.cse.newvar()
         if (dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
-            accumulator = f"_{result_var}"
+            accumulator = result_var
             self.body.writeline(
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
             )
