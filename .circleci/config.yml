@@ -18,6 +18,7 @@ jobs:
             source .circleci/setup_env.sh
             mkdir test-results
             pytest -v --junitxml=test-results/junit.xml
+            pytest tests/test_torchinductor.py
       - store_test_results:
           path: test-results
       - run:
