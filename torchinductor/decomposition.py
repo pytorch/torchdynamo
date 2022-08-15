@@ -44,6 +44,7 @@ decompositions = get_decompositions(
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
+        aten.linalg_vector_norm,
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,

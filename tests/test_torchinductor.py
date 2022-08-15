@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
@@ -15,6 +16,7 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.compile_fx import compile_fx_inner
 
 try:
     import sympy
@@ -2719,3 +2721,42 @@ if HAS_CUDA:
             )
 
     CommonTemplate.install(GpuTests, "cuda")
+
+    class GPUReproTests(TestCase):
+        def test_index_put_issue(self):
+            def forward(
+                self,
+                arg76_1,
+                expand_default,
+                full_like_default,
+                _to_copy_default_67,
+                zeros,
+            ):
+                sum_sym_int_19 = torch.ops.aten.sum.SymInt(
+                    _to_copy_default_67, [0], True
+                )
+                view_default_57 = torch.ops.aten.view.default(
+                    sum_sym_int_19, [512, 768]
+                )
+                where_self = torch.ops.aten.where.self(
+                    expand_default, view_default_57, full_like_default
+                )
+                clone_default_12 = torch.ops.aten.clone.default(zeros)
+                index_put__default = torch.ops.aten.index_put_.default(
+                    clone_default_12, [arg76_1], where_self, True
+                )
+                return (index_put__default,)
+
+            inps = [
+                (torch.Size([512]), torch.int64),
+                (torch.Size([512, 768]), torch.bool),
+                (torch.Size([512, 768]), torch.float16),
+                (torch.Size([4, 512, 768]), torch.float16),
+                (torch.Size([512, 768]), torch.float16),
+            ]
+            inps = [torch.zeros(())] + [
+                torch.ones(shape, dtype=dtype, device="cuda") for (shape, dtype) in inps
+            ]
+            mod = make_fx(forward)(*inps)
+            compiled = compile_fx_inner(mod, inps)
+            compiled(*inps)
