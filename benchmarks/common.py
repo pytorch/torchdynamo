@@ -930,7 +930,6 @@ class BenchmarkRunner:
             import git
             repo = git.Repo("../torchdynamo") # Hack assumption of torchbenchmark positioning
             curr_branch = repo.active_branch.name
-            print("current branch?", curr_branch)
             if curr_branch != 'main':
                 if repo.is_dirty():
                     raise RuntimeError("--diff called on dirty branch. Commit, stash, or reset.")
