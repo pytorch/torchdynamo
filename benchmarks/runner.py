@@ -24,7 +24,6 @@ If you want to test float16
 """
 
 import argparse
-import collections
 import io
 import itertools
 import os
@@ -35,7 +34,6 @@ import pandas as pd
 import torch
 from matplotlib import rcParams
 from scipy.stats import gmean
-from scipy.stats import tmean
 from tabulate import tabulate
 
 import torchdynamo
@@ -65,12 +63,12 @@ TABLE = {
         "inductor_cudagraphs": "--inductor-settings --float32 -n50 --inductor",
     },
     "profile_compiler": {
-        "pytorch": "--training --profile-backend=pytorch --isolate --raise-on-assertion-error --raise-on-backend-error ",
-        "eager": "--training --profile-backend=eager --isolate --raise-on-assertion-error --raise-on-backend-error ",
-        "ts_nvfuser": "--training --profile-backend=nvfuser --isolate --raise-on-assertion-error --raise-on-backend-error ",
-        "aot_eager": "--training --profile-backend=aot_nop --isolate --raise-on-assertion-error --raise-on-backend-error ",
-        "aot_nvfuser": "--training --profile-backend=aot_nvfuser --isolate --raise-on-assertion-error --raise-on-backend-error ",
-        "inductor_cudagraphs": "--training --profile-backend=inductor --isolate --raise-on-assertion-error --raise-on-backend-error ",
+        "pytorch": "--training --profile-backend=pytorch --isolate",
+        "eager": "--training --profile-backend=eager --isolate",
+        "ts_nvfuser": "--training --profile-backend=nvfuser --isolate",
+        "aot_eager": "--training --profile-backend=aot_nop --isolate",
+        "aot_nvfuser": "--training --profile-backend=aot_nvfuser --isolate",
+        "inductor_cudagraphs": "--training --profile-backend=inductor --isolate",
     },
 }
 
@@ -188,6 +186,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 )
                 cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename}"
                 cmd = f"{cmd} {base_cmd}"
+                if args.profile_compiler:
+                    cmd = f"{cmd} --raise-on-assertion-error --raise-on-backend-error"
                 if args.quick:
                     if suite == "torchbench":
                         cmd = f"{cmd} --only=resnet18"
@@ -206,7 +206,7 @@ def generate_dropdown_comment(title, body):
     str_io = io.StringIO()
     str_io.write(f"{title}\n")
     str_io.write("<details>\n")
-    str_io.write(f"<summary>see more</summary>\n")
+    str_io.write("<summary>see more</summary>\n")
     str_io.write(f"{body}")
     str_io.write("\n")
     str_io.write("</details>\n\n")
@@ -379,7 +379,7 @@ class ParseCompilerProfileLogs(Parser):
     def prettyprint(self):
         str_io = io.StringIO()
         str_io.write("\n")
-        str_io.write(f"# Compilation Profile #\n")
+        str_io.write("# Compilation Profile #\n")
         str_io.write(
             f"The tables show the worst {self.threshold} models for different metrics"
         )
