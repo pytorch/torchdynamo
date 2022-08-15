@@ -368,7 +368,7 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering([aten.alias, aten.detach, aten.lift])
+@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift])
 def nop(x):
     return x  # AOT autograd handles this for us
 
