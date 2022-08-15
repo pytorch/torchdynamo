@@ -928,9 +928,10 @@ class BenchmarkRunner:
         if diff:
             assert(branch is None), "Branch set during top level flow."
             import git
-            repo = git.Repo()
-            curr_branch = repo.active_branch
-            if str(curr_branch) != 'main':
+            repo = git.Repo("../torchdynamo") # Hack assumption of torchbenchmark positioning
+            curr_branch = repo.active_branch.name
+            print("current branch?", curr_branch)
+            if curr_branch != 'main':
                 if repo.is_dirty():
                     raise RuntimeError("--diff called on dirty branch. Commit, stash, or reset.")
                 # Run current
@@ -938,7 +939,7 @@ class BenchmarkRunner:
                 # Swap to main
                 repo.git.checkout('main')
                 # Run main
-                run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check=False,dynamic_shapes=False,diff=False, branch='main')
+                run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check=False,dynamic_shapes=False,diff=False,branch='main')
                 # Swap back
                 repo.git.checkout(curr_branch)
                 return
@@ -1160,7 +1161,7 @@ def parse_args():
     )
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
-    parser.add_argument("--diff", action="store_true", help="Delta against this branch")
+    parser.add_argument("--diff", action="store_true", help="Delta this branch against main. In the future, we may add support for picking the branch.")
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
