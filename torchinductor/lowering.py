@@ -1507,7 +1507,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(self.get_size())
+    assert -len(self.get_size()) <= dim < len(self.get_size())
 
     self.realize()
     V.graph.realize_users_of(self.get_name())

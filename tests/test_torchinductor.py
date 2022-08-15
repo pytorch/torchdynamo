@@ -2324,7 +2324,7 @@ class CommonTemplate:
             fn,
             [
                 torch.zeros(2, 3),
-                0,
+                -1,
                 torch.tensor([[0]]),
                 torch.ones(2, 3),
             ],
