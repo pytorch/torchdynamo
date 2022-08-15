@@ -508,13 +508,19 @@ class BlockedNodes:
             self.dep_to_nodes[dep] = [x for x in self.dep_to_nodes[dep] if x]
             for box in self.dep_to_nodes[dep]:
                 if (
-                    len(box.peek().unmet_dependencies - deps) == 0
+                    box.peek()
+                    and len(box.peek().unmet_dependencies - deps) == 0
                     and box.peek().group == group
                 ):
                     out = box.pop()
                     if isinstance(out, FusedSchedulerNode):
                         for x in out.snodes:
-                            result.append(x)
+                            if len(x.unmet_dependencies) == 0:
+                                result.append(x)
+                            else:
+                                self.add(x)
+                        # in case there are dependencies inside pre fused nodes
+                        result.extend(self.pop_fusable(deps, group))
                     else:
                         result.append(out)
         return result
