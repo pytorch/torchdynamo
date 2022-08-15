@@ -110,7 +110,9 @@ def decode_device(device):
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
-        return torch.device(device)
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=torch.cuda.current_device())
     return device
 
 

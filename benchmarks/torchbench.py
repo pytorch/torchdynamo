@@ -164,7 +164,7 @@ INDUCTOR_INFERENCE_NOT_YET_WORKING = {
     *AOT_AUTOGRAD_NOT_YET_WORKING,
     # RuntimeError: The tensor has a non-zero number of elements,
     "fastNLP_Bert",
-    # missing ops: scatter / argmax
+    # Accuracy errors
     "hf_Reformer",
     "maml",
     # as_strided issue

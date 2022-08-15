@@ -103,9 +103,9 @@ def inductor_fails(fx_g, args, check_str=None):
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod = compile_mod(*args)
     except Exception as e:
-        if check_str is not None and check_str in str(e):
+        if check_str is not None and check_str in repr(e):
             return False
-        print(e)
+        print(repr(e))
         return True
     return False
 
@@ -120,9 +120,7 @@ def dump_to_minify(gm, args):
             textwrap.dedent(
                 """
                 from functools import partial
-
                 from torchinductor.debug_utils import inductor_fails, isolate_inductor_fails
-
                 from functorch.compile import minifier
 
                 env_variables = {"CUDA_VISIBLE_DEVICES": "1"}
