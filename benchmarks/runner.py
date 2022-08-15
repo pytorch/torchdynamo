@@ -472,7 +472,7 @@ class ParsePerformanceLogs(Parser):
             self.parsed_frames[suite] = df
 
     def geomean(self, compiler, df):
-        return f"{round(gmean(df[compiler].clip(1)), 2)}x"
+        return f"{round(gmean(df[compiler][df[compiler] > 0].clip(1)), 2)}x"
 
     def passrate(self, compiler, df):
         total = len(df.index)
@@ -510,6 +510,21 @@ class ParsePerformanceLogs(Parser):
         str_io = io.StringIO()
         str_io.write("\n")
         str_io.write("## Executive Summary ##\n")
+        description = (
+            "Majority of our efforts are currently on improving the correctness and "
+            "performance on OSS training models - torchbench, huggingface and timm models. "
+            "This is the current performance and accuracy numbers for the float32 and float16 "
+            "precision.\n"
+            "For measuring accuracy, we show the accuracy pass rate, i.e., "
+            "percentage of models passing numerical checks for forward pass outputs and "
+            "gradients.\n"
+            "For performance, we use geometric mean speedup normalized to Pytorch "
+            "eager, which is calculated by clipping the individual speedups at 1.0x. We skip "
+            "the failing models during the gmean calculation. This essentially represents "
+            '"speedups we expect once we fixed the failures, assuming similar distribution". '
+            "All of our experiments are on A100 GPUs.\n\n"
+        )
+        str_io.write(description)
 
         speedup_caption = (
             f"Geometric mean speedup for {self.dtypes[0]} precision on A100 GPU\n"
@@ -519,8 +534,8 @@ class ParsePerformanceLogs(Parser):
         passrate_caption = f"Passrate for {self.dtypes[0]} precision on A100 GPU\n"
         passrate_summary = self.exec_summary_text(passrate_caption, self.passrate)
 
-        str_io.write(speedup_summary)
         str_io.write(passrate_summary)
+        str_io.write(speedup_summary)
         self.executive_summary = str_io.getvalue()
 
     def prepare_message(self, suite):
