@@ -939,7 +939,7 @@ class BenchmarkRunner:
                     # Swap to main
                     repo.git.checkout('main')
                     # Run main
-                    self.run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check=False,dynamic_shapes=False,diff=False,branch='main')
+                    self.run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check,dynamic_shapes,diff=False,branch='main')
                 finally:
                     # Swap back
                     repo.git.checkout(curr_branch)
