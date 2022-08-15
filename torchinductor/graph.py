@@ -151,7 +151,11 @@ class GraphLowering(torch.fx.Interpreter):
     def add_tensor_constant(self, data):
         def allocate():
             for name, value in self.constants.items():
-                if data.size() == value.size() and torch.allclose(data, value):
+                if (data.size() == value.size() and 
+                    data.stride() == value.stride() and
+                    data.dtype == value.dtype and
+                    data.device == value.device and
+                    torch.eq(data, value).all()):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
