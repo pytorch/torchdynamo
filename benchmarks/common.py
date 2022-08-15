@@ -922,7 +922,31 @@ class BenchmarkRunner:
         experiment,
         skip_accuracy_check=False,
         dynamic_shapes=False,
+        diff=False,
+        branch=None,
     ):
+        if diff:
+            assert(branch is None), "Branch set during top level flow."
+            import git
+            repo = git.Repo()
+            curr_branch = repo.active_branch
+            if str(curr_branch) != 'main':
+                if repo.is_dirty():
+                    raise RuntimeError("--diff called on dirty branch. Commit, stash, or reset.")
+                # Run current
+                self.run_one_model(name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check,dynamic_shapes,diff=False,branch=curr_branch)
+                # Swap to main
+                repo.git.checkout('main')
+                # Run main
+                run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check=False,dynamic_shapes=False,diff=False, branch='main')
+                # Swap back
+                repo.git.checkout(curr_branch)
+                return
+            else:
+                raise RuntimeError("--diff called on main branch, what are you diffing?")
+        elif branch:
+            print("RUNNING ON BRANCH:", branch)
+            
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             is_training, current_device, name
         )
@@ -1135,6 +1159,8 @@ def parse_args():
         help="exports trace of kineto profiler",
     )
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+
+    parser.add_argument("--diff", action="store_true", help="Delta against this branch")
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
@@ -1648,6 +1674,7 @@ def main(runner, original_dir=None):
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
+                diff=args.diff,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
@@ -1703,6 +1730,7 @@ def main(runner, original_dir=None):
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
+                diff=args.diff,
             )
 
         Stats.print_summary()
