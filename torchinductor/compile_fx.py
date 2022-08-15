@@ -1,16 +1,13 @@
 import dataclasses
 import functools
-import itertools
 import logging
 import operator
 import os
-import textwrap
 from typing import List
 
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
-import torchdynamo.config
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize
@@ -20,6 +17,8 @@ from torchdynamo.utils import init_logging
 
 from . import config
 from . import overrides
+from .debug_utils import dump_to_minify
+from .debug_utils import dump_to_repro
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
@@ -69,48 +68,6 @@ class CheckEachNode(torch.fx.Interpreter):
         assert same(expected, actual)
 
         return expected
-
-
-def dump_to_repro(gm, *args):
-    with open(os.path.join(torchdynamo.config.base_dir, "repro.py"), "w") as fd:
-        fd.write(
-            textwrap.dedent(
-                """
-                import torch
-                import torchdynamo
-                from torchdynamo.testing import rand_strided, same
-                """
-            )
-        )
-        fd.write("class Repro:\n")
-        for i in itertools.count():
-            try:
-                val = getattr(gm, f"_tensor_constant{i}")
-            except AttributeError:
-                break
-            fd.write(f"    _tensor_constant{i} = {val.item()!r}\n")
-        fd.write(textwrap.indent(gm.code, "    "))
-        fd.write("\n")
-
-        fd.write("args = (\n")
-        for arg in args:
-            fd.write(
-                f"  rand_strided({tuple(arg.size())!r}, {tuple(arg.stride())!r},"
-                f" {arg.dtype!r}, {arg.device.type!r}),"
-            )
-            fd.write("\n")
-        fd.write(")\n")
-        fd.write(
-            textwrap.dedent(
-                """
-                expected = Repro().forward(*args)
-                with torchdynamo.optimize("inductor", nopython=True):
-                    actual = Repro().forward(*args)
-                assert same(actual, expected)
-                """
-            )
-        )
-        print("wrote repro.py")
 
 
 def compile_fx_python_key(
@@ -163,7 +120,7 @@ def compile_fx_inner(
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphify(
+            compiled_fn = cudagraphify(
                 compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
             )
         elif cudagraphs:
@@ -175,10 +132,16 @@ def compile_fx_inner(
                 log.warning("skipping cudagraphs due to input mutation")
             elif set(graph.device_types) != {"cpu"}:
                 log.warning("skipping cudagraphs due to multiple devices")
+
+        if config.repro_level > 0:
+            compiled_fn(*example_inputs)
+
         return compiled_fn
     except Exception:
-        if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
-            wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
+        if config.repro_level == 1:
+            dump_to_repro(gm, example_inputs)
+        elif config.repro_level == 2:
+            dump_to_minify(gm, example_inputs)
 
         raise
 

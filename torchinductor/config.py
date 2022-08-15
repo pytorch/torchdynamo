@@ -1,3 +1,5 @@
+import os
+
 # add some debug printouts
 debug = False
 
@@ -46,6 +48,12 @@ prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
+
+# Inductor compilation debug info
+# 0: Nothing printed out when compilation fails
+# 1: Dump the graph out to repro.py if compilation fails
+# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
+repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
 
 
 # config specific to codegen/cpp.pp
