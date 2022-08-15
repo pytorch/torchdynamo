@@ -1017,6 +1017,7 @@ class Scheduler:
             if (
                 name in V.kernel.must_keep_buffers
                 or name in V.kernel.args.input_buffers
+                or name in self.mutation_renames
             ):
                 continue
             node = self.name_to_node[name]
