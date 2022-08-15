@@ -934,13 +934,15 @@ class BenchmarkRunner:
                 if repo.is_dirty():
                     raise RuntimeError("--diff called on dirty branch. Commit, stash, or reset.")
                 # Run current
-                self.run_one_model(name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check,dynamic_shapes,diff=False,branch=curr_branch)
-                # Swap to main
-                repo.git.checkout('main')
-                # Run main
-                run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check=False,dynamic_shapes=False,diff=False,branch='main')
-                # Swap back
-                repo.git.checkout(curr_branch)
+                try:
+                    self.run_one_model(name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check,dynamic_shapes,diff=False,branch=curr_branch)
+                    # Swap to main
+                    repo.git.checkout('main')
+                    # Run main
+                    self.run_one_model(self,name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check=False,dynamic_shapes=False,diff=False,branch='main')
+                finally:
+                    # Swap back
+                    repo.git.checkout(curr_branch)
                 return
             else:
                 raise RuntimeError("--diff called on main branch, what are you diffing?")
