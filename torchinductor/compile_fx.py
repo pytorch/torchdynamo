@@ -106,6 +106,8 @@ def compile_fx_inner(
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
+    if config.repro_level == 3:
+        dump_to_minify(gm, example_inputs)
     try:
         graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
         with V.set_graph_handler(graph):
