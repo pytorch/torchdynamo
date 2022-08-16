@@ -34,6 +34,7 @@ troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
 )
 
+log = logging.getLogger(__name__)
 
 LOGGING_CONFIG = {
     "version": 1,
@@ -88,11 +89,6 @@ def format_graph_tabular(graph):
     try:
         from tabulate import tabulate
     except ImportError:
-        log.warning(
-            "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
-            "which could not be found on this machine. Run `pip "
-            "install tabulate` to install the library."
-        )
         raise
 
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
@@ -320,12 +316,12 @@ def torchscript(model, example_inputs, verbose=True):
         return torch.jit.trace(model, example_inputs)
     except Exception:
         if verbose:
-            log.error("jit error")
+            log.exception("jit error")
         try:
             return torch.jit.script(model)
         except Exception:
             if verbose:
-                log.error("jit error")
+                log.exception("jit error")
     return None
 
 

@@ -184,19 +184,21 @@ def format_exception(exc, frame):
     msg = os.linesep * 2
     msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
     msg += traceback.format_exc()
-    msg += (
-        "\n"
-        + "=" * 10
-        + " The above exception occurred while processing the following code "
-        + "=" * 10
-        + "\n\n"
-    )
-    msg += "".join(
-        traceback.format_list(
-            filter_stack(traceback.extract_stack(frame))
-            + list(reversed(exc.real_stack))
+    if hasattr(exc, "real_stack"):
+        msg += (
+            "\n"
+            + "=" * 10
+            + " The above exception occurred while processing the following code "
+            + "=" * 10
+            + "\n\n"
         )
-    )
+        msg += "".join(
+            traceback.format_list(
+                filter_stack(traceback.extract_stack(frame))
+                + list(reversed(exc.real_stack))
+            )
+        )
+
     msg += "=" * 10
     return msg
 
@@ -303,8 +305,8 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
                 except exc.SkipFrame:
-                    if one_graph and config.debug:
-                        print("ERROR: No graph captured with one_graph=True")
+                    if one_graph:
+                        log.debug("No graph captured with one_graph=True")
                     return None
             output_codes.add(code)
 

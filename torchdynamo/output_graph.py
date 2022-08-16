@@ -41,6 +41,7 @@ from .variables.tensor import UnspecializedPythonVariable
 
 log = logging.getLogger(__name__)
 
+
 def _get_gen_rand_values_fn(random_calls):
     def _gen_rand_values():
         return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
@@ -359,7 +360,11 @@ class OutputGraph(fx.Tracer):
                 f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
             )
         except ImportError:
-            pass
+            log.warning(
+                "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
+                "which could not be found on this machine. Run `pip "
+                "install tabulate` to install the library."
+            )
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
