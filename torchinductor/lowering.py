@@ -1338,8 +1338,6 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 
 def check_and_broadcast_indices(indices):
-    print(indices)
-    print([i.get_dtype() for i in indices if i is not None])
     assert all(
         [
             i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
