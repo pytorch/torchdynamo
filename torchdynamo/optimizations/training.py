@@ -49,6 +49,15 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
+            # TODO - Remove the TorchDynamo functionalization when Dispatcher
+            # functionalization is ready.  Sometimes TorchDynamo
+            # functinalization can leave the graph in bad state.
+            try:
+                self.gm(*example_inputs)
+            except:
+                log.debug("TorchDynamo functionalization left the graph in bad state.")
+                self.gm = gm
+
         gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
 
         # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
