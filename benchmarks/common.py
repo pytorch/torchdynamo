@@ -936,7 +936,7 @@ class BenchmarkRunner:
             if curr_branch != "main":
                 if repo.is_dirty():
                     raise RuntimeError(
-                        "--diff called on dirty branch. Commit, stash, or reset."
+                        "--diff-main called on dirty branch. Commit, stash, or reset."
                     )
                 # Run current
                 try:
@@ -977,7 +977,7 @@ class BenchmarkRunner:
                 return
             else:
                 raise RuntimeError(
-                    "--diff called on main branch, what are you diffing?"
+                    "--diff-main called on main branch, what are you diffing?"
                 )
         elif branch:
             print("RUNNING ON BRANCH:", branch)
@@ -1196,7 +1196,7 @@ def parse_args():
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
     parser.add_argument(
-        "--diff",
+        "--diff-main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
     )
