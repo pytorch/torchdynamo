@@ -434,17 +434,18 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
         )
     )
 
-    for sh, sp in zip(shapes, speedups):
+    for sh, eager, compiler in zip(shapes, medians[:, 0], medians[:, 1]):
         output_csv(
             "dynamic_shapes.csv",
-            ("dev", "backend", "name", "batch_size", "shape", "speedup"),
+            ("dev", "backend", "name", "batch_size", "shape", "eager", "compiler"),
             [
                 current_device,
                 os.path.basename(output_filename)[:-4],
                 current_name,
                 current_batch_size,
                 sh,
-                sp,
+                eager,
+                compiler
             ],
         )
 
