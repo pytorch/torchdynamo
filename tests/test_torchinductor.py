@@ -516,6 +516,21 @@ class CommonTemplate:
         def fn(a, b):
             return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
 
+    def test_sum_int(self):
+        def fn(x):
+            return 2*x.sum(-1) + x.sum()
+
+        dtypes = torch.bool, torch.uint8, torch.int
+        inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
+        for i in inps:
+            self.common(fn, (i,), check_lowp=False)
+
+    def test_sum_dtype(self):
+        def fn(x):
+            return x*x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
+
+        self.common(fn, (torch.ones(32, 32) * 70))
+
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     def test_clamp(self):

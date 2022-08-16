@@ -949,7 +949,7 @@ def arange(
     assert isinstance(end, int)
     assert isinstance(step, int)
 
-    dtype = dtype or torch.get_default_dtype()
+    dtype = dtype or torch.int64
     length = (end - start) // step
     start = sympy.Integer(start)
     step = sympy.Integer(step)
@@ -2697,8 +2697,13 @@ def div(a, b):
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
 
+@register_lowering([aten.sum, prims.sum])
+def sum_(x, axis = None, keepdims=False, *, dtype=None):
+    if (is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())) and dtype is None:
+        dtype = torch.int64
+    fn = make_reduction("sum")
+    return fn(x, axis, keepdims, dtype=dtype)
 
-sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
