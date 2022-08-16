@@ -31,6 +31,7 @@ decompositions = get_decompositions(
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
+        aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu_backward,
         aten.glu_backward,
