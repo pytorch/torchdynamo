@@ -926,29 +926,62 @@ class BenchmarkRunner:
         branch=None,
     ):
         if diff:
-            assert(branch is None), "Branch set during top level flow."
+            assert branch is None, "Branch set during top level flow."
             import git
-            repo = git.Repo("../torchdynamo") # Hack assumption of torchbenchmark positioning
+
+            repo = git.Repo(
+                "../torchdynamo"
+            )  # Hack assumption of torchbenchmark positioning
             curr_branch = repo.active_branch.name
-            if curr_branch != 'main':
+            if curr_branch != "main":
                 if repo.is_dirty():
-                    raise RuntimeError("--diff called on dirty branch. Commit, stash, or reset.")
+                    raise RuntimeError(
+                        "--diff called on dirty branch. Commit, stash, or reset."
+                    )
                 # Run current
                 try:
-                    self.run_one_model(name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check,dynamic_shapes,diff=False,branch=curr_branch)
+                    self.run_one_model(
+                        name,
+                        model,
+                        is_training,
+                        model_iter_fn,
+                        example_inputs,
+                        optimize_ctx,
+                        accuracy_ctx,
+                        experiment,
+                        skip_accuracy_check,
+                        dynamic_shapes,
+                        diff=False,
+                        branch=curr_branch,
+                    )
                     # Swap to main
-                    repo.git.checkout('main')
+                    repo.git.checkout("main")
                     # Run main
-                    self.run_one_model(name,model,is_training,model_iter_fn,example_inputs,optimize_ctx,accuracy_ctx,experiment,skip_accuracy_check,dynamic_shapes,diff=False,branch='main')
+                    self.run_one_model(
+                        name,
+                        model,
+                        is_training,
+                        model_iter_fn,
+                        example_inputs,
+                        optimize_ctx,
+                        accuracy_ctx,
+                        experiment,
+                        skip_accuracy_check,
+                        dynamic_shapes,
+                        diff=False,
+                        branch="main",
+                    )
                 finally:
                     # Swap back
                     repo.git.checkout(curr_branch)
                 return
             else:
-                raise RuntimeError("--diff called on main branch, what are you diffing?")
+                raise RuntimeError(
+                    "--diff called on main branch, what are you diffing?"
+                )
         elif branch:
             print("RUNNING ON BRANCH:", branch)
-            
+
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             is_training, current_device, name
         )
@@ -1162,7 +1195,11 @@ def parse_args():
     )
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
-    parser.add_argument("--diff", action="store_true", help="Delta this branch against main. In the future, we may add support for picking the branch.")
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
