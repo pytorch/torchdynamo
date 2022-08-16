@@ -1390,7 +1390,6 @@ def check_and_broadcast_indices(indices):
 
 @register_lowering(aten.index, type_promote=False)
 def index(x, indices):
-    print(x, indices)
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices = check_and_broadcast_indices(indices)
@@ -2697,7 +2696,16 @@ def div(a, b):
     )
 
 
-sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
+@register_lowering([aten.sum, prims.sum])
+def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+    fn = make_reduction("sum")
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
