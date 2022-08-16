@@ -915,7 +915,7 @@ def arange(
     assert isinstance(end, int)
     assert isinstance(step, int)
 
-    dtype = dtype or torch.get_default_dtype()
+    dtype = dtype or torch.int64
     length = (end - start) // step
     start = sympy.Integer(start)
     step = sympy.Integer(step)

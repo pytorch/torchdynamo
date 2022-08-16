@@ -130,7 +130,15 @@ class InputGen:
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
 @patch("torchdynamo.config.raise_on_backend_error", True)
-def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+    tol=1e-4,
+    *,
+    check_lowp=True,
+    exact_dtype=True,
+):
     torchdynamo.reset()
 
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
@@ -170,7 +178,9 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
     correct_flat = tuple(
-        y.to(x.dtype) if isinstance(y, torch.Tensor) else y
+        y.to(x.dtype)
+        if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
+        else y
         for x, y in zip(actual_flat, correct_flat)
     )
     correct = tree_unflatten(correct_flat, correct_spec)
@@ -178,11 +188,15 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     # print(correct)
     # print(actual)
     # print(correct - actual)
-    self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
+    self.assertTrue(
+        same(actual, correct, tol=tol, equal_nan=True, exact_dtype=exact_dtype)
+    )
 
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
-def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
+def check_model_cuda(
+    self: TestCase, model, example_inputs, *, check_lowp=True, exact_dtype=True
+):
     if hasattr(model, "to"):
         model = model.to("cuda")
 
@@ -195,7 +209,7 @@ def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
         ).copy_(x)
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
-    check_model(self, model, example_inputs)
+    check_model(self, model, example_inputs, exact_dtype=exact_dtype)
 
     if check_lowp:
 
@@ -209,7 +223,7 @@ def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
-        check_model(self, model, example_inputs, 2e-3)
+        check_model(self, model, example_inputs, 2e-3, exact_dtype=exact_dtype)
 
 
 class SweepInputs2:
@@ -532,6 +546,13 @@ class CommonTemplate:
             return tmp, tmp + rng2
 
         self.common(fn, (torch.randn(8, 8),))
+
+    def test_arange1(self):
+        def fn(x):
+            rng1 = torch.arange(8, device=x.device)
+            return (x + rng1,)
+
+        self.common(fn, (torch.randint(4, (8, 8)),), check_lowp=False)
 
     def test_linspace(self):
         def fn(x):
@@ -2663,6 +2684,8 @@ class CommonTemplate:
             [
                 torch.randn([8, 256, 256]),
             ],
+            exact_dtype=False,  # FIXME
+            check_lowp=False,  # FIXME
         )
 
     def test_argmax_argmin2(self):
@@ -2679,6 +2702,8 @@ class CommonTemplate:
             [
                 torch.randn([144, 144]),
             ],
+            exact_dtype=False,  # FIXME
+            check_lowp=False,  # FIXME
         )
 
     def test_vdd_clamp(self):
