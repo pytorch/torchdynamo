@@ -554,6 +554,8 @@ def draw_buffers(nodes, fname, print_graph=False):
         if "fusion_meta" not in node.meta:
             continue
         group = node.meta["fusion_meta"].group
+        if isinstance(group, tuple):
+            group = group[1]
 
         # gather meta data
         dtype = None
@@ -632,10 +634,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             group = node_type
         elif isinstance(snode, SchedulerNode):
             node_type = "compute"
-            group = snode.group[1]
+            group = snode.group
         elif isinstance(snode, FusedSchedulerNode):
             node_type = "fused"
-            group = snode.group[1]
+            group = snode.group
         else:
             raise RuntimeError("Unknown node type")
         node_func = func_dict[node_type]
