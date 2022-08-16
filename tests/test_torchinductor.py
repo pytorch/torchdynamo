@@ -2771,6 +2771,55 @@ class CommonTemplate:
             ],
         )
 
+    def test_tmp_not_defined_issue(self):
+        def forward(
+            primals_3,
+            primals_4,
+            add_tensor,
+            convert_element_type_default,
+            div_default,
+            reciprocal_default,
+        ):
+            var_default = torch.ops.prims.var.default(
+                convert_element_type_default, [2], correction=0
+            )
+            sub_tensor = torch.ops.aten.sub.Tensor(add_tensor, div_default)
+            mul_tensor_1 = torch.ops.aten.mul.Tensor(sub_tensor, reciprocal_default)
+            mul_tensor_2 = torch.ops.aten.mul.Tensor(mul_tensor_1, primals_3)
+            add_tensor_2 = torch.ops.aten.add.Tensor(mul_tensor_2, primals_4)
+            convert_element_type_default_1 = (
+                torch.ops.prims.convert_element_type.default(
+                    add_tensor_2, torch.float32
+                )
+            )
+            convert_element_type_default_2 = (
+                torch.ops.prims.convert_element_type.default(
+                    convert_element_type_default_1, torch.float32
+                )
+            )
+            var_default_1 = torch.ops.prims.var.default(
+                convert_element_type_default_2, [2], correction=0
+            )
+            broadcast_in_dim_default_2 = torch.ops.prims.broadcast_in_dim.default(
+                var_default_1, [1, 512, 1], [0, 1]
+            )
+            sum_default_1 = torch.ops.prims.sum.default(
+                convert_element_type_default_2, [2]
+            )
+            add_tensor_3 = torch.ops.aten.add.Tensor(broadcast_in_dim_default_2, 1e-05)
+            return (var_default, sum_default_1, add_tensor_3)
+
+        inps = [
+            (torch.Size([1024]), torch.float32),
+            (torch.Size([1024]), torch.float32),
+            (torch.Size([1, 512, 1024]), torch.float32),
+            (torch.Size([1, 512, 1024]), torch.float32),
+            (torch.Size([1, 512, 1]), torch.float32),
+            (torch.Size([1, 512, 1]), torch.float32),
+        ]
+        inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
+        self.common(forward, inps)
+
 
 if HAS_CPU:
 
