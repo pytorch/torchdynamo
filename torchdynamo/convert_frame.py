@@ -38,10 +38,6 @@ from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
 from .utils import istype
-from .utils import log_debug
-from .utils import log_error
-from .utils import log_info
-from .utils import log_warning
 from .utils import orig_code_map
 from .utils import troubleshooting_url
 
@@ -176,7 +172,7 @@ def has_tensor_in_frame(frame):
         if has_tensor(value):
             return True
 
-    log_debug(
+    log.debug(
         f"skipping because no torch.* {frame.f_code.co_name} \
             {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
     )
@@ -193,7 +189,7 @@ def format_exception(exc, frame):
         + "=" * 10
         + " The above exception occurred while processing the following code "
         + "=" * 10
-        + "\n"
+        + "\n\n"
     )
     msg += "".join(
         traceback.format_list(
@@ -258,7 +254,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 return f"{str(guard_failures[code][-1])}"
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log_warning(
+            log.warning(
                 f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
                 + f"   function: {format_func_info(code)}\n"
                 + f"   reasons:  {format_guard_failures(code)}\n"
@@ -310,8 +306,8 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     return None
             output_codes.add(code)
 
-            log_info(format_bytecode("ORIGINAL BYTECODE", frame.f_code))
-            log_info(format_bytecode("MODIFIED BYTECODE", code))
+            log.info(format_bytecode("ORIGINAL BYTECODE", frame.f_code))
+            log.info(format_bytecode("MODIFIED BYTECODE", code))
 
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
@@ -325,7 +321,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 [f" - {str(guard)}" for guard in sorted(output.guards)]
             )
 
-            log_info(guard_str)
+            log.info(guard_str)
 
             if guard_export_fn is not None:
                 guard_export_fn(output.guards)
@@ -337,13 +333,13 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             BackendCompilerFailed,
             AssertionError,
         ) as e:
-            log_error(
+            log.error(
                 format_bytecode("WONT CONVERT", frame.f_code)
                 + format_exception(e, frame)
             )
             raise
         except Exception as e:
-            log_error(
+            log.error(
                 format_bytecode("WONT CONVERT", frame.f_code)
                 + format_exception(e, frame)
             )

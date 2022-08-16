@@ -1,6 +1,7 @@
 import collections
 import copy
 import itertools
+import logging
 import operator
 import re
 import sys
@@ -33,12 +34,12 @@ from .utils import count_calls
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import format_graph_tabular
-from .utils import log_info
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
 
+log = logging.getLogger(__name__)
 
 def _get_gen_rand_values_fn(random_calls):
     def _gen_rand_values():
@@ -354,7 +355,7 @@ class OutputGraph(fx.Tracer):
         self.install_global(name, compiled_fn)
 
         try:
-            log_info(
+            log.info(
                 f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
             )
         except ImportError:

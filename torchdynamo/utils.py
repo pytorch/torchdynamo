@@ -38,7 +38,7 @@ troubleshooting_url = (
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "[%(levelname)s] %(message)s"},
+        "torchdynamo_format": {"format": "Torchdynamo: [%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
@@ -67,28 +67,8 @@ LOGGING_CONFIG = {
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
-        logger = logging.getLogger(config.log_name)
+        logger = logging.getLogger("torchdynamo")
         logger.setLevel(config.log_level)
-
-
-def get_logger():
-    return logging.getLogger(config.log_name)
-
-
-def log_warning(msg, *args, **kwargs):
-    get_logger().warning(msg, *args, **kwargs)
-
-
-def log_error(msg, *args, **kwargs):
-    get_logger().error(msg, *args, **kwargs)
-
-
-def log_info(msg, *args, **kwargs):
-    get_logger().info(msg, *args, **kwargs)
-
-
-def log_debug(msg, *args, **kwargs):
-    get_logger().debug(msg, *args, **kwargs)
 
 
 # filter out all frames after entering dynamo
@@ -97,7 +77,7 @@ def filter_stack(stack):
     for frame in stack:
         if "convert_frame" in frame.filename:
             break
-        if "eval_frame" in frame.filename:
+        if "eval_frame" in frame.filename or "torchdynamo.optimize(" in frame.line:
             continue
         user_stack.append(frame)
 
@@ -108,7 +88,7 @@ def format_graph_tabular(graph):
     try:
         from tabulate import tabulate
     except ImportError:
-        log_warning(
+        log.warning(
             "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
             "which could not be found on this machine. Run `pip "
             "install tabulate` to install the library."
@@ -340,12 +320,12 @@ def torchscript(model, example_inputs, verbose=True):
         return torch.jit.trace(model, example_inputs)
     except Exception:
         if verbose:
-            log_error("jit error")
+            log.error("jit error")
         try:
             return torch.jit.script(model)
         except Exception:
             if verbose:
-                log_error("jit error")
+                log.error("jit error")
     return None
 
 
@@ -575,7 +555,7 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         for k in a.keys():
             if not (same(a[k], b[k], cos_similarity, tol, equal_nan=equal_nan)):
-                log_info("Accuracy failed for key name", k)
+                log.info("Accuracy failed for key name", k)
                 return False
         return True
     elif isinstance(a, torch.Tensor):
@@ -593,7 +573,7 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
                 return True
             res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
             if res < 0.99:
-                log_info(f"Similarity score={res.cpu().detach().item()}")
+                log.info(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)

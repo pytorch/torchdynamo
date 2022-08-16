@@ -10,7 +10,6 @@ import torch
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import log_debug
 from torchdynamo.utils import same
 
 from . import config
@@ -139,7 +138,7 @@ def catch_errors_wrapper(callback):
     def catch_errors(frame, cache_size):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                log_debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+                log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
                 return None
             if (
                 frame.f_code.co_filename == "<string>"

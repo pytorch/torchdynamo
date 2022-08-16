@@ -50,8 +50,6 @@ from .utils import counters
 from .utils import fake_tensors_available
 from .utils import filter_stack
 from .utils import istype
-from .utils import log_debug
-from .utils import log_warning
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
@@ -162,7 +160,7 @@ def break_graph_if_unsupported(*, push):
                     )
                 )
 
-                log_warning(f"Graph break: {exc} from user code at:\n {user_stack}")
+                log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
@@ -293,7 +291,7 @@ class InstructionTranslatorBase(object):
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
-        log_debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
+        log.debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
 
         try:
             if not hasattr(self, inst.opname):
@@ -1373,7 +1371,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as exc:
-            log_warning(
+            log.warning(
                 f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
             )
             unimplemented("arg mismatch inlining")
@@ -1386,7 +1384,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        log_debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
+        log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -1405,7 +1403,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        log_debug(f"DONE INLINING {code}")
+        log.debug(f"DONE INLINING {code}")
 
         if is_generator(code):
             assert tracer.symbolic_result.as_python_constant() is None
