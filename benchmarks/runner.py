@@ -103,6 +103,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir", help="Choose the output directory to save the logs"
     )
+
     # Choose either generation of commands, pretty parsing or e2e runs
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
