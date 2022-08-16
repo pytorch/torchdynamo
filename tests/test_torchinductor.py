@@ -532,7 +532,7 @@ class CommonTemplate:
 
     def test_sum_int(self):
         def fn(x):
-            return 2*x.sum(-1) + x.sum()
+            return 2 * x.sum(-1) + x.sum()
 
         dtypes = torch.bool, torch.uint8, torch.int
         inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
@@ -541,7 +541,7 @@ class CommonTemplate:
 
     def test_sum_dtype(self):
         def fn(x):
-            return x*x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
+            return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70))
 

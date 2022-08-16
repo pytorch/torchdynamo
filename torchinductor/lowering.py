@@ -2696,12 +2696,16 @@ def div(a, b):
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
 
+
 @register_lowering([aten.sum, prims.sum])
-def sum_(x, axis = None, keepdims=False, *, dtype=None):
-    if (is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())) and dtype is None:
+def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
         dtype = torch.int64
     fn = make_reduction("sum")
     return fn(x, axis, keepdims, dtype=dtype)
+
 
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
