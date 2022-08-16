@@ -292,6 +292,8 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
                 except exc.SkipFrame:
+                    if one_graph and config.debug:
+                        print("ERROR: No graph captured with one_graph=True")
                     return None
             output_codes.add(code)
             if config.debug:

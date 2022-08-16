@@ -707,7 +707,7 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
-    def test_div(self):
+    def test_div1(self):
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
@@ -716,6 +716,77 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
+
+    def test_div2(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(fn, (torch.randint(-100, 100, [8, 8]), 100 * torch.randn(8, 8)))
+
+    def test_div3(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        a = torch.randint(1, 100, [8, 8])
+        self.common(fn, (a * 2, a))
+
+    def test_div4(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(fn, (torch.randint(-100, 0, [8, 8]), torch.randint(1, 10, [8, 8])))
+
+    def test_div5(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        # divide a scalar
+        self.common(fn, (torch.randint(-100, 0, [8, 8]), 16))
+
+    def test_div6(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        # treat boolean as integer
+        self.common(
+            fn, (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8]))
+        )
+
+    def test_div7(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(2**32, 2**40, [100, 100]),
+                torch.randint(-10, -1, [100, 100]),
+            ),
+        )
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -1677,6 +1748,14 @@ class CommonTemplate:
                 torch.tensor([3, 4, 4, 3], dtype=torch.int64),
             ),
         )
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 12),
+                torch.tensor([[0, 0, 2, 2]], dtype=torch.int64),
+                torch.tensor([[3], [4], [4], [3]], dtype=torch.int64),
+            ),
+        )
 
     def test_index2(self):
         def fn(a, b):
@@ -2274,7 +2353,7 @@ class CommonTemplate:
             fn,
             [
                 torch.zeros(2, 3),
-                0,
+                -1,
                 torch.tensor([[0]]),
                 torch.ones(2, 3),
             ],
