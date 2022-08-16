@@ -503,20 +503,29 @@ class BlockedNodes:
 
     def pop_fusable(self, deps, group):
         assert isinstance(deps, set)
+        unpacked_something = False
         result = []
         for dep in deps:
             self.dep_to_nodes[dep] = [x for x in self.dep_to_nodes[dep] if x]
             for box in self.dep_to_nodes[dep]:
                 if (
-                    len(box.peek().unmet_dependencies - deps) == 0
+                    box.peek()
+                    and len(box.peek().unmet_dependencies - deps) == 0
                     and box.peek().group == group
                 ):
                     out = box.pop()
                     if isinstance(out, FusedSchedulerNode):
                         for x in out.snodes:
-                            result.append(x)
+                            if len(x.unmet_dependencies) == 0:
+                                result.append(x)
+                            else:
+                                self.add(x)
+                            unpacked_something = True
                     else:
                         result.append(out)
+        if unpacked_something:
+            # in case there are dependencies inside pre fused nodes
+            result.extend(self.pop_fusable(deps, group))
         return result
 
 
