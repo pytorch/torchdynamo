@@ -1,7 +1,7 @@
 version: 2.1
 
 jobs:
-  gpu_linux:
+  coverage:
     machine:
       # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
       image: ubuntu-2004-cuda-11.4:202110-01
@@ -43,8 +43,42 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             python .circleci/check_coverage.py
-
+  aot_eager:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - run:
+          name: Setup
+          command: |
+            source .circleci/setup_env.sh
+      - run:
+          name: TorchBench install
+          command: |
+            source .circleci/setup_env.sh
+            conda install -y -c conda-forge git-lfs
+            git lfs install --skip-repo
+            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+            # above doesn't work due to git-lfs auth issues, workaround with a tarball:
+            wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+            tar jxvf torchbenchmark.tar.bz2
+            (cd torchbenchmark && python install.py)
+      - run:
+          name: TorchBench AotAutograd Eager run
+          command: |
+            source .circleci/setup_env.sh
+            python benchmarks/torchbench.py --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 --isolate --use-eval-mode --output=aot_eager.csv
+      - store_artifacts:
+          path: aot_eager.csv
+      - run:
+          name: TorchBench AotAutograd Eager compiler accuracy
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_aot.py
 workflows:
   gpu:
     jobs:
-      - gpu_linux
+      - coverage
+      - aot_eager

@@ -91,9 +91,9 @@ def _kernel_delta_x_hwc(
         delta_xh_ptrs = delta_xh_ptr + off_x_crs
         delta_xw_ptrs = delta_xw_ptr + off_x_crs
         delta_xc_ptrs = delta_xc_ptr + off_x_crs
-        delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
-        delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
-        delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
+        delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS, other=0)
+        delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS, other=0)
+        delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS, other=0)
         off_x_crs_unpacked = (
             delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
         )

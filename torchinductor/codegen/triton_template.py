@@ -122,9 +122,7 @@ class TritonTemplateKernel(TritonKernel):
         render_dict["pointwise_code"] = self.pointwise_code.getvalue() if fuse else None
         render_dict["keep_store"] = not could_remove_kernel_buf
         render_dict["out_def"] = (
-            self.out_def()
-            if kernel_buf_replace_name is None
-            else kernel_buf_replace_def
+            self.out_def() if not could_remove_kernel_buf else kernel_buf_replace_def
         )
         self.body = self.template.render(render_dict) + "\n"
 

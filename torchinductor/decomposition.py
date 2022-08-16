@@ -31,6 +31,7 @@ decompositions = get_decompositions(
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
+        aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu_backward,
         aten.glu_backward,
@@ -44,6 +45,7 @@ decompositions = get_decompositions(
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
+        aten.linalg_vector_norm,
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
@@ -57,6 +59,9 @@ decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
+        aten.new_empty,
+        aten.new_full,
+        aten.new_ones,
         aten.nll_loss_backward,
         aten.norm,
         aten.reflection_pad2d_backward,
@@ -92,6 +97,11 @@ def register_decomposition(ops):
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
     return decomp.register_decomposition(ops, decompositions, disable_meta=True)
+
+
+@register_decomposition([aten.detach_])
+def detach_(x):
+    return x
 
 
 @register_decomposition([aten.clamp])
@@ -144,16 +154,6 @@ def log2(x):
 def round_dec(x, decimals=0):
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
-
-
-@register_decomposition([aten.div.Tensor_mode])
-def div_mode(a, b, rounding_mode=None):
-    result = aten.div(a, b)
-    if rounding_mode == "floor":
-        return torch.floor(result)
-    if rounding_mode == "trunc":
-        return torch.trunc(result)
-    return result
 
 
 @register_decomposition([aten.gelu])

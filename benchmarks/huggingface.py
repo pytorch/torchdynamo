@@ -11,7 +11,6 @@ import torch
 from common import BenchmarkRunner
 from common import main
 
-import torchdynamo
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
 
@@ -105,8 +104,28 @@ SKIP = {
 
 # TODO - Fails even after fake tensors
 USE_SMALL_BATCH_SIZE = {
+    "AlbertForMaskedLM": 2,
     "AlbertForPreTraining": 4,
-    "XLNetLMHeadModel": 8,
+    "AlbertForQuestionAnswering": 2,
+    "BartForCausalLM": 4,
+    "DebertaForMaskedLM": 4,
+    "DebertaForQuestionAnswering": 4,
+    "DebertaV2ForMaskedLM": 1,
+    "DebertaV2ForQuestionAnswering": 1,
+    "DistilBertForMaskedLM": 16,
+    "ElectraForCausalLM": 1,
+    "GPTNeoForCausalLM": 1,
+    "GPTNeoForSequenceClassification": 1,
+    "M2M100ForConditionalGeneration": 2,
+    "MT5ForConditionalGeneration": 2,
+    "MegatronBertForCausalLM": 2,
+    "OPTForCausalLM": 4,
+    "PegasusForCausalLM": 8,
+    "PegasusForConditionalGeneration": 4,
+    "RobertaForCausalLM": 4,
+    "TrOCRForCausalLM": 8,
+    "XGLMForCausalLM": 2,
+    "XLNetLMHeadModel": 4,
 }
 
 
@@ -135,9 +154,9 @@ def get_sequence_length(model_cls, model_name):
         seq_length = 512
     else:
         logging.warn(
-            f"Sequence Length not defined for {model_name}. Choosing 512 arbitrarily"
+            f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
         )
-        seq_length = 512
+        seq_length = 128
     return seq_length
 
 
@@ -412,11 +431,9 @@ class HuggingfaceRunner(BenchmarkRunner):
     def compute_loss(self, pred):
         return pred[0]
 
-    @torchdynamo.skip
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(**inputs)
 
-    @torchdynamo.skip
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         mod.zero_grad(True)

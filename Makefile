@@ -2,7 +2,7 @@
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
             $(wildcard tests/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
-            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py)
+            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py) $(wildcard .circleci/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -97,7 +97,7 @@ build-deps: clone-deps
 	# conda create --name torchdynamo -y python=3.8
 	# conda activate torchdynamo
 	conda install -y astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
-        cffi typing_extensions future six requests dataclasses protobuf numba cython
+        cffi typing_extensions future six requests dataclasses protobuf numba cython scikit-learn
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 

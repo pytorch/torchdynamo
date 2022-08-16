@@ -82,6 +82,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torchdynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+        # unpack torch.jit.script_if_tracing
+        if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+            fn = inspect.getattr_static(fn, "__original_fn", fn)
         self.fn: types.FunctionType = fn
 
     def self_args(self):

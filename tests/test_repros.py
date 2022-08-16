@@ -36,6 +36,15 @@ def ifdyn(count1, count2):
         return count2
 
 
+def has_detectron2():
+    try:
+        from detectron2.layers.mask_ops import _paste_masks_tensor_shape
+
+        return _paste_masks_tensor_shape is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True):
     # from detectron2 mask_ops.py
 
@@ -1437,3 +1446,45 @@ class ReproTests(torchdynamo.testing.TestCase):
             m.forward(listy)
 
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_vdd_duplicate_error(self):
+        def fn(a, dt):
+            keys = list(dt._jt_dict.keys())
+            p = torch.cos(dt._jt_dict[keys[0]]._value)
+            q = torch.sin(a)
+            r = torch.sigmoid(dt._jt_dict[keys[0]]._value)
+            return p + q + r
+
+        class Value:
+            def __init__(self):
+                self._value = torch.randn(4)
+
+        class Sample:
+            def __init__(self):
+                self._jt_dict = {}
+                self._jt_dict["POSITION_ID"] = Value()
+
+        a = torch.randn(4)
+        sample = Sample()
+
+        ref = fn(a, sample)
+
+        optimized_fn = torchdynamo.optimize("eager", nopython=True)(fn)
+        res = optimized_fn(a, sample)
+
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not has_detectron2(), "requires detectron2")
+    def test_multi_import(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def to_bitmasks(boxes):
+            from detectron2.layers.mask_ops import _paste_masks_tensor_shape
+            from detectron2.layers.mask_ops import paste_masks_in_image
+
+            if (
+                paste_masks_in_image is not None
+                and _paste_masks_tensor_shape is not None
+            ):
+                return boxes + 1
+
+        self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())

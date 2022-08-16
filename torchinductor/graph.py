@@ -151,7 +151,13 @@ class GraphLowering(torch.fx.Interpreter):
     def add_tensor_constant(self, data):
         def allocate():
             for name, value in self.constants.items():
-                if data is value:
+                if (
+                    data.size() == value.size()
+                    and data.stride() == value.stride()
+                    and data.dtype == value.dtype
+                    and data.device == value.device
+                    and torch.eq(data, value).all()
+                ):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
@@ -267,15 +273,16 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
-        result = super().run_node(n)
-        num_users = len(set(n.users))
-        if num_users > 1 and isinstance(result, TensorBox):
-            for user in n.users:
-                if user.target in needs_realized_inputs or user.op == "output":
-                    result.realize_hint()
+        with ir.IRNode.current_origins({n}):
+            result = super().run_node(n)
+            num_users = len(set(n.users))
+            if num_users > 1 and isinstance(result, TensorBox):
+                for user in n.users:
+                    if user.target in needs_realized_inputs or user.op == "output":
+                        result.realize_hint()
 
-            # TODO(jansel): introduce a store vs inline choice
-            result.mark_reuse(len(n.users))
+                # TODO(jansel): introduce a store vs inline choice
+                result.mark_reuse(len(n.users))
         return result
 
     def codegen(self):
