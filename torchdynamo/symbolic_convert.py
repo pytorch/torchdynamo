@@ -1192,7 +1192,9 @@ class InstructionTranslatorBase(object):
         self.f_code: types.CodeType = f_code
 
         if fake_tensors_available:
-            self._fake_mode = torch._subclasses.FakeTensorMode(inner=None)
+            with torch._subclasses.FakeTensorMode() as fake_mode:
+                pass
+            self._fake_mode = fake_mode
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []

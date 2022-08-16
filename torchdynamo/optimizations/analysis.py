@@ -116,11 +116,12 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
     if fake_tensors_available and config.fake_tensor_propagation:
-        fake_mode = FakeTensorMode()
+        with FakeTensorMode() as fake_mode:
+            pass
         fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        with fake_mode:
+        with fake_mode.restore():
             ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         new_gm = copy.deepcopy(gm)
