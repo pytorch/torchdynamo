@@ -503,6 +503,7 @@ class BlockedNodes:
 
     def pop_fusable(self, deps, group):
         assert isinstance(deps, set)
+        unpacked_something = False
         result = []
         for dep in deps:
             self.dep_to_nodes[dep] = [x for x in self.dep_to_nodes[dep] if x]
@@ -519,10 +520,12 @@ class BlockedNodes:
                                 result.append(x)
                             else:
                                 self.add(x)
-                        # in case there are dependencies inside pre fused nodes
-                        result.extend(self.pop_fusable(deps, group))
+                            unpacked_something = True
                     else:
                         result.append(out)
+        if unpacked_something:
+            # in case there are dependencies inside pre fused nodes
+            result.extend(self.pop_fusable(deps, group))
         return result
 
 
