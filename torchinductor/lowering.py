@@ -1340,14 +1340,22 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 def check_and_broadcast_indices(indices):
     print(indices)
     print([i.get_dtype() for i in indices if i is not None])
-    assert all([i.get_dtype() in (torch.int64, torch.bool, torch.uint8) for i in indices if i is not None]), \
-    "indices must be int64, byte or bool"
-    assert all([i.get_dtype() == torch.int64 for i in indices if i is not None]), "bool indices are not supported yet"
+    assert all(
+        [
+            i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+            for i in indices
+            if i is not None
+        ]
+    ), "indices must be int64, byte or bool"
+    assert all(
+        [i.get_dtype() == torch.int64 for i in indices if i is not None]
+    ), "bool indices are not supported yet"
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
     new_indices = [None] * len(indices)
     for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
         new_indices[i] = x
     return new_indices
+
 
 @register_lowering(aten.index, type_promote=False)
 def index(x, indices):

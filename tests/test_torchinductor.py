@@ -1665,7 +1665,6 @@ class CommonTemplate:
             ),
         )
 
-
     def test_index2(self):
         def fn(a, b):
             return (
