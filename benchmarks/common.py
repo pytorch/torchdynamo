@@ -403,6 +403,7 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
             timings[rep, input_idx, 1] = timed(
                 model, optimized_model_iter_fn, inputs, return_result=False
             )
+
     medians = np.median(timings, axis=0)
     speedups = list(medians[:, 0] / medians[:, 1])
     speedups_mean = np.mean(speedups)
@@ -432,18 +433,21 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
             ]
         )
     )
-    output_csv(
-        output_filename,
-        ("dev", "name", "batch_size", "speedup mean", "speedup median", "speedup var"),
-        [
-            current_device,
-            current_name,
-            current_batch_size,
-            speedups_mean,
-            speedups_median,
-            speedups_var,
-        ],
-    )
+
+    for sh, sp in zip(shapes, speedups):
+        output_csv(
+            "dynamic_shapes.csv",
+            ("dev", "backend", "name", "batch_size", "shape", "speedup"),
+            [
+                current_device,
+                os.path.basename(output_filename)[:-4],
+                current_name,
+                current_batch_size,
+                sh,
+                sp,
+            ],
+        )
+
     return output_str
 
 
@@ -1418,7 +1422,7 @@ def main(runner, original_dir=None):
 
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
-        output_filename = "inductor.csv"
+        output_filename = f"inductor_{'dynamic' if args.inductor_dynamic else 'static'}.csv"
     elif args.online_autotune:
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
@@ -1706,7 +1710,8 @@ def main(runner, original_dir=None):
             )
 
         Stats.print_summary()
-        print_summary(output_filename)
+        if not args.dynamic_shapes:
+            print_summary(output_filename)
 
 
 if __name__ == "__main__":
