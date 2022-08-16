@@ -787,6 +787,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         data = torch.randn(1)
         out1 = m(data)
         cnt = torchdynamo.testing.CompileCounter()
+        torchdynamo.reset()
         with torchdynamo.optimize(cnt, nopython=True):
             out2 = m(data)
 
@@ -794,8 +795,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out1, out2))
 
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
-        cnt = torchdynamo.testing.CompileCounter()
         pre = m(data)
+        cnt.clear()
         with torchdynamo.optimize(cnt, nopython=False):
             opt_pre = m(data)
             m = M(module_dict)
@@ -852,6 +853,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
         cnt = torchdynamo.testing.CompileCounter()
 
+        torchdynamo.reset()
         with torchdynamo.optimize(cnt):
 
             def test_torch_static():

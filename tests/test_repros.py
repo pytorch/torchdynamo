@@ -942,8 +942,9 @@ class ReproTests(torchdynamo.testing.TestCase):
         def fn4(x):
             return x[0] + 1
 
+        cnt = torchdynamo.testing.CompileCounter()
         for fn in (fn1, fn2, fn3, fn4):
-            cnt = torchdynamo.testing.CompileCounter()
+            cnt.clear()
             with torchdynamo.optimize_assert(cnt):
                 self.assertTrue(same(fn(ex), ex.a + 1))
             self.assertEqual(cnt.frame_count, 1)
