@@ -1390,7 +1390,6 @@ def check_and_broadcast_indices(indices):
 
 @register_lowering(aten.index, type_promote=False)
 def index(x, indices):
-    print(x, indices)
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices = check_and_broadcast_indices(indices)
