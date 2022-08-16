@@ -302,9 +302,14 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     orig_code_map[code] = frame.f_code
                     break
                 except exc.RestartAnalysis:
+                    log.debug("Restarting analysis ...")
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
                 except exc.SkipFrame:
+                    log.debug(
+                        f"Skipping frame {frame.f_code.co_name} \
+                        {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+                    )
                     if one_graph:
                         log.debug("No graph captured with one_graph=True")
                     return None
