@@ -1488,3 +1488,7 @@ class ReproTests(torchdynamo.testing.TestCase):
                 return boxes + 1
 
         self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())
+
+
+if __name__ == "__main__":
+    unittest.main()
