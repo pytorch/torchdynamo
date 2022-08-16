@@ -1621,7 +1621,6 @@ def main(runner, original_dir=None):
         return
 
     if args.profile_backend and args.only:
-        assert args.isolate, "Use --isolate or --only to enable isolation"
         if output_filename is None:
             output_filename = "backends_profile.csv"
         for device in args.devices:

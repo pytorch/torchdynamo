@@ -63,12 +63,12 @@ TABLE = {
         "inductor_cudagraphs": "--inductor-settings --float32 -n50 --inductor",
     },
     "profile_compiler": {
-        "pytorch": "--training --profile-backend=pytorch --isolate",
-        "eager": "--training --profile-backend=eager --isolate",
-        "ts_nvfuser": "--training --profile-backend=nvfuser --isolate",
-        "aot_eager": "--training --profile-backend=aot_nop --isolate",
-        "aot_nvfuser": "--training --profile-backend=aot_nvfuser --isolate",
-        "inductor_cudagraphs": "--training --profile-backend=inductor --isolate",
+        "pytorch": "--training --profile-backend=pytorch",
+        "eager": "--training --profile-backend=eager",
+        "ts_nvfuser": "--training --profile-backend=nvfuser",
+        "aot_eager": "--training --profile-backend=aot_nop",
+        "aot_nvfuser": "--training --profile-backend=aot_nvfuser",
+        "inductor_cudagraphs": "--training --profile-backend=inductor",
     },
 }
 
@@ -301,7 +301,7 @@ class ParseCompilerProfileLogs(Parser):
             "memory": "Peak Memory",
             "graphs": "Number of graphs",
         }
-        self.threshold = 20
+        self.threshold = 50
         self.units = {
             "time": "seconds",
             "memory": "GB",
@@ -355,7 +355,8 @@ class ParseCompilerProfileLogs(Parser):
             df = pd.concat(frames_per_suite)
 
         # Sort in descending order
-        df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+        # df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+        df = df.sort_values(by=self.compilers[-2], ascending=False)
         df = df.round(3)
         return df
 
