@@ -7,10 +7,11 @@ from typing import List
 import sympy
 import torch
 import torch.fx
+from torch._prims.utils import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims.utils import elementwise_dtypes
 from torch._prims_common import Number
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
-from torch._prims.utils import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 
 from . import config
 from . import ir
