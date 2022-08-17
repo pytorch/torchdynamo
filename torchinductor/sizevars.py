@@ -68,9 +68,6 @@ class SizeVarAllocator(object):
         from .ir import IndexingDiv
         from .ir import ModularIndexing
 
-        if isinstance(var_ranges, tuple):
-            assert len(var_ranges) == 1, var_ranges
-            var_ranges = var_ranges[0]
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
@@ -348,6 +345,7 @@ class SizeVarAllocator(object):
         return f"({', '.join(parts)})"
 
 
+@functools.lru_cache(256)
 def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
     """
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
