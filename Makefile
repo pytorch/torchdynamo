@@ -139,19 +139,19 @@ fixed2-gpu: develop
 
 baseline-cpu: develop
 	 rm -f baseline_*.csv
-	 python benchmarks/torchbench.py --isolate -n50 --overhead
-	 python benchmarks/torchbench.py --isolate -n50 --speedup-ts
-	 python benchmarks/torchbench.py --isolate -n50 --speedup-sr
-	 python benchmarks/torchbench.py --isolate -n50 --speedup-onnx
+	 python benchmarks/torchbench.py -n50 --overhead
+	 python benchmarks/torchbench.py -n50 --speedup-ts
+	 python benchmarks/torchbench.py -n50 --speedup-sr
+	 python benchmarks/torchbench.py -n50 --speedup-onnx
 	 paste -d, baseline_ts.csv baseline_sr.csv baseline_onnx.csv > baseline_all.csv
 
 baseline-gpu: develop
 	 rm -f baseline_*.csv
-	 python benchmarks/torchbench.py -dcuda --isolate -n100 --overhead
-	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
-	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
-	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-trt
-	 python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-onnx
+	 python benchmarks/torchbench.py -dcuda -n100 --overhead
+	 python benchmarks/torchbench.py -dcuda -n100 --speedup-ts && mv baseline_ts.csv baseline_nnc.csv
+	 python benchmarks/torchbench.py -dcuda -n100 --speedup-ts --nvfuser && mv baseline_ts.csv baseline_nvfuser.csv
+	 python benchmarks/torchbench.py -dcuda -n100 --speedup-trt
+	 python benchmarks/torchbench.py -dcuda -n100 --speedup-onnx
 	 paste -d, baseline_nnc.csv baseline_nvfuser.csv baseline_trt.csv baseline_onnx.csv > baseline_all.csv
 
 gpu-inductor-cudagraphs-fp32: develop

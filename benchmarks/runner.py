@@ -47,23 +47,23 @@ DEFAULT_OUTPUT_DIR = "benchmark_logs"
 
 TABLE = {
     "training": {
-        "ts_nnc": "--training --speedup-ts --use-eval-mode --isolate",
-        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate",
-        "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode --isolate",
-        "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode --isolate",
-        "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate",
-        "inductor_cudagraphs": "--training --inductor --use-eval-mode --isolate",
+        "ts_nnc": "--training --speedup-ts --use-eval-mode ",
+        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode ",
+        "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode ",
+        "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode ",
+        "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode ",
+        "inductor_cudagraphs": "--training --inductor --use-eval-mode",
     },
     "inference": {
-        "ts_nnc": "--isolate --speedup-ts",
-        "ts_nvfuser": "--isolate -n100 --speedup-ts --nvfuser",
-        "trt": "--isolate -n100 --speedup-trt",
+        "ts_nnc": "--speedup-ts",
+        "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
+        "trt": "-n100 --speedup-trt",
         "eager_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs",
         "nnc_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
         "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
         "inductor_cudagraphs": "--inductor-settings --float32 -n50 --inductor",
     },
-    "coverage": {"dynamo_eager": "--isolate --coverage"},
+    "coverage": {"dynamo_eager": "--coverage"},
 }
 
 INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
