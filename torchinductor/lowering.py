@@ -1440,6 +1440,8 @@ def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
     indices, start_offset, end_offset = check_and_broadcast_indices(indices)
     indices_sizes = [i.get_size() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+
     assert isinstance(self, TensorBox)
     self.realize()
     V.graph.realize_users_of(self.get_name())
@@ -1453,36 +1455,21 @@ def index_put_(self, indices, values, accumulate=False):
     ]
 
     values = expand(values, expected_vals_size)
-
-    iter_ranges = []
-    index_loaders = []
-
-    for s_size, idx, v_size in itertools.zip_longest(
-        self.get_size(), indices, values.get_size()
-    ):
-        assert s_size is not None
-        assert v_size is not None
-        if idx is not None:
-            (i_size,) = idx.get_size()
-            iter_ranges.append(V.graph.sizevars.guard_equals(i_size, v_size))
-            index_loaders.append(idx.make_loader())
-        else:
-            iter_ranges.append(V.graph.sizevars.guard_equals(s_size, v_size))
-            index_loaders.append(None)
-
+    # all guards are set above during broadcast_tensors and expand
     def output_indexer(index):
-        assert len(index) == len(index_loaders)
-        index = list(index)
-        for i, loader in enumerate(index_loaders):
-            if loader is not None:
-                index[i] = ops.indirect_indexing(loader([index[i]]))
-        return index
+        assert len(index) == len(expected_vals_size)
+        new_index = [
+            ops.indirect_indexing(loader(index[start_offset:end_offset]))
+            for loader in indices_loaders
+        ]
+        new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
+        return new_index
 
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
-        ranges=iter_ranges,
+        ranges=expected_vals_size,  # iter_ranges,
         output_indexer=output_indexer,
         scatter_mode="atomic_add" if accumulate else None,
     )
