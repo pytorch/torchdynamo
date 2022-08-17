@@ -751,10 +751,11 @@ class CommonTemplate:
             )
 
         a = torch.randint(1, 100, [8, 8])
-        self.common(fn, (a * 2, a), exact_dtype=False)  # FIXME
+        self.common(fn, (a * 2, a))
 
     def test_div4(self):
         def fn(a, b):
+            return aten.div(a, b, rounding_mode="floor")
             return (
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
@@ -764,7 +765,6 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randint(-100, 0, [8, 8]), torch.randint(1, 10, [8, 8])),
-            exact_dtype=False,
         )
 
     def test_div5(self):
@@ -776,7 +776,7 @@ class CommonTemplate:
             )
 
         # divide a scalar
-        self.common(fn, (torch.randint(-100, 0, [8, 8]), 16), exact_dtype=False)
+        self.common(fn, (torch.randint(-100, 0, [8, 8]), 16))
 
     def test_div6(self):
         def fn(a, b):
@@ -790,7 +790,6 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8])),
-            exact_dtype=False,  # FIXME
         )
 
     def test_div7(self):
@@ -807,7 +806,6 @@ class CommonTemplate:
                 torch.randint(2**32, 2**40, [100, 100]),
                 torch.randint(-10, -1, [100, 100]),
             ),
-            exact_dtype=False,  # FIXME
         )
 
     def test_sum_keepdims(self):

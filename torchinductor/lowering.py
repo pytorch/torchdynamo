@@ -21,7 +21,6 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
-from .ir import is_triton
 from .utils import has_torchvision_roi_align
 from .utils import sympy_product
 from .virtualized import V
@@ -2668,16 +2667,15 @@ def truncdiv(a, b):
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
-    on_triton = is_triton(a) or is_triton(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
     # see the discussion at https://github.com/openai/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if (both_integer and on_triton) else floor(div(a, b))
+        return floordiv(a, b) if both_integer else floor(div(a, b))
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
-        return truncdiv(a, b) if (both_integer and on_triton) else trunc(div(a, b))
+        return truncdiv(a, b) if both_integer else trunc(div(a, b))
     return div(a, b)
 
 
