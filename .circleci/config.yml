@@ -8,18 +8,13 @@ jobs:
     resource_class: gpu.nvidia.large
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - env-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci" }}
       - run:
           name: Setup
           command: |
             source .circleci/setup_env.sh
-      - run:
-          name: Tests
-          command: |
-            source .circleci/setup_env.sh
-            mkdir test-results
-            pytest -v --junitxml=test-results/junit.xml
-      - store_test_results:
-          path: test-results
       - run:
           name: TorchBench install
           command: |
@@ -31,6 +26,19 @@ jobs:
             wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
+      - save_cache:
+          key: env-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci" }}
+          paths:
+            - conda
+            - env
+      - run:
+          name: Tests
+          command: |
+            source .circleci/setup_env.sh
+            mkdir test-results
+            pytest -v --junitxml=test-results/junit.xml
+      - store_test_results:
+          path: test-results
       - run:
           name: TorchBench run
           command: |
@@ -50,6 +58,9 @@ jobs:
     resource_class: gpu.nvidia.large
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - env-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci" }}
       - run:
           name: Setup
           command: |
@@ -65,6 +76,11 @@ jobs:
             wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
+      - save_cache:
+          key: env-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci" }}
+          paths:
+            - conda
+            - env
       - run:
           name: TorchBench AotAutograd Eager run
           command: |
