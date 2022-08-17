@@ -10,7 +10,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-{{ arch }}-{{ checksum ".circleci" }}
+            - env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -27,7 +27,7 @@ jobs:
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
       - save_cache:
-          key: env-{{ arch }}-{{ checksum ".circleci" }}
+          key: env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
             - env
@@ -60,7 +60,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-{{ arch }}-{{ checksum ".circleci" }}
+            - env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -77,7 +77,7 @@ jobs:
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
       - save_cache:
-          key: env-{{ arch }}-{{ checksum ".circleci" }}
+          key: env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
             - env
