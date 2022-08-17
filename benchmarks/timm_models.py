@@ -41,22 +41,43 @@ with open(filename, "r") as fh:
 
 
 # TODO - Figure out the reason of cold start memory spike
-USE_HALF_BATCH_SIZE = {
-    "cait_m36_384",
-    "convit_base",
-    "convnext_base",
-    "crossvit_9_240",
-    "cspdarknet53",
-    "gluon_xception65",
-    "jx_nest_base",
-    "nasnetalarge",
-    "pit_b_224",
-    "pnasnet5large",
-    "poolformer_m36",
-    "resnest101e",
-    "swin_base_patch4_window7_224",
-    "swsl_resnext101_32x16d",
-    "xcit_large_24_p8_224",
+BATCH_SIZE_DIVISORS = {
+    "beit_base_patch16_224": 2,
+    "cait_m36_384": 4,
+    "convit_base": 4,
+    "convmixer_768_32": 2,
+    "convnext_base": 4,
+    "crossvit_9_240": 2,
+    "cspdarknet53": 2,
+    "deit_base_distilled_patch16_224": 2,
+    "densenet121": 2,
+    "dla102": 2,
+    "dpn107": 2,
+    "ecaresnet101d": 2,
+    "gluon_senet154": 2,
+    "gluon_xception65": 2,
+    "gmixer_24_224": 2,
+    "gmlp_s16_224": 2,
+    "jx_nest_base": 2,
+    "legacy_senet154": 2,
+    "mixer_b16_224": 2,
+    "mixnet_l": 2,
+    "mobilevit_s": 2,
+    "nasnetalarge": 2,
+    "pit_b_224": 2,
+    "pnasnet5large": 2,
+    "poolformer_m36": 2,
+    "res2net101_26w_4s": 2,
+    "resnest101e": 4,
+    "sebotnet33ts_256": 2,
+    "swin_base_patch4_window7_224": 2,
+    "swsl_resnext101_32x16d": 2,
+    "tf_mixnet_l": 2,
+    "tnt_s_patch16_224": 2,
+    "twins_pcpvt_base": 4,
+    "vit_base_patch16_224": 2,
+    "volo_d1_224": 2,
+    "xcit_large_24_p8_224": 4,
 }
 
 # https://github.com/pytorch/torchdynamo/issues/611
@@ -199,8 +220,9 @@ class TimmRunnner(BenchmarkRunner):
         )
         input_size = data_config["input_size"]
         recorded_batch_size = TIMM_MODELS[model_name]
-        if model_name in USE_HALF_BATCH_SIZE:
-            recorded_batch_size = int(recorded_batch_size / 2)
+        recorded_batch_size = max(
+            int(recorded_batch_size / BATCH_SIZE_DIVISORS.get(model_name, 1)), 1
+        )
         batch_size = batch_size or recorded_batch_size
 
         # example_inputs = torch.randn(
