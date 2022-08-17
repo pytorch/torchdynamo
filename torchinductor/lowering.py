@@ -7,7 +7,9 @@ from typing import List
 import sympy
 import torch
 import torch.fx
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._prims_common import Number
+from torch._prims_common import elementwise_dtypes
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
 
@@ -116,7 +118,6 @@ def decode_device(device):
 
 
 def get_promoted_dtype(*args):
-    # TODO: fix other dtype places in this file
     def construct_input(inp):
         if isinstance(inp, Number):
             return inp
@@ -126,7 +127,11 @@ def get_promoted_dtype(*args):
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
-    return functools.reduce(torch.result_type, [construct_input(arg) for arg in args])
+    inps = [construct_input(arg) for arg in args]
+    _, dtype = elementwise_dtypes(
+        *inps, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    return dtype
 
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
@@ -149,9 +154,11 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
         if type_promote and indices:
-            dtype = functools.reduce(
-                torch.promote_types, [args[i].get_dtype() for i in indices]
-            )
+            # FIXME that's a crude approximation for promoting args
+            promoting_args = [
+                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+            ]
+            dtype = get_promoted_dtype(*promoting_args)
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
@@ -410,7 +417,7 @@ if hasattr(aten, "lift_fresh"):
     register_lowering(aten.lift_fresh)(nop)
 
 
-@register_lowering(aten.squeeze)
+@register_lowering(aten.squeeze, type_promote=False)
 def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
@@ -423,7 +430,7 @@ def squeeze(x, dim=None):
     return view(x, new_shape)
 
 
-@register_lowering(aten.expand)
+@register_lowering(aten.expand, type_promote=False)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -437,7 +444,7 @@ def expand(x, sizes):
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
-@register_lowering(prims.broadcast_in_dim)
+@register_lowering(prims.broadcast_in_dim, type_promote=False)
 def broadcast_in_dim(a, shape, broadcast_dimensions):
     s = list(shape)
     for broadcast_dimension in broadcast_dimensions:
@@ -451,7 +458,7 @@ def broadcast_in_dim(a, shape, broadcast_dimensions):
     return expand(v, shape)
 
 
-@register_lowering(aten.expand_as)
+@register_lowering(aten.expand_as, type_promote=False)
 def expand_as(x, y):
     return expand(x, y.get_size())
 
@@ -497,30 +504,30 @@ def repeat(x, repeats):
     )
 
 
-@register_lowering(aten._unsafe_view)
-@register_lowering(aten.view)
-@register_lowering(aten.reshape)
+@register_lowering(aten._unsafe_view, type_promote=False)
+@register_lowering(aten.view, type_promote=False)
+@register_lowering(aten.reshape, type_promote=False)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
     return TensorBox(View.create(x.data, sizes))
 
 
-@register_lowering(aten.permute)
+@register_lowering(aten.permute, type_promote=False)
 def permute(x, dims):
     assert isinstance(x, TensorBox)
     assert isinstance(dims, (list, tuple))
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
 
-@register_lowering(aten.slice)
+@register_lowering(aten.slice, type_promote=False)
 def slice_(x, dim, start, end, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
-@register_lowering(aten.roll)
+@register_lowering(aten.roll, type_promote=False)
 def roll(a, shifts, dims=tuple()):
     """
     This is based on torch._refs.roll(), but uses ir.ModularIndexing().
@@ -578,7 +585,7 @@ def roll(a, shifts, dims=tuple()):
     )
 
 
-@register_lowering(aten.as_strided)
+@register_lowering(aten.as_strided, type_promote=False)
 def as_strided(x, size, stride, storage_offset=None):
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
         # as_strided ignores views
@@ -648,7 +655,7 @@ def unbind(x, dim=0):
     return result
 
 
-@register_lowering(aten.unsqueeze)
+@register_lowering(aten.unsqueeze, type_promote=False)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
@@ -656,7 +663,7 @@ def unsqueeze(x, dim):
     return view(x, new_shape)
 
 
-@register_lowering(aten.unsqueeze_)
+@register_lowering(aten.unsqueeze_, type_promote=False)
 def unsqueeze_(x, dim):
     val = unsqueeze(x, dim)
     assert isinstance(x, TensorBox)
@@ -1938,7 +1945,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
     )
 
 
-@register_lowering(aten.constant_pad_nd)
+@register_lowering(aten.constant_pad_nd, type_promote=False)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
@@ -2427,7 +2434,7 @@ def avg_pool2d_backward(
     return rv
 
 
-@register_lowering(aten._adaptive_avg_pool2d)
+@register_lowering(aten._adaptive_avg_pool2d, type_promote=False)
 def _adaptive_avg_pool2d(x, output_size):
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
