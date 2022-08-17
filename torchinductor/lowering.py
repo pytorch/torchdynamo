@@ -2498,7 +2498,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         inner_loader = x.make_loader()
         result = Reduction.create(
             device=x.get_device(),
-            dtype=override_dtype or x.get_dtype(),
+            dst_dtype=override_dtype or x.get_dtype(),
+            src_dtype=x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
@@ -2695,7 +2696,7 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
-    fn = make_reduction("sum")
+    fn = make_reduction("sum", override_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
 
@@ -2704,8 +2705,8 @@ register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
-register_lowering(aten.argmax)(make_reduction("argmax"))
-register_lowering(aten.argmin)(make_reduction("argmin"))
+register_lowering(aten.argmax)(make_reduction("argmax", override_dtype=torch.int64))
+register_lowering(aten.argmin)(make_reduction("argmin", override_dtype=torch.int64))
 
 add = register_pointwise(aten.add)
 exp = register_pointwise(aten.exp)
