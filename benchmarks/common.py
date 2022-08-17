@@ -1185,7 +1185,6 @@ def parse_args():
     )
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
-
     parser.add_argument(
         "--diff_main",
         action="store_true",
@@ -1738,7 +1737,6 @@ def main(runner, original_dir=None):
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
         print_summary(output_filename)
-
 
 
 if __name__ == "__main__":
