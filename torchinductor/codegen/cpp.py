@@ -195,12 +195,24 @@ class CppOverrides(OpOverrides):
         return f"std::floor({x})"
 
     @staticmethod
+    def floordiv(a, b):
+        # a and b are integer type
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+
+    @staticmethod
     def ceil(x):
         return f"std::ceil({x})"
 
     @staticmethod
     def trunc(x):
         return f"std::trunc({x})"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # a and b are integer type
+        return f"{a} / {b}"
 
     @staticmethod
     def isinf(x):

@@ -8,6 +8,7 @@ import io
 import itertools
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
+from torchdynamo.testing import CompileCounterWithBackend
 from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
@@ -672,19 +674,53 @@ def read_batch_size_from_file(args, filename, model_name):
     return batch_size
 
 
+class TimeOutException(Exception):
+    pass
+
+
+def alarm_handler(signum, frame):
+    raise TimeOutException()
+
+
+def exit_after(s):
+    """
+    Decorator to raise TimeoutException if the fn is taking more than s seconds
+    to run.
+    """
+
+    def outer(fn):
+        def inner(*args, **kwargs):
+            signal.signal(signal.SIGALRM, alarm_handler)
+            signal.alarm(s)
+            try:
+                result = fn(*args, **kwargs)
+            finally:
+                signal.alarm(0)
+            return result
+
+        return inner
+
+    return outer
+
+
 def compilation_profiling_experiment(
     model_iter_fn, model, example_inputs, backend="pytorch"
 ):
     # Get the context
+    cnt = CompileCounterWithBackend(backend)
     if backend == "pytorch":
         ctx = NullContext()
     else:
-        ctx = torchdynamo.optimize(backend)
+        ctx = torchdynamo.optimize(cnt)
 
     def get_peak_memory():
         return torch.cuda.max_memory_allocated() / 10**9
 
-    try:
+    # Exit the process after 600 seconds
+    timeout = 600
+
+    @exit_after(timeout)
+    def wrapper():
         # Reset and warmup
         torchdynamo.reset()
         torch.cuda.empty_cache()
@@ -701,10 +737,22 @@ def compilation_profiling_experiment(
         with ctx:
             model_iter_fn(model, example_inputs)
         peak_memory = get_peak_memory()
+        graphs = cnt.frame_count
+        return compilation_latency, peak_memory, graphs
+
+    try:
+        compilation_latency, peak_memory, graphs = wrapper()
+    except TimeOutException:
+        print(f"Timeout: {backend} took more than {timeout} seconds to compile")
+        compilation_latency = timeout
+        peak_memory = 0
+        graphs = 0
     except Exception:
         compilation_latency = 0
         peak_memory = 0
-    return compilation_latency, peak_memory
+        graphs = 0
+
+    return compilation_latency, peak_memory, graphs
 
 
 def null_experiment(args, model_iter_fn, model, example_inputs):
@@ -878,12 +926,12 @@ class BenchmarkRunner:
             model=model,
             example_inputs=example_inputs,
         )
-        time, memory = experiment(backend=backend)
+        time, memory, graphs = experiment(backend=backend)
 
         output_csv(
             output_filename,
-            ("dev", "name", "batch_size", "time", "memory"),
-            [device, model_name, batch_size, time, memory],
+            ("dev", "name", "batch_size", "time", "memory", "graphs"),
+            [device, model_name, batch_size, time, memory, graphs],
         )
 
     def batch_size_finder(
@@ -921,7 +969,66 @@ class BenchmarkRunner:
         experiment,
         skip_accuracy_check=False,
         dynamic_shapes=False,
+        diff=False,
+        branch=None,
     ):
+        if diff:
+            assert branch is None, "Branch set during top level flow."
+            import git
+
+            repo = git.Repo(
+                "../torchdynamo"
+            )  # Hack assumption of torchbenchmark positioning
+            curr_branch = repo.active_branch.name
+            if curr_branch != "main":
+                if repo.is_dirty():
+                    raise RuntimeError(
+                        "--diff_main called on dirty branch. Commit, stash, or reset."
+                    )
+                # Run current
+                try:
+                    self.run_one_model(
+                        name,
+                        model,
+                        is_training,
+                        model_iter_fn,
+                        example_inputs,
+                        optimize_ctx,
+                        accuracy_ctx,
+                        experiment,
+                        skip_accuracy_check,
+                        dynamic_shapes,
+                        diff=False,
+                        branch=curr_branch,
+                    )
+                    # Swap to main
+                    repo.git.checkout("main")
+                    # Run main
+                    self.run_one_model(
+                        name,
+                        model,
+                        is_training,
+                        model_iter_fn,
+                        example_inputs,
+                        optimize_ctx,
+                        accuracy_ctx,
+                        experiment,
+                        skip_accuracy_check,
+                        dynamic_shapes,
+                        diff=False,
+                        branch="main",
+                    )
+                finally:
+                    # Swap back
+                    repo.git.checkout(curr_branch)
+                return
+            else:
+                raise RuntimeError(
+                    "--diff_main called on main branch, what are you diffing?"
+                )
+        elif branch:
+            print("RUNNING ON BRANCH:", branch)
+
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             is_training, current_device, name
         )
@@ -1125,6 +1232,12 @@ def parse_args():
         help="exports trace of kineto profiler",
     )
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+
+    parser.add_argument(
+        "--diff_main",
+        action="store_true",
+        help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1573,7 +1686,6 @@ def main(runner, original_dir=None):
         return
 
     if args.profile_backend and args.only:
-        assert args.isolate, "Use --isolate or --only to enable isolation"
         if output_filename is None:
             output_filename = "backends_profile.csv"
         for device in args.devices:
@@ -1641,6 +1753,7 @@ def main(runner, original_dir=None):
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
+                diff=args.diff_main,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
