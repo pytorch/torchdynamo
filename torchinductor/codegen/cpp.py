@@ -125,6 +125,14 @@ def cpp_prefix():
                 at::Philox4_32 engine(seed, 0, offset);
                 return engine.randn(10);
             }
+
+            template <typename T>
+            inline T atomic_add(T &v, T a)
+            {
+                static_assert(sizeof(std::atomic<T>) == sizeof(T), "Cannot cast properly to std::atomic<T>.");
+                return std::atomic_fetch_add_explicit(reinterpret_cast<std::atomic<T> *>(&v), a, std::memory_order_relaxed);
+            }
+            
             """
         ),
         "h",
@@ -324,7 +332,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
-                line = f"std::atomic_fetch_add_explicit(&{var}[{cexpr(index)}], {value}, std::memory_order_relaxed);"
+                line = f"atomic_add(&{var}[{cexpr(index)}], {value}, std::memory_order_relaxed);"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
