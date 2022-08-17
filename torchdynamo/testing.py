@@ -199,7 +199,5 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     if dtype.is_floating_point:
         buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
-        buffer = torch.randint(
-            low=0, high=2, size=[needed_size], dtype=dtype, device=device
-        )
+        buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
