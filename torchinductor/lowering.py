@@ -1456,6 +1456,7 @@ def index_put_(self, indices, values, accumulate=False):
 
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
+
     def output_indexer(index):
         assert len(index) == len(expected_vals_size)
         new_index = [

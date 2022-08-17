@@ -2303,7 +2303,7 @@ class CommonTemplate:
         def fn(a, b, c):
             torch.ops.aten.index_put_(a, (None, b, None), c)
             a1 = a + 1
-            torch.ops.aten.index_put_(a1, (None, b+1, None), c+1)
+            torch.ops.aten.index_put_(a1, (None, b + 1, None), c + 1)
             return (a, a1)
 
         self.common(
