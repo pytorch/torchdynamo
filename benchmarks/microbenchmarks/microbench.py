@@ -14,7 +14,7 @@ from torchinductor.compile_fx import compile_fx
 from torchinductor.utils import timed
 
 try:
-    import tests.test_torchinductor as tti
+    import test.test_torchinductor as tti
 except ImportError:
     tti = None
 
