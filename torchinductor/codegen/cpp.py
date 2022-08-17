@@ -309,14 +309,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
-                # Note atomic_ref requires C++20 and certain processor features
-                self.stores.writeline(
-                    name,
-                    "static_assert(std::atomic_ref<"
-                    + f"std::remove_pointer_t<decltype({var})>"
-                    + ">::is_always_lock_free);",
-                )
-                line = f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
+                line = f"std::atomic_fetch_add_explicit(&{var}[{cexpr(index)}], {value}, memory_order_relaxed);"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
