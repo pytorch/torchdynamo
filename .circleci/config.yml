@@ -10,7 +10,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+            - env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -27,10 +27,10 @@ jobs:
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
       - save_cache:
-          key: env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
-            - env
+            - torchbenchmark
       - run:
           name: Tests
           command: |
@@ -60,7 +60,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+            - env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -77,10 +77,10 @@ jobs:
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
       - save_cache:
-          key: env-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
-            - env
+            - torchbenchmark
       - run:
           name: TorchBench AotAutograd Eager run
           command: |
