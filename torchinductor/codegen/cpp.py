@@ -103,6 +103,7 @@ def cpp_prefix():
             #include <omp.h>
 
             #include <ATen/core/PhiloxRNGEngine.h>
+            #include <ATen/native/cpu/AtomicAddFloat.h>
 
             template<typename T>
             inline T mod(T a, T b) { return a % b; }
@@ -124,13 +125,6 @@ def cpp_prefix():
             float randn_cpu(uint32_t seed, uint32_t offset) {
                 at::Philox4_32 engine(seed, 0, offset);
                 return engine.randn(10);
-            }
-
-            template <typename T>
-            inline T atomic_add(T &v, T a)
-            {
-                static_assert(sizeof(std::atomic<T>) == sizeof(T), "Cannot cast properly to std::atomic<T>.");
-                return std::atomic_fetch_add_explicit(reinterpret_cast<std::atomic<T> *>(&v), a, std::memory_order_relaxed);
             }
             
             """
@@ -332,7 +326,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
-                line = f"atomic_add(&{var}[{cexpr(index)}], {value}, std::memory_order_relaxed);"
+                line = f"cpu_atomic_add_float(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
