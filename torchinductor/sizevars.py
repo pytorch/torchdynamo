@@ -10,6 +10,7 @@ from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from .utils import freeze_inputs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ class SizeVarAllocator(object):
     def simplify(self, expr):
         return sympy.expand(expr).subs(self.replacements)
 
+    @freeze_inputs
+    @functools.lru_cache(256)
     def simplify_with_ranges(self, expr, var_ranges):
         """
         Simplify indexing expression with knowledge of the ranges of
