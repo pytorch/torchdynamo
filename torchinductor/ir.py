@@ -1783,9 +1783,6 @@ class ComputedBuffer(Buffer):
 
         # the reordering_reindex in reads' simplify_reorder_and_tile
         reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
-        for i, reads_buf in enumerate(reads_bufs):
-            if isinstance(reads_buf, ComputedBuffer):
-                reordering_reindex[i] = reads_buf.iter_reordering_reindex
 
         def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
