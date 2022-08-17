@@ -359,6 +359,7 @@ class Scatter(Pointwise):
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
+    # self.dtype represents the dst dtype
     src_dtype: torch.dtype
 
     def __str__(self):
@@ -409,12 +410,14 @@ class Reduction(Loops):
             self.ranges,
             self.reduction_ranges,
             self.reduction_type,
+            self.src_dtype,
         )
 
     @staticmethod
     def num_splits(
         device,
-        dtype,
+        dst_dtype,
+        src_dtype,
         inner_fn,
         ranges,
         reduction_ranges,
@@ -512,11 +515,12 @@ class Reduction(Loops):
 
         r = Reduction(
             device,
-            dtype,
+            dst_dtype,
             inner_fn,
             ranges,
             reduction_ranges,
             reduction_type,
+            src_dtype,
         )
         read_writes = ComputedBuffer(
             name=None,
@@ -558,7 +562,7 @@ class Reduction(Loops):
     def create(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
+        dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable,
         ranges: List[Expr],
@@ -572,13 +576,14 @@ class Reduction(Loops):
                 reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
                 return inner_fn(index, reduction_index)
 
-            return Pointwise.create(device, dtype, fn, ranges)
+            return Pointwise.create(device, dst_dtype, fn, ranges)
 
         if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
             # triton doesn't support reduce to single element well, so break it up
             split = cls.num_splits(
                 device,
-                dtype,
+                dst_dtype,
+                src_dtype,
                 inner_fn,
                 ranges,
                 reduction_ranges,
@@ -589,7 +594,8 @@ class Reduction(Loops):
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
                     device,
-                    dtype,
+                    dst_dtype,
+                    src_dtype,
                     inner_fn,
                     ranges,
                     reduction_ranges,
@@ -600,7 +606,7 @@ class Reduction(Loops):
         return TensorBox.create(
             Reduction(
                 device,
-                dtype,
+                dst_dtype,
                 inner_fn,
                 ranges,
                 reduction_ranges,
@@ -624,7 +630,8 @@ class Reduction(Loops):
     def create_multilayer(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
         inner_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
@@ -670,7 +677,9 @@ class Reduction(Loops):
                     ops.index_expr(indices, torch.int32),
                     ops.index_expr(reduction_numel, torch.int32),
                 )
-                return ops.masked(mask, body, cls.default_value(reduction_type, dtype))
+                return ops.masked(
+                    mask, body, cls.default_value(reduction_type, dst_dtype)
+                )
             else:
                 return body()
 
@@ -678,16 +687,18 @@ class Reduction(Loops):
         # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
         # in fp32 and not reduce precision by breaking up the kernel into multiple layers
         intermediate_dtype = (
-            dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
         )
         intermediate = Reduction.create(
             device,
             intermediate_dtype,
+            src_dtype,
             wrapper_fn,
             [*ranges, split],
             [block_size],
             reduction_type,
-            dtype,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -698,11 +709,12 @@ class Reduction(Loops):
         return TensorBox.create(
             Reduction(
                 device,
-                dtype,
+                dst_dtype,
                 intermediate_fn,
                 ranges,
                 [split],
                 reduction_type,
+                src_dtype,
             )
         )
 
