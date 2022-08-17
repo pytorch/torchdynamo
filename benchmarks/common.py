@@ -1402,6 +1402,12 @@ def parse_args():
         "--prims-nvfuser", action="store_true", help="user prims + nvfuser backend"
     )
     parser.add_argument(
+        "--nvprims-nvfuser", action="store_true", help="nvprims + nvfuser backend"
+    )
+    parser.add_argument(
+        "--nvprims-aten", action="store_true", help="nvprims + aten backend"
+    )
+    parser.add_argument(
         "--dump-raw-metrics",
         action="store_true",
         help="dump raw timing metrics from speedup experiment",
@@ -1840,6 +1846,16 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize("prims_nvfuser", nopython=args.nopython)
         experiment = speedup_experiment
         backend_str = "prims_nvfuser"
+        output_filename = f"accuracy_aot_{backend_str}.csv"
+    elif args.nvprims_nvfuser:
+        optimize_ctx = torchdynamo.optimize("nvprims_nvfuser", nopython=args.nopython)
+        experiment = speedup_experiment
+        backend_str = "nvprims_nvfuser"
+        output_filename = f"accuracy_aot_{backend_str}.csv"
+    elif args.nvprims_aten:
+        optimize_ctx = torchdynamo.optimize("nvprims_aten", nopython=args.nopython)
+        experiment = speedup_experiment
+        backend_str = "nvprims_aten"
         output_filename = f"accuracy_aot_{backend_str}.csv"
     elif args.print_fx:
         optimize_ctx = torchdynamo.optimize(
