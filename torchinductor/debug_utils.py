@@ -51,6 +51,24 @@ def dump_to_repro(gm, args):
         print("wrote repro.py")
 
 
+def dump_state_inductor(gm, args):
+    subdir = f"{cache_dir()}/minimizer_checkpoints"
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+    with open(file_name, "w") as fd:
+        fd.write(generate_repro_string(gm, args))
+        fd.write(
+            textwrap.dedent(
+                """
+                compiled = compile_fx_inner(mod, args)
+                compiled(*args)
+                """
+            )
+        )
+
+
 def isolate_inductor_fails(fx_g, args, env=None):
     if env is None:
         env = {}
@@ -120,12 +138,21 @@ def dump_to_minify(gm, args):
             textwrap.dedent(
                 """
                 from functools import partial
-                from torchinductor.debug_utils import inductor_fails, isolate_inductor_fails
+                from torchinductor.debug_utils import (
+                    inductor_fails,
+                    isolate_inductor_fails,
+                    dump_state_inductor,
+                )
                 from functorch.compile import minifier
 
                 env_variables = {"CUDA_VISIBLE_DEVICES": "1"}
 
-                minifier(mod, args, partial(isolate_inductor_fails, env=env_variables))
+                minifier(
+                    mod,
+                    args,
+                    module_fails=partial(isolate_inductor_fails, env=env_variables),
+                    dump_state=dump_state_inductor,
+                )
                 """
             )
         )
