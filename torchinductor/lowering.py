@@ -154,7 +154,7 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
         if type_promote and indices:
-            dtype = get_promoted_dtype(*[args[i] for i in indices])
+            dtype = get_promoted_dtype(*args[i])
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
