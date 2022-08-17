@@ -156,7 +156,7 @@ def stacksize_analysis(instructions):
 
     if sys.version_info < (3, 8) and not fixed_point.value:
         # This is a rare issue in python 3.7 that still needs debugging
-        # see tests/test_nops.py::NopTests::test3
+        # see test/test_nops.py::NopTests::test3
         return low + 32
 
     assert fixed_point.value, "failed to reach fixed point"

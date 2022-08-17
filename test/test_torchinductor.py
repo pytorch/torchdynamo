@@ -532,6 +532,21 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_sum_int(self):
+        def fn(x):
+            return 2 * x.sum(-1) + x.sum()
+
+        dtypes = torch.bool, torch.uint8, torch.int
+        inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
+        for i in inps:
+            self.common(fn, (i,), check_lowp=False)
+
+    def test_sum_dtype(self):
+        def fn(x):
+            return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
+
+        self.common(fn, (torch.ones(32, 32) * 70,))
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
@@ -736,10 +751,11 @@ class CommonTemplate:
             )
 
         a = torch.randint(1, 100, [8, 8])
-        self.common(fn, (a * 2, a), exact_dtype=False)  # FIXME
+        self.common(fn, (a * 2, a))
 
     def test_div4(self):
         def fn(a, b):
+            return aten.div(a, b, rounding_mode="floor")
             return (
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
@@ -749,7 +765,6 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randint(-100, 0, [8, 8]), torch.randint(1, 10, [8, 8])),
-            exact_dtype=False,
         )
 
     def test_div5(self):
@@ -761,7 +776,7 @@ class CommonTemplate:
             )
 
         # divide a scalar
-        self.common(fn, (torch.randint(-100, 0, [8, 8]), 16), exact_dtype=False)
+        self.common(fn, (torch.randint(-100, 0, [8, 8]), 16))
 
     def test_div6(self):
         def fn(a, b):
@@ -775,7 +790,6 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8])),
-            exact_dtype=False,  # FIXME
         )
 
     def test_div7(self):
@@ -792,7 +806,6 @@ class CommonTemplate:
                 torch.randint(2**32, 2**40, [100, 100]),
                 torch.randint(-10, -1, [100, 100]),
             ),
-            exact_dtype=False,  # FIXME
         )
 
     def test_sum_keepdims(self):
@@ -2265,6 +2278,9 @@ class CommonTemplate:
                 torch.randn([601, 256, 7, 7]),
             ],
         )
+        self.common(
+            fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
+        )
 
     def test_index_put2(self):
         def fn(a, b, c):
@@ -2279,6 +2295,22 @@ class CommonTemplate:
             ],
             # workaround for https://github.com/openai/triton/issues/558
             check_lowp=False,
+        )
+
+    def test_index_put3(self):
+        def fn(a, b, c):
+            torch.ops.aten.index_put_(a, (None, b, None), c)
+            a1 = a + 1
+            torch.ops.aten.index_put_(a1, (None, b + 1, None), c + 1)
+            return (a, a1)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1024, 4, 2]),
+                torch.arange(3),
+                torch.randn([1024, 1, 2]),
+            ],
         )
 
     @unittest.skipIf(not config.fallback_random, "requires config.fallback_random")
@@ -2770,8 +2802,6 @@ class CommonTemplate:
             [
                 torch.randn([8, 256, 256]),
             ],
-            exact_dtype=False,  # FIXME
-            check_lowp=False,  # FIXME
         )
 
     def test_argmax_argmin2(self):
@@ -2788,8 +2818,26 @@ class CommonTemplate:
             [
                 torch.randn([144, 144]),
             ],
-            exact_dtype=False,  # FIXME
-            check_lowp=False,  # FIXME
+        )
+
+    @unittest.skip(
+        """
+        FIXME: In the case of having equally max/min elements, our implementation returns
+        the last index instead of the first one
+        """
+    )
+    def test_argmax_argmin3(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, -1),
+                aten.argmin(x, -1),
+            )
+
+        self.common(
+            fn,
+            [torch.randint(0, 5, [10, 10])],
         )
 
     def test_vdd_clamp(self):

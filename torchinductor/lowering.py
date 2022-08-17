@@ -21,7 +21,6 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
-from .ir import is_triton
 from .utils import has_torchvision_roi_align
 from .utils import sympy_product
 from .virtualized import V
@@ -1382,39 +1381,34 @@ def check_and_broadcast_indices(indices):
         [i.get_dtype() == torch.int64 for i in indices if i is not None]
     ), "bool indices are not supported yet"
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
+    assert len(valid_idxs) > 0, "requires at least 1 non-None index"
     new_indices = [None] * len(indices)
     for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
         new_indices[i] = x
-    return new_indices
-
-
-@register_lowering(aten.index, type_promote=False)
-def index(x, indices):
-    print(x, indices)
-    assert isinstance(indices, (list, tuple))
-    x_loader = x.make_loader()
-    indices = check_and_broadcast_indices(indices)
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    assert len(indices_sizes) > 0, "should have at least 1 valid index"
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
-    output_size = list(indices_sizes[0])
-    for i in range(1, len(indices_sizes)):
-        assert len(indices_sizes[i]) == len(output_size)
-        for j in range(len(output_size)):
-            output_size[j] = V.graph.sizevars.guard_equals(
-                output_size[j], indices_sizes[i][j]
-            )
-
+        output_dim = len(x.get_size())
     start_offset = 0
     # only support None at start or end for now
-    tmp = list(indices)
+    tmp = list(new_indices)
     while tmp and tmp[-1] is None:
         tmp.pop()
     while tmp and tmp[0] is None:
         tmp.pop(0)
         start_offset += 1
     assert all((i is not None) for i in tmp)
-    end_offset = len(output_size) + start_offset
+    end_offset = output_dim + start_offset
+
+    return new_indices, start_offset, end_offset
+
+
+@register_lowering(aten.index, type_promote=False)
+def index(x, indices):
+    assert isinstance(indices, (list, tuple))
+    x_loader = x.make_loader()
+    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    indices_sizes = [i.get_size() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    # no guards on output size, all the guards are set in broadcast_tensors
+    output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
     output_size = [
@@ -1443,40 +1437,39 @@ def index(x, indices):
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
-    indices = check_and_broadcast_indices(indices)
+    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    indices_sizes = [i.get_size() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+
     assert isinstance(self, TensorBox)
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    iter_ranges = []
-    index_loaders = []
+    x_size = self.get_size()
+    output_size = list(indices_sizes[0])
+    expected_vals_size = [
+        *x_size[:start_offset],
+        *output_size,
+        *x_size[start_offset + len(indices_sizes) :],
+    ]
 
-    for s_size, idx, v_size in itertools.zip_longest(
-        self.get_size(), indices, values.get_size()
-    ):
-        assert s_size is not None
-        assert v_size is not None
-        if idx is not None:
-            (i_size,) = idx.get_size()
-            iter_ranges.append(V.graph.sizevars.guard_equals(i_size, v_size))
-            index_loaders.append(idx.make_loader())
-        else:
-            iter_ranges.append(V.graph.sizevars.guard_equals(s_size, v_size))
-            index_loaders.append(None)
+    values = expand(values, expected_vals_size)
+    # all guards are set above during broadcast_tensors and expand
 
     def output_indexer(index):
-        assert len(index) == len(index_loaders)
-        index = list(index)
-        for i, loader in enumerate(index_loaders):
-            if loader is not None:
-                index[i] = ops.indirect_indexing(loader([index[i]]))
-        return index
+        assert len(index) == len(expected_vals_size)
+        new_index = [
+            ops.indirect_indexing(loader(index[start_offset:end_offset]))
+            for loader in indices_loaders
+        ]
+        new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
+        return new_index
 
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
-        ranges=iter_ranges,
+        ranges=expected_vals_size,  # iter_ranges,
         output_indexer=output_indexer,
         scatter_mode="atomic_add" if accumulate else None,
     )
@@ -2505,7 +2498,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         inner_loader = x.make_loader()
         result = Reduction.create(
             device=x.get_device(),
-            dtype=override_dtype or x.get_dtype(),
+            dst_dtype=override_dtype or x.get_dtype(),
+            src_dtype=x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
@@ -2669,16 +2663,15 @@ def truncdiv(a, b):
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
-    on_triton = is_triton(a) or is_triton(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
     # see the discussion at https://github.com/openai/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if (both_integer and on_triton) else floor(div(a, b))
+        return floordiv(a, b) if both_integer else floor(div(a, b))
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
-        return truncdiv(a, b) if (both_integer and on_triton) else trunc(div(a, b))
+        return truncdiv(a, b) if both_integer else trunc(div(a, b))
     return div(a, b)
 
 
@@ -2697,14 +2690,23 @@ def div(a, b):
     )
 
 
-sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
+@register_lowering([aten.sum, prims.sum])
+def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+    fn = make_reduction("sum", override_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
-register_lowering(aten.argmax)(make_reduction("argmax"))
-register_lowering(aten.argmin)(make_reduction("argmin"))
+register_lowering(aten.argmax)(make_reduction("argmax", override_dtype=torch.int64))
+register_lowering(aten.argmin)(make_reduction("argmin", override_dtype=torch.int64))
 
 add = register_pointwise(aten.add)
 exp = register_pointwise(aten.exp)

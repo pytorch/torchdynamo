@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import functools
 import itertools
 import logging
 import math
@@ -13,6 +14,7 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
+from ..utils import freeze_inputs
 from ..utils import sympy_dot
 from ..utils import unique
 from ..virtualized import V
@@ -21,6 +23,8 @@ from ..virtualized import ops
 log = logging.getLogger(__name__)
 
 
+@freeze_inputs
+@functools.lru_cache(256)
 def _simplify_loops(index_vars, sizes, index_formulas):
     """
     Try to remove as many axis from loop iterations as possible, by:
@@ -567,7 +571,7 @@ class Kernel(CodeGen):
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -608,8 +612,10 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, reduction_type, index, value):
-                return self.reduction(name, dtype, reduction_type, index, value)
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                return self.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

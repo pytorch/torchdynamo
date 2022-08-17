@@ -506,7 +506,7 @@ make lint-deps
 
 Run tests with
 ```shell
-pytest tests
+pytest test
 ```
 
 To debug a specific test (with more debug prints) do:

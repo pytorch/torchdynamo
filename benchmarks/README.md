@@ -40,11 +40,11 @@ Running runner.py generates a file named `run.sh`. This file contains the actual
 One could directly call torchbench.py, huggingface.py or timm_models.py with the necessary flags. There are a lot of flags in the benchmarks runner. Some of the examples are as follows. These are subject to change.
 
 **Inference Commands**
-* TorchScript NVFuser Inference - `python benchmarks/torchbench.py -dcuda --isolate -n100 --speedup-ts`
+* TorchScript NVFuser Inference - `python benchmarks/torchbench.py -dcuda -n100 --speedup-ts`
 * TorchInductor CUDA Graphs Inference - `python benchmarks/torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor`
 
 **Training Commands**
-* Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/torchbench.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate`
-* AOTAutograd Torchscript NVFuser Training - `python benchmarks/torchbench.py --float32 -dcuda --training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate`
+* Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/torchbench.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --use-eval-mode`
+* AOTAutograd Torchscript NVFuser Training - `python benchmarks/torchbench.py --float32 -dcuda --training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode`
 
 Above commands are for torchbench models. You can simply replace `torchbench.py` with `huggingface.py` for HF models, and `timm_model.py` for TIMM models.

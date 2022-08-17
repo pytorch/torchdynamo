@@ -663,12 +663,10 @@ class TritonKernel(Kernel):
         return index_str, " & ".join(mask)
 
     def var_ranges(self):
-        return (
-            dict(
-                itertools.chain.from_iterable(
-                    tree.var_ranges.items() for tree in self.range_trees
-                )
-            ),
+        return dict(
+            itertools.chain.from_iterable(
+                tree.var_ranges.items() for tree in self.range_trees
+            )
         )
 
     def codegen_indexing(self, expr: sympy.Expr):
@@ -730,9 +728,9 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, dtype))
+        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
@@ -747,17 +745,17 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
-            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
+        if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}) + {default}"
             )
             accumulator_index = None
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
                 self.body.writeline(
-                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int32)"
+                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
                 )
 
             updated = value
@@ -798,7 +796,7 @@ class TritonKernel(Kernel):
                     f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
                 )
         else:
-            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
+            var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)
