@@ -1382,38 +1382,34 @@ def check_and_broadcast_indices(indices):
         [i.get_dtype() == torch.int64 for i in indices if i is not None]
     ), "bool indices are not supported yet"
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
+    assert len(valid_idxs) > 0, "requires at least 1 non-None index"
     new_indices = [None] * len(indices)
     for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
         new_indices[i] = x
-    return new_indices
-
-
-@register_lowering(aten.index, type_promote=False)
-def index(x, indices):
-    assert isinstance(indices, (list, tuple))
-    x_loader = x.make_loader()
-    indices = check_and_broadcast_indices(indices)
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    assert len(indices_sizes) > 0, "should have at least 1 valid index"
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
-    output_size = list(indices_sizes[0])
-    for i in range(1, len(indices_sizes)):
-        assert len(indices_sizes[i]) == len(output_size)
-        for j in range(len(output_size)):
-            output_size[j] = V.graph.sizevars.guard_equals(
-                output_size[j], indices_sizes[i][j]
-            )
-
+        output_dim = len(x.get_size())
     start_offset = 0
     # only support None at start or end for now
-    tmp = list(indices)
+    tmp = list(new_indices)
     while tmp and tmp[-1] is None:
         tmp.pop()
     while tmp and tmp[0] is None:
         tmp.pop(0)
         start_offset += 1
     assert all((i is not None) for i in tmp)
-    end_offset = len(output_size) + start_offset
+    end_offset = output_dim + start_offset
+
+    return new_indices, start_offset, end_offset
+
+
+@register_lowering(aten.index, type_promote=False)
+def index(x, indices):
+    assert isinstance(indices, (list, tuple))
+    x_loader = x.make_loader()
+    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    indices_sizes = [i.get_size() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    # no guards on output size, all the guards are set in broadcast_tensors
+    output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
     output_size = [
@@ -1442,10 +1438,21 @@ def index(x, indices):
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
-    indices = check_and_broadcast_indices(indices)
+    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    indices_sizes = [i.get_size() for i in indices if i is not None]
     assert isinstance(self, TensorBox)
     self.realize()
     V.graph.realize_users_of(self.get_name())
+
+    x_size = self.get_size()
+    output_size = list(indices_sizes[0])
+    expected_vals_size = [
+        *x_size[:start_offset],
+        *output_size,
+        *x_size[start_offset + len(indices_sizes) :],
+    ]
+
+    values = expand(values, expected_vals_size)
 
     iter_ranges = []
     index_loaders = []
