@@ -110,7 +110,9 @@ def decode_device(device):
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
-        return torch.device(device)
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=torch.cuda.current_device())
     return device
 
 
@@ -825,7 +827,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.argmax)
 make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
@@ -947,7 +948,7 @@ def arange(
     assert isinstance(end, int)
     assert isinstance(step, int)
 
-    dtype = dtype or torch.get_default_dtype()
+    dtype = dtype or torch.int64
     length = (end - start) // step
     start = sympy.Integer(start)
     step = sympy.Integer(step)
@@ -1369,12 +1370,32 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     )
 
 
+def check_and_broadcast_indices(indices):
+    assert all(
+        [
+            i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+            for i in indices
+            if i is not None
+        ]
+    ), "indices must be int64, byte or bool"
+    assert all(
+        [i.get_dtype() == torch.int64 for i in indices if i is not None]
+    ), "bool indices are not supported yet"
+    valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
+    new_indices = [None] * len(indices)
+    for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
+        new_indices[i] = x
+    return new_indices
+
+
 @register_lowering(aten.index, type_promote=False)
 def index(x, indices):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    indices = check_and_broadcast_indices(indices)
     indices_sizes = [i.get_size() for i in indices if i is not None]
+    assert len(indices_sizes) > 0, "should have at least 1 valid index"
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
     output_size = list(indices_sizes[0])
     for i in range(1, len(indices_sizes)):
         assert len(indices_sizes[i]) == len(output_size)
@@ -1421,6 +1442,7 @@ def index(x, indices):
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
+    indices = check_and_broadcast_indices(indices)
     assert isinstance(self, TensorBox)
     self.realize()
     V.graph.realize_users_of(self.get_name())
@@ -1507,7 +1529,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(self.get_size())
+    assert -len(self.get_size()) <= dim < len(self.get_size())
 
     self.realize()
     V.graph.realize_users_of(self.get_name())
@@ -2674,7 +2696,16 @@ def div(a, b):
     )
 
 
-sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
+@register_lowering([aten.sum, prims.sum])
+def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+    fn = make_reduction("sum")
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))

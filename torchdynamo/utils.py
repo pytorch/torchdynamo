@@ -513,12 +513,13 @@ except ImportError:
     fake_tensors_available = False
 
 
-def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
+def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False, exact_dtype=True):
     """Check correctness to see if a and b match"""
     if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
         return len(a) == len(b) and all(
-            same(ai, bi, cos_similarity, tol, equal_nan) for ai, bi in zip(a, b)
+            same(ai, bi, cos_similarity, tol, equal_nan, exact_dtype)
+            for ai, bi in zip(a, b)
         )
     elif isinstance(a, dict):
         assert isinstance(b, dict)
@@ -526,7 +527,16 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             b.keys()
         ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
         for k in a.keys():
-            if not (same(a[k], b[k], cos_similarity, tol, equal_nan=equal_nan)):
+            if not (
+                same(
+                    a[k],
+                    b[k],
+                    cos_similarity,
+                    tol,
+                    equal_nan=equal_nan,
+                    exact_dtype=exact_dtype,
+                )
+            ):
                 print("Accuracy failed for key name", k)
                 return False
         return True
@@ -536,6 +546,8 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
             a = a.to_dense()
             b = b.to_dense()
         assert isinstance(b, torch.Tensor), f"type mismatch {type(a)} {type(b)}"
+        if exact_dtype:
+            assert a.dtype == b.dtype
         if cos_similarity:
             a = a.flatten().to(torch.float32)
             b = b.flatten().to(torch.float32)
@@ -548,6 +560,8 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
                 print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
+            if not exact_dtype:
+                a = a.to(b.dtype)
             return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
     elif isinstance(a, (str, int, type(None), bool, torch.device)):
         return a == b
@@ -570,7 +584,14 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False):
     ):
         assert type(a) is type(b)
         return all(
-            same(getattr(a, key), getattr(b, key), cos_similarity, tol, equal_nan)
+            same(
+                getattr(a, key),
+                getattr(b, key),
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+            )
             for key in a.__dict__.keys()
         )
     else:

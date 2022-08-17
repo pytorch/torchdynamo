@@ -343,7 +343,7 @@ class WrapperCodeGen(CodeGen):
             output.splice(
                 """
                 from torchdynamo.testing import rand_strided
-                from benchmarks.microbenchmarks.microbench import print_performance
+                from torchinductor.utils import print_performance
                 """,
                 strip=True,
             )
