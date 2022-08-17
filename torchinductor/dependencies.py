@@ -161,7 +161,7 @@ class RecordLoadStore(V.MockHandler):
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"store({name}, {index}, {value}, {mode})"
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 
     def index_expr(self, index, dtype):

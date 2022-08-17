@@ -57,14 +57,14 @@ def reduction_combine(reduction_type, var, next_value):
 index_value_name_counter = 1
 
 
-def argmax_argmin_prefix(reduction_type, dtype, tmpvar):
+def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     global index_value_name_counter
     struct_name = f"IndexValue_{index_value_name_counter}"
     index_value_name_counter += 1
 
     prefix = [
-        f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[dtype]} value;}};",
-        f"{struct_name} {tmpvar}(0, {reduction_init(reduction_type, dtype)});",
+        f"struct {struct_name} {{long index; {DTYPE_TO_CPP[src_dtype]} value;}};",
+        f"{struct_name} {tmpvar}(0, {reduction_init(reduction_type, src_dtype)});",
     ]
     if reduction_type == "argmax":
         prefix.extend(
@@ -72,7 +72,7 @@ def argmax_argmin_prefix(reduction_type, dtype, tmpvar):
                 f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
                 "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, dtype)}}})",
+                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
             ]
         )
     elif reduction_type == "argmin":
@@ -81,7 +81,7 @@ def argmax_argmin_prefix(reduction_type, dtype, tmpvar):
                 f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
                 "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, dtype)}}})",
+                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
             ]
         )
     return prefix
@@ -333,7 +333,7 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
         tmpvar = self.cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
@@ -342,7 +342,7 @@ class CppKernel(Kernel):
         self.reduction_vars[tmpvar] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
-                argmax_argmin_prefix(reduction_type, dtype, tmpvar)
+                argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
             self.stores.writelines(

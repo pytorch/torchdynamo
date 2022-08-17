@@ -2802,8 +2802,6 @@ class CommonTemplate:
             [
                 torch.randn([8, 256, 256]),
             ],
-            exact_dtype=False,  # FIXME
-            check_lowp=False,  # FIXME
         )
 
     def test_argmax_argmin2(self):
@@ -2820,8 +2818,26 @@ class CommonTemplate:
             [
                 torch.randn([144, 144]),
             ],
-            exact_dtype=False,  # FIXME
-            check_lowp=False,  # FIXME
+        )
+
+    @unittest.skip(
+        """
+        FIXME: In the case of having equally max/min elements, our implementation returns
+        the last index instead of the first one
+        """
+    )
+    def test_argmax_argmin3(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, -1),
+                aten.argmin(x, -1),
+            )
+
+        self.common(
+            fn,
+            [torch.randint(0, 5, [10, 10])],
         )
 
     def test_vdd_clamp(self):
