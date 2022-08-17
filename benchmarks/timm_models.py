@@ -74,8 +74,9 @@ BATCH_SIZE_DIVISORS = {
     "swsl_resnext101_32x16d": 2,
     "tf_mixnet_l": 2,
     "tnt_s_patch16_224": 2,
-    "twins_pcpvt_base": 2,
+    "twins_pcpvt_base": 4,
     "vit_base_patch16_224": 2,
+    "volo_d1_224": 2,
     "xcit_large_24_p8_224": 4,
 }
 
