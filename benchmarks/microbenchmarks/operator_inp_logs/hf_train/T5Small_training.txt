@@ -1,0 +1,120 @@
+Operator: aten._log_softmax.default
+cnt: 1, '((T([1024, 32128], th.float16), 1, False), {})'
+Operator: aten._log_softmax_backward_data.default
+cnt: 1, '((T([1024, 32128], th.float16), T([1024, 32128], th.float16), 1, th.float16), {})'
+Operator: aten._softmax.default
+cnt: 18, '((T([1, 8, 1024, 1024], th.float32), -1, False), {})'
+Operator: aten._softmax_backward_data.default
+cnt: 18, '((T([1, 8, 1024, 1024], th.float32), T([1, 8, 1024, 1024], th.float32), -1, th.float32), {})'
+Operator: aten._to_copy.default
+cnt: 2, '((T([1, 1024], th.float32),), {\'device\': "th.device(\'cuda\')", \'dtype\': th.float32, \'layout\': th.strided})'
+cnt: 1, "((T([1, 1, 1, 1024], th.float32),), {'dtype': th.float16})"
+cnt: 1, "((T([1024, 1024], th.bool),), {'dtype': th.int64})"
+cnt: 2, "((T([1024, 1024], th.int64),), {'dtype': th.float32})"
+cnt: 2, "((T([1024, 1024], th.float32),), {'dtype': th.int64})"
+cnt: 18, "((T([1, 8, 1024, 1024], th.float16),), {'dtype': th.float32})"
+cnt: 36, '((T([1, 8, 1024, 1024], th.float32),), {\'device\': "th.device(\'cuda\')", \'dtype\': th.float16, \'layout\': th.strided})'
+cnt: 1, "((T([1, 1024, 1024], th.bool),), {'dtype': th.float32})"
+cnt: 1, "((T([1, 1, 1024, 1024], th.float32),), {'dtype': th.float16})"
+cnt: 1, "((T([1, 1, 1, 1024], th.int64),), {'dtype': th.float16})"
+cnt: 18, '((T([1, 8, 1024, 1024], th.float16),), {\'device\': "th.device(\'cuda\')", \'dtype\': th.float32, \'layout\': th.strided})'
+Operator: aten._unsafe_view.default
+cnt: 84, '((T([1024, 512], th.float16), [1, 1024, 512]), {})'
+cnt: 18, '((T([8, 1024, 1024], th.float16), [1, 8, 1024, 1024]), {})'
+cnt: 18, '((T([8, 1024, 64], th.float16), [1, 8, 1024, 64]), {})'
+cnt: 12, '((T([1024, 2048], th.float16), [1, 1024, 2048]), {})'
+cnt: 1, '((T([1024, 32128], th.float16), [1, 1024, 32128]), {})'
+cnt: 36, '((T([1, 1024, 8, 64], th.float16), [1, 1024, 512]), {})'
+Operator: aten.abs.default
+cnt: 1, '((T([1024, 1024], th.int64),), {})'
+Operator: aten.add.Tensor
+cnt: 2, '((T([1024, 1024], th.int64), 0), {})'
+cnt: 1, '((T([1024, 1024], th.int64), 8), {})'
+cnt: 1, '((T([1, 8, 1024, 1024], th.float16, (8, 1, 8192, 8)), T([1, 1, 1, 1024], th.float16)), {})'
+cnt: 95, '((T([1, 1024, 512], th.float16), T([1, 1024, 512], th.float16)), {})'
+cnt: 1, '((T([1024, 1024], th.int64), 16), {})'
+cnt: 1, '((T([1, 8, 1024, 1024], th.float16, (8, 1, 8192, 8)), T([1, 1, 1024, 1024], th.float16)), {})'
+cnt: 1, '((T([1, 8, 1024, 1024], th.float16), T([1, 1, 1, 1024], th.float16)), {})'
+cnt: 10, '((T([1, 8, 1024, 1024], th.float16), T([1, 8, 1024, 1024], th.float16)), {})'
+cnt: 2, '((T([32128, 512], th.float16), T([32128, 512], th.float16)), {})'
+Operator: aten.add_.Tensor
+cnt: 1, '((T([1024, 1024], th.int64), T([1024, 1024], th.int64)), {})'
+cnt: 12, '((T([1, 8, 1024, 1024], th.float16), T([1, 8, 1024, 1024], th.float16, (8, 1, 8192, 8))), {})'
+cnt: 6, '((T([1, 8, 1024, 1024], th.float16), T([1, 8, 1024, 1024], th.float16)), {})'
+Operator: aten.any.default
+cnt: 30, '((T([1, 1024, 512], th.bool),), {})'
+Operator: aten.bmm.default
+cnt: 36, '((T([8, 1024, 64], th.float16, (64, 512, 1)), T([8, 64, 1024], th.float16, (64, 1, 512))), {})'
+cnt: 36, '((T([8, 1024, 1024], th.float16), T([8, 1024, 64], th.float16, (64, 512, 1))), {})'
+cnt: 18, '((T([8, 1024, 1024], th.float16, (1048576, 1, 1024)), T([8, 1024, 64], th.float16, (64, 512, 1))), {})'
+cnt: 18, '((T([8, 64, 1024], th.float16, (64, 1, 512)), T([8, 1024, 1024], th.float16)), {})'
+Operator: aten.clone.default
+cnt: 3, '((T([1, 1024], th.int64),), {})'
+Operator: aten.copy_.default
+cnt: 3, '((T([1, 1024], th.int64), T([1, 1024], th.int64)), {})'
+Operator: aten.div.Tensor
+cnt: 1, '((T([1024, 1024], th.float32), 8), {})'
+cnt: 1, '((T([1024, 1024], th.float32), 2.772588722239781), {})'
+cnt: 1, '((T([1024, 1024], th.float32), 16), {})'
+cnt: 1, '((T([1024, 1024], th.float32), 2.0794415416798357), {})'
+Operator: aten.embedding.default
+cnt: 2, '((T([32128, 512], th.float16), T([1, 1024], th.int64)), {})'
+cnt: 2, '((T([32, 8], th.float16), T([1024, 1024], th.int64)), {})'
+Operator: aten.embedding_dense_backward.default
+cnt: 2, '((T([1024, 1024, 8], th.float16, (1024, 1, 1048576)), T([1024, 1024], th.int64), 32, -1, False), {})'
+cnt: 2, '((T([1, 1024, 512], th.float16), T([1, 1024], th.int64), 32128, -1, False), {})'
+Operator: aten.gt.Scalar
+cnt: 1, '((T([1024, 1024], th.int64), 0), {})'
+Operator: aten.isinf.default
+cnt: 30, '((T([1, 1024, 512], th.float16),), {})'
+Operator: aten.le.Tensor
+cnt: 1, '((T([1, 1024, 1024], th.int64), T([1, 1024, 1], th.int64)), {})'
+Operator: aten.log.default
+cnt: 2, '((T([1024, 1024], th.float32),), {})'
+Operator: aten.lt.Scalar
+cnt: 1, '((T([1024, 1024], th.int64), 8), {})'
+cnt: 1, '((T([1024, 1024], th.int64), 16), {})'
+Operator: aten.minimum.default
+cnt: 3, '((T([1024, 1024], th.int64), T([1024, 1024], th.int64)), {})'
+Operator: aten.mm.default
+cnt: 72, '((T([1024, 512], th.float16), T([512, 512], th.float16, (1, 512))), {})'
+cnt: 12, '((T([1024, 512], th.float16), T([512, 2048], th.float16, (1, 512))), {})'
+cnt: 12, '((T([1024, 2048], th.float16), T([2048, 512], th.float16, (1, 2048))), {})'
+cnt: 1, '((T([1024, 512], th.float16), T([512, 32128], th.float16, (1, 512))), {})'
+cnt: 1, '((T([32128, 1024], th.float16, (1, 32128)), T([1024, 512], th.float16)), {})'
+cnt: 1, '((T([1024, 32128], th.float16), T([32128, 512], th.float16)), {})'
+cnt: 12, '((T([512, 1024], th.float16, (1, 512)), T([1024, 2048], th.float16)), {})'
+cnt: 12, '((T([1024, 512], th.float16), T([512, 2048], th.float16)), {})'
+cnt: 12, '((T([2048, 1024], th.float16, (1, 2048)), T([1024, 512], th.float16)), {})'
+cnt: 12, '((T([1024, 2048], th.float16), T([2048, 512], th.float16)), {})'
+cnt: 54, '((T([512, 1024], th.float16, (1, 512)), T([1024, 512], th.float16)), {})'
+cnt: 54, '((T([1024, 512], th.float16), T([512, 512], th.float16)), {})'
+cnt: 18, '((T([512, 1024], th.float16), T([1024, 512], th.float16)), {})'
+cnt: 18, '((T([1024, 512], th.float16, (1, 1024)), T([512, 512], th.float16)), {})'
+Operator: aten.mul.Tensor
+cnt: 2, '((T([1, 1, 1, 1024], th.float16), -10000.0), {})'
+cnt: 1, '((T([1024, 1024], th.int64), 16), {})'
+cnt: 1, '((T([1024, 1024], th.float32), 8), {})'
+cnt: 1, '((T([1, 1, 1024, 1024], th.float32), T([1, 1, 1, 1024], th.float32)), {})'
+cnt: 1, '((T([1, 1, 1024, 1024], th.float16), -10000.0), {})'
+cnt: 1, '((T([1024, 1024], th.float32), 16), {})'
+cnt: 2, '((T([1, 1024, 512], th.float16), 0.04419417382415922), {})'
+Operator: aten.neg.default
+cnt: 1, '((T([1024, 1024], th.int64),), {})'
+Operator: aten.nll_loss_backward.default
+cnt: 1, '((T([], th.float16), T([1024, 32128], th.float16), T([1024], th.int64), None, 1, -100, T([], th.float16)), {})'
+Operator: aten.nll_loss_forward.default
+cnt: 1, '((T([1024, 32128], th.float16), T([1024], th.int64), None, 1, -100), {})'
+Operator: aten.relu.default
+cnt: 12, '((T([1, 1024, 2048], th.float16),), {})'
+Operator: aten.repeat.default
+cnt: 1, '((T([1, 1, 1024], th.int64), [1, 1024, 1]), {})'
+Operator: aten.rsub.Scalar
+cnt: 2, '((T([1, 1, 1, 1024], th.float16), 1.0), {})'
+cnt: 1, '((T([1, 1, 1024, 1024], th.float16), 1.0), {})'
+Operator: aten.sub.Tensor
+cnt: 2, '((T([1, 1024], th.int64), T([1024, 1], th.int64)), {})'
+Operator: aten.threshold_backward.default
+cnt: 12, '((T([1, 1024, 2048], th.float16), T([1, 1024, 2048], th.float16), 0), {})'
+Operator: aten.where.self
+cnt: 2, '((T([1024, 1024], th.bool), T([1024, 1024], th.int64), T([1024, 1024], th.int64)), {})'

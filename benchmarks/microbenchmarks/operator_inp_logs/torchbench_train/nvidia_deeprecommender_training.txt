@@ -1,0 +1,36 @@
+Operator: aten.addmm.default
+cnt: 1, '((T([512], th.float16), T([256, 197951], th.float16), T([197951, 512], th.float16, (1, 197951))), {})'
+cnt: 2, '((T([512], th.float16), T([256, 512], th.float16), T([512, 512], th.float16, (1, 512))), {})'
+cnt: 1, '((T([1024], th.float16), T([256, 512], th.float16), T([512, 1024], th.float16, (1, 512))), {})'
+cnt: 1, '((T([512], th.float16), T([256, 1024], th.float16), T([1024, 512], th.float16, (1, 1024))), {})'
+cnt: 1, '((T([197951], th.float16), T([256, 512], th.float16), T([512, 197951], th.float16, (1, 512))), {})'
+Operator: aten.clone.default
+cnt: 1, '((T([256, 197951], th.float16),), {})'
+Operator: aten.copy_.default
+cnt: 1, '((T([256, 197951], th.float16), T([256, 197951], th.float16)), {})'
+Operator: aten.div.Tensor
+cnt: 2, '((T([], th.float16), 50675456), {})'
+Operator: aten.elu.default
+cnt: 4, '((T([256, 512], th.float16), 1.6732632423543772, 1.0507009873554805), {})'
+cnt: 1, '((T([256, 1024], th.float16), 1.6732632423543772, 1.0507009873554805), {})'
+cnt: 1, '((T([256, 197951], th.float16), 1.6732632423543772, 1.0507009873554805), {})'
+Operator: aten.elu_backward.default
+cnt: 1, '((T([256, 197951], th.float16, (0, 0)), 1.6732632423543772, 1.0507009873554805, 1, False, T([256, 197951], th.float16)), {})'
+cnt: 4, '((T([256, 512], th.float16), 1.6732632423543772, 1.0507009873554805, 1, False, T([256, 512], th.float16)), {})'
+cnt: 1, '((T([256, 1024], th.float16), 1.6732632423543772, 1.0507009873554805, 1, False, T([256, 1024], th.float16)), {})'
+Operator: aten.mm.default
+cnt: 1, '((T([256, 197951], th.float16), T([197951, 512], th.float16)), {})'
+cnt: 1, '((T([197951, 256], th.float16, (1, 197951)), T([256, 512], th.float16)), {})'
+cnt: 2, '((T([256, 512], th.float16), T([512, 512], th.float16)), {})'
+cnt: 2, '((T([512, 256], th.float16, (1, 512)), T([256, 512], th.float16)), {})'
+cnt: 1, '((T([256, 512], th.float16), T([512, 1024], th.float16)), {})'
+cnt: 1, '((T([512, 256], th.float16, (1, 512)), T([256, 1024], th.float16)), {})'
+cnt: 1, '((T([256, 1024], th.float16), T([1024, 512], th.float16)), {})'
+cnt: 1, '((T([1024, 256], th.float16, (1, 1024)), T([256, 512], th.float16)), {})'
+cnt: 1, '((T([512, 256], th.float16, (1, 512)), T([256, 197951], th.float16)), {})'
+Operator: aten.sum.SymInt
+cnt: 1, '((T([256, 197951], th.float16), [0], True), {})'
+cnt: 4, '((T([256, 512], th.float16), [0], True), {})'
+cnt: 1, '((T([256, 1024], th.float16), [0], True), {})'
+Operator: aten.sum.default
+cnt: 1, '((T([256, 197951], th.float16),), {})'

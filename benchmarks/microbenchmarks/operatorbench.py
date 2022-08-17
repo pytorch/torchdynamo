@@ -32,7 +32,7 @@ def compute_speedups(repeats, models, example_inputs):
 
 
 def microbenchmark(target, args, kwargs, dtype):
-    gm, gm_args = gen_gm_and_inputs(torch.ops.aten.avg_pool2d.default, args, kwargs)
+    gm, gm_args = gen_gm_and_inputs(target, args, kwargs)
     compiled_fn = compile_fx(gm, gm_args)
     cudagraphs_eager = cudagraphs_inner(gm, gm_args, copy_outputs=False)
     cudagraphs_jit = cudagraphs_inner(

@@ -1,0 +1,70 @@
+Operator: aten.add.Tensor
+cnt: 1, '((T([1, 1], th.float16), 1), {})'
+cnt: 1, '((T([1, 1], th.float16), -10), {})'
+Operator: aten.addmm.default
+cnt: 1, '((T([50], th.float16), T([1, 39200], th.float16), T([39200, 50], th.float16, (1, 39200))), {})'
+cnt: 1, '((T([1024], th.float16), T([1, 50], th.float16), T([50, 1024], th.float16, (1, 50))), {})'
+cnt: 1, '((T([1024], th.float16), T([1, 1024], th.float16), T([1024, 1024], th.float16, (1, 1024))), {})'
+cnt: 1, '((T([2], th.float16), T([1, 1024], th.float16), T([1024, 2], th.float16, (1, 1024))), {})'
+Operator: aten.cat.default
+cnt: 1, '(([T([1, 1], th.float16), T([1, 1], th.float16)], 1), {})'
+Operator: aten.clone.default
+cnt: 1, '((T([1, 27, 84, 84], th.float16),), {})'
+Operator: aten.convolution.default
+cnt: 1, '((T([1, 27, 84, 84], th.float16), T([32, 27, 3, 3], th.float16), T([32], th.float16), [2, 2], [0, 0], [1, 1], False, [0, 0], 1), {})'
+cnt: 1, '((T([1, 32, 41, 41], th.float16), T([32, 32, 3, 3], th.float16), T([32], th.float16), [1, 1], [0, 0], [1, 1], False, [0, 0], 1), {})'
+cnt: 1, '((T([1, 32, 39, 39], th.float16), T([32, 32, 3, 3], th.float16), T([32], th.float16), [1, 1], [0, 0], [1, 1], False, [0, 0], 1), {})'
+cnt: 1, '((T([1, 32, 37, 37], th.float16), T([32, 32, 3, 3], th.float16), T([32], th.float16), [1, 1], [0, 0], [1, 1], False, [0, 0], 1), {})'
+Operator: aten.convolution_backward.default
+cnt: 1, '((T([1, 32, 35, 35], th.float16), T([1, 32, 37, 37], th.float16), T([32, 32, 3, 3], th.float16), [32], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [True, True, True]), {})'
+cnt: 1, '((T([1, 32, 37, 37], th.float16), T([1, 32, 39, 39], th.float16), T([32, 32, 3, 3], th.float16), [32], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [True, True, True]), {})'
+cnt: 1, '((T([1, 32, 39, 39], th.float16), T([1, 32, 41, 41], th.float16), T([32, 32, 3, 3], th.float16), [32], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [True, True, True]), {})'
+cnt: 1, '((T([1, 32, 41, 41], th.float16), T([1, 27, 84, 84], th.float16), T([32, 27, 3, 3], th.float16), [32], [2, 2], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]), {})'
+Operator: aten.copy_.default
+cnt: 1, '((T([1, 27, 84, 84], th.float16), T([1, 27, 84, 84], th.float16)), {})'
+Operator: aten.div.Tensor
+cnt: 1, '((T([1, 27, 84, 84], th.float16), 255.0), {})'
+Operator: aten.exp.default
+cnt: 1, '((T([1, 1], th.float16),), {})'
+Operator: aten.mm.default
+cnt: 1, '((T([1, 2], th.float16), T([2, 1024], th.float16)), {})'
+cnt: 1, '((T([2, 1], th.float16), T([1, 1024], th.float16)), {})'
+cnt: 1, '((T([1, 1024], th.float16), T([1024, 1024], th.float16)), {})'
+cnt: 1, '((T([1024, 1], th.float16), T([1, 1024], th.float16)), {})'
+cnt: 1, '((T([1, 1024], th.float16), T([1024, 50], th.float16)), {})'
+cnt: 1, '((T([1024, 1], th.float16), T([1, 50], th.float16)), {})'
+cnt: 1, '((T([1, 50], th.float16), T([50, 39200], th.float16)), {})'
+cnt: 1, '((T([50, 1], th.float16), T([1, 39200], th.float16)), {})'
+Operator: aten.mul.Tensor
+cnt: 1, '((T([1, 1], th.float16), 6.0), {})'
+Operator: aten.native_layer_norm.default
+cnt: 1, '((T([1, 50], th.float16), [50], T([50], th.float16), T([50], th.float16), 1e-05), {})'
+Operator: aten.native_layer_norm_backward.default
+cnt: 1, '((T([1, 50], th.float16), T([1, 50], th.float16), [50], T([1, 1], th.float32), T([1, 1], th.float32), T([50], th.float16), T([50], th.float16), [True, True, True]), {})'
+Operator: aten.relu.default
+cnt: 1, '((T([1, 32, 41, 41], th.float16),), {})'
+cnt: 1, '((T([1, 32, 39, 39], th.float16),), {})'
+cnt: 1, '((T([1, 32, 37, 37], th.float16),), {})'
+cnt: 1, '((T([1, 32, 35, 35], th.float16),), {})'
+Operator: aten.relu_.default
+cnt: 2, '((T([1, 1024], th.float16),), {})'
+Operator: aten.split.Tensor
+cnt: 1, '((T([1, 2], th.float16), 1, -1), {})'
+Operator: aten.sum.SymInt
+cnt: 1, '((T([1, 2], th.float16), [0], True), {})'
+cnt: 2, '((T([1, 1024], th.float16), [0], True), {})'
+cnt: 1, '((T([1, 50], th.float16), [0], True), {})'
+Operator: aten.sum.default
+cnt: 1, '((T([1, 1], th.float16),), {})'
+Operator: aten.tanh.default
+cnt: 1, '((T([1, 50], th.float16),), {})'
+cnt: 2, '((T([1, 1], th.float16),), {})'
+Operator: aten.tanh_backward.default
+cnt: 1, '((T([1, 1], th.float16), T([1, 1], th.float16)), {})'
+cnt: 1, '((T([1, 50], th.float16), T([1, 50], th.float16)), {})'
+Operator: aten.threshold_backward.default
+cnt: 2, '((T([1, 1024], th.float16), T([1, 1024], th.float16), 0), {})'
+cnt: 1, '((T([1, 32, 35, 35], th.float16), T([1, 32, 35, 35], th.float16), 0), {})'
+cnt: 1, '((T([1, 32, 37, 37], th.float16), T([1, 32, 37, 37], th.float16), 0), {})'
+cnt: 1, '((T([1, 32, 39, 39], th.float16), T([1, 32, 39, 39], th.float16), 0), {})'
+cnt: 1, '((T([1, 32, 41, 41], th.float16), T([1, 32, 41, 41], th.float16), 0), {})'

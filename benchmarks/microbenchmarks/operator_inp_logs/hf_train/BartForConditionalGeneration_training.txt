@@ -1,0 +1,91 @@
+Operator: aten._log_softmax.default
+cnt: 1, '((T([2048, 50265], th.float16), 1, False), {})'
+Operator: aten._log_softmax_backward_data.default
+cnt: 1, '((T([2048, 50265], th.float16), T([2048, 50265], th.float16), 1, th.float16), {})'
+Operator: aten._softmax.default
+cnt: 36, '((T([32, 1024, 1024], th.float16), -1, False), {})'
+Operator: aten._softmax_backward_data.default
+cnt: 36, '((T([32, 1024, 1024], th.float16), T([32, 1024, 1024], th.float16), -1, th.float16), {})'
+Operator: aten._to_copy.default
+cnt: 1, "((T([1024, 1024], th.float32),), {'dtype': th.float16})"
+cnt: 1, '((T([2, 1, 1024, 1024], th.float16, (0, 1048576, 1024, 1)),), {\'device\': "th.device(\'cuda\')", \'dtype\': th.float16, \'layout\': th.strided})'
+Operator: aten._unsafe_view.default
+cnt: 108, '((T([2, 1024, 16, 64], th.float16), [2, 1024, 1024]), {})'
+cnt: 1, '((T([2048, 50265], th.float16), [2, 1024, 50265]), {})'
+cnt: 36, '((T([2, 16, 1024, 64], th.float16), [32, 1024, 64]), {})'
+cnt: 36, '((T([2, 1024, 1024], th.float16), [2048, 1024]), {})'
+Operator: aten.add.Tensor
+cnt: 2, '((T([1024], th.int64), 2), {})'
+cnt: 2, '((T([2, 1024, 1024], th.float16), T([1024, 1024], th.float16)), {})'
+cnt: 191, '((T([2, 1024, 1024], th.float16), T([2, 1024, 1024], th.float16)), {})'
+cnt: 1, '((T([1024], th.int64), 1), {})'
+cnt: 12, '((T([2, 16, 1024, 1024], th.float16), T([2, 1, 1024, 1024], th.float16)), {})'
+cnt: 1, '((T([2, 1024, 50265], th.float16), T([1, 50265], th.float16)), {})'
+cnt: 2, '((T([50265, 1024], th.float16), T([50265, 1024], th.float16)), {})'
+Operator: aten.addmm.default
+cnt: 144, '((T([1024], th.float16), T([2048, 1024], th.float16), T([1024, 1024], th.float16, (1, 1024))), {})'
+cnt: 24, '((T([4096], th.float16), T([2048, 1024], th.float16), T([1024, 4096], th.float16, (1, 1024))), {})'
+cnt: 24, '((T([1024], th.float16), T([2048, 4096], th.float16), T([4096, 1024], th.float16, (1, 4096))), {})'
+Operator: aten.any.default
+cnt: 24, '((T([2, 1024, 1024], th.bool),), {})'
+Operator: aten.bmm.default
+cnt: 72, '((T([32, 1024, 64], th.float16), T([32, 64, 1024], th.float16, (65536, 1, 64))), {})'
+cnt: 72, '((T([32, 1024, 1024], th.float16), T([32, 1024, 64], th.float16)), {})'
+cnt: 36, '((T([32, 1024, 1024], th.float16, (1048576, 1, 1024)), T([32, 1024, 64], th.float16)), {})'
+cnt: 36, '((T([32, 64, 1024], th.float16, (65536, 1, 64)), T([32, 1024, 1024], th.float16)), {})'
+Operator: aten.clone.default
+cnt: 2, '((T([2, 1024], th.int64),), {})'
+cnt: 1, '((T([2, 1023], th.int64, (1024, 1)),), {})'
+Operator: aten.copy_.default
+cnt: 2, '((T([2, 1024], th.int64), T([2, 1024], th.int64)), {})'
+cnt: 1, '((T([2, 1023], th.int64, (1024, 1)), T([2, 1023], th.int64)), {})'
+Operator: aten.embedding.default
+cnt: 2, '((T([50265, 1024], th.float16), T([2, 1024], th.int64), 1), {})'
+cnt: 2, '((T([1026, 1024], th.float16), T([1024], th.int64)), {})'
+Operator: aten.embedding_dense_backward.default
+cnt: 2, '((T([1024, 1024], th.float16), T([1024], th.int64), 1026, -1, False), {})'
+cnt: 2, '((T([2, 1024, 1024], th.float16), T([2, 1024], th.int64), 50265, 1, False), {})'
+Operator: aten.eq.Scalar
+cnt: 1, '((T([2, 1024], th.int64), -100), {})'
+Operator: aten.fill_.Tensor
+cnt: 1, '((T([2], th.int64, (1024,)), T([], th.int64)), {})'
+Operator: aten.gelu.default
+cnt: 24, '((T([2, 1024, 4096], th.float16),), {})'
+Operator: aten.gelu_backward.default
+cnt: 24, '((T([2, 1024, 4096], th.float16), T([2, 1024, 4096], th.float16)), {})'
+Operator: aten.isinf.default
+cnt: 12, '((T([2, 1024, 1024], th.float16),), {})'
+Operator: aten.isnan.default
+cnt: 12, '((T([2, 1024, 1024], th.float16),), {})'
+Operator: aten.lt.Tensor
+cnt: 1, '((T([1024], th.int64), T([1024, 1], th.int64)), {})'
+Operator: aten.masked_fill_.Scalar
+cnt: 1, '((T([2, 1024], th.int64), T([2, 1024], th.bool), 1), {})'
+cnt: 1, '((T([1024, 1024], th.float32), T([1024, 1024], th.bool), 0), {})'
+Operator: aten.mm.default
+cnt: 1, '((T([2048, 1024], th.float16), T([1024, 50265], th.float16, (1, 1024))), {})'
+cnt: 1, '((T([50265, 2048], th.float16, (1, 50265)), T([2048, 1024], th.float16)), {})'
+cnt: 1, '((T([2048, 50265], th.float16), T([50265, 1024], th.float16)), {})'
+cnt: 24, '((T([2048, 1024], th.float16), T([1024, 4096], th.float16)), {})'
+cnt: 24, '((T([1024, 2048], th.float16, (1, 1024)), T([2048, 4096], th.float16)), {})'
+cnt: 24, '((T([2048, 4096], th.float16), T([4096, 1024], th.float16)), {})'
+cnt: 24, '((T([4096, 2048], th.float16, (1, 4096)), T([2048, 1024], th.float16)), {})'
+cnt: 144, '((T([2048, 1024], th.float16), T([1024, 1024], th.float16)), {})'
+cnt: 144, '((T([1024, 2048], th.float16, (1, 1024)), T([2048, 1024], th.float16)), {})'
+Operator: aten.mul.Tensor
+cnt: 4, '((T([2, 1024, 1024], th.float16), 1.0), {})'
+cnt: 72, '((T([2, 1024, 1024], th.float16), 0.125), {})'
+Operator: aten.native_layer_norm.default
+cnt: 62, '((T([2, 1024, 1024], th.float16), [1024], T([1024], th.float16), T([1024], th.float16), 1e-05), {})'
+Operator: aten.native_layer_norm_backward.default
+cnt: 62, '((T([2, 1024, 1024], th.float16), T([2, 1024, 1024], th.float16), [1024], T([2, 1024, 1], th.float32), T([2, 1024, 1], th.float32), T([1024], th.float16), T([1024], th.float16), [True, True, True]), {})'
+Operator: aten.new_zeros.default
+cnt: 1, '((T([2, 1024], th.int64), [2, 1024]), {\'device\': "th.device(\'cuda\')", \'dtype\': th.int64, \'layout\': th.strided, \'pin_memory\': False})'
+Operator: aten.nll_loss_backward.default
+cnt: 1, '((T([], th.float16), T([2048, 50265], th.float16), T([2048], th.int64), None, 1, -100, T([], th.float16)), {})'
+Operator: aten.nll_loss_forward.default
+cnt: 1, '((T([2048, 50265], th.float16), T([2048], th.int64), None, 1, -100), {})'
+Operator: aten.sum.SymInt
+cnt: 168, '((T([2048, 1024], th.float16), [0], True), {})'
+cnt: 24, '((T([2048, 4096], th.float16), [0], True), {})'
+cnt: 2, '((T([2, 1024, 1024], th.float16), [0], True), {})'

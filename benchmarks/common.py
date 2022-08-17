@@ -1633,7 +1633,7 @@ def main(runner, original_dir=None):
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
     mode = "training" if args.training else "eval"
-    output = os.path.join(os.path.dirname(args.output), f"{name}_{mode}.json")
+    output = os.path.join(os.path.dirname(args.output), f"{name}_{mode}.txt")
 
     # TODO - add option for coalescing inputs over multiple runs
     if os.path.exists(output):
