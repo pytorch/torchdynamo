@@ -62,9 +62,12 @@ def argmax_argmin_prefix(reduction_type, dtype, tmpvar):
     struct_name = f"IndexValue_{index_value_name_counter}"
     index_value_name_counter += 1
 
+    # A small annoyance, due to it being a little cumbersome to just throw {} into strings
+    open_brace = "{"
+    close_brace = "}"
     prefix = [
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[dtype]} value;}};",
-        f"{struct_name} {tmpvar}(0, {reduction_init(reduction_type, dtype)});",
+        f"{struct_name} {tmpvar}{open_brace}0, {reduction_init(reduction_type, dtype)}{close_brace};",
     ]
     if reduction_type == "argmax":
         prefix.extend(
@@ -321,7 +324,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
-                line = f"std::atomic_fetch_add_explicit(&{var}[{cexpr(index)}], {value}, memory_order_relaxed);"
+                line = f"std::atomic_fetch_add_explicit(&{var}[{cexpr(index)}], {value}, std::memory_order_relaxed);"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
