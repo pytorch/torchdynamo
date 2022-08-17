@@ -186,7 +186,9 @@ class IndexingDiv(sympy.Function):
                     return IndexingDiv(base - a, divisor) + a / gcd
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
-            return IndexingDiv(base / gcd, divisor / gcd)
+            return IndexingDiv(
+                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+            )
 
 
 class CleanDiv(IndexingDiv):
