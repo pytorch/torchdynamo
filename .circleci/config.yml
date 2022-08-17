@@ -10,7 +10,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+            - env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -27,14 +27,16 @@ jobs:
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
       - save_cache:
-          key: env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
+            - env
             - torchbenchmark
       - run:
           name: Tests
           command: |
             source .circleci/setup_env.sh
+            make develop
             mkdir test-results
             pytest -v --junitxml=test-results/junit.xml
       - store_test_results:
@@ -60,7 +62,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+            - env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -77,14 +79,16 @@ jobs:
             tar jxvf torchbenchmark.tar.bz2
             (cd torchbenchmark && python install.py)
       - save_cache:
-          key: env-v1-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
+            - env
             - torchbenchmark
       - run:
           name: TorchBench AotAutograd Eager run
           command: |
             source .circleci/setup_env.sh
+            make develop
             python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
