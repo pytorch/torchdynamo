@@ -66,8 +66,8 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     open_brace = "{"
     close_brace = "}"
     prefix = [
-        f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[dtype]} value;}};",
-        f"{struct_name} {tmpvar}{open_brace}0, {reduction_init(reduction_type, dtype)}{close_brace};",
+        f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
+        f"{struct_name} {tmpvar}{open_brace}0, {reduction_init(reduction_type, src_dtype)}{close_brace};",
     ]
     if reduction_type == "argmax":
         prefix.extend(
