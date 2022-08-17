@@ -127,9 +127,8 @@ def get_promoted_dtype(*args):
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
     if len(args) == 1:
-        inp = construct_input(args[0])
-        assert isinstance(inp, torch.Tensor)
-        return inp.dtype
+        assert hasattr(args[0], "get_dtype")
+        return args[0].get_dtype()
     return functools.reduce(torch.result_type, [construct_input(arg) for arg in args])
 
 
