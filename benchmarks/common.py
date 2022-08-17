@@ -936,7 +936,7 @@ class BenchmarkRunner:
             if curr_branch != "main":
                 if repo.is_dirty():
                     raise RuntimeError(
-                        "--diff-main called on dirty branch. Commit, stash, or reset."
+                        "--diff_main called on dirty branch. Commit, stash, or reset."
                     )
                 # Run current
                 try:
@@ -977,7 +977,7 @@ class BenchmarkRunner:
                 return
             else:
                 raise RuntimeError(
-                    "--diff-main called on main branch, what are you diffing?"
+                    "--diff_main called on main branch, what are you diffing?"
                 )
         elif branch:
             print("RUNNING ON BRANCH:", branch)
@@ -1196,7 +1196,7 @@ def parse_args():
     parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
 
     parser.add_argument(
-        "--diff-main",
+        "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
     )
@@ -1713,7 +1713,7 @@ def main(runner, original_dir=None):
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
-                diff=args.diff,
+                diff=args.diff_main,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
@@ -1769,7 +1769,7 @@ def main(runner, original_dir=None):
                 experiment,
                 args.skip_accuracy_check,
                 args.dynamic_shapes,
-                diff=args.diff,
+                diff=args.diff_main,
             )
 
         Stats.print_summary()
