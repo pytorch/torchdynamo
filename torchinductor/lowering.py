@@ -126,6 +126,10 @@ def get_promoted_dtype(*args):
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
+    if len(args) == 1:
+        inp = construct_input(args[0])
+        assert isinstance(inp, torch.Tensor)
+        return inp.dtype
     return functools.reduce(torch.result_type, [construct_input(arg) for arg in args])
 
 
@@ -149,9 +153,8 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
         if type_promote and indices:
-            dtype = functools.reduce(
-                torch.promote_types, [args[i].get_dtype() for i in indices]
-            )
+            # FIXME this is still wrong for more than 2 args, but better than what we have now
+            dtype = get_promoted_dtype(*[args[i] for i in indices])
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
