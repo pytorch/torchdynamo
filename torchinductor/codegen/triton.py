@@ -663,12 +663,10 @@ class TritonKernel(Kernel):
         return index_str, " & ".join(mask)
 
     def var_ranges(self):
-        return (
-            dict(
-                itertools.chain.from_iterable(
-                    tree.var_ranges.items() for tree in self.range_trees
-                )
-            ),
+        return dict(
+            itertools.chain.from_iterable(
+                tree.var_ranges.items() for tree in self.range_trees
+            )
         )
 
     def codegen_indexing(self, expr: sympy.Expr):
