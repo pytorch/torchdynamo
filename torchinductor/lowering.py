@@ -10,6 +10,7 @@ import torch.fx
 from torch._prims_common import Number
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
+from torch._prims.utils import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 
 from . import config
 from . import ir
@@ -116,7 +117,6 @@ def decode_device(device):
 
 
 def get_promoted_dtype(*args):
-    # TODO: fix other dtype places in this file
     def construct_input(inp):
         if isinstance(inp, Number):
             return inp
@@ -126,10 +126,11 @@ def get_promoted_dtype(*args):
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
-    if len(args) == 1:
-        assert hasattr(args[0], "get_dtype")
-        return args[0].get_dtype()
-    return functools.reduce(torch.result_type, [construct_input(arg) for arg in args])
+    inps = [construct_input(arg) for arg in args]
+    _, dtype = elementwise_dtypes(
+        *inps, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    return dtype
 
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
@@ -152,7 +153,6 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
         if type_promote and indices:
-            # FIXME this is still wrong for more than 2 args, but better than what we have now
             dtype = get_promoted_dtype(*[args[i] for i in indices])
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
