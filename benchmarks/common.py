@@ -4,7 +4,6 @@ import collections
 import copy
 import csv
 import functools
-import gc
 import io
 import itertools
 import logging
@@ -1059,9 +1058,6 @@ def parse_args():
         "--prims-nvfuser", action="store_true", help="user prims + nvfuser backend"
     )
     parser.add_argument(
-        "--isolate", action="store_true", help="run each model in its own process"
-    )
-    parser.add_argument(
         "--dump-raw-metrics",
         action="store_true",
         help="dump raw timing metrics from speedup experiment",
@@ -1081,7 +1077,7 @@ def parse_args():
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
     )
-    parser.add_argument("--only", help="used by --isolate to run just one model")
+    parser.add_argument("--only", help="Run just one model")
     parser.add_argument(
         "--minimum-call-count", type=int, help="filter out graphs with too few ops"
     )
@@ -1661,7 +1657,7 @@ def main(runner, original_dir=None):
                     *Stats.aot_summary(),
                 ],
             )
-    elif args.isolate:
+    else:
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:
@@ -1677,35 +1673,6 @@ def main(runner, original_dir=None):
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
-        print_summary(output_filename)
-    else:
-        if output_filename and os.path.exists(output_filename):
-            os.unlink(output_filename)
-        for device, name, model, example_inputs, batch_size in runner.iter_models(args):
-            current_name = name
-            current_device = device
-            current_batch_size = batch_size
-            torchdynamo.reset()
-            gc.collect()
-
-            if args.float32:
-                model, example_inputs = cast_to_fp32(model, example_inputs)
-            elif args.float16:
-                model, example_inputs = cast_to_fp16(model, example_inputs)
-            runner.run_one_model(
-                name,
-                model,
-                args.training,
-                model_iter_fn,
-                example_inputs,
-                optimize_ctx,
-                accuracy_ctx,
-                experiment,
-                args.skip_accuracy_check,
-                args.dynamic_shapes,
-            )
-
-        Stats.print_summary()
         print_summary(output_filename)
 
 
