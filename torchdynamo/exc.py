@@ -1,33 +1,50 @@
 import dataclasses
 import os
+import textwrap
 import traceback
 
 import torchdynamo.config as config
 from torchdynamo.utils import counters
 
 
-class InternalTorchDynamoError(RuntimeError):
+class TorchDynamoException(RuntimeError):
     pass
 
 
-class RestartAnalysis(RuntimeError):
+class InternalTorchDynamoError(TorchDynamoException):
     pass
 
 
-class SkipFrame(RuntimeError):
+class RestartAnalysis(TorchDynamoException):
     pass
 
 
-class TorchRuntimeError(RuntimeError):
+class SkipFrame(TorchDynamoException):
+    pass
+
+
+class TorchRuntimeError(TorchDynamoException):
     pass
 
 
 @dataclasses.dataclass
-class FakeTensorError(RuntimeError):
+class FakeTensorError(TorchDynamoException):
     reason: str
 
 
-class BackendCompilerFailed(RuntimeError):
+class ResetRequired(TorchDynamoException):
+    def __init__(self):
+        super(ResetRequired, self).__init__(
+            textwrap.dedent(
+                """
+                Must call `torchdynamo.reset()` before changing backends.  Detected two calls to
+                `torchdynamo.optimize(...)` with a different backend compiler arguments.
+                """
+            )
+        )
+
+
+class BackendCompilerFailed(TorchDynamoException):
     def __init__(self, backend_fn, inner_exception):
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
@@ -39,7 +56,7 @@ class BackendCompilerFailed(RuntimeError):
         )
 
 
-class Unsupported(RuntimeError):
+class Unsupported(TorchDynamoException):
     def __init__(self, msg):
         super(Unsupported, self).__init__(msg)
         self.real_stack = []

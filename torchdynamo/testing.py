@@ -113,6 +113,10 @@ class CompileCounter:
                 self.op_count += 1
         return gm.forward
 
+    def clear(self):
+        self.frame_count = 0
+        self.op_count = 0
+
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
     if torchdynamo.config.dynamic_shapes and expected_ops_dynamic is not None:
@@ -134,11 +138,13 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
     correct1 = fn(*args1)
     correct2 = fn(*args2)
+    torchdynamo.reset()
     with torchdynamo.optimize_assert(actual):
         val1a = fn(*args1)
         val2a = fn(*args2)
         val1b = fn(*args1)
         val2b = fn(*args2)
+    torchdynamo.reset()
     self.assertTrue(same(val1a, correct1))
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
