@@ -193,5 +193,23 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertEqual(r2.dtype, torch.bfloat16)
 
 
+class NormalizeIRTests(torchdynamo.testing.TestCase):
+    @unittest.skipIf(not has_functorch(), "requires functorch")
+    def test_inplace_normalize(self):
+        def fn(a, b):
+            x = torch.cos(a)
+            x += b
+            return torch.sin(x)
+
+        a = torch.randn(10)
+        b = torch.randn(10).to(torch.float64)
+
+        ref = fn(a, b)
+
+        optimized_fn = torchdynamo.optimize("aot_nop")(fn)
+        res = optimized_fn(a, b)
+        self.assertTrue(same(ref, res))
+
+
 if __name__ == "__main__":
     unittest.main()
