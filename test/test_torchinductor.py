@@ -2278,6 +2278,9 @@ class CommonTemplate:
                 torch.randn([601, 256, 7, 7]),
             ],
         )
+        self.common(
+            fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
+        )
 
     def test_index_put2(self):
         def fn(a, b, c):
@@ -2292,6 +2295,22 @@ class CommonTemplate:
             ],
             # workaround for https://github.com/openai/triton/issues/558
             check_lowp=False,
+        )
+
+    def test_index_put3(self):
+        def fn(a, b, c):
+            torch.ops.aten.index_put_(a, (None, b, None), c)
+            a1 = a + 1
+            torch.ops.aten.index_put_(a1, (None, b + 1, None), c + 1)
+            return (a, a1)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1024, 4, 2]),
+                torch.arange(3),
+                torch.randn([1024, 1, 2]),
+            ],
         )
 
     @unittest.skipIf(not config.fallback_random, "requires config.fallback_random")
