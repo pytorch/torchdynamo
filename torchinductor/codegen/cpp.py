@@ -323,6 +323,9 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
+                # TODO(voz): Add a templatized version that then calls into the correct
+                # method. This has hard assumptions around floats. This passes today for CI.
+                # However, it may not hold in the future.
                 line = f"cpu_atomic_add_float(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
