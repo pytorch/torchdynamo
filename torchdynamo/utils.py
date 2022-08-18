@@ -511,26 +511,44 @@ except ImportError:
     fake_tensors_available = False
 
 
-def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False, exact_dtype=True):
-    """Check correctness to see if a and b match"""
-    if isinstance(a, (list, tuple, torch.nn.ParameterList, torch.Size)):
-        assert isinstance(b, (list, tuple)), f"type mismatch {type(a)} {type(b)}"
-        return len(a) == len(b) and all(
-            same(ai, bi, cos_similarity, tol, equal_nan, exact_dtype)
-            for ai, bi in zip(a, b)
+def rmse(ref, res):
+    """
+    Calculate root mean squared error
+    """
+    return torch.sqrt(torch.mean(torch.square(ref - res)))
+
+
+def same(
+    ref,
+    res,
+    fp64_ref=None,
+    cos_similarity=False,
+    tol=1e-4,
+    equal_nan=False,
+    exact_dtype=True,
+):
+    """Check correctness to see if ref and res match"""
+    if fp64_ref is None:
+        fp64_ref = ref
+    if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
+        assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+        return len(ref) == len(res) and all(
+            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
-    elif isinstance(a, dict):
-        assert isinstance(b, dict)
-        assert set(a.keys()) == set(
-            b.keys()
-        ), f"keys mismatch {set(a.keys())} == {set(b.keys())}"
-        for k in a.keys():
+    elif isinstance(ref, dict):
+        assert isinstance(res, dict)
+        assert set(ref.keys()) == set(
+            res.keys()
+        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        for k in ref.keys():
             if not (
                 same(
-                    a[k],
-                    b[k],
-                    cos_similarity,
-                    tol,
+                    ref[k],
+                    res[k],
+                    fp64_ref[k],
+                    cos_similarity=cos_similarity,
+                    tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
                 )
@@ -538,36 +556,47 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False, exact_dtype=True
                 print("Accuracy failed for key name", k)
                 return False
         return True
-    elif isinstance(a, torch.Tensor):
-        if a.is_sparse:
-            assert b.is_sparse
-            a = a.to_dense()
-            b = b.to_dense()
-        assert isinstance(b, torch.Tensor), f"type mismatch {type(a)} {type(b)}"
+    elif isinstance(ref, torch.Tensor):
+        if ref.is_sparse:
+            assert res.is_sparse
+            ref = ref.to_dense()
+            res = res.to_dense()
+        assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert a.dtype == b.dtype
+            assert ref.dtype == res.dtype
         if cos_similarity:
-            a = a.flatten().to(torch.float32)
-            b = b.flatten().to(torch.float32)
-            if torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=True):
+            ref = ref.flatten().to(torch.float32)
+            res = res.flatten().to(torch.float32)
+            if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=True):
                 # early exit that handles zero/nan better
                 # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
                 return True
-            res = torch.nn.functional.cosine_similarity(a, b, dim=0, eps=1e-6)
+            res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if res < 0.99:
                 print(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             if not exact_dtype:
-                a = a.to(b.dtype)
-            return torch.allclose(a, b, atol=tol, rtol=tol, equal_nan=equal_nan)
-    elif isinstance(a, (str, int, type(None), bool, torch.device)):
-        return a == b
-    elif isinstance(a, float):
-        return math.isclose(a, b, rel_tol=tol, abs_tol=tol)
-    elif is_numpy_int_type(a) or is_numpy_float_type(a):
-        return (type(a) is type(b)) and (a == b)
-    elif type(a).__name__ in (
+                ref = ref.to(res.dtype)
+
+            # First try usual allclose
+            if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=equal_nan):
+                return True
+
+            # Check error from fp64 version
+            if fp64_ref.dtype == torch.float64:
+                ref_error = rmse(fp64_ref, ref).item()
+                res_error = rmse(fp64_ref, res).item()
+                return res_error <= (1.1 * ref_error + 1e-5)
+
+            return False
+    elif isinstance(ref, (str, int, type(None), bool, torch.device)):
+        return ref == res
+    elif isinstance(ref, float):
+        return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+    elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
+        return (type(ref) is type(res)) and (ref == res)
+    elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
         "CausalLMOutputWithCrossAttentions",
@@ -580,20 +609,21 @@ def same(a, b, cos_similarity=False, tol=1e-4, equal_nan=False, exact_dtype=True
         "Foo",
         "Variable",
     ):
-        assert type(a) is type(b)
+        assert type(ref) is type(res)
         return all(
             same(
-                getattr(a, key),
-                getattr(b, key),
-                cos_similarity,
-                tol,
-                equal_nan,
-                exact_dtype,
+                getattr(ref, key),
+                getattr(res, key),
+                getattr(fp64_ref, key),
+                cos_similarity=cos_similarity,
+                tol=tol,
+                equal_nan=equal_nan,
+                exact_dtype=exact_dtype,
             )
-            for key in a.__dict__.keys()
+            for key in ref.__dict__.keys()
         )
     else:
-        raise RuntimeError(f"unsupported type: {type(a).__name__}")
+        raise RuntimeError(f"unsupported type: {type(ref).__name__}")
 
 
 def format_func_info(code):
