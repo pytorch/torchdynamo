@@ -138,8 +138,6 @@ class CppCodeCache:
                 try:
                     subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError as e:
-                    # This prints a command one can run again to repro the error.
-                    print(f"SUBPROCESS ERROR: {' '.join(cmd)} ")
                     raise exc.CppCompileError(cmd, e.output)
 
             cls.cache[key] = cdll.LoadLibrary(output_path)

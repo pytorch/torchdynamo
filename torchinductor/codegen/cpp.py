@@ -63,11 +63,9 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     index_value_name_counter += 1
 
     # A small annoyance, due to it being a little cumbersome to just throw {} into strings
-    open_brace = "{"
-    close_brace = "}"
     prefix = [
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
-        f"{struct_name} {tmpvar}{open_brace}0, {reduction_init(reduction_type, src_dtype)}{close_brace};",
+        f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
     if reduction_type == "argmax":
         prefix.extend(
@@ -125,7 +123,7 @@ def cpp_prefix():
             float randn_cpu(uint32_t seed, uint32_t offset) {
                 at::Philox4_32 engine(seed, 0, offset);
                 return engine.randn(10);
-            }            
+            }
             """
         ),
         "h",
