@@ -378,6 +378,13 @@ class Functionalization(Transformer):
         with self._set_current_node(n):
             result = getattr(self, n.op)(target, args, kwargs)
 
+            # For inplace operators, the output dtype should be equal to the
+            # dtype of tensor being inplace modified.
+            if n.target in IOPERATOR_REPLACEMENTS:
+                result = getattr(self, "call_method")(
+                    "to", (result, n.args[0].meta["dtype"]), {}
+                )
+
         for patch in patches:
             assert isinstance(
                 patch, torch.fx.Node
