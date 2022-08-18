@@ -1,6 +1,9 @@
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
+from typing import Any
+from typing import Type
+from typing import Union
 
 import sympy
 from torch.fx.graph import inplace_methods
@@ -11,6 +14,10 @@ import torchdynamo
 threadlocal = local()
 
 
+class NullHandler:
+    pass
+
+
 class Virtualized:
     """
     A global variable that redirects via thread local variable
@@ -18,7 +25,9 @@ class Virtualized:
     This allows us to swap in different op implementations in codegen.
     """
 
-    def __init__(self, vname, default):
+    def __init__(
+        self, vname: str, default: Union[Type[NullHandler], Type["MockHandler"], Any]
+    ) -> None:
         self._key = f"__torchinductor_{vname}"
         self._default = default
 
@@ -43,10 +52,6 @@ class Virtualized:
         return getattr(self._get_handler(), name)
 
 
-class NullHandler:
-    pass
-
-
 class MockHandler:
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -65,7 +70,7 @@ class MockHandler:
         return sympy.Symbol(str(index_var))
 
     @classmethod
-    def _init_cls(cls):
+    def _init_cls(cls) -> None:
         def make_handler(format_string):
             @staticmethod
             def inner(*args):

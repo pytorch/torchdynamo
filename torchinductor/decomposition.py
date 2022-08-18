@@ -2,14 +2,19 @@ import logging
 import math
 import numbers
 from enum import Enum
+from typing import Callable
+from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 import torch
 import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch import Tensor
 from torch._decomp import get_decompositions
+from torch._ops import OpOverload
+from torch._ops import OpOverloadPacket
 
 from torchinductor import config
 
@@ -92,7 +97,9 @@ if not config.fallback_random:
     )
 
 
-def register_decomposition(ops):
+def register_decomposition(
+    ops: Union[List[OpOverload], OpOverloadPacket, List[OpOverloadPacket]]
+) -> Callable:
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")

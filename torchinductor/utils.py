@@ -1,6 +1,7 @@
 import functools
 import operator
 import time
+from typing import Callable
 
 import numpy as np
 import sympy
@@ -21,7 +22,7 @@ def has_triton():
 
 
 @functools.lru_cache(None)
-def has_torchvision_roi_align():
+def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa
 
@@ -83,7 +84,7 @@ immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
 immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 
-def freeze_inputs(f):
+def freeze_inputs(f: functools._lru_cache_wrapper) -> Callable:
     """
     Useful for wrapping lists in tuples for caching purposes
     """

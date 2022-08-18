@@ -9,7 +9,9 @@ import re
 import subprocess
 import sysconfig
 import types
+from ctypes import CDLL
 from ctypes import cdll
+from typing import Tuple
 
 from torch.utils import cpp_extension
 
@@ -19,11 +21,11 @@ from . import exc
 log = logging.getLogger(__name__)
 
 
-def cache_dir():
+def cache_dir() -> str:
     return f"/tmp/torchinductor_{getpass.getuser()}"
 
 
-def code_hash(code):
+def code_hash(code: str) -> str:
     return (
         "c"
         + base64.b32encode(hashlib.sha256(code.encode("utf-8")).digest())[:51]
@@ -32,7 +34,7 @@ def code_hash(code):
     )
 
 
-def write(source_code, ext, extra=""):
+def write(source_code: str, ext: str, extra: str = "") -> Tuple[str, str]:
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
     if not os.path.exists(subdir):
@@ -47,7 +49,7 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-def cpp_compiler():
+def cpp_compiler() -> str:
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -56,7 +58,7 @@ def cpp_compiler():
 
 
 @functools.lru_cache(1)
-def cpp_compiler_search(search):
+def cpp_compiler_search(search: Tuple[None, str, str, str, str, str, str, str]) -> str:
     for cxx in search:
         try:
             if cxx is None:
@@ -94,7 +96,7 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-def cpp_compile_command(input, output, include_pytorch=False):
+def cpp_compile_command(input: str, output: str, include_pytorch: bool = False) -> str:
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
@@ -127,7 +129,7 @@ class CppCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code):
+    def load(cls, source_code: str) -> CDLL:
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
         if key not in cls.cache:
             output_path = input_path[:-3] + "so"

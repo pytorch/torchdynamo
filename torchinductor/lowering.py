@@ -2,11 +2,16 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable
+from typing import Any
+from typing import Callable
 from typing import List
+from typing import Optional
+from typing import Union
 
 import sympy
 import torch
 import torch.fx
+from torch._ops import OpOverloadPacket
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._prims_common import Number
 from torch._prims_common import elementwise_dtypes
@@ -34,7 +39,9 @@ prims = torch.ops.prims
 needs_realized_inputs = set()
 
 
-def add_needs_realized_inputs(fn):
+def add_needs_realized_inputs(
+    fn: Union[OpOverloadPacket, List[OpOverloadPacket]]
+) -> Optional[List[None]]:
     if isinstance(fn, (list, tuple, set)):
         return [add_needs_realized_inputs(x) for x in fn]
     needs_realized_inputs.add(fn)
@@ -134,7 +141,9 @@ def get_promoted_dtype(*args):
     return dtype
 
 
-def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
+def _register_lowering(
+    aten_fn: Any, decomp_fn: Callable, broadcast: bool, type_promote: bool
+) -> Callable:
     """
     Add a lowering to lowerings dict
 
@@ -194,7 +203,9 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
     return wrapped
 
 
-def register_lowering(aten_fn, broadcast=False, type_promote=True):
+def register_lowering(
+    aten_fn: Any, broadcast: bool = False, type_promote: bool = True
+) -> functools.partial:
     """
     Shim to support decorator syntax.
     """
@@ -243,7 +254,12 @@ def promote_constants(inputs):
     ]
 
 
-def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=None):
+def make_pointwise(
+    fn: Callable,
+    override_dtype: Optional[torch.dtype] = None,
+    override_device: None = None,
+    override_bool: Optional[Callable] = None,
+) -> Callable:
     def inner(*inputs: List[TensorBox]):
         inputs = promote_constants(inputs)
         loaders = [x.make_loader() for x in inputs]
@@ -337,7 +353,7 @@ def to(
     return x
 
 
-def ops_wrapper(name):
+def ops_wrapper(name: str) -> Callable:
     assert isinstance(name, str)
 
     def fn(*args, **kwargs):
@@ -347,14 +363,14 @@ def ops_wrapper(name):
 
 
 def register_pointwise(
-    aten_fn,
-    name=None,
-    broadcast=True,
-    type_promote=True,
-    override_dtype=None,
-    override_device=None,
-    override_bool=None,
-):
+    aten_fn: OpOverloadPacket,
+    name: None = None,
+    broadcast: bool = True,
+    type_promote: bool = True,
+    override_dtype: Optional[torch.dtype] = None,
+    override_device: None = None,
+    override_bool: Optional[str] = None,
+) -> Callable:
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
     fn = ops_wrapper(name)
@@ -700,7 +716,7 @@ def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
-def make_fallback(kernel):
+def make_fallback(kernel: OpOverloadPacket) -> None:
     add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
@@ -738,7 +754,7 @@ else:
     # native_dropout handled in decomps
     # bernoulli_ handled in decomps
 
-    def make_rand(fn_name):
+    def make_rand(fn_name: str) -> Callable:
         def rand_or_randn(
             *size,
             dtype=None,
@@ -1201,7 +1217,7 @@ def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
 
-def tensor_constructor(fill_value):
+def tensor_constructor(fill_value: int) -> Callable:
     # torch.zeros, torch.ones, etc
     def inner(
         *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
@@ -1224,7 +1240,7 @@ zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
 ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
 
 
-def create_tensor_like(creation_fn):
+def create_tensor_like(creation_fn: Callable) -> Callable:
     """
     Shim to convert X_like(...) into X(...).  For example zeros_like() into zeros().
     """
@@ -1263,7 +1279,7 @@ ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
 
-def new_constant(fill_value):
+def new_constant(fill_value: int) -> Callable:
     def _new_constant(
         x, size, *, dtype=None, layout=None, device=None, pin_memory=None
     ):
@@ -2456,7 +2472,9 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def make_reduction(reduction_type: str, override_dtype=None):
+def make_reduction(
+    reduction_type: str, override_dtype: Optional[torch.dtype] = None
+) -> Callable:
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
@@ -2761,7 +2779,7 @@ register_lowering(aten.__or__, type_promote=False)(
 )
 
 
-def register_inplace(aten_op, outplace_op):
+def register_inplace(aten_op: OpOverloadPacket, outplace_op: Callable) -> Callable:
     @register_lowering(aten_op, type_promote=False)
     def fn(*args):
         result = outplace_op(*args)
