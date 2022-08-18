@@ -8,9 +8,11 @@ from collections import OrderedDict
 from functools import partial
 from typing import Any
 from typing import Callable
+from typing import ClassVar
 from typing import List
 from typing import Optional
 from typing import Set
+from typing import Tuple
 from unittest.mock import patch
 
 import numpy
@@ -186,7 +188,9 @@ class IndexingDiv(sympy.Function):
                     return IndexingDiv(base - a, divisor) + a / gcd
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
-            return IndexingDiv(base / gcd, divisor / gcd)
+            return IndexingDiv(
+                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+            )
 
 
 class CleanDiv(IndexingDiv):
@@ -209,7 +213,7 @@ def is_triton(x):
 
 @dataclasses.dataclass
 class IRNode(object):
-    _current_origins = set()
+    _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
     @contextlib.contextmanager
@@ -331,7 +335,7 @@ class Pointwise(Loops):
 @dataclasses.dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[List[Expr]], Expr]
-    scatter_mode: str = None
+    scatter_mode: Optional[str] = None
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -618,9 +622,17 @@ class Reduction(Loops):
     @staticmethod
     def default_value(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
-            return float("-inf") if is_float_dtype(dtype) else -(2**31)
+            return (
+                torch.finfo(dtype).min
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).min
+            )
         if reduction_type in {"min", "argmin"}:
-            return float("inf") if is_float_dtype(dtype) else 2**31 - 1
+            return (
+                torch.finfo(dtype).max
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).max
+            )
         return {
             "sum": 0,
             "any": 0,
@@ -1506,7 +1518,7 @@ class MutationLayout(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            None,
+            target.get_stride(),
         )
         self.target = target
 
@@ -2014,13 +2026,16 @@ class ConcatKernel(NopKernel):
 
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
-    constant_args: List[Any] = ()
+    constant_args: Tuple[Any, ...] = ()
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
         self.freeze_layout()
+
+    def codegen(self, wrapper):
+        raise NotImplementedError
 
     @staticmethod
     def copy_input(x):
@@ -2683,20 +2698,20 @@ class Convolution(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride_: List[int],
+        padding_: List[int],
+        dilation_: List[int],
         transposed: bool,
-        output_padding: List[int],
+        output_padding_: List[int],
         groups: int,
     ):
         x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
-        stride = tuple(stride)
-        padding = tuple(padding)
-        dilation = tuple(dilation)
+        stride = tuple(stride_)
+        padding = tuple(padding_)
+        dilation = tuple(dilation_)
         assert isinstance(transposed, bool)
-        output_padding = tuple(output_padding)
+        output_padding = tuple(output_padding_)
         assert isinstance(groups, int)
 
         weight_shape = [
@@ -2799,11 +2814,11 @@ class Convolution(ExternKernelAlloc):
 
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
-            output_layout = "torch.channels_last"
+            output_layout_str = "torch.channels_last"
         elif config.tune_layout:
             from .codegen.autotuner import tuned_conv_layout
 
-            output_layout = tuned_conv_layout(
+            output_layout_str = tuned_conv_layout(
                 kernel,
                 x.get_size(),
                 weight.get_size(),
@@ -2817,9 +2832,9 @@ class Convolution(ExternKernelAlloc):
                 x.get_dtype(),
             )
         else:
-            output_layout = "torch.contiguous_format"
+            output_layout_str = "torch.contiguous_format"
 
-        if output_layout == "torch.channels_last":
+        if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
@@ -3167,7 +3182,7 @@ class LoopBodyBlock:
                     return V.ops.masked(mask, subblock, other)
 
                 name = self.body.add_submodule(shim, "masked_subblock")
-                subblock = LoopBodyBlock(self.body, masked_body, ())
+                subblock = LoopBodyBlock(self.body, masked_body, [])
                 self.body.subblocks[name] = subblock
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}

@@ -16,6 +16,7 @@ jobs:
         python-version: '3.7'
         cache: 'pip'
     - run: make setup_nightly
+    - run: make develop
     - run: make test
 
 concurrency:
