@@ -358,6 +358,14 @@ class ParseCompilerProfileLogs(Parser):
         # df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
         df = df.sort_values(by=self.compilers[-2], ascending=False)
         df = df.round(3)
+
+        # For graph breaks, just print one column
+        if metric == "graphs":
+            batch_size_idx = df.columns.to_list().index("batch_size")
+            common_columns = df.columns.to_list()[: batch_size_idx + 1]
+            subset_df = df[df.columns[0 : batch_size_idx + 1]]
+            subset_df.insert(batch_size_idx + 1, "graphs", df["eager"])
+            df = subset_df
         return df
 
     def prepare_message_for_metric(self, metric):
@@ -404,6 +412,7 @@ class ParsePerformanceLogs(Parser):
             x="name",
             y=labels,
             kind="bar",
+            width=0.65,
             title=title,
             ylabel="Speedup over eager",
             xlabel="",
