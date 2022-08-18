@@ -9,6 +9,7 @@ from typing import Optional
 from typing import Set
 from typing import Tuple
 from typing import Union
+from typing import cast
 
 import sympy
 
@@ -33,11 +34,10 @@ class MemoryDep(typing.NamedTuple):
     def maybe_swap_sizes(self) -> "MemoryDep":
         # swap only in simple cases where index is trivial and
         # there are just 2 sizes
-        print(self.index)
         if (
             len(self.size) == 2
             and len(self.index.args) == 0
-            and self.index.name == canonicalization_prefix() + "0"
+            and cast(sympy.Symbol, self.index).name == canonicalization_prefix() + "0"
         ):
             c = canonicalization_prefix()
             size = (self.size[1], self.size[0])
@@ -56,7 +56,10 @@ class MemoryDep(typing.NamedTuple):
         # make sure last dim index is not used
         prefix = canonicalization_prefix()
         len_prefix = len(prefix)
-        prefixes = [fs.name[:len_prefix] for fs in self.index.free_symbols]
+        prefixes = [
+            fs.name[:len_prefix]
+            for fs in cast(Set[sympy.Symbol], self.index.free_symbols)
+        ]
         assert (
             len(prefixes) == 0 or prefix in prefixes
         ), "index expression should contain canonicalized symbols"
