@@ -37,7 +37,7 @@ lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
-	mypy --show-error-codes $(MYPY_FILES)
+	mypy --show-error-codes --follow-imports=skip $(MYPY_FILES)
 	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
 		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
