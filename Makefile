@@ -43,7 +43,7 @@ lint:
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
-	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs $(PIP) install
+	grep -E '(black|flake8|isort|click|torch|mypy)' requirements.txt | xargs $(PIP) install
 
 setup_lint: lint-deps
 
