@@ -4,6 +4,7 @@ import weakref
 
 import torch
 from torch import _prims
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.overrides import TorchFunctionMode
 
 log = logging.getLogger(__name__)
