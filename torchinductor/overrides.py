@@ -90,10 +90,13 @@ class PhiloxRandomState:
 
     @classmethod
     def get_seed_offset(cls, x):
-        if isinstance(x, torch.fx.experimental.proxy_tensor.ProxyTensor):
-            if cls.last_tracer_ref() is not x.proxy.tracer:
+        modes = torch.fx.experimental.proxy_tensor.get_torch_dispatch_modes()
+        proxy_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
+        if proxy_modes:
+            tracer = proxy_modes[0].tracer
+            if cls.last_tracer_ref() is not tracer:
                 # tracer changed, need to reset state
-                cls.reset(x.proxy.tracer)
+                cls.reset(tracer)
         else:
             # no tracer, need to reset state
             cls.reset()
