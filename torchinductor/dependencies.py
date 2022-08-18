@@ -3,6 +3,7 @@ import dataclasses
 import itertools
 import logging
 import typing
+from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -99,7 +100,10 @@ class StarDep(typing.NamedTuple):
 
 class IndexExprDep(typing.NamedTuple):
     index: sympy.Expr  # type: ignore[assignment]
-    size: List[sympy.Expr]
+    size: Tuple[sympy.Expr, ...]
+
+
+VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 @dataclasses.dataclass
@@ -108,7 +112,7 @@ class ReadWrites:
     writes: Set[Dep]
     index_exprs: Set[IndexExprDep]
     range_vars: List[sympy.Expr]
-    var_ranges: Optional[typing.Dict[sympy.Expr, sympy.Expr]] = None
+    var_ranges: Optional[VarRanges] = None
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -131,13 +135,13 @@ class ReadWrites:
 
 
 class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
-    def __init__(self, var_ranges, normalize):
+    def __init__(self, var_ranges: VarRanges, normalize: bool):
         super(RecordLoadStore, self).__init__()
-        self._reads = set()
-        self._writes = set()
-        self._index_exprs = set()
-        self._var_ranges = var_ranges
-        self._normalize = normalize
+        self._reads: Set[MemoryDep] = set()
+        self._writes: Set[MemoryDep] = set()
+        self._index_exprs: Set[IndexExprDep] = set()
+        self._var_ranges: VarRanges = var_ranges
+        self._normalize: bool = normalize
 
     def canonicalize(
         self, index: sympy.Expr
@@ -165,30 +169,32 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr, upcast: bool = False) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"load({name}, {index}, {upcast})"
 
-    def store(self, name, index, value, mode=None):
+    def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"store({name}, {index}, {value}, {mode})"
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(
+        self, name: str, dtype, src_dtype, reduction_type, index, value
+    ) -> str:
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 
-    def index_expr(self, index, dtype):
+    def index_expr(self, index: sympy.Expr, dtype) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
         return f"index_expr({index}, {dtype})"
 
 
-def var_builder(prefix):
+def var_builder(prefix: str) -> Tuple[VarRanges, Callable]:
     cnt = itertools.count()
-    var_ranges = collections.OrderedDict()
+    var_ranges: VarRanges = collections.OrderedDict()
 
-    def add_var(length):
+    def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy.Symbol(f"{prefix}{next(cnt)}", is_integer=True)
         var_ranges[v] = length
         return v
@@ -196,20 +202,20 @@ def var_builder(prefix):
     return var_ranges, add_var
 
 
-def index_vars_no_squeeze(*argsizes, prefix):
+def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args = []
+    args: List[List[sympy.Symbol]] = []
     for size in argsizes:
         args.append(list(map(add_var, size)))
     return args, var_ranges
 
 
-def index_vars_squeeze(*argsizes, prefix="d"):
+def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
     from torchinductor.ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args = []
-    new_sizes = []
+    args: List[List[sympy.Expr]] = []
+    new_sizes: List[List[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -217,18 +223,25 @@ def index_vars_squeeze(*argsizes, prefix="d"):
     return new_sizes, args, var_ranges
 
 
-def extract_read_writes(fn, *argsizes, normalize=False, prefix="d"):
+def extract_read_writes(
+    fn: Callable,
+    *argsizes: Tuple[sympy.Expr, ...],
+    normalize: bool = False,
+    prefix: str = "d",
+):
     _, args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
-    with V.set_ops_handler(rw):
+    with V.set_ops_handler(rw):  # type: ignore[call-arg]
         fn(*args)
 
     if normalize:
-        range_vars = None  # Number of vars could differ due to normalization
+        range_vars = []  # Number of vars could differ due to normalization
     else:
         range_vars = [*itertools.chain(*args)]
 
-    return ReadWrites(rw._reads, rw._writes, rw._index_exprs, range_vars, var_ranges)
+    return ReadWrites(
+        set(rw._reads), set(rw._writes), rw._index_exprs, range_vars, var_ranges
+    )
 
 
 def canonicalization_prefix():
