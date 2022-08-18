@@ -404,6 +404,7 @@ class ParsePerformanceLogs(Parser):
             x="name",
             y=labels,
             kind="bar",
+            width=0.65,
             title=title,
             ylabel="Speedup over eager",
             xlabel="",

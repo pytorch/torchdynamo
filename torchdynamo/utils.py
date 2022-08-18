@@ -283,7 +283,7 @@ def is_jit_model(model0):
     )
 
 
-def torchscript(model, example_inputs, verbose=True):
+def torchscript(model, example_inputs, verbose=False):
     if is_jit_model(model):
         # already done?
         return model
@@ -296,6 +296,8 @@ def torchscript(model, example_inputs, verbose=True):
         except Exception:
             if verbose:
                 log.exception("jit error")
+            else:
+                log.error("Both torch.jit.trace and torch.jit.script failed")
     return None
 
 
