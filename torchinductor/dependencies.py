@@ -3,6 +3,7 @@ import dataclasses
 import itertools
 import logging
 import typing
+from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
@@ -25,13 +26,14 @@ class MemoryDep(typing.NamedTuple):
     index: sympy.Expr  # type: ignore[assignment]
     size: Tuple[sympy.Expr, ...]
 
-    def broadcast_extend_sizes(self, extra_sizes: List[sympy.Expr]):
+    def broadcast_extend_sizes(self, extra_sizes: List[sympy.Expr]) -> "MemoryDep":
         size = (*self.size, *[x for x in extra_sizes if x != 1])
         return MemoryDep(self.name, self.index, size)
 
-    def maybe_swap_sizes(self):
+    def maybe_swap_sizes(self) -> "MemoryDep":
         # swap only in simple cases where index is trivial and
         # there are just 2 sizes
+        print(self.index)
         if (
             len(self.size) == 2
             and len(self.index.args) == 0
@@ -46,29 +48,31 @@ class MemoryDep(typing.NamedTuple):
         else:
             return self
 
-    def strip_last_size(self):
+    def strip_last_size(self) -> "MemoryDep":
         nsizes = len(self.size)
-        if nsizes >= 1 and len(self.index.args) <= nsizes - 1:
-            # make sure last dim index is not used
-            prefix = canonicalization_prefix()
-            len_prefix = len(prefix)
-            prefixes = [fs.name[:len_prefix] for fs in self.index.free_symbols]
-            assert (
-                len(prefixes) == 0 or prefix in prefixes
-            ), "index expression should contain canonicalized symbols"
-            last_index = f"{prefix}{len(self.size)-1}"
-            if last_index not in self.index.free_symbols:
-                size = self.size[:-1]
-                return MemoryDep(self.name, self.index, size)
-            else:
-                return self
+        assert (
+            nsizes >= 1 and len(self.index.args) <= nsizes - 1
+        ), "Only used on reductions"
+        # make sure last dim index is not used
+        prefix = canonicalization_prefix()
+        len_prefix = len(prefix)
+        prefixes = [fs.name[:len_prefix] for fs in self.index.free_symbols]
+        assert (
+            len(prefixes) == 0 or prefix in prefixes
+        ), "index expression should contain canonicalized symbols"
+        last_index = f"{prefix}{len(self.size)-1}"
+        if last_index not in self.index.free_symbols:
+            size = self.size[:-1]
+            return MemoryDep(self.name, self.index, size)
+        else:
+            return self
 
-    def rename(self, renames):
+    def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
             return MemoryDep(renames[self.name], self.index, self.size)
         return self
 
-    def is_simple(self):
+    def is_simple(self) -> bool:
         s = str(self.index)
         if "indirect" in s:
             return False
@@ -81,12 +85,12 @@ class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
 
-    def rename(self, renames):
+    def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
             return StarDep(renames[self.name])
         return self
 
-    def is_simple(self):
+    def is_simple(self) -> bool:
         return False
 
 
@@ -101,9 +105,9 @@ class ReadWrites:
     writes: Set[Dep]
     index_exprs: Set[IndexExprDep]
     range_vars: List[sympy.Expr]
-    var_ranges: Optional[typing.Dict[sympy.Expr, sympy.Expr]]
+    var_ranges: Optional[typing.Dict[sympy.Expr, sympy.Expr]] = None
 
-    def rename(self, renames: typing.Dict[str, str]):
+    def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
             {dep.rename(renames) for dep in self.reads},
             {dep.rename(renames) for dep in self.writes},
@@ -112,7 +116,7 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, name: str):
+    def with_read(self, name: str) -> "ReadWrites":
         assert isinstance(name, str)
         return ReadWrites(
             set.union(self.reads, {StarDep(name)}),
@@ -132,7 +136,9 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         self._var_ranges = var_ranges
         self._normalize = normalize
 
-    def canonicalize(self, index):
+    def canonicalize(
+        self, index: sympy.Expr
+    ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
         sizes = list(self._var_ranges.values())
         sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:

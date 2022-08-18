@@ -103,6 +103,6 @@ class triton:
     many_files = False
 
     # use triton.autotune?
-    autotune = True
+    autotune = False
 
     use_bmm = False
