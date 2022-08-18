@@ -125,8 +125,7 @@ def cpp_prefix():
             float randn_cpu(uint32_t seed, uint32_t offset) {
                 at::Philox4_32 engine(seed, 0, offset);
                 return engine.randn(10);
-            }
-            
+            }            
             """
         ),
         "h",
