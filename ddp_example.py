@@ -103,7 +103,7 @@ def hf_bert(rank, world_size):
     model_container = Model('train', 'cuda')
     model, (inputs, ) = model_container.get_module()
     model.to(rank)
-    ddp_model = DDP(model, device_ids=[rank], bucket_cap_mb=400)
+    ddp_model = DDP(model, device_ids=[rank], bucket_cap_mb=25)
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
     optimizer.zero_grad()
@@ -131,4 +131,6 @@ def run_demo(demo_fn, world_size):
 if __name__ == "__main__":
     # run_demo(demo_basic, 1)
     # run_demo(hf_bert, 1)
+    # demo_basic(0, 1)
+    # torchdynamo.reset()
     hf_bert(0, 1)

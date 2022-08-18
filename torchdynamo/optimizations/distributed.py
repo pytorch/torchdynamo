@@ -1,9 +1,11 @@
 import itertools
-from typing import Dict
+from typing import Any, Dict, Iterator, Optional, Tuple, Union
 from typing import List
 
 import torch
 import torch.fx as fx
+from torch.fx.node import Argument, Node, Target, map_aggregate
+from torch.fx.proxy import Proxy
 
 
 class DDPOptimizer:
@@ -45,10 +47,10 @@ class DDPOptimizer:
                     ]
                 )
                 bucket_bytes += params_size_b
-                print(f"accumulated {params_size_b} b from {node}")
+                # print(f"accumulated {params_size_b} b from {node}")
             else:
                 # TODO(whc) confirm this:
-                # e.g. call_method, call_function aren't supported, as they wouldn't be supported by DDP either.
+                # (e.g. call_method, call_function aren't expected to 'have' parameters)
                 pass
 
             node_splits[0].append(node)
@@ -73,27 +75,43 @@ class DDPOptimizer:
         for p, nodes in enumerate(node_splits):
             for node in nodes:
                 partition_map[node] = p
+        
+        # hack to split each node for debugging
+        # partition_map = {node: idx for idx, node in enumerate(gm.graph.nodes)}
+
         split_gm = fx.passes.split_module.split_module(
             gm, None, lambda node: partition_map[node]
         )
-
+        x = gm.graph.python_code(gm)
+        with open(f"debug.log", "w") as dump_file:
+            dump_file.write("---orig graph---")
+            dump_file.write(str(gm.graph))
+            dump_file.write("\n---split graph---")
+            dump_file.write(str(split_gm.graph))
+        
+        
+        def args_str(args):
+            if torch.is_tensor(args):
+                return f"T[{args.shape}]"
+            elif isinstance(args, tuple):
+                return f"tuple({', '.join([args_str(x) for x in args])})"
+            elif isinstance(args, list):
+                return f"list({', '.join([args_str(x) for x in args])})"
+            else:
+                return str(args)
         # 3: compile each of the partitioned submodules using the user-provided compiler
-        new_graph = fx.Graph()
-        val_map: Dict[fx.Node, fx.Node] = {}
-        subgraph_example_inputs = example_inputs
-        for node in split_gm.graph.nodes:
-            if node.op == "call_module":
+        class SubmodCompiler(torch.fx.interpreter.Interpreter):
+            def __init__(self, module, compiler):
+                super().__init__(module)
+                self.compiler = compiler
 
-                # submods may return a single tensor or a tuple
-                # but AotAutograd requires even single-tensors to be wrapped in tuples
-                # we have to wrap/unwrap the special case singleton-tuples using this wrapper
-                submod = split_gm.get_submodule(node.target)
-                unwrap_singleton_tuple = False
-                for sn in submod.graph.nodes:
-                    if sn.op == "output":
-                        if not isinstance(sn.args[0], tuple):
-                            unwrap_singleton_tuple = True
-                            sn.args = (sn.args,)
+            def compile_submod(self, submod, args, kwargs):
+                """
+                Compile the submodule,
+                using a wrapper to make sure its output is always a tuple,
+                which is required by AotAutograd based compilers
+                """
+                assert len(kwargs) == 0, "We assume only args for these modules"
 
                 class WrapperModule(torch.nn.Module):
                     def __init__(self, compiled_submod, unwrap_singleton_tuple):
@@ -102,27 +120,64 @@ class DDPOptimizer:
                         self.unwrap_singleton_tuple = unwrap_singleton_tuple
 
                     def forward(self, *args):
-                        if self.unwrap_singleton_tuple:
-                            return self.compiled_submod(*args)[0]
-                        return self.compiled_submod(*args)
+                        x = self.compiled_submod(*args)
+                        print(f"wrapper produced {args_str(x)}")
+                        if self.unwrap_singleton_tuple and isinstance(x, tuple):
+                            print(f"wrapper returning {args_str(x[0])}")
+                            return x[0]
+                        print(f"wrapper returning {args_str(x)}")
+                        return x
 
+                unwrap_singleton_tuple = False
+                for sn in submod.graph.nodes:
+                    if sn.op == "output":
+                        if not isinstance(sn.args[0], tuple):
+                            print(f"checking for tuples: {args_str(sn.args)}")
+                            unwrap_singleton_tuple = True
+                            sn.args = (sn.args,)
+                            # submod.recompile() 
                 wrapper = WrapperModule(
-                    self.backend_compile_fn(submod, subgraph_example_inputs),
+                    self.compiler(submod, args),
                     unwrap_singleton_tuple,
                 )
+                return wrapper
 
-                # propagate the example inputs for use when compiling next submod
-                subgraph_example_inputs = wrapper.compiled_submod(
-                    *subgraph_example_inputs
-                )
+            def run_node(self, n : Node) -> Any:
+                """
+            
+                """
+                import torch.fx.traceback as fx_traceback
+                with fx_traceback.append_stack_trace(n.stack_trace):
+                    args, kwargs = self.fetch_args_kwargs_from_env(n)
+                    print(f"run_node {n.op}, {n.target} got args {args_str(args)}")
+                    assert isinstance(args, tuple)
+                    assert isinstance(kwargs, dict)
 
-                # replace the original submod with the compiled one in its wrapper
-                split_gm.delete_submodule(node.target)
-                split_gm.add_submodule(node.target, wrapper,
-                )
+                    # modify the currently running FX graph
+                    # maybe this isn't sound in general, but only changing the target of a node might be ok?
+                    if n.op == "call_module":
+                        submod = self.fetch_attr(n.target)
+                        print("--compile submod")
+                        with open(f"debug.log", "a") as dump_file:
+                            dump_file.write(f"\n---{n.target} graph---")
+                            dump_file.write(str(submod.graph))
+                        compiled_submod = self.compile_submod(submod, args, kwargs)
+                        print("--replace submod")
+                        n.target = 'compiled_' + n.target
+                        # self.module.delete_submodule(n.target)
+                        self.module.add_submodule(n.target, compiled_submod)
 
-            val_map[node] = new_graph.node_copy(node, lambda n: val_map[n])
-        split_gm.graph = new_graph
+                    # then we execute the modified node using the usual logic
+                    print(f"--execute call_module {getattr(self,n.op)}")
+                    return getattr(self, n.op)(n.target, args, kwargs)
+
+        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
+        print("---run submod compiler---")
+        submod_compiler.run(*example_inputs)
+        print("---end submod compiler---")
+        with open(f"debug.log", "a") as dump_file:
+            dump_file.write(f"\n---final graph---")
+            dump_file.write(str(split_gm.graph))
 
         if self.debug:
             print("DDPOptimizer compiled the split graphs:")
