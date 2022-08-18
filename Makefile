@@ -3,6 +3,7 @@
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
             $(wildcard test/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
             $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py) $(wildcard .circleci/*.py)
+MYPY_FILES := torchinductor/dependencies.py
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -36,6 +37,7 @@ lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
+	mypy --show-error-codes $(MYPY_FILES)
 	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
 		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`

@@ -4,7 +4,10 @@ import itertools
 import logging
 import typing
 from typing import List
+from typing import Optional
 from typing import Set
+from typing import Tuple
+from typing import Union
 
 import sympy
 
@@ -14,13 +17,15 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+Dep = Union["MemoryDep", "StarDep"]
+
 
 class MemoryDep(typing.NamedTuple):
     name: str
-    index: sympy.Expr
-    size: List[sympy.Expr]
+    index: sympy.Expr  # type: ignore[assignment]
+    size: Tuple[sympy.Expr, ...]
 
-    def broadcast_extend_sizes(self, extra_sizes):
+    def broadcast_extend_sizes(self, extra_sizes: List[sympy.Expr]):
         size = (*self.size, *[x for x in extra_sizes if x != 1])
         return MemoryDep(self.name, self.index, size)
 
@@ -86,17 +91,17 @@ class StarDep(typing.NamedTuple):
 
 
 class IndexExprDep(typing.NamedTuple):
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     size: List[sympy.Expr]
 
 
 @dataclasses.dataclass
 class ReadWrites:
-    reads: Set[MemoryDep]
-    writes: Set[MemoryDep]
+    reads: Set[Dep]
+    writes: Set[Dep]
     index_exprs: Set[IndexExprDep]
     range_vars: List[sympy.Expr]
-    var_ranges: typing.Dict[sympy.Expr, sympy.Expr] = None
+    var_ranges: Optional[typing.Dict[sympy.Expr, sympy.Expr]]
 
     def rename(self, renames: typing.Dict[str, str]):
         return ReadWrites(
@@ -118,7 +123,7 @@ class ReadWrites:
         )
 
 
-class RecordLoadStore(V.MockHandler):
+class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges, normalize):
         super(RecordLoadStore, self).__init__()
         self._reads = set()
