@@ -10,6 +10,10 @@ torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
 
+# The flag below controls whether to allow TF32 on matmul.
+torch.backends.cuda.matmul.allow_tf32 = True
+
+
 class Func(object):
     # mm
     @torchdynamo.optimize("inductor")
@@ -67,9 +71,9 @@ def bench(shape, layer_id, p, fusion_types=[""]):
         def fn():
             return fn_mm(*args)
 
-        torchinductor.config.triton.use_mm = False
+        torchinductor.config.triton.mm = "aten"
         torch_mm_ms, _, _ = triton.testing.do_bench(fn)
-        torchinductor.config.triton.use_mm = True
+        torchinductor.config.triton.mm = "triton"
         # reset to force code gen new python code
         torchdynamo.reset()
         torchinductor.metrics.reset()

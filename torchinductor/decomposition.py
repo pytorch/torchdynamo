@@ -22,7 +22,6 @@ decompositions = get_decompositions(
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
-        aten.clamp,
         aten.clamp_max,
         aten.clamp_min,
         aten.cudnn_batch_norm,
@@ -33,6 +32,7 @@ decompositions = get_decompositions(
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
+        aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
         aten.gelu_backward,
@@ -47,6 +47,7 @@ decompositions = get_decompositions(
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
+        aten.linalg_vector_norm,
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
@@ -60,6 +61,9 @@ decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
+        aten.new_empty,
+        aten.new_full,
+        aten.new_ones,
         aten.nll_loss_backward,
         aten.norm,
         aten.reflection_pad2d_backward,
@@ -98,6 +102,20 @@ def register_decomposition(ops):
     return decomp.register_decomposition(ops, decompositions, disable_meta=True)
 
 
+@register_decomposition([aten.detach_])
+def detach_(x):
+    return x
+
+
+@register_decomposition([aten.clamp])
+def clamp(x, min=None, max=None):
+    if min is not None:
+        x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
+    if max is not None:
+        x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
+    return x
+
+
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2):
     return torch.mm(mat1, mat2) + input
@@ -122,16 +140,6 @@ def log2(x):
 def round_dec(x, decimals=0):
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
-
-
-@register_decomposition([aten.div.Tensor_mode])
-def div_mode(a, b, rounding_mode=None):
-    result = aten.div(a, b)
-    if rounding_mode == "floor":
-        return torch.floor(result)
-    if rounding_mode == "trunc":
-        return torch.trunc(result)
-    return result
 
 
 @register_decomposition([aten.special_erf, aten.erf])
@@ -165,10 +173,12 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill.Scalar])
+@register_decomposition([aten.masked_fill])
 def masked_fill(value, mask, other):
     if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
+    if other.device != value.device and other.numel() == 1:
+        other = other.to(value.device)
     value, mask, other = torch.broadcast_tensors(value, mask, other)
     return torch.where(mask, other, value)
 

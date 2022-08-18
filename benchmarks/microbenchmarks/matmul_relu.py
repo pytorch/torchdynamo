@@ -4,7 +4,7 @@ from benchmark_helper import time_with_torch_timer
 import torchdynamo
 import torchinductor.config as inductor_config
 
-inductor_config.triton.use_mm = True
+inductor_config.triton.mm = "triton"
 
 
 @torchdynamo.optimize("inductor", nopython=True)

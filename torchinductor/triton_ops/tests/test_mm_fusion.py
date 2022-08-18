@@ -8,6 +8,9 @@ from torchdynamo.testing import rand_strided
 torchinductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
+# The flag below controls whether to allow TF32 on matmul.
+torch.backends.cuda.matmul.allow_tf32 = True
+
 class Func(object):
     @torchdynamo.optimize("inductor")
     def mm(x, w, bias):
@@ -47,14 +50,14 @@ def test(shape, fusion_type="add"):
     else:
         mm_fusion = getattr(Func, f"mm_{fusion_type}")
     # torchinductor from template
-    torchinductor.config.triton.use_mm = True
+    torchinductor.config.triton.mm = "triton"
     torchinductor.metrics.reset()
     y = mm_fusion(a, b, bias)
     assert torchinductor.metrics.generated_kernel_count == 1, f"codegen #kernel != 1"
     # baseline
     # reset to force code gen new python code
     torchdynamo.reset()
-    torchinductor.config.triton.use_mm = False
+    torchinductor.config.triton.mm = "aten"
     y_correct = mm_fusion(a, b, bias)
     assert(same(y, y_correct, cos_similarity=True))
 

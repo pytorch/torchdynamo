@@ -1,5 +1,18 @@
 import os
 import textwrap
+from functools import lru_cache
+
+if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
+
+    @lru_cache(None)
+    def _record_missing_op(target):
+        with open("/tmp/missing_ops.txt", "a") as fd:
+            fd.write(str(target) + "\n")
+
+else:
+
+    def _record_missing_op(target):
+        pass
 
 
 class OperatorIssue(RuntimeError):
@@ -13,13 +26,25 @@ class OperatorIssue(RuntimeError):
         return textwrap.indent("\n".join(lines), "  ")
 
 
-class MissingOperator(OperatorIssue):
+class MissingOperatorWithoutDecomp(OperatorIssue):
     def __init__(self, target, args, kwargs):
-        if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
-            with open("/tmp/missing_ops.txt", "a") as fd:
-                fd.write(str(target) + "\n")
+        _record_missing_op(target)
+        super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
+
+
+class MissingOperatorWithDecomp(OperatorIssue):
+    def __init__(self, target, args, kwargs):
+        _record_missing_op(target)
         super().__init__(
-            f"missing lowering/decomposition\n{self.operator_str(target, args, kwargs)}"
+            f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
+            + textwrap.dedent(
+                f"""
+
+                There is a decomposition available for {target} in
+                torch._decomp.get_decompositions().  Please add this operator to the
+                `decompositions` list in `./torchinductor/decomposition.py`.
+                """
+            )
         )
 
 

@@ -292,47 +292,18 @@ class GradModeVariable(ContextWrappingVariable):
             return "no_grad"
 
 
-class ProfileRecordFunctionVariable(ContextWrappingVariable):
-    def __init__(self, target_value, initial_value=None, **kwargs):
-        kwargs_edited = kwargs
-        super(ProfileRecordFunctionVariable, self).__init__(
-            target_value=target_value, initial_value=initial_value, **kwargs_edited
-        )
+class FakeContextWrappingVariable(ContextManagerVariable):
+    def __init__(self, **kwargs):
+        super(FakeContextWrappingVariable, self).__init__(**kwargs)
 
     def enter(self, tx):
-        self.enter = True
-        super(ProfileRecordFunctionVariable, self).enter(tx)
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        self.enter = False
-        super(ProfileRecordFunctionVariable, self).exit(tx)
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def _call_func(self, tx, value):
-        if self.enter:
-            self.proxy_value = tx.output.create_proxy(
-                "call_function",
-                torch.ops.profiler._record_function_enter,
-                (value,),
-                {},
-                current_tx=tx,
-            )
-        else:
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.profiler._record_function_exit,
-                (self.proxy_value,),
-                {},
-                current_tx=tx,
-            )
-
-    def _func_name(self):
-        if self.enter:
-            return "torch.ops.profiler._record_function_enter"
-        else:
-            return "torch.ops.profiler._record_function_exit"
-
-    def _initial_value(self):
-        return self.target_value
+    def fn_name(self):
+        return "autograd.profiler.profile"
 
 
 class WithExitFunctionVariable(VariableTracker):
@@ -573,7 +544,7 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented("call torchdynamo.disable() wrapped function")
+            unimplemented(f"call torchdynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -624,3 +595,9 @@ class NumpyVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented("numpy")
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value

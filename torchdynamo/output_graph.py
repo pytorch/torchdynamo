@@ -88,6 +88,7 @@ class OutputGraph(fx.Tracer):
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
+        self.unspec_variable_map = {}
 
     @property
     def output(self):
@@ -143,7 +144,7 @@ class OutputGraph(fx.Tracer):
         placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
 
         # unique
-        used_names = {n.name for n in placeholders}
+        used_names = {n.target for n in placeholders}
         if name in used_names:
             for i in itertools.count():
                 if f"{name}_{i}" not in used_names:
