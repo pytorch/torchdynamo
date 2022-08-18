@@ -2,13 +2,10 @@ import logging
 import math
 import numbers
 from enum import Enum
-from typing import Optional
-from typing import Tuple
 
 import torch
 import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
-from torch import Tensor
 from torch._decomp import get_decompositions
 
 from torchinductor import config
