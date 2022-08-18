@@ -1,6 +1,7 @@
 black==22.6.0
 flake8==4.0.1
 isort==5.10.1
+mypy==0.960
 click>=8.1
 expecttest
 Jinja2

@@ -969,12 +969,12 @@ class SqueezeView(BaseView):
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
-    def squeezer(size):
+    def squeezer(size: Tuple[sympy.Expr, ...]):
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index):
+        def reindex(index: List[sympy.Expr]) -> List[sympy.Expr]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.Integer(0)] * length
             for idx, s in zip(not_one, index):
