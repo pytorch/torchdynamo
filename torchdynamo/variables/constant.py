@@ -1,6 +1,10 @@
 import operator
+from typing import Callable
 from typing import Dict
 from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import Union
 
 import torch
 
@@ -12,12 +16,12 @@ from .base import typestr
 
 
 class ConstantVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value: Optional[Union[str, Tuple[str], int]], **kwargs) -> None:
         super(ConstantVariable, self).__init__(**kwargs)
         assert not isinstance(value, torch.Tensor)
         self.value = value
 
-    def as_proxy(self):
+    def as_proxy(self) -> Optional[Union[str, int]]:
         return self.value
 
     def __str__(self):
@@ -27,7 +31,7 @@ class ConstantVariable(VariableTracker):
     def python_type(self):
         return type(self.value)
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Union[str, int]:
         return self.value
 
     @property
@@ -45,7 +49,7 @@ class ConstantVariable(VariableTracker):
         )
 
     @staticmethod
-    def is_literal(obj):
+    def is_literal(obj: Callable) -> bool:
         if type(obj) in (int, float, bool, type(None), str):
             return True
         if type(obj) in (list, tuple, set, frozenset):

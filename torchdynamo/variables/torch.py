@@ -1,11 +1,14 @@
 import re
 import types
+from typing import Callable
 from typing import Dict
 from typing import List
 
 import torch._C
 import torch.nn
 
+from torchdynamo.variables.base import VariableTracker
+from torchdynamo.variables.constant import ConstantVariable
 from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import ProfileRecordFunctionVariable
 
@@ -26,7 +29,7 @@ from .tensor import TensorWithTFOverrideVariable
 class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value: Callable, **kwargs) -> None:
         super(TorchVariable, self).__init__(**kwargs)
 
         self.value = value
@@ -75,7 +78,7 @@ class TorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def can_constant_fold_through(self):
+    def can_constant_fold_through(self) -> bool:
         if self.value in (
             torch._assert,
             torch.device,
@@ -89,7 +92,10 @@ class TorchVariable(VariableTracker):
         return getattr(self.value, "__module__", None) == "math"
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
         from . import ConstantVariable
         from . import GradModeVariable
@@ -237,7 +243,9 @@ class TorchVariable(VariableTracker):
 
             return tensor_variable
 
-    def is_dynamic_shapes(self, args, kwargs):
+    def is_dynamic_shapes(
+        self, args: List[ConstantVariable], kwargs: Dict[str, ConstantVariable]
+    ) -> bool:
         """Check for dynamic shapes when shape specialization is enabled"""
         # TODO(jansel): need to get a complete list
         if self.value in (

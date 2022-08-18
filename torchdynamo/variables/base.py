@@ -5,6 +5,10 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
+from typing import Union
+
+from torchdynamo.guards import Guard
+from torchdynamo.source import Source
 
 from .. import variables
 from ..exc import unimplemented
@@ -42,7 +46,9 @@ class VariableTracker:
     _nonvar_fields = ["value"]
 
     @staticmethod
-    def propagate(*vars: List[List["VariableTracker"]]):
+    def propagate(
+        *vars: List[List["VariableTracker"]],
+    ) -> Dict[str, Union[Set[Any], Set[Guard]]]:
         """Combine the guards from many VariableTracker into **kwargs for a new instance"""
         guards = set()
 
@@ -66,7 +72,7 @@ class VariableTracker:
             "guards": guards,
         }
 
-    def clone(self, **kwargs):
+    def clone(self, **kwargs) -> "VariableTracker":
         """Shallow copy with some (optional) changes"""
         args = dict(self.__dict__)
         args.update(kwargs)
@@ -79,8 +85,11 @@ class VariableTracker:
 
     @classmethod
     def apply(
-        cls, fn: Callable[["VariableTracker"], "VariableTracker"], value, cache=None
-    ):
+        cls,
+        fn: Callable[["VariableTracker"], "VariableTracker"],
+        value: Any,
+        cache: Optional[Any] = None,
+    ) -> Any:
         """
         Walk this object and call fn on all the VariableTracker
         instances to produce a new VariableTracker with the results.
@@ -118,11 +127,13 @@ class VariableTracker:
     def add_guard(self, guard):
         return self.clone(guards=set.union(self.guards, {guard}))
 
-    def add_guards(self, guards):
+    def add_guards(self, guards: Set[Guard]) -> "VariableTracker":
         assert isinstance(guards, set)
         return self.clone(guards=set.union(self.guards, guards))
 
-    def add_options(self, options, *more):
+    def add_options(
+        self, options: Union[Dict[str, Set[Guard]], "GetAttrVariable"], *more
+    ) -> "VariableTracker":
         if more:
             return self.add_options(options).add_options(*more)
         if isinstance(options, VariableTracker):
@@ -130,7 +141,7 @@ class VariableTracker:
         assert isinstance(options, dict)
         return self.add_guards(options.get("guards", set()))
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}()"
 
     def __repr__(self):
@@ -143,14 +154,16 @@ class VariableTracker:
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         try:
             self.as_python_constant()
             return True
         except NotImplementedError:
             return False
 
-    def as_specialized(self, tx):
+    def as_specialized(
+        self, tx: "InstructionTranslator"
+    ) -> Union["ConstantVariable", "VariableTracker"]:
         """
         For specialized variables, return itself,
         For unspecialized variables, convert to constant variable and return.
@@ -175,11 +188,11 @@ class VariableTracker:
         new_guards.update(self.source.create_guard(fn) for fn in fns)
         return new_guards
 
-    def const_getattr(self, tx, name: str) -> Any:
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError()
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
         value = self.const_getattr(tx, name)
@@ -251,7 +264,7 @@ class VariableTracker:
         guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
-    ):
+    ) -> None:
         super(VariableTracker, self).__init__()
         self.guards = guards or set()
         self.source = source

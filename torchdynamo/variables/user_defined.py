@@ -35,7 +35,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         options = VariableTracker.propagate(self)
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -51,8 +51,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_method(
         self,
-        tx,
-        name,
+        tx: "InstructionTranslator",
+        name: str,
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
@@ -108,7 +108,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
-    def const_getattr(self, tx, name):
+    def const_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)

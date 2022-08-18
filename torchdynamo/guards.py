@@ -25,7 +25,6 @@ from . import mutation_guard
 from ._guards import TensorGuards
 from ._guards import check_obj_id
 from ._guards import check_type_id
-from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
 from .exc import unimplemented
 from .utils import dict_const_keys
@@ -625,6 +624,8 @@ def guard_error_hook(
     )
     print(" ", " and\n  ".join(guard_fn.code_parts))
 
+
+from .eval_frame import set_guard_error_hook
 
 set_guard_error_hook(guard_error_hook)
 

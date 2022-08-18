@@ -4,16 +4,21 @@ import itertools
 import math
 import operator
 import types
+from typing import Callable
 from typing import Dict
 from typing import List
+from typing import Union
 
 import numpy as np
 import torch
 
 from torchdynamo.guards import GuardBuilder
+from torchdynamo.variables.base import VariableTracker
 from torchdynamo.variables.dicts import ConstDictVariable
+from torchdynamo.variables.misc import GetAttrVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
 from torchdynamo.variables.tensor import FakeItemVariable
+from torchdynamo.variables.torch import TorchVariable
 
 from .. import config
 from .. import variables
@@ -28,7 +33,6 @@ from ..utils import istype
 from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import MutableLocal
-from .base import VariableTracker
 
 
 class BuiltinVariable(VariableTracker):
@@ -96,7 +100,7 @@ class BuiltinVariable(VariableTracker):
         fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
         return fns
 
-    def can_constant_fold_through(self):
+    def can_constant_fold_through(self) -> bool:
         return self.fn in self._constant_fold_functions()
 
     @staticmethod
@@ -137,10 +141,10 @@ class BuiltinVariable(VariableTracker):
         }
         return fns
 
-    def can_insert_in_graph(self):
+    def can_insert_in_graph(self) -> bool:
         return self.fn in self._fx_graph_functions()
 
-    def __init__(self, fn, **kwargs):
+    def __init__(self, fn: Callable, **kwargs) -> None:
         super(BuiltinVariable, self).__init__(**kwargs)
         self.fn = fn
 
@@ -167,7 +171,7 @@ class BuiltinVariable(VariableTracker):
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
 
-    def tensor_args(self, *args, **kwargs):
+    def tensor_args(self, *args, **kwargs) -> bool:
         return any(
             isinstance(i, variables.TensorVariable)
             for i in itertools.chain(args, kwargs.values())
@@ -176,7 +180,7 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
-    def unspec_numpy_args(self, *args, **kwargs):
+    def unspec_numpy_args(self, *args, **kwargs) -> bool:
         return all(
             isinstance(
                 i,
@@ -192,7 +196,7 @@ class BuiltinVariable(VariableTracker):
             for x in itertools.chain(args, kwargs.values())
         )
 
-    def unspec_python_args(self, *args, **kwargs):
+    def unspec_python_args(self, *args, **kwargs) -> bool:
         return check_unspec_python_args(args, kwargs)
 
     @staticmethod
@@ -224,7 +228,10 @@ class BuiltinVariable(VariableTracker):
         return unwrapped_args, unwrapped_kwargs
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
@@ -619,8 +626,12 @@ class BuiltinVariable(VariableTracker):
             return value
 
     def call_getattr(
-        self, tx, obj: VariableTracker, name_var: VariableTracker, default=None
-    ):
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        name_var: VariableTracker,
+        default: None = None,
+    ) -> Union[GetAttrVariable, TorchVariable]:
         from . import ConstantVariable
         from . import GetAttrVariable
         from . import PythonModuleVariable

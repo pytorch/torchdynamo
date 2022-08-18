@@ -8,8 +8,6 @@ from typing import List
 
 import torch.nn
 
-from torchdynamo.variables.lists import SliceVariable
-
 from .. import skipfiles
 from .. import variables
 from ..allowed_functions import is_allowed
@@ -324,6 +322,8 @@ class NNModuleVariable(VariableTracker):
                 torch.nn.ParameterList.__getitem__,
             ), typestr(module)
             assert self.source
+
+            from torchdynamo.variables.lists import SliceVariable
 
             if isinstance(args[0], SliceVariable):
                 # Build a TupleVariable of NNModules

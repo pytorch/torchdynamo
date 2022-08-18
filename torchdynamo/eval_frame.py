@@ -6,6 +6,12 @@ import logging
 import threading
 import types
 import warnings
+from typing import Any
+from typing import Callable
+from typing import List
+from typing import Optional
+from typing import Type
+from typing import Union
 from unittest.mock import patch
 
 import torch
@@ -64,11 +70,11 @@ def remove_from_cache(f):
         log.warning("could not determine __code__ for %s", f)
 
 
-def nothing():
+def nothing() -> None:
     pass
 
 
-def innermost_fn(fn):
+def innermost_fn(fn: Callable) -> Union[Callable, Any]:
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
@@ -84,11 +90,11 @@ def innermost_fn(fn):
 class _TorchDynamoContext:
     def __init__(
         self,
-        callback,
-        on_enter=nothing,
-        backend_ctx_ctor=null_context,
-        patch_fn=nothing,
-    ):
+        callback: Optional[Callable],
+        on_enter: Callable = nothing,
+        backend_ctx_ctor: Type[Any] = null_context,
+        patch_fn: Union[Callable, functools._lru_cache_wrapper] = nothing,
+    ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback = callback
@@ -97,18 +103,18 @@ class _TorchDynamoContext:
         self.extra_ctx_ctor = backend_ctx_ctor
         patch_fn()
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: None, exc_val: None, exc_tb: None) -> None:
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
-    def __call__(self, fn):
+    def __call__(self, fn: Callable) -> Callable:
         fn = innermost_fn(fn)
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -173,7 +179,7 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor):
+    def __init__(self, callback: Callable, backend_ctx_ctor: Type[Any]) -> None:
         def on_enter():
             global most_recent_backend
             if (
@@ -199,11 +205,11 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(callback=None)
 
 
-def catch_errors_wrapper(callback):
+def catch_errors_wrapper(callback: Callable) -> Callable:
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         try:
@@ -228,18 +234,20 @@ def catch_errors_wrapper(callback):
     return catch_errors
 
 
-def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
+def _optimize_catch_errors(
+    compile_fn: Callable, backend_ctx_ctor: Type[Any] = null_context
+) -> OptimizeContext:
     return OptimizeContext(
         catch_errors_wrapper(compile_fn), backend_ctx_ctor=backend_ctx_ctor
     )
 
 
 class WrapperBackend:
-    def __init__(self, backend=None):
+    def __init__(self, backend: Optional[Callable] = None) -> None:
         self.backend = backend
 
     @property
-    def example_inputs(self):
+    def example_inputs(self) -> List[torch.Tensor]:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
@@ -275,7 +283,7 @@ class WrapperBackend:
             self.restore()
 
 
-def get_compiler_fn(compiler_fn):
+def get_compiler_fn(compiler_fn: Union[str, Any]) -> Union[Any, Callable]:
     """Expand backend strings to functions"""
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
@@ -289,7 +297,7 @@ def get_compiler_fn(compiler_fn):
     return compiler_fn
 
 
-def optimize(backend, nopython=False):
+def optimize(backend: Union[str, Any], nopython: bool = False) -> OptimizeContext:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -443,7 +451,7 @@ def export(f, *args, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, guard_export_fn=None):
+def optimize_assert(backend: Any, guard_export_fn: None = None) -> OptimizeContext:
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
@@ -466,7 +474,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None):
+def disable(fn: Optional[Callable] = None) -> Callable:
     """Decorator and context manager to disable TorchDynamo"""
     if fn is not None:
         fn = innermost_fn(fn)
@@ -492,7 +500,7 @@ def skip(fn=None):
 class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
-    def patch():
+    def patch() -> None:
         # Disable TorchDynamo on some torch.* compilers generated frames
         torch.jit.trace = disable(torch.jit.trace)
         torch.jit.trace_module = disable(torch.jit.trace_module)
@@ -533,7 +541,7 @@ class TorchPatcher:
             setattr(opt.step, "hooked", True)
 
     @staticmethod
-    def suppress_torch_distributed_warnings(fn):
+    def suppress_torch_distributed_warnings(fn: Callable) -> Callable:
         def inner_fn(*args, **kwargs):
             warnings.filterwarnings(
                 "ignore", category=UserWarning, module="torch.distributed"

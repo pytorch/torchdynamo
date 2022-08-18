@@ -8,10 +8,13 @@ import traceback
 import types
 import typing
 import weakref
+from typing import Any
 from typing import Callable
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+
+from torchdynamo.eval_frame import WrapperBackend
 
 from . import config
 from . import exc
@@ -45,7 +48,7 @@ log = logging.getLogger(__name__)
 
 
 class Tracker:
-    def __init__(self):
+    def __init__(self) -> None:
         self.seen = []
         self.seen_ids = set()
 
@@ -59,7 +62,7 @@ class Tracker:
     def __contains__(self, item):
         return id(item) in self.seen_ids
 
-    def clear(self):
+    def clear(self) -> None:
         self.seen.clear()
         self.seen_ids.clear()
 
@@ -77,7 +80,9 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_compiler_fn(compiler_fn):
+def wrap_compiler_fn(
+    compiler_fn: typing.Union[Any, typing.Callable]
+) -> typing.Union[WrapperBackend, Any]:
     """WrapperBackend if config.verify_correctness is True"""
     if config.verify_correctness:
         # wrap backend if verify_correctness is True
@@ -89,7 +94,7 @@ def wrap_compiler_fn(compiler_fn):
     return compiler_fn
 
 
-def wrap_convert_context(fn):
+def wrap_convert_context(fn: typing.Callable) -> typing.Callable:
     """
     Context manager to:
         1) Save/restore torch random state
@@ -184,7 +189,9 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
+def convert_frame_assert(
+    compiler_fn: Callable, guard_export_fn: None = None, one_graph: bool = True
+) -> typing.Callable:
     """Fully convert a frame into an FX graph"""
     init_logging()
 
@@ -342,7 +349,9 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
     return wrap_convert_context(_convert_frame_assert)
 
 
-def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
+def convert_frame(
+    compiler_fn: typing.Callable, guard_export_fn: None = None
+) -> typing.Callable:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
 

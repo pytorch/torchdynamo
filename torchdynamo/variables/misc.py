@@ -3,6 +3,7 @@ import sys
 import types
 from typing import Dict
 from typing import List
+from typing import Union
 
 import torch._C
 
@@ -10,6 +11,8 @@ from torchdynamo.variables.functions import UserFunctionVariable
 from torchdynamo.variables.functions import UserMethodVariable
 from torchdynamo.variables.functions import WrappedUserFunctionVariable
 from torchdynamo.variables.functions import WrappedUserMethodVariable
+from torchdynamo.variables.tensor import TensorVariable
+from torchdynamo.variables.user_defined import UserDefinedClassVariable
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -445,7 +448,9 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
-    def __init__(self, obj, name, **kwargs):
+    def __init__(
+        self, obj: Union[UserDefinedClassVariable, TensorVariable], name: str, **kwargs
+    ) -> None:
         super(GetAttrVariable, self).__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
@@ -474,7 +479,10 @@ class GetAttrVariable(VariableTracker):
         return codegen.create_load_attrs(self.name)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
 
         # This variable is True when it corresponds to user code such as

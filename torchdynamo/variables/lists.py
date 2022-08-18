@@ -1,7 +1,14 @@
 from typing import Dict
 from typing import List
+from typing import Optional
+from typing import Type
 
 import torch
+
+from torchdynamo.bytecode_transformation import Instruction
+from torchdynamo.codegen import PyCodegen
+from torchdynamo.variables.base import VariableTracker
+from torchdynamo.variables.constant import ConstantVariable
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -24,13 +31,13 @@ class BaseListVariable(VariableTracker):
             tuple: TupleVariable,
         }[obj]
 
-    def __init__(self, items: List[VariableTracker], **kwargs):
+    def __init__(self, items: List[VariableTracker], **kwargs) -> None:
         super(BaseListVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
         self.items: List[VariableTracker] = items
 
-    def _as_proxy(self):
+    def _as_proxy(self) -> List[Optional[int]]:
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
@@ -206,10 +213,10 @@ class ListVariable(BaseListVariable):
 
 
 class TupleVariable(BaseListVariable):
-    def python_type(self):
+    def python_type(self) -> Type[tuple]:
         return tuple
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: PyCodegen) -> List[Instruction]:
         codegen.foreach(self.items)
         return [create_instruction("BUILD_TUPLE", len(self.items))]
 
@@ -295,7 +302,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items: List[ConstantVariable], **kwargs) -> None:
         start, stop, step = [variables.ConstantVariable(None)] * 3
         if len(items) == 1:
             (stop,) = items
@@ -307,7 +314,7 @@ class SliceVariable(BaseListVariable):
             assert False
         super().__init__([start, stop, step], **kwargs)
 
-    def as_proxy(self):
+    def as_proxy(self) -> slice:
         return slice(*self._as_proxy())
 
     def python_type(self):

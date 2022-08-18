@@ -19,10 +19,6 @@ from .utils import istype
 from .utils import rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
-from .variables.tensor import TensorWithTFOverrideVariable
-from .variables.tensor import UnspecializedNumpyVariable
-from .variables.tensor import UnspecializedPythonVariable
 
 
 @dataclasses.dataclass
@@ -78,6 +74,11 @@ class PyCodegen(object):
         if self.top_of_stack is value:
             output.append(create_instruction("DUP_TOP"))
             return
+
+        from .variables.tensor import TensorVariable
+        from .variables.tensor import TensorWithTFOverrideVariable
+        from .variables.tensor import UnspecializedNumpyVariable
+        from .variables.tensor import UnspecializedPythonVariable
 
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
