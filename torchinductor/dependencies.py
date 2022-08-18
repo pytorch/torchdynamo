@@ -152,7 +152,6 @@ class ReadWrites:
             index_exprs,
         )
 
-
 class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super(RecordLoadStore, self).__init__()
