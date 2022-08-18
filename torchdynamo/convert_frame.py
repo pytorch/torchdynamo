@@ -83,6 +83,7 @@ def wrap_compiler_fn(compiler_fn):
         # wrap backend if verify_correctness is True
         wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
 
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
         return wrapper_backend_compiler_fn
 
     return compiler_fn
@@ -113,6 +114,7 @@ def wrap_convert_context(fn):
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
+    _fn._torchdynamo_orig_callable = fn
     return _fn
 
 
@@ -292,6 +294,8 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
                 except exc.SkipFrame:
+                    if one_graph and config.debug:
+                        print("ERROR: No graph captured with one_graph=True")
                     return None
             output_codes.add(code)
             if config.debug:
@@ -334,6 +338,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
             raise InternalTorchDynamoError()
 
+    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
     return wrap_convert_context(_convert_frame_assert)
 
 
@@ -356,4 +361,5 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
             pass
         return None
 
+    _convert_frame._torchdynamo_orig_callable = compiler_fn
     return _convert_frame

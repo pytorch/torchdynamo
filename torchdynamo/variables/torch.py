@@ -1,3 +1,4 @@
+import logging
 import re
 import types
 from typing import Dict
@@ -7,18 +8,22 @@ import torch._C
 import torch.nn
 
 from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import ProfileRecordFunctionVariable
+from torchdynamo.variables.misc import FakeContextWrappingVariable
 
 from .. import config
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..utils import check_constant_args
+from ..utils import check_unspec_python_args
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
+
+log = logging.getLogger(__name__)
 
 
 class TorchVariable(VariableTracker):
@@ -94,12 +99,14 @@ class TorchVariable(VariableTracker):
         from . import TensorVariable
 
         constant_args = check_constant_args(args, kwargs)
+        unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
-        elif self.can_constant_fold_through() and constant_args:
+        elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return ConstantVariable(
                 self.as_python_constant()(
@@ -193,9 +200,14 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
+        elif self.value is torch.autograd.profiler.profile:
+            if len(args) == 0 or len(args) > 0 and args[0]:
+                log.warning("Profiler will be ignored")
+            return FakeContextWrappingVariable(**options)
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
-            return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
+            log.warning("Profiler will be ignored")
+            return FakeContextWrappingVariable(**options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]

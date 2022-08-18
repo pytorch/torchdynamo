@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import logging
 from typing import Dict
 from typing import List
 
@@ -9,7 +10,10 @@ from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from .utils import freeze_inputs
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -57,6 +61,8 @@ class SizeVarAllocator(object):
     def simplify(self, expr):
         return sympy.expand(expr).subs(self.replacements)
 
+    @freeze_inputs
+    @functools.lru_cache(256)
     def simplify_with_ranges(self, expr, var_ranges):
         """
         Simplify indexing expression with knowledge of the ranges of
@@ -65,9 +71,6 @@ class SizeVarAllocator(object):
         from .ir import IndexingDiv
         from .ir import ModularIndexing
 
-        if isinstance(var_ranges, tuple):
-            assert len(var_ranges) == 1, var_ranges
-            var_ranges = var_ranges[0]
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
@@ -278,7 +281,13 @@ class SizeVarAllocator(object):
         for v in index.free_symbols:
             if str(v).startswith("indirect"):
                 index = index.subs({v: 0})
-        return [self.size_hint(s) for s in self.stride_vars(index, vars)]
+        result = []
+        for s in self.stride_vars(index, vars):
+            try:
+                result.append(self.size_hint(s))
+            except TypeError:
+                result.append(0)
+        return result
 
     def stride_order(self, index: sympy.Expr, vars: List[sympy.Symbol]):
         strides = tuple(map(abs, self.stride_hints(index, vars)))
@@ -339,6 +348,7 @@ class SizeVarAllocator(object):
         return f"({', '.join(parts)})"
 
 
+@functools.lru_cache(256)
 def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
     """
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
@@ -416,9 +426,11 @@ class SimplifyIndexing(V.WrapperHandler):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
         return self._inner.store(name, index, value, mode=mode)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.reduction(name, dtype, reduction_type, index, value)
+        return self._inner.reduction(
+            name, dtype, src_dtype, reduction_type, index, value
+        )
 
     def index_expr(self, index, dtype):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)

@@ -1,15 +1,13 @@
+import dataclasses
 import functools
-import itertools
 import logging
 import operator
 import os
-import textwrap
 from typing import List
 
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
-import torchdynamo.config
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize
@@ -19,11 +17,21 @@ from torchdynamo.utils import init_logging
 
 from . import config
 from . import overrides
+from .debug_utils import dump_to_minify
+from .debug_utils import dump_to_repro
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class BoxedBool:
+    value: bool
+
+    def __bool__(self):
+        return self.value
 
 
 class CheckEachNode(torch.fx.Interpreter):
@@ -62,48 +70,6 @@ class CheckEachNode(torch.fx.Interpreter):
         return expected
 
 
-def dump_to_repro(gm, *args):
-    with open(os.path.join(torchdynamo.config.base_dir, "repro.py"), "w") as fd:
-        fd.write(
-            textwrap.dedent(
-                """
-                import torch
-                import torchdynamo
-                from torchdynamo.testing import rand_strided, same
-                """
-            )
-        )
-        fd.write("class Repro:\n")
-        for i in itertools.count():
-            try:
-                val = getattr(gm, f"_tensor_constant{i}")
-            except AttributeError:
-                break
-            fd.write(f"    _tensor_constant{i} = {val.item()!r}\n")
-        fd.write(textwrap.indent(gm.code, "    "))
-        fd.write("\n")
-
-        fd.write("args = (\n")
-        for arg in args:
-            fd.write(
-                f"  rand_strided({tuple(arg.size())!r}, {tuple(arg.stride())!r},"
-                f" {arg.dtype!r}, {arg.device.type!r}),"
-            )
-            fd.write("\n")
-        fd.write(")\n")
-        fd.write(
-            textwrap.dedent(
-                """
-                expected = Repro().forward(*args)
-                with torchdynamo.optimize("inductor", nopython=True):
-                    actual = Repro().forward(*args)
-                assert same(actual, expected)
-                """
-            )
-        )
-        print("wrote repro.py")
-
-
 def compile_fx_python_key(
     model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
 ):
@@ -140,6 +106,8 @@ def compile_fx_inner(
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
+    if config.repro_level == 3:
+        dump_to_minify(gm, example_inputs)
     try:
         graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
         with V.set_graph_handler(graph):
@@ -154,17 +122,28 @@ def compile_fx_inner(
             and set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
         ):
-            return cudagraphify(
+            compiled_fn = cudagraphify(
                 compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
             )
-        elif cudagraphs and set(graph.device_types) == {"cuda"}:
-            log.warning("skipping cudagraphs due to input mutation")
-        elif cudagraphs and len(graph.device_types) > 1:
-            log.warning("skipping cudagraphs due to multple devices")
+        elif cudagraphs:
+            if isinstance(cudagraphs, BoxedBool):
+                # Disable cudagraphs in the backwards pass too:
+                cudagraphs.value = False
+
+            if set(graph.device_types) == {"cuda"}:
+                log.warning("skipping cudagraphs due to input mutation")
+            elif set(graph.device_types) != {"cpu"}:
+                log.warning("skipping cudagraphs due to multiple devices")
+
+        if config.repro_level > 0:
+            compiled_fn(*example_inputs)
+
         return compiled_fn
     except Exception:
-        if os.environ.get("TORCHINDUCTOR_DUMP_REPRO") == "1":
-            wrap(functools.partial(dump_to_repro, gm))(*example_inputs)
+        if config.repro_level == 1:
+            dump_to_repro(gm, example_inputs)
+        elif config.repro_level == 2:
+            dump_to_minify(gm, example_inputs)
 
         raise
 
@@ -248,20 +227,25 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
     num_example_inputs = len(example_inputs_)
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         if config.debug:
             print("FORWARD GRAPH:")
             model.graph.print_tabular()
         fixed = len(example_inputs) - num_example_inputs
-        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+        return compile_fx_inner(
+            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+        )
 
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         if config.debug:
             print("BACKWARD GRAPH:")
             model.graph.print_tabular()
         fixed = count_tangents(model)
-        return compile_fx_inner(model, example_inputs, num_fixed=fixed)
+        return compile_fx_inner(
+            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+        )
 
     with overrides.patch_functions():
         return aot_autograd(
@@ -270,7 +254,9 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
             decompositions=decompositions,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
         )
 
 

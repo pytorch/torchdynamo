@@ -18,6 +18,7 @@ from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
 from .guards import CheckFunctionManager
 from .guards import GuardedCode
+from .optimizations import BACKENDS
 from .utils import same
 
 unsupported = torchdynamo.eval_frame.unsupported
@@ -113,6 +114,28 @@ class CompileCounter:
                 self.op_count += 1
         return gm.forward
 
+    def clear(self):
+        self.frame_count = 0
+        self.op_count = 0
+
+
+class CompileCounterWithBackend:
+    def __init__(self, backend):
+        self.frame_count = 0
+        self.op_count = 0
+        self.backend = backend
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.frame_count += 1
+        for node in gm.graph.nodes:
+            if "call" in node.op:
+                self.op_count += 1
+        if self.backend == "inductor":
+            from torchinductor.compile_fx import compile_fx
+
+            return compile_fx(gm, example_inputs)
+        return BACKENDS[self.backend](gm, example_inputs)
+
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
     if torchdynamo.config.dynamic_shapes and expected_ops_dynamic is not None:
@@ -134,11 +157,13 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
     correct1 = fn(*args1)
     correct2 = fn(*args2)
+    torchdynamo.reset()
     with torchdynamo.optimize_assert(actual):
         val1a = fn(*args1)
         val2a = fn(*args2)
         val1b = fn(*args1)
         val2b = fn(*args2)
+    torchdynamo.reset()
     self.assertTrue(same(val1a, correct1))
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
@@ -199,7 +224,5 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     if dtype.is_floating_point:
         buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
-        buffer = torch.randint(
-            low=0, high=2, size=[needed_size], dtype=dtype, device=device
-        )
+        buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)

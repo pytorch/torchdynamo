@@ -6,7 +6,6 @@ import dis
 import enum
 import functools
 import math
-import random
 import sys
 import typing
 import unittest
@@ -642,6 +641,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+        torchdynamo.reset()
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
             self.assertTrue(same(fn(obj2), correct2))
@@ -1019,6 +1019,32 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_optimize_on_module(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def custom_member(self):
+                # Just for checking that Dynamo returned mod object can redirect
+                # to this method
+                pass
+
+            def forward(self, x):
+                return self.relu(x)
+
+        cnts1 = torchdynamo.testing.CompileCounter()
+        mod = MockModule()
+        optimized_mod = torchdynamo.optimize(cnts1, nopython=True)(mod)
+
+        a = torch.randn(10)
+        ref = mod(a)
+        res = optimized_mod(a)
+
+        optimized_mod.custom_member()
+
+        self.assertTrue(same(ref, res))
+
     def test_nested_optimize_decorator(self):
         cnts2 = torchdynamo.testing.CompileCounter()
         cnts3 = torchdynamo.testing.CompileCounter()
@@ -1039,6 +1065,55 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts2.frame_count, 0)
         self.assertEqual(cnts3.frame_count, 1)
         self.assertEqual(cnts3.op_count, 4)
+
+    def test_nested_optimize_run(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts, nopython=True)
+        def fn(x):
+            return torch.relu(torch.cos(x) + torch.sin(x))
+
+        fn(torch.randn(4))
+        self.assertEqual(cnts.frame_count, 1)
+
+        fn(torch.randn(4, 4))
+        self.assertEqual(cnts.frame_count, 2)
+
+        # Test that run works on a decorated fn
+        fn = torchdynamo.run(fn)
+        fn(torch.randn(4, 4, 4))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nested_optimize(self):
+        cnts1 = torchdynamo.testing.CompileCounter()
+        cnts2 = torchdynamo.testing.CompileCounter()
+
+        def fn(x):
+            return torch.relu(torch.cos(x) + torch.sin(x))
+
+        fn1 = torchdynamo.optimize(cnts1, nopython=True)(fn)
+        fn2 = torchdynamo.optimize(cnts2, nopython=True)(fn1)
+
+        # The first optimize in the nesting should be ignored
+        fn2(torch.randn(4))
+        self.assertEqual(cnts2.frame_count, 1)
+        self.assertEqual(cnts1.frame_count, 0)
+
+        # Since the fn code object is already compiled, calling fn1 should
+        # directly call the compiled_fn callable.
+        torchdynamo.run()(fn1)(torch.randn(4))
+        self.assertEqual(cnts1.frame_count, 0)
+
+        # Test same behavior by reversing the calls
+        torchdynamo.reset()
+        cnts1 = torchdynamo.testing.CompileCounter()
+        cnts2 = torchdynamo.testing.CompileCounter()
+        fn1 = torchdynamo.optimize(cnts1, nopython=True)(fn)
+        fn2 = torchdynamo.optimize(cnts2, nopython=True)(fn1)
+        fn1(torch.randn(4))
+        self.assertEqual(cnts1.frame_count, 1)
+        torchdynamo.run()(fn2)(torch.randn(4))
+        self.assertEqual(cnts2.frame_count, 0)
 
     def test_nested_disable_decorator(self):
         cnts = torchdynamo.testing.CompileCounter()
@@ -1220,6 +1295,25 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    def test_autograd_profiler(self):
+        # wrap torch.autograd.profiler.* as FakeContextWrappingVariable and do nothing
+        def fn(x):
+            y = x**2
+            with torch.autograd.profiler.profile():
+                y = y + 2
+                with torch.autograd.profiler.record_function("my_function"):
+                    z = y**3
+                    z.tolist()  # graph break
+                    z = z + 1
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res = fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
@@ -1346,6 +1440,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, Foo.FOO)
         self.assertEqual(cnts.op_count, 2)
 
+        torchdynamo.reset()
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts, nopython=True):
             fn(x, Foo.BAR)
@@ -1368,6 +1463,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             m(data, correct_ref_id)
         self.assertEqual(cnts.op_count, 2)
 
+        torchdynamo.reset()
         cnts = torchdynamo.testing.CompileCounter()
         incorrect_ref_id = id(m) + 1
         with torchdynamo.optimize(cnts, nopython=True):
@@ -1407,6 +1503,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             fn(x, torch.add)
         self.assertEqual(cnts.op_count, 2)
 
+        torchdynamo.reset()
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts, nopython=True):
             fn(x, torch.mul)
@@ -1424,6 +1521,7 @@ class MiscTests(torchdynamo.testing.TestCase):
             with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
                 f(x)
 
+        torchdynamo.reset()
         with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
             with torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter()):
                 f(x)
@@ -1622,93 +1720,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(len(module_dict), len(modules))
         for k1, m2 in zip(modules, module_dict.children()):
             self.assertTrue(modules[k1] is m2)
-
-    def test_unspecialized_primitive_variable(self):
-        # correctness check
-        def fn(x, y, z):
-            xy = [x + y, y, False]
-            np_x = x.numpy()
-            np_y = y.numpy()
-            return {
-                "x": x,
-                "z": z,
-                "a": np_y.sum(),
-                "b": xy,
-                "c": np_y[0][0] / 68,
-                "d": np_x.sum(),
-            }, x + np_y.sum() + z
-
-        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-        y = torch.ones([2, 2], dtype=torch.int64)
-        z = np.int64(12)
-        res1 = fn(x, y, z)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res2 = fn(x, y, z)
-        self.assertTrue(same(res1, res2))
-
-    def test_unspecialized_primitive_variable2(self):
-        # no recompilations if passing on different numpy int values
-        def fn(x, y):
-            return {"a": x + 1, "b": y / 2}
-
-        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            for i in range(10):
-                fn(x, np.int64(i))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
-
-    def test_unspecialized_primitive_variable3(self):
-        # test unspecialized primitive max/min
-        def fn(x, y, z):
-            return z + 1, max(x, y), min(x - 4, y)
-
-        x = np.int64(12)
-        y = 10
-        z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-        res1 = fn(x, y, z)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res2 = fn(x, y, z)
-        self.assertTrue(same(res1, res2))
-
-    def test_unspecialized_primitive_variable4(self):
-        # test random functions
-        def fn(x):
-            r1 = random.random()
-            y = x + random.uniform(10, 20)
-            y.sum().item()
-            r2 = random.randint(2, 18)  # no graph output in this frame
-            y.sum().item()
-            return y + r1, r2
-
-        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-        random.seed(1)
-        res1 = fn(x)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            random.seed(1)
-            res2 = fn(x)
-        self.assertTrue(same(res1, res2))
-
-    def test_unspecialized_primitive_variable5(self):
-        # test inserting random output into graph only
-        def fn(shape):
-            torch.manual_seed(123)
-            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
-            return x
-
-        shape = [2, 3]
-        random.seed(1)
-        res1 = fn(shape)
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            random.seed(1)
-            res2 = fn(shape)
-
-        self.assertTrue(same(res1, res2))
 
     def test_side_effects_codegen_update_mutated(self):
         # codegen to update mutated variables with side effect
@@ -2025,6 +2036,48 @@ class MiscTests(torchdynamo.testing.TestCase):
             model_b.foo(prefix="abc")
 
         self.assertEqual(a_names, model_b.names)
+
+    def test_numpy_variable_isinstance(self):
+        def fn(x, m):
+            if isinstance(m, np.ndarray):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.tensor([2.3])
+        m = np.array([1, 2, 3])
+        ref = fn(x, m)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res = fn(x, m)
+        self.assertEqual(ref, res)
+
+    def test_change_backends(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def fn1():
+            return x + 1
+
+        @torchdynamo.optimize("ts")
+        def fn2():
+            return x + 2
+
+        @torchdynamo.optimize("eager", nopython=False)
+        def fn3():
+            return x + 1
+
+        x = torch.tensor([3, 5])
+
+        fn1()
+        fn1()
+        fn3()
+        self.assertRaises(torchdynamo.exc.ResetRequired, fn2)
+        fn1()
+        torchdynamo.reset()
+        fn2()
+        fn2()
+        self.assertRaises(torchdynamo.exc.ResetRequired, fn1)
+        self.assertRaises(torchdynamo.exc.ResetRequired, fn3)
+        fn2()
 
 
 class TestTracer(JitTestCase):

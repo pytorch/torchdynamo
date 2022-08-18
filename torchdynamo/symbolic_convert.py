@@ -439,12 +439,12 @@ class InstructionTranslatorBase(object):
 
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
-        if level.as_python_constant() != 0:
-            unimplemented("IMPORT_NAME with level")
-
-        # Import name imports the top level package
-        module_name = inst.argval.split(".")[0]
-        value = importlib.import_module(module_name)
+        module_name = inst.argval
+        value = __import__(
+            module_name,
+            fromlist=fromlist.as_python_constant(),
+            level=level.as_python_constant(),
+        )
         source = self.import_source(module_name)
 
         if is_allowed(value):
@@ -545,6 +545,8 @@ class InstructionTranslatorBase(object):
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
+        left = left.as_specialized(self)
+        right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_is_const = {
@@ -734,7 +736,12 @@ class InstructionTranslatorBase(object):
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        self.push(SliceVariable(items, **options))
+        self.push(
+            SliceVariable(
+                [x.as_specialized(self) for x in items],
+                **options,
+            )
+        )
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
@@ -1185,7 +1192,9 @@ class InstructionTranslatorBase(object):
         self.f_code: types.CodeType = f_code
 
         if fake_tensors_available:
-            self._fake_mode = torch._subclasses.FakeTensorMode(inner=None)
+            with torch._subclasses.FakeTensorMode() as fake_mode:
+                pass
+            self._fake_mode = fake_mode
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []

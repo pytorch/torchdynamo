@@ -81,6 +81,7 @@ class Guard:
     name: str
     source: GuardSource
     create_fn: Callable
+    is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
     guard_types: Optional[List[str]] = None
@@ -151,9 +152,9 @@ def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
     """
-    m = re.search(r"[a-z0-9_]+\(([^(),]+)[^()]*\)", name)
-    if m:
-        return strip_function_call(m.group(1))
+    m = re.search(r"([a-z0-9_]+)\(([^(),]+)[^()]*\)", name)
+    if m and m.group(1) != "slice":
+        return strip_function_call(m.group(2))
     return strip_getattr_getitem(name)
 
 
@@ -193,6 +194,8 @@ class GuardBuilder:
             name = guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
+            if re.match(r"^\d+$", base):
+                log.warning(f"invalid var name: {guard}")
             self.argnames.append(base)
 
         return name
