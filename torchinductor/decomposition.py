@@ -102,11 +102,6 @@ def register_decomposition(ops):
     return decomp.register_decomposition(ops, decompositions, disable_meta=True)
 
 
-@register_decomposition([aten.detach_])
-def detach_(x):
-    return x
-
-
 @register_decomposition([aten.clamp])
 def clamp(x, min=None, max=None):
     if min is not None:
@@ -362,7 +357,7 @@ def conj_physical(self):
     return self
 
 
-@register_decomposition([aten.lift])
+@register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
 
