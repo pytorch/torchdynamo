@@ -291,8 +291,6 @@ def torchscript(model, example_inputs, verbose=True):
     try:
         return torch.jit.trace(model, example_inputs)
     except Exception:
-        if verbose:
-            log.exception("jit error")
         try:
             return torch.jit.script(model)
         except Exception:
