@@ -1518,7 +1518,7 @@ class MutationLayout(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            target.get_stride(),
+            None,  # type: ignore[arg-type]
         )
         self.target = target
 
