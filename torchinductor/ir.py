@@ -622,9 +622,17 @@ class Reduction(Loops):
     @staticmethod
     def default_value(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
-            return float("-inf") if is_float_dtype(dtype) else -(2**31)
+            return (
+                torch.finfo(dtype).min
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).min
+            )
         if reduction_type in {"min", "argmin"}:
-            return float("inf") if is_float_dtype(dtype) else 2**31 - 1
+            return (
+                torch.finfo(dtype).max
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).max
+            )
         return {
             "sum": 0,
             "any": 0,
