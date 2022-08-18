@@ -10,7 +10,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+            - env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -18,16 +18,22 @@ jobs:
       - run:
           name: TorchBench install
           command: |
-            source .circleci/setup_env.sh
-            conda install -y -c conda-forge git-lfs
-            git lfs install --skip-repo
-            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
-            # above doesn't work due to git-lfs auth issues, workaround with a tarball:
-            wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
-            tar jxvf torchbenchmark.tar.bz2
-            (cd torchbenchmark && python install.py)
+            FILE=torchbenchmark/env-v2.key
+            if test -f "$FILE"; then
+              # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
+              echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
+            else
+              source .circleci/setup_env.sh
+              conda install -y -c conda-forge git-lfs
+              git lfs install --skip-repo
+              # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+              # above doesn't work due to git-lfs auth issues, workaround with a tarball:
+              wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+              tar jxvf torchbenchmark.tar.bz2
+              (cd torchbenchmark && python install.py && touch env-v2.key)
+            fi
       - save_cache:
-          key: env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
             - env
@@ -62,7 +68,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+            - env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -70,16 +76,22 @@ jobs:
       - run:
           name: TorchBench install
           command: |
-            source .circleci/setup_env.sh
-            conda install -y -c conda-forge git-lfs
-            git lfs install --skip-repo
-            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
-            # above doesn't work due to git-lfs auth issues, workaround with a tarball:
-            wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
-            tar jxvf torchbenchmark.tar.bz2
-            (cd torchbenchmark && python install.py)
+            FILE=torchbenchmark/env-v2.key
+            if test -f "$FILE"; then
+              # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
+              echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
+            else
+              source .circleci/setup_env.sh
+              conda install -y -c conda-forge git-lfs
+              git lfs install --skip-repo
+              # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+              # above doesn't work due to git-lfs auth issues, workaround with a tarball:
+              wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+              tar jxvf torchbenchmark.tar.bz2
+              (cd torchbenchmark && python install.py && touch env-v2.key)
+            fi
       - save_cache:
-          key: env-v1.0-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
           paths:
             - conda
             - env
