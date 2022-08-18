@@ -118,7 +118,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            # This is a rare compile_subgraph that bypasses unimplemented
             self.output.compile_subgraph(self, msg="generic_jump")
             self.pop()
 
