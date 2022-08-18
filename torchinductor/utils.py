@@ -1,6 +1,7 @@
 import functools
 import operator
 import time
+from typing import Dict
 
 import numpy as np
 import sympy
@@ -8,6 +9,8 @@ import torch
 from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
+
+VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 @functools.lru_cache(None)

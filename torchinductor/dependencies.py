@@ -16,6 +16,7 @@ import sympy
 
 from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
+from .utils import VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -103,9 +104,6 @@ class IndexExprDep(typing.NamedTuple):
     size: Tuple[sympy.Expr, ...]
 
 
-VarRanges = Dict[sympy.Expr, sympy.Expr]
-
-
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[Dep]
@@ -190,7 +188,7 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         return f"index_expr({index}, {dtype})"
 
 
-def var_builder(prefix: str) -> Tuple[VarRanges, Callable]:
+def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = collections.OrderedDict()
 
