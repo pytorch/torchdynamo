@@ -118,7 +118,8 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            self.output.compile_subgraph(self)
+            # This is a rare compile_subgraph that bypasses unimplemented
+            self.output.compile_subgraph(self, msg="generic_jump")
             self.pop()
 
             if_next = self.create_call_resume_at(self.next_instruction)
@@ -147,6 +148,7 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
+            msg = None
             try:
                 return inner_fn(self, inst)
             except Unsupported as exc:
@@ -154,8 +156,9 @@ def break_graph_if_unsupported(*, push):
                     raise
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
+                msg = exc.msg
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self)
+            self.output.compile_subgraph(self, msg=msg)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
@@ -318,7 +321,7 @@ class InstructionTranslatorBase(object):
             exc.SkipFrame,
             exc.TorchRuntimeError,
             exc.Unsupported,
-        ):
+        ) as e:
             raise
         except Exception as e:
             if config.debug or config.trace or config.print_internal_exceptions:
@@ -714,7 +717,7 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(prior)
 
         # break the graph
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(self, "store_attr")
         self.output.add_output_instructions([inst])
         self.popn(2)
         self.output.add_output_instructions(
