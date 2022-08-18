@@ -1,16 +1,41 @@
 import itertools
-from typing import Any, Dict, Iterator, Optional, Tuple, Union
+from typing import Any
+from typing import Dict
+from typing import Iterator
 from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import Union
 
 import torch
 import torch.fx as fx
-from torch.fx.node import Argument, Node, Target, map_aggregate
+import torch.fx.traceback as fx_traceback
+from torch.fx.node import Argument
+from torch.fx.node import Node
+from torch.fx.node import Target
+from torch.fx.node import map_aggregate
 from torch.fx.proxy import Proxy
+
+
+def args_str(args):
+    # a debug helper
+    if torch.is_tensor(args):
+        return f"T[{args.shape}]"
+    elif isinstance(args, tuple):
+        return f"tuple({', '.join([args_str(x) for x in args])})"
+    elif isinstance(args, list):
+        return f"list({', '.join([args_str(x) for x in args])})"
+    else:
+        return str(args)
 
 
 class DDPOptimizer:
     def __init__(
-        self, bucket_bytes_cap: int, parameters_to_ignore: List[str], backend_compile_fn, debug=False
+        self,
+        bucket_bytes_cap: int,
+        parameters_to_ignore: List[str],
+        backend_compile_fn,
+        debug=False,
     ):
         self.bucket_bytes_cap = bucket_bytes_cap
         self.parameters_to_ignore = parameters_to_ignore
@@ -75,35 +100,27 @@ class DDPOptimizer:
         for p, nodes in enumerate(node_splits):
             for node in nodes:
                 partition_map[node] = p
-        
-        # hack to split each node for debugging
+
+        # hack to make each node its own graph (for debugging)
         # partition_map = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
         split_gm = fx.passes.split_module.split_module(
             gm, None, lambda node: partition_map[node]
         )
         x = gm.graph.python_code(gm)
-        with open(f"debug.log", "w") as dump_file:
-            dump_file.write("---orig graph---")
-            dump_file.write(str(gm.graph))
-            dump_file.write("\n---split graph---")
-            dump_file.write(str(split_gm.graph))
-        
-        
-        def args_str(args):
-            if torch.is_tensor(args):
-                return f"T[{args.shape}]"
-            elif isinstance(args, tuple):
-                return f"tuple({', '.join([args_str(x) for x in args])})"
-            elif isinstance(args, list):
-                return f"list({', '.join([args_str(x) for x in args])})"
-            else:
-                return str(args)
+        if self.debug:
+            with open(f"debug_ddp_optimizer.log", "w") as dump_file:
+                dump_file.write("---orig graph---")
+                dump_file.write(str(gm.graph))
+                dump_file.write("\n---split graph---")
+                dump_file.write(str(split_gm.graph))
+
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
-            def __init__(self, module, compiler):
+            def __init__(self, module, compiler, debug=False):
                 super().__init__(module)
                 self.compiler = compiler
+                self.debug = debug
 
             def compile_submod(self, submod, args, kwargs):
                 """
@@ -121,35 +138,31 @@ class DDPOptimizer:
 
                     def forward(self, *args):
                         x = self.compiled_submod(*args)
-                        print(f"wrapper produced {args_str(x)}")
+                        # TODO(whc)
+                        # for some reason the isinstance check is necessary if I split one node per submod
+                        # - even though I supposedly wrapped the output in a tuple in those cases, the real
+                        # compiled module was still returning a tensor
                         if self.unwrap_singleton_tuple and isinstance(x, tuple):
-                            print(f"wrapper returning {args_str(x[0])}")
                             return x[0]
-                        print(f"wrapper returning {args_str(x)}")
                         return x
 
                 unwrap_singleton_tuple = False
                 for sn in submod.graph.nodes:
                     if sn.op == "output":
                         if not isinstance(sn.args[0], tuple):
-                            print(f"checking for tuples: {args_str(sn.args)}")
                             unwrap_singleton_tuple = True
                             sn.args = (sn.args,)
-                            # submod.recompile() 
                 wrapper = WrapperModule(
                     self.compiler(submod, args),
                     unwrap_singleton_tuple,
                 )
                 return wrapper
 
-            def run_node(self, n : Node) -> Any:
-                """
-            
-                """
-                import torch.fx.traceback as fx_traceback
+            def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
-                    print(f"run_node {n.op}, {n.target} got args {args_str(args)}")
+                    if self.debug:
+                        print(f"run_node {n.op}, {n.target} got args {args_str(args)}")
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
 
@@ -157,31 +170,24 @@ class DDPOptimizer:
                     # maybe this isn't sound in general, but only changing the target of a node might be ok?
                     if n.op == "call_module":
                         submod = self.fetch_attr(n.target)
-                        print("--compile submod")
-                        with open(f"debug.log", "a") as dump_file:
-                            dump_file.write(f"\n---{n.target} graph---")
-                            dump_file.write(str(submod.graph))
+                        if self.debug:
+                            with open(f"debug_ddp_optimizer.log", "a") as dump_file:
+                                dump_file.write(f"\n---{n.target} graph---")
+                                dump_file.write(str(submod.graph))
                         compiled_submod = self.compile_submod(submod, args, kwargs)
-                        print("--replace submod")
-                        n.target = 'compiled_' + n.target
+                        n.target = "compiled_" + n.target
                         # self.module.delete_submodule(n.target)
                         self.module.add_submodule(n.target, compiled_submod)
 
                     # then we execute the modified node using the usual logic
-                    print(f"--execute call_module {getattr(self,n.op)}")
                     return getattr(self, n.op)(n.target, args, kwargs)
 
-        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
-        print("---run submod compiler---")
+        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, self.debug)
         submod_compiler.run(*example_inputs)
-        print("---end submod compiler---")
-        with open(f"debug.log", "a") as dump_file:
-            dump_file.write(f"\n---final graph---")
-            dump_file.write(str(split_gm.graph))
 
         if self.debug:
-            print("DDPOptimizer compiled the split graphs:")
-            print(split_gm.graph)
-            print()
+            with open(f"debug_ddp_optimizer.log", "a") as dump_file:
+                dump_file.write(f"\n---final graph---")
+                dump_file.write(str(split_gm.graph))
 
         return split_gm

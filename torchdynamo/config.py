@@ -100,4 +100,4 @@ capture_scalar_outputs = False
 # Automatically split model graph into pieces to match DDP bucket sizes
 # to allow DDP comm/compute overlap
 optimize_ddp = True
-debug_optimize_ddp = True
+debug_optimize_ddp = False

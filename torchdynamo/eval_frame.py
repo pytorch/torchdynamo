@@ -214,9 +214,9 @@ def catch_errors_wrapper(callback):
             if config.optimize_ddp:
                 ddp_module = DistributedDataParallel.get_active_ddp_module()
                 if ddp_module and frame.f_code.co_name == "forward":
-                    print(
-                        f"compile for ddp: {frame.f_code.co_name} {frame.f_code.co_filename}"
-                    )
+                    # print(
+                    #     f"compile for ddp: {frame.f_code.co_name} {frame.f_code.co_filename}"
+                    # )
                     with compile_lock:
                         ddp_optimizer = DDPOptimizer(
                             bucket_bytes_cap=ddp_module.bucket_bytes_cap,

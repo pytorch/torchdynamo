@@ -70,9 +70,11 @@ def demo_basic(rank, world_size):
 
     cleanup()
 
+
 def setup_torchbench():
     import os
     import sys
+
     for torchbench_dir in (
         "./torchbenchmark",
         "../torchbenchmark",
@@ -93,24 +95,26 @@ def setup_torchbench():
     sys.path.append(torchbench_dir)
 
 
-
 def hf_bert(rank, world_size):
     print(f"Running hf_bert on rank {rank}.")
     setup(rank, world_size)
 
-    setup_torchbench() 
+    setup_torchbench()
     from torchbenchmark.models.hf_Bert import Model
-    model_container = Model('train', 'cuda')
-    model, (inputs, ) = model_container.get_module()
+
+    model_container = Model("train", "cuda")
+    model, (inputs,) = model_container.get_module()
     model.to(rank)
     ddp_model = DDP(model, device_ids=[rank], bucket_cap_mb=25)
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
     optimizer.zero_grad()
+
     @torchdynamo.optimize("aot_nvfuser")
     def run_model():
         outputs = ddp_model(inputs)
         return outputs
+
     outputs = run_model()
     labels = torch.randn(outputs.logits.shape).to(rank)
     loss_fn(outputs.logits, labels).backward()
@@ -121,7 +125,7 @@ def hf_bert(rank, world_size):
 # torchdynamo.config.trace = True
 torchdynamo.config.debug = False
 torchdynamo.config.optimize_ddp = True
-torchdynamo.config.debug_optimize_ddp = True
+# torchdynamo.config.debug_optimize_ddp = True
 
 
 def run_demo(demo_fn, world_size):
@@ -130,7 +134,7 @@ def run_demo(demo_fn, world_size):
 
 if __name__ == "__main__":
     # run_demo(demo_basic, 1)
-    # run_demo(hf_bert, 1)
+    run_demo(hf_bert, 1)
     # demo_basic(0, 1)
     # torchdynamo.reset()
-    hf_bert(0, 1)
+    # hf_bert(0, 1)
