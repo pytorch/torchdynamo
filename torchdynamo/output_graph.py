@@ -457,7 +457,7 @@ class OutputGraph(fx.Tracer):
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
-        msgs = reversed(traceback.StackSummary.from_list(frame_summaries).format())
+        msgs = traceback.StackSummary.from_list(frame_summaries).format()
         rv.node.stack_trace = "".join(msgs)
 
         return rv
