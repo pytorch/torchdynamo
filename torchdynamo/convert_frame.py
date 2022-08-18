@@ -31,6 +31,7 @@ from .exc import Unsupported
 from .exc import unimplemented
 from .guards import CheckFunctionManager
 from .guards import GuardedCode
+from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
@@ -297,6 +298,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     if one_graph and config.debug:
                         print("ERROR: No graph captured with one_graph=True")
                     return None
+
             output_codes.add(code)
             if config.debug:
                 debug_print("ORIGINAL BYTECODE")
@@ -363,3 +365,87 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn
     return _convert_frame
+
+
+# TODO mlazos: add support for same args
+def replay(filename):
+    with open(filename, "rb") as in_file:
+        record = ExecutionRecord.load(in_file)
+    record.globals = globals()
+    output = None
+    one_graph = False
+    guard_export_fn = None
+
+    def transform(instructions, code_options):
+        nonlocal output
+        tracer = InstructionTranslator(
+            instructions,
+            None,
+            record.locals,
+            record.globals,
+            record.builtins,  # TODO mlazos: fill this in
+            record.code_options,  # TODO mlazos: fill this in
+            lambda: None,
+            one_graph,
+        )
+        tracer.run()
+        output = tracer.output
+        assert output.output_instructions
+        instructions[:] = output.output_instructions
+        code_options.update(output.code_options)
+
+        if config.dead_code_elimination:
+            instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+
+    def debug_print(prefix):
+        if not config.debug:
+            return
+        print(
+            f"\n{prefix}",
+            record.code_options["co_name"],
+            record.code_options["co_filename"],
+            record.code_options["co_firstlineno"],
+        )
+        print(record.instrs)
+
+    try:
+        for attempt in itertools.count():
+            try:
+                transform(record.instrs, record.code_options)
+                break
+            except exc.RestartAnalysis:
+                if attempt > 100:
+                    unimplemented("100+ RestartAnalysis() calls")
+            except exc.SkipFrame:
+                if one_graph and config.debug:
+                    print("ERROR: No graph captured with one_graph=True")
+                return None
+
+        # TODO mlazos: add debug printing back
+
+        assert output.guards is not None
+        CheckFunctionManager(output.guards, record.locals, record.globals)
+
+        if config.debug:
+            print("\nGUARDS:")
+            for guard in sorted(output.guards):
+                print(" -", str(guard))
+            print()
+
+        if guard_export_fn is not None:
+            guard_export_fn(output.guards)
+
+    except (Unsupported, TorchRuntimeError, BackendCompilerFailed, AssertionError):
+        if config.debug or config.trace or config.print_internal_exceptions:
+            debug_print("WONT CONVERT")
+        raise
+    except Exception:
+        if config.debug or config.trace or config.print_internal_exceptions:
+            debug_print("WONT CONVERT")
+            sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
+            traceback.print_exc()
+            sys.stderr.write(
+                "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
+            )
+            sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+        raise InternalTorchDynamoError()

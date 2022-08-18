@@ -45,6 +45,7 @@ from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardBuilder
 from .output_graph import OutputGraph
+from .replay_record import ExecutionRecord
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
@@ -265,10 +266,15 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(state)
             raise
 
+    def write_record_to_file(self, filename):
+        with open(f"{filename}.record", "wb") as f:
+            self.exec_record.dump(f)
+
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         inst = self.instructions[self.instruction_pointer]
         self.current_instruction = inst
+        self.exec_record.instrs.append(inst)
         self.instruction_pointer += 1
         if self.instruction_pointer < len(self.instructions):
             self.next_instruction = self.instructions[self.instruction_pointer]
@@ -318,9 +324,11 @@ class InstructionTranslatorBase(object):
             exc.SkipFrame,
             exc.TorchRuntimeError,
             exc.Unsupported,
-        ):
+        ) as e:
+            self.write_record_to_file(str(type(e)))
             raise
         except Exception as e:
+            self.write_record_to_file(str(type(e).__name__))
             if config.debug or config.trace or config.print_internal_exceptions:
                 sys.stderr.write(
                     f"ERROR FROM offset={self.current_instruction.offset} "
@@ -1190,6 +1198,9 @@ class InstructionTranslatorBase(object):
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
+
+        # Execution record for replaying errors
+        self.exec_record = ExecutionRecord(code_options=code_options)
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode() as fake_mode:

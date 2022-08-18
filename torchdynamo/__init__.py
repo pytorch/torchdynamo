@@ -2,6 +2,7 @@ from . import allowed_functions
 from . import convert_frame
 from . import eval_frame
 from . import resume_execution
+from .convert_frame import replay
 from .eval_frame import disable
 from .eval_frame import export
 from .eval_frame import optimize
@@ -17,7 +18,7 @@ __all__ = [
     "optimize_assert",
     "export",
     "run",
-    "disable",
+    "replay" "disable",
     "reset",
     "list_backends",
     "skip",
