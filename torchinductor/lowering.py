@@ -1292,10 +1292,6 @@ def create_tensor_like(creation_fn):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        if memory_format == torch.preserve_format:
-            assert tuple(ir.FlexibleLayout.contiguous_strides(x.get_size())) == tuple(x.get_stride())
-        else:
-            assert memory_format in (None, torch.contiguous_format)
 
         if dtype is None:
             dtype = x.get_dtype()
@@ -1304,11 +1300,7 @@ def create_tensor_like(creation_fn):
         device = device or x.get_device()
         size = list(x.get_size())
         return creation_fn(
-            size,
-            dtype=dtype,
-            device=device,
-            layout=layout,
-            pin_memory=pin_memory
+            size, dtype=dtype, device=device, layout=layout, pin_memory=pin_memory
         )
 
     return _constant_like
@@ -2912,3 +2904,20 @@ register_inplace(aten.div_, div)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
+
+
+@register_lowering(aten.size)
+def size(a, dim):
+    return a.get_size()[dim]
+
+
+try:
+    math = torch.ops.math
+
+    @register_lowering(math.mul)
+    def mul(a, b):
+        return a * b
+
+
+except:
+    pass

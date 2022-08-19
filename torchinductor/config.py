@@ -4,17 +4,11 @@ debug = False
 # dead code elimination
 dce = False
 
-# assume there will be no backwards
-forward_only = False
-
 # assume input tensors are dynamic
 dynamic_shapes = True
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
-
-# enable some approximation algorithms
-approximations = False
 
 # put correctness assertions in generated code
 size_asserts = True
