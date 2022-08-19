@@ -13,6 +13,7 @@ import torch
 import torch.utils._pytree as pytree
 
 import torchdynamo
+from torchdynamo.debug_utils import wrap_dynamo_gm_debug
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import compile_times
@@ -279,6 +280,7 @@ class WrapperBackend:
 
 def get_compiler_fn(compiler_fn):
     """Expand backend strings to functions"""
+    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
 
@@ -288,7 +290,7 @@ def get_compiler_fn(compiler_fn):
 
         compiler_fn = BACKENDS[compiler_fn]
 
-    return compiler_fn
+    return wrap_dynamo_gm_debug(compiler_fn, compiler_str)
 
 
 class _NullDecorator(contextlib.nullcontext):

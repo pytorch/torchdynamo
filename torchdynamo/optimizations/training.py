@@ -12,7 +12,7 @@ from torch.utils._pytree import tree_map
 
 import torchdynamo
 from torchdynamo import config
-from torchdynamo.debug_utils import wrap_debug
+from torchdynamo.debug_utils import wrap_post_aot_debug
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
@@ -249,7 +249,7 @@ class AotPrimsNvfuser(AotAutogradStrategy):
         return BACKENDS["aot_autograd"](
             self.gm,
             self.example_inputs,
-            fw_compiler=wrap_debug(self.nvfuser, "nvfuser"),
+            fw_compiler=wrap_post_aot_debug(self.nvfuser, "nvfuser"),
             partition_fn=self.min_cut_rematerialization_partition,
             hasher_type="StaticShapeHasher",
             decompositions=self.aten2aten_decompositions,
