@@ -1696,10 +1696,6 @@ def main(runner, original_dir=None):
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
-    if args.batch_size_file:
-        if not args.only:
-            raise RuntimeError("--batch-size-file requires --only")
-
     experiment = functools.partial(experiment, args, model_iter_fn)
 
     if args.only:
