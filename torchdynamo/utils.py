@@ -70,6 +70,8 @@ def init_logging():
         logging.config.dictConfig(LOGGING_CONFIG)
         logger = logging.getLogger("torchdynamo")
         logger.setLevel(config.log_level)
+        logger = logging.getLogger("torchinductor")
+        logger.setLevel(config.log_level)
 
 
 # filter out all frames after entering dynamo
