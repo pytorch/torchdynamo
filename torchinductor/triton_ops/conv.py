@@ -368,6 +368,169 @@ def _kernel_delta_x(
     return
 
 
+# This only applies to IN_H <= KERNEL_H & IN_W <= KERNEL_W & OUT_H==OUT_W==1
+@conv_heuristics()
+@triton.jit
+def _kernel_delta_w(
+    x,
+    w,
+    y,
+    # stride of tensor
+    stride_xn,
+    stride_xc,
+    stride_xh,
+    stride_xw,
+    stride_wn,
+    stride_wc,
+    stride_wh,
+    stride_ww,
+    stride_yn,
+    stride_yc,
+    stride_yh,
+    stride_yw,
+    stride_biasn,
+    # pointer inc for w
+    delta_w_ptr,
+    # Tensor dimensions
+    BATCH,
+    IN_C,
+    IN_H,
+    IN_W,
+    KERNEL_N,
+    KERNEL_H,
+    KERNEL_W,
+    OUT_H,
+    OUT_W,
+    # parameters of conv
+    stride_h,
+    stride_w,
+    padding_h,
+    padding_w,
+    dilation_h,
+    dilation_w,
+    output_padding_h,
+    output_padding_w,
+    groups,
+    # Metaparameters
+    ACC_TYPE: tl.constexpr,
+    IN1X1_NHWC: tl.constexpr,
+    # blocks in different dimension
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    # reduction tiling parameter for matmul
+    BLOCK_K: tl.constexpr,
+    # Super-blocking for better L2 peformance
+    GROUP_H: tl.constexpr,
+):
+    """
+    each program instance computes a [BLOCK_BATCH, BLOCK_N, BLOCK_H, BLOCK_W] block of y
+    """
+    # -----------------------------------------------------------
+    # Map program ids `pid` to the block of y it should compute.
+    pid_nhw = tl.program_id(0)
+    pid_k = tl.program_id(1)
+    CRS = IN_C * IN_H * IN_W
+
+    # offset for output y
+    off_y_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
+    off_y_nhw = pid_nhw * BLOCK_M + tl.arange(0, BLOCK_M)
+    off_y_n = off_y_nhw // (OUT_H * OUT_W)
+    off_y_hw = off_y_nhw % (OUT_H * OUT_W)
+    off_y_h = off_y_hw // OUT_W + output_padding_h
+    off_y_w = off_y_hw % OUT_W + output_padding_w
+
+    # offset for the initial ptr for x
+    off_x_n = off_y_n
+    # off_x_h = off_y_h * stride_h - padding_h
+    # off_x_w = off_y_w * stride_w - padding_w
+    # off_x_nhw = off_x_n * stride_xn + off_x_h * stride_xh + off_x_w * stride_xw
+    off_x_crs = tl.arange(0, BLOCK_K)
+
+    x_ptrs = x + off_x_n[:, None] * stride_xn + off_x_crs[None, :]
+
+    mask_x = (off_x_n < BATCH)[:, None] & (off_x_crs < CRS)[None, :]
+
+    # offset for the inital ptr for w
+    off_w_crs = tl.arange(0, BLOCK_K)
+    off_w_k = off_y_k
+    mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+
+    # load inc ptr of w, upade w_ptrs
+    if not IN1X1_NHWC:
+        delta_w_ptrs = delta_w_ptr + off_w_crs
+        off_w_crs_unpacked = tl.load(delta_w_ptrs, mask=off_w_crs < CRS)
+        w_ptrs = w + off_w_crs_unpacked[:, None] + off_w_k[None, :] * stride_wn
+    else:
+        w_ptrs = w + off_w_crs[:, None] + off_w_k[None, :]
+
+    # ------ load x ------
+    matrix_x = tl.load(x_ptrs, mask=mask_x)
+    # ------ load w ------
+    matrix_w = tl.load(w_ptrs, mask=mask_w)
+
+    # -----------------------------------------------------------
+    # allocate accumulator
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+    for crs in range(0, CRS, BLOCK_K):
+
+        # ------ matrix multiplication ------
+        acc += tl.dot(matrix_x, matrix_w)
+        # ------ update ptrs ------
+        x_ptrs += BLOCK_K
+        # load inc ptr of w, upade w_ptrs
+        if not IN1X1_NHWC:
+            off_w_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
+            delta_w_ptrs = delta_w_ptr + off_w_crs
+            # add this to force triton not to vectorize, otherwise map::at error
+            delta_w_ptrs = tl.multiple_of(delta_w_ptrs, 1)
+            off_w_crs_unpacked = tl.load(delta_w_ptrs, mask=off_w_crs < CRS)
+            w_ptrs = w + off_w_crs_unpacked[:, None] + off_w_k[None, :] * stride_wn
+        else:
+            off_w_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
+            w_ptrs += BLOCK_K
+
+        mask_x = (off_x_n < BATCH)[:, None] & (off_x_crs < CRS)[None, :]
+        mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
+        # ------ prefetch ------
+        # ------ load x ------
+        matrix_x = tl.load(x_ptrs, mask=mask_x)
+        # ------ load w ------
+        matrix_w = tl.load(w_ptrs, mask=mask_w)
+
+    acc = acc.to(y.dtype.element_ty)
+
+    # rematerialize -- this saves some registers
+    # offset for output y
+    off_y_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
+    off_y_nhw = pid_nhw * BLOCK_M + tl.arange(0, BLOCK_M)
+    off_y_n = off_y_nhw // (OUT_H * OUT_W)
+    off_y_hw = off_y_nhw % (OUT_H * OUT_W)
+    # consider output padding
+    off_y_h = off_y_hw // OUT_W + output_padding_h
+    off_y_w = off_y_hw % OUT_W + output_padding_w
+
+    # y ptrs in the block of [BLOCK_M, BLOCK_N]
+    y_ptrs = (
+        y
+        + off_y_n[:, None] * stride_yn
+        + off_y_h[:, None] * stride_yh
+        + off_y_w[:, None] * stride_yw
+        + off_y_k[None, :] * stride_yc
+    )
+
+    # out-of-bounds check
+    mask_y = (
+        (off_y_n < BATCH)[:, None]
+        & (off_y_h < OUT_H + output_padding_h)[:, None]
+        & (off_y_w < OUT_W + output_padding_w)[:, None]
+        & (off_y_k < KERNEL_N)[None, :]
+    )
+
+    tl.store(y_ptrs, acc, mask=mask_y)
+
+    return
+
+
 class _conv:
     kernel = _kernel_delta_x_hwc
 
@@ -443,6 +606,39 @@ class _conv:
             r_dilation_h * stride_xh + r_dilation_w * stride_xw + r_inc * stride_xc
         )
         return delta_x
+
+    @staticmethod
+    def _delta_w_ptr(
+        IN_C,
+        IN_H,
+        IN_W,
+        padding_h,
+        padding_w,
+        stride_wc,
+        stride_wh,
+        stride_ww,
+        stride_xc,
+        stride_xh,
+        stride_xw,
+        device,
+    ):
+        # get the order of axes in w, innermost dimension outward
+        stride_x_3d = [stride_xc, stride_xh, stride_xw]
+        order = sorted(range(len(stride_x_3d)), key=stride_x_3d.__getitem__)
+        window_size = IN_C * IN_H * IN_W
+
+        r_window = torch.arange(0, window_size, 1, device=device)
+        window_unpack = _unpack(r_window, order, [IN_C, IN_H, IN_W])
+        window_unpack_c = window_unpack[order[0]]
+        window_unpack_h = window_unpack[order[1]]
+        window_unpack_w = window_unpack[order[2]]
+        r_dilation_h = window_unpack_h + padding_h
+        r_dilation_w = window_unpack_w + padding_w
+        r_inc = window_unpack_c
+        delta_w = (
+            r_dilation_h * stride_wh + r_dilation_w * stride_ww + r_inc * stride_wc
+        )
+        return delta_w
 
     @staticmethod
     def _call(
@@ -546,8 +742,11 @@ class _conv:
         )
         # if stride_x[xc] == 1 and stride_x > 1 and stride_y > 1:
         CONV1X1_NHWC = False
+        IN1X1_NHWC = False
         if stride_x[xc] == 1 and KERNEL_H == 1 and KERNEL_W == 1:
             CONV1X1_NHWC = True
+        if stride_x[xc] == 1 and IN_H == 1 and IN_W == 1:
+            IN1X1_NHWC = True
         #  do we need delta x ptr for h, w, c dimension each or not
         DELTA_X_PTR_HWC = (
             False
@@ -557,7 +756,31 @@ class _conv:
             )
             else True
         )
-        if not CONV1X1_NHWC:
+        # do we need delta_w or delta_x
+        DELTA_W_PTR = (
+            True
+            if (OUT_H == 1 and OUT_W == 1 and IN_H <= KERNEL_H and IN_W <= KERNEL_W)
+            else False
+        )
+        if DELTA_W_PTR:
+            if IN1X1_NHWC:
+                delta_w = None
+            else:
+                delta_w = _conv._delta_w_ptr(
+                    IN_C,
+                    IN_H,
+                    IN_W,
+                    padding[0],
+                    padding[1],
+                    stride_w[wc],
+                    stride_w[wh],
+                    stride_w[ww],
+                    stride_x[xc],
+                    stride_x[xh],
+                    stride_x[xw],
+                    device,
+                )
+        elif not CONV1X1_NHWC:
             if DELTA_X_PTR_HWC:
                 delta_xh, delta_xw, delta_xc = _conv._delta_x_ptr_hwc(
                     IN_C,
@@ -599,8 +822,57 @@ class _conv:
                 triton.cdiv(KERNEL_N, META["BLOCK_N"]),
             )
 
+        if DELTA_W_PTR:
+            _kernel_delta_w[grid](
+                x,
+                w,
+                y,
+                # stride nchw for x,w,y tensor
+                stride_x[xn],
+                stride_x[xc],
+                stride_x[xh],
+                stride_x[xw],
+                stride_w[wn],
+                stride_w[wc],
+                stride_w[wh],
+                stride_w[ww],
+                stride_y[yn],
+                stride_y[yc],
+                stride_y[yh],
+                stride_y[yw],
+                stride_biasn,
+                # pointer inc for x
+                delta_w,
+                # Tensor dimensions
+                BATCH,
+                IN_C,
+                IN_H,
+                IN_W,
+                KERNEL_N,
+                KERNEL_H,
+                KERNEL_W,
+                OUT_H,
+                OUT_W,
+                # conv parameters
+                stride[0],
+                stride[1],
+                padding[0],
+                padding[1],
+                dilation[0],
+                dilation[1],
+                output_padding[0],
+                output_padding[1],
+                groups,
+                # Metaparameters
+                ACC_TYPE=ACC_TYPE,
+                IN1X1_NHWC=IN1X1_NHWC,
+                # BLOCK_M=128,
+                # BLOCK_N=32,
+                # BLOCK_K=32,
+                GROUP_H=1,
+            )
         # conv1x1 or padding==0
-        if CONV1X1_NHWC or not DELTA_X_PTR_HWC:
+        elif CONV1X1_NHWC or not DELTA_X_PTR_HWC:
             _kernel_delta_x[grid](
                 x,
                 w,

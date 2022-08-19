@@ -24,3 +24,9 @@ alexnet_layers = (
     # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding
     (224, 224, 3, 11, 11, 64, (4, 4), (2, 2)),
 )
+
+
+test_layers = (
+    # IN_H, IN_W, IN_C, KERNEL_H, KERNEL_W, KERNEL_N, stride, padding
+    (2, 2, 256, 3, 3, 256, (2, 2), (1, 1)),
+)
