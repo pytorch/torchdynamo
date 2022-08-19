@@ -9,6 +9,18 @@ from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
 
+from torchinductor import config
+
+
+def init_opt_level():
+    if config.opt_level == 0:
+        config.prefuse_nodes = False
+        config.triton.autotune = False
+        config.triton.cudagraphs = False
+        config.triton.max_tiles = 0
+    elif config.opt_level == 1:
+        pass
+
 
 @functools.lru_cache(None)
 def has_triton():

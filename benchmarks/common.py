@@ -1130,6 +1130,9 @@ def parse_args():
     parser.add_argument(
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
     )
+    parser.add_argument(
+        "--opt-level", "-O", type=int, help="inductor optimization level"
+    )
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
@@ -1514,6 +1517,9 @@ def main(runner, original_dir=None):
         torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
+
+        if args.opt_level is not None:
+            torchinductor.config.opt_level = args.opt_level
 
         torchinductor.config.debug = args.verbose
         if args.threads:

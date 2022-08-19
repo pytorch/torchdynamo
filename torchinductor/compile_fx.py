@@ -14,6 +14,7 @@ from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
+from torchinductor.utils import init_opt_level
 
 from . import config
 from . import overrides
@@ -101,8 +102,6 @@ def compile_fx_inner(
     cudagraphs=None,
     num_fixed=0,
 ):
-    init_logging()
-
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
@@ -262,9 +261,8 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
-    logging.getLogger("torchinductor").setLevel(
-        logging.DEBUG if config.debug else logging.WARNING
-    )
+    init_logging()
+    init_opt_level()
     if config.aot_autograd:
         return compile_fx_aot(model_, example_inputs_)
     else:

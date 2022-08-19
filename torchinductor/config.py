@@ -56,6 +56,11 @@ tune_layout = False
 # 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
 repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
 
+# Controls induction optimization level
+# 0: no optimization
+# 1: turn on all optimizations
+# TODO: add a control for every optimization and break into more opt levels
+opt_level = 1
 
 # config specific to codegen/cpp.pp
 class cpp:
