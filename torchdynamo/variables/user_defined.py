@@ -130,7 +130,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __str__(self):
         inner = self.value_type.__name__
-        if inner == "builtin_function_or_method":
+        if inner in [
+            "builtin_function_or_method",
+            "getset_descriptor",
+            "method_descriptor",
+            "method",
+        ]:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
