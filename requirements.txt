@@ -12,4 +12,5 @@ pytest
 pyyaml
 sympy
 tabulate
+dill
 torch>=1.12.0

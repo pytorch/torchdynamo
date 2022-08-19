@@ -332,7 +332,8 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except Exception:
+        except Exception as e:
+            self.write_record_to_file(str(type(e).__name__))
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -362,6 +363,10 @@ class InstructionTranslatorBase(object):
 
     def LOAD_FAST(self, inst):
         name = inst.argval
+
+        if torchdynamo.config.record_replay_enabled and name in self.f_locals:
+            self.exec_record.locals[name] = self.f_locals[name]
+
         if name.startswith(".") and name not in self.symbolic_locals:
             # This happens in dict/list comprehensions
             name = name.replace(".", "implicit")
@@ -1170,6 +1175,7 @@ class InstructionTranslatorBase(object):
         self,
         output: OutputGraph,
         instructions: List[Instruction],
+        f_locals: Dict[str, Any],
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
@@ -1193,13 +1199,14 @@ class InstructionTranslatorBase(object):
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[int, int] = {id(i): n for n, i in enumerate(instructions)}
+        self.f_locals: Dict[str, Any] = f_locals  # Note: only needed for record/replay
         self.f_globals: Dict[str, Any] = f_globals
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        self.exec_record = ExecutionRecord(code_options=code_options)
+        self.exec_record = ExecutionRecord(code=f_code, code_options=code_options)
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode() as fake_mode:
@@ -1236,6 +1243,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
+            f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
             code_options=code_options,
@@ -1441,6 +1449,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins = f_builtins.__dict__
         super(InliningInstructionTranslator, self).__init__(
             output=parent.output,
+            f_locals={},  # This is probably not correct, needs to be populated by args?
             f_globals=f_globals,
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,

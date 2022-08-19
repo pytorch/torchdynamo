@@ -183,7 +183,7 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def format_exception(exc, frame):
+def format_exception(exc, frame=None):
     msg = os.linesep * 2
     msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
     msg += traceback.format_exc()
@@ -195,11 +195,11 @@ def format_exception(exc, frame):
             + "=" * 10
             + "\n\n"
         )
+        stack_above_dynamo = []
+        if frame is not None:
+            stack_above_dynamo = filter_stack(traceback.extract_stack(frame))
         msg += "".join(
-            traceback.format_list(
-                filter_stack(traceback.extract_stack(frame))
-                + list(reversed(exc.real_stack))
-            )
+            traceback.format_list(stack_above_dynamo + list(reversed(exc.real_stack)))
         )
 
     msg += "=" * 10
@@ -387,6 +387,7 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
 
 # TODO mlazos: add support for same args
 def replay(filename):
+    init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
     record.globals = globals()
@@ -398,7 +399,7 @@ def replay(filename):
         nonlocal output
         tracer = InstructionTranslator(
             instructions,
-            None,
+            record.code,
             record.locals,
             record.globals,
             record.builtins,  # TODO mlazos: fill this in
@@ -415,16 +416,9 @@ def replay(filename):
         if config.dead_code_elimination:
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    def debug_print(prefix):
-        if not config.debug:
-            return
-        print(
-            f"\n{prefix}",
-            record.code_options["co_name"],
-            record.code_options["co_filename"],
-            record.code_options["co_firstlineno"],
-        )
-        print(record.instrs)
+    def format_bytecode(prefix, bytecode):
+        return f"{prefix} {record.code_options['co_name']} {record.code_options['co_filename']} \
+            {record.code_options['co_firstlineno']} \n{dis.Bytecode(bytecode).dis()}\n "
 
     try:
         for attempt in itertools.count():
@@ -452,18 +446,14 @@ def replay(filename):
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)
-
-    except (Unsupported, TorchRuntimeError, BackendCompilerFailed, AssertionError):
-        if config.debug or config.trace or config.print_internal_exceptions:
-            debug_print("WONT CONVERT")
+    except (
+        Unsupported,
+        TorchRuntimeError,
+        BackendCompilerFailed,
+        AssertionError,
+    ) as e:
+        log.error(format_bytecode("WONT CONVERT", record.code) + format_exception(e))
         raise
-    except Exception:
-        if config.debug or config.trace or config.print_internal_exceptions:
-            debug_print("WONT CONVERT")
-            sys.stderr.write("=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n")
-            traceback.print_exc()
-            sys.stderr.write(
-                "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
-            )
-            sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+    except Exception as e:
+        log.error(format_bytecode("WONT CONVERT", record.code) + format_exception(e))
         raise InternalTorchDynamoError()
