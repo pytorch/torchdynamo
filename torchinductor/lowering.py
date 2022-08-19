@@ -1264,12 +1264,9 @@ def full_like(x, fill_value, **kwargs):
 
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
-    def inner(
-        *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
-    ):
+    def inner(*size, dtype=None, device=None, layout=0, pin_memory=False):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -1295,7 +1292,11 @@ def create_tensor_like(creation_fn):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
+        if memory_format == torch.preserve_format:
+            assert tuple(ir.FlexibleLayout.contiguous_strides(x.get_size())) == tuple(x.get_stride())
+        else:
+            assert memory_format in (None, torch.contiguous_format)
+
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1307,8 +1308,7 @@ def create_tensor_like(creation_fn):
             dtype=dtype,
             device=device,
             layout=layout,
-            pin_memory=pin_memory,
-            memory_format=memory_format,
+            pin_memory=pin_memory
         )
 
     return _constant_like

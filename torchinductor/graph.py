@@ -214,10 +214,8 @@ class GraphLowering(torch.fx.Interpreter):
             return super().call_function(target, args, kwargs)
 
         print(target)
-        if target == torch.ops.math.size:
+        if target == torch.ops.aten.size:
             return args[0].get_size()[args[1]]
-        if target == torch.ops.math.stride:
-            return args[0].get_stride()[args[1]]
         if target == torch.ops.math.mul:
             return args[0] * args[1]
 
