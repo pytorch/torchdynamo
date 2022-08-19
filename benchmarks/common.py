@@ -949,7 +949,6 @@ class BenchmarkRunner:
         model_iter_fn,
         example_inputs,
         optimize_ctx,
-        accuracy_ctx,
         experiment,
         diff=False,
         branch=None,
@@ -975,7 +974,6 @@ class BenchmarkRunner:
                         model_iter_fn,
                         example_inputs,
                         optimize_ctx,
-                        accuracy_ctx,
                         experiment,
                         diff=False,
                         branch=curr_branch,
@@ -989,7 +987,6 @@ class BenchmarkRunner:
                         model_iter_fn,
                         example_inputs,
                         optimize_ctx,
-                        accuracy_ctx,
                         experiment,
                         diff=False,
                         branch="main",
@@ -1071,8 +1068,8 @@ class BenchmarkRunner:
             torch.manual_seed(1337)
             torchdynamo.reset()
             try:
-                accuracy_model_iter_fn = accuracy_ctx(model_iter_fn)
-                new_result = accuracy_model_iter_fn(model, example_inputs)
+                optimized_model_iter_fn = optimize_ctx(model_iter_fn)
+                new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception:
                 logging.exception("unhandled error")
                 print("ERROR")
@@ -1094,10 +1091,7 @@ class BenchmarkRunner:
                     return sys.exit(-1)
             ok, total = Stats.reset_counters()
             results = []
-            if optimize_ctx != accuracy_ctx:
-                torchdynamo.reset()
             # run with torchdynamo few times to populate the cache
-            optimized_model_iter_fn = optimize_ctx(model_iter_fn)
             for _ in range(3):
                 optimized_model_iter_fn(model, example_inputs)
             _, frames_second_pass = Stats.reset_counters()  # should be 0
@@ -1494,7 +1488,6 @@ def main(runner, original_dir=None):
     if args.no_skip:
         runner.skip_models.clear()
 
-    accuracy_ctx = None
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
     optimize_ctx = NullContext()
@@ -1610,9 +1603,9 @@ def main(runner, original_dir=None):
         output_filename = f"accuracy_aot_{backend_str}.csv"
     elif args.accuracy_aot_ts_mincut:
         optimize_ctx = torchdynamo.optimize("aot_nvfuser", nopython=args.nopython)
-        accuracy_ctx = torchdynamo.optimize(
-            "aot_nvfuser_nodecomps", nopython=args.nopython
-        )
+        # accuracy_ctx = torchdynamo.optimize(
+        #     "aot_nvfuser_nodecomps", nopython=args.nopython
+        # )
         experiment = speedup_experiment
         assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
         backend_str = "nvfuser" if args.nvfuser else "nnc"
@@ -1657,9 +1650,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
         experiment = coverage_experiment
         output_filename = "coverage.csv"
-
-    if accuracy_ctx is None:
-        accuracy_ctx = optimize_ctx
 
     runner.setup_amp()
 
@@ -1734,7 +1724,6 @@ def main(runner, original_dir=None):
                 model_iter_fn,
                 example_inputs,
                 optimize_ctx,
-                accuracy_ctx,
                 experiment,
                 diff=args.diff_main,
             )
