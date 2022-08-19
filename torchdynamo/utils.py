@@ -29,17 +29,17 @@ import torchdynamo.config
 
 from . import config
 
-log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
 )
 
+log = logging.getLogger(__name__)
 
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "%(levelname)s %(name)s: %(message)s"},
+        "torchdynamo_format": {"format": "Torchdynamo: [%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
@@ -65,10 +65,34 @@ LOGGING_CONFIG = {
 }
 
 
-@functools.lru_cache(None)
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
+        logger = logging.getLogger("torchdynamo")
+        logger.setLevel(config.log_level)
+
+
+# filter out all frames after entering dynamo
+def filter_stack(stack):
+    user_stack = []
+    for frame in stack:
+        if "convert_frame" in frame.filename:
+            break
+        if "eval_frame" in frame.filename or "torchdynamo.optimize(" in frame.line:
+            continue
+        user_stack.append(frame)
+
+    return user_stack
+
+
+def format_graph_tabular(graph):
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        raise
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
+    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
 
 
 def count_calls(g: fx.Graph):
@@ -555,7 +579,7 @@ def same(
                     exact_dtype=exact_dtype,
                 )
             ):
-                print("Accuracy failed for key name", k)
+                log.info("Accuracy failed for key name", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -575,7 +599,7 @@ def same(
                 return True
             res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().detach().item()}")
+                log.info(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             if not exact_dtype:

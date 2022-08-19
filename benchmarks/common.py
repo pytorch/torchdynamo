@@ -1451,7 +1451,7 @@ def main(runner, original_dir=None):
         torch.set_num_threads(args.threads)
 
     if args.verbose:
-        torchdynamo.config.debug = True
+        torchdynamo.config.log_level = logging.DEBUG
 
     torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
