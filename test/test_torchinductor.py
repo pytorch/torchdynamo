@@ -522,6 +522,20 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
+    def test_reduction2(self):
+        def fn(a):
+            # FIXME: a.argmax
+            return (a.sum(), a.max(), a.min(), a.argmin())
+
+        self.common(fn, (torch.full((4,), float("inf")),))
+
+    def test_reduction3(self):
+        def fn(a):
+            # FIXME: a.argmin
+            return (a.sum(), a.max(), a.min(), a.argmax())
+
+        self.common(fn, (torch.full((4,), float("-inf")),))
+
     def test_multilayer_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
