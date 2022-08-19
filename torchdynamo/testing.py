@@ -51,6 +51,14 @@ def collect_results(model, prediction, loss, example_inputs):
     return results
 
 
+def requires_bwd_pass(out):
+    if isinstance(out, torch.Tensor):
+        return out.requires_grad
+    elif isinstance(out, (list, tuple)):
+        return any([requires_bwd_pass(x) for x in out])
+    raise NotImplementedError("Don't know how to reduce", type(out))
+
+
 def reduce_to_scalar_loss(out):
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):

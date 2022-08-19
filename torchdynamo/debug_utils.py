@@ -13,6 +13,8 @@ import torch.fx as fx
 
 import torchdynamo
 from torchdynamo import config
+from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import same
 
 
 def minifier_dir():
@@ -93,7 +95,7 @@ COMPILER_REPRO_OPTIONS = {
 }
 
 
-def dump_state(gm, args, compiler_name):
+def dump_post_aot_graph_state(gm, args, compiler_name):
     subdir = f"{minifier_dir()}/checkpoints"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -214,7 +216,7 @@ def dump_to_minify(gm, args, compiler_name: str):
                 from functools import partial
                 from torchdynamo.debug_utils import (
                     isolate_fails,
-                    dump_state,
+                    dump_post_aot_graph_state,
                 )
                 from functorch.compile import minifier
 
@@ -224,7 +226,7 @@ def dump_to_minify(gm, args, compiler_name: str):
                     mod,
                     args,
                     module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}"),
-                    dump_state=partial(dump_state, compiler_name="{compiler_name}"),
+                    dump_state=partial(dump_post_aot_graph_state, compiler_name="{compiler_name}"),
                 )
                 """
             )
@@ -232,7 +234,15 @@ def dump_to_minify(gm, args, compiler_name: str):
     print("wrote out to minifier_launcher.py")
 
 
-def wrap_debug(compiler, compiler_name: str):
+def wrap_post_aot_debug(compiler, compiler_name: str):
+    """
+    Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
+    forward and backward call separately with the backend compiler - like
+    inductor or nvfuser. Intercepting after Aot Autograd presents neat
+    abstration, where all the params are lifted as graph inputs, making it easy
+    to save the graph as a string.
+    """
+
     @functools.wraps(compiler)
     def debug_wrapper(gm, example_inputs, **kwargs):
         orig_graph = copy.deepcopy(gm.graph)
@@ -247,7 +257,7 @@ def wrap_debug(compiler, compiler_name: str):
                 compiled_fn(*example_inputs)
         except Exception as e:
             if config.repro_level == 1:
-                dump_state(
+                dump_post_aot_graph_state(
                     fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
                 )
             elif config.repro_level == 2:
@@ -257,5 +267,186 @@ def wrap_debug(compiler, compiler_name: str):
             raise e
 
         return compiled_fn
+
+    return debug_wrapper
+
+
+def run_fwd_maybe_bwd(gm, args):
+    """
+    Runs a forward and possibly backward iteration for a given mod and args.
+    """
+    from torchdynamo.testing import collect_results
+    from torchdynamo.testing import reduce_to_scalar_loss
+    from torchdynamo.testing import requires_bwd_pass
+
+    out = gm(*args)
+    if requires_bwd_pass(out):
+        loss = reduce_to_scalar_loss(out)
+        loss.backward()
+        return collect_results(gm, out, loss, args)
+    else:
+        return out
+
+
+def generate_backend_repro_string(gm, args, compiler_name):
+    """
+    Generate a repro string for backend-agnostic minified version.
+    """
+
+    imports = textwrap.dedent(
+        """
+        import torch
+        import torchdynamo
+        from torchdynamo.testing import rand_strided
+        from torchdynamo.debug_utils import run_fwd_maybe_bwd
+
+        """
+    )
+
+    prep_inputs = textwrap.dedent(
+        f"""
+        args = {[(tuple(arg.shape), tuple(arg.stride()), arg.dtype, arg.device.type, arg.requires_grad) for arg in args]}
+        args = [rand_strided(shape, stride, dtype, device).requires_grad_(requires_grad) for (shape, stride, dtype, device, requires_grad) in args]
+
+        """
+    )
+
+    setup_module = textwrap.dedent(
+        f"""
+        import module
+        mod = module.ReproModule().cuda()
+        opt_mod = torchdynamo.optimize("{compiler_name}")(mod)
+
+        """
+    )
+
+    # TODO - Figure out the amp state
+    run_module = textwrap.dedent(
+        f"""
+        with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
+            ref = run_fwd_maybe_bwd(mod, args)
+            res = run_fwd_maybe_bwd(opt_mod, args)
+        """
+    )
+
+    return imports + prep_inputs + setup_module + run_module
+
+
+def dump_dynamo_gm_state(gm, args, compiler_name):
+    import tarfile
+
+    subdir = f"{minifier_dir()}/checkpoints"
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+
+    tmp_dir = os.path.join(subdir, f"{len(gm.graph.nodes)}")
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    file_name = os.path.join(tmp_dir, "repro.py")
+    gm_dir = os.path.join(tmp_dir, "module")
+    if not os.path.exists(gm_dir):
+        os.makedirs(gm_dir, exist_ok=True)
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+    for node in gm.graph.nodes:
+        new_kwargs = {}
+        for k, v in node.kwargs.items():
+            if isinstance(v, torch.device):
+                v = v.type
+            new_kwargs[k] = v
+        node.kwargs = new_kwargs
+    gm.recompile()
+
+    with open(file_name, "w") as fd:
+        gm.to_folder(gm_dir, "ReproModule")
+        fd.write(generate_backend_repro_string(gm, args, compiler_name))
+    local_dir = os.path.join(torchdynamo.config.base_dir, "repro")
+    if os.path.exists(local_dir):
+        shutil.rmtree(local_dir)
+    shutil.copytree(tmp_dir, local_dir)
+    local_tar_file = os.path.join(torchdynamo.config.base_dir, "repro.tar.gz")
+    with tarfile.open(local_tar_file, "w:gz") as tar:
+        tar.add(local_dir, arcname=os.path.basename(local_dir))
+
+
+def wrap_dynamo_gm_debug(compiler_fn, compiler_name: str):
+    """
+    A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
+    As opposed to wrap_post_aot_debug, this wrapper intercepts at the
+    TorchDynamo produced Fx Graph Module. This makes it backend-agnostic to some
+    level, e.g., it is useful for minifying issues related to Aot Autograd
+    tracing.  If an error is found, we minify and save the minified repro in
+    repro.tar.gz.
+    """
+    from difflib import SequenceMatcher
+
+    @functools.wraps(compiler_fn)
+    def debug_wrapper(gm, example_inputs, **kwargs):
+        """
+        Find the smallest Fx GraphModule that leads to the same error
+        """
+        compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+        if config.repro_level > 0:
+            # Ensure that we fail when backend fails
+            config.raise_on_backend_error = True
+            try:
+                if config.verify_correctness:
+                    ref = run_fwd_maybe_bwd(
+                        copy.deepcopy(gm), clone_inputs(example_inputs)
+                    )
+                    res = run_fwd_maybe_bwd(
+                        copy.deepcopy(compiled_gm), clone_inputs(example_inputs)
+                    )
+                    assert same(ref, res, cos_similarity=True)
+                else:
+                    run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+            except Exception as exc:
+                print("Original model failed with the following error", exc)
+                dump_state = functools.partial(
+                    dump_dynamo_gm_state, compiler_name=compiler_name
+                )
+                if config.repro_level == 1:
+                    dump_state(
+                        fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
+                    )
+                else:
+                    # We cannot dump to minifier because minifier expects an fx
+                    # graph module. The one above works because make_fx is used
+                    # to generate Fx graph module. We cannot do this here
+                    # because it alters the behavior.
+
+                    orig_failure = str(exc)
+
+                    def fails(mod, inps):
+                        # TODO - Add accuracy chec
+                        try:
+                            compiled_mod = compiler_fn(
+                                mod, clone_inputs(example_inputs), **kwargs
+                            )
+                            if config.verify_correctness:
+                                ref = run_fwd_maybe_bwd(mod, clone_inputs(inps))
+                                res = run_fwd_maybe_bwd(
+                                    compiled_mod, clone_inputs(inps)
+                                )
+                                return not same(ref, res, cos_similarity=True)
+                            else:
+                                run_fwd_maybe_bwd(compiled_mod, clone_inputs(inps))
+                                return False
+                        except Exception as e:
+                            new_failure = str(e)
+                            if (
+                                SequenceMatcher(None, orig_failure, new_failure).ratio()
+                                > 0.5
+                            ):
+                                return True
+                            return False
+
+                    from functorch.compile import minifier
+
+                    minifier(gm, example_inputs, fails, dump_state=dump_state)
+                    raise exc
+
+        return compiled_gm
 
     return debug_wrapper
