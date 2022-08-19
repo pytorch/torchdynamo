@@ -80,14 +80,7 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-# https://github.com/pytorch/torchdynamo/issues/611
-REQUIRE_HIGHER_TOLERANCE = {
-    "adv_inception_v3",
-    "convmixer_768_32",
-    "convnext_base",
-    "gluon_inception_v3",
-    "inception_v3",
-}
+REQUIRE_HIGHER_TOLERANCE = set()
 
 
 def refresh_model_names():
@@ -245,6 +238,11 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
+        if is_training and not use_eval_mode:
+            model.train()
+        else:
+            model.eval()
+
         return device, model_name, model, example_inputs, batch_size
 
     def iter_models(self, args):
