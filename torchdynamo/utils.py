@@ -615,7 +615,10 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                return res_error <= (1.1 * ref_error + 1e-5)
+                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                if not passes_test:
+                    print(f"RMSE (res-fp64): {res_error}, (ref-fp64): {ref_error}")
+                return passes_test
 
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):

@@ -35,7 +35,7 @@ realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
-fallback_random = False
+fallback_random = True
 
 # python_key_normalize versus aot_autograd
 aot_autograd = True
