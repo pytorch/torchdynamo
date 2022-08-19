@@ -330,6 +330,9 @@ def optimize(backend, nopython=False, guard_export_fn=None):
 
 
 def explain(f, *args, **kwargs):
+    import torchdynamo.symbolic_convert as symbolic_convert
+    symbolic_convert.explain = True
+
     out_guards = []
     graphs = []
     ops_per_graph = []
@@ -371,7 +374,10 @@ def explain(f, *args, **kwargs):
     for idx in range(0, len(break_reasons)):
         formatted_list += f"{idx + 1}. {break_reasons[idx]} \n"
 
-    explanation = f"Dynamo produced {graph_count} graphs, with {graph_count - 1} graph break and {op_count} ops. \n Break reasons: \n\n{formatted_list}"
+    explanation = f"Dynamo produced {graph_count} graphs" 
+    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
+    explanation += f"\n Break reasons: \n\n{formatted_list}"
+    symbolic_convert.explain = False
     return explanation, out_guards, graphs, ops_per_graph
 
 
