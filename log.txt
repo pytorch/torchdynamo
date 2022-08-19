@@ -1,0 +1,523 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.4, pytest-7.1.2, pluggy-1.0.0 -- /Users/migeedz/opt/anaconda3/envs/pytorch2/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/migeedz/torchdynamo, configfile: pytest.ini
+collecting ... collected 5 items / 4 deselected / 1 selected
+
+tests/test_gradual_types.py::TorchDynamoUseCases::test_XGLM ERROR FROM offset=10 filename /Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/transformers/models/xglm/modeling_xglm.py 171 AttributeError
+========== TorchDynamo Stack Trace ==========
+Traceback (most recent call last):
+  File "/Users/migeedz/torchdynamo/torchdynamo/convert_frame.py", line 288, in _convert_frame_assert
+    code = transform_code_object(frame.f_code, transform)
+  File "/Users/migeedz/torchdynamo/torchdynamo/bytecode_transformation.py", line 338, in transform_code_object
+    transformations(instructions, code_options)
+  File "/Users/migeedz/torchdynamo/torchdynamo/convert_frame.py", line 264, in transform
+    tracer.run()
+  File "/Users/migeedz/torchdynamo/torchdynamo/symbolic_convert.py", line 312, in run
+    and self.step()
+  File "/Users/migeedz/torchdynamo/torchdynamo/symbolic_convert.py", line 290, in step
+    getattr(self, inst.opname)(inst)
+  File "/Users/migeedz/torchdynamo/torchdynamo/symbolic_convert.py", line 151, in wrapper
+    return inner_fn(self, inst)
+  File "/Users/migeedz/torchdynamo/torchdynamo/symbolic_convert.py", line 627, in CALL_FUNCTION
+    self.call_function(fn, args, {})
+  File "/Users/migeedz/torchdynamo/torchdynamo/symbolic_convert.py", line 226, in call_function
+    self.push(fn.call_function(self, args, kwargs))
+  File "/Users/migeedz/torchdynamo/torchdynamo/variables/misc.py", line 505, in call_function
+    return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
+  File "/Users/migeedz/torchdynamo/torchdynamo/variables/nn_module.py", line 460, in call_method
+    if id(method.__code__) in self._nn_module_method_ids():
+AttributeError: 'staticmethod' object has no attribute '__code__'
+========== Exception (above) while processing ==========
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/bin/pytest", line 8, in <module>
+    sys.exit(console_main())
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/config/__init__.py", line 187, in console_main
+    code = main()
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/config/__init__.py", line 164, in main
+    ret: Union[ExitCode, int] = config.hook.pytest_cmdline_main(
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_hooks.py", line 265, in __call__
+    return self._hookexec(self.name, self.get_hookimpls(), kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_manager.py", line 80, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_callers.py", line 39, in _multicall
+    res = hook_impl.function(*args)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/main.py", line 315, in pytest_cmdline_main
+    return wrap_session(config, _main)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/main.py", line 268, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/main.py", line 322, in _main
+    config.hook.pytest_runtestloop(session=session)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_hooks.py", line 265, in __call__
+    return self._hookexec(self.name, self.get_hookimpls(), kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_manager.py", line 80, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_callers.py", line 39, in _multicall
+    res = hook_impl.function(*args)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/main.py", line 347, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_hooks.py", line 265, in __call__
+    return self._hookexec(self.name, self.get_hookimpls(), kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_manager.py", line 80, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_callers.py", line 39, in _multicall
+    res = hook_impl.function(*args)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 111, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 130, in runtestprotocol
+    reports.append(call_and_report(item, "call", log))
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 219, in call_and_report
+    call = call_runtest_hook(item, when, **kwds)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 258, in call_runtest_hook
+    return CallInfo.from_call(
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 338, in from_call
+    result: Optional[TResult] = func()
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 259, in <lambda>
+    lambda: ihook(item=item, **kwds), when=when, reraise=reraise
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_hooks.py", line 265, in __call__
+    return self._hookexec(self.name, self.get_hookimpls(), kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_manager.py", line 80, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/pluggy/_callers.py", line 39, in _multicall
+    res = hook_impl.function(*args)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/runner.py", line 166, in pytest_runtest_call
+    item.runtest()
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/_pytest/unittest.py", line 327, in runtest
+    self._testcase(result=self)  # type: ignore[arg-type]
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/unittest/case.py", line 650, in __call__
+    return self.run(*args, **kwds)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/unittest/case.py", line 591, in run
+    self._callTestMethod(testMethod)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/unittest/case.py", line 549, in _callTestMethod
+    method()
+  File "/Users/migeedz/torchdynamo/tests/test_gradual_types.py", line 230, in test_XGLM
+    m = generate_hf_model(XGLMModel, hidden_layers=1)
+  File "/Users/migeedz/torchdynamo/tests/test_gradual_types.py", line 67, in generate_hf_model
+    model = model_cls(config)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/transformers/models/xglm/modeling_xglm.py", line 553, in __init__
+    self.embed_positions = XGLMSinusoidalPositionalEmbedding(
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/transformers/models/xglm/modeling_xglm.py", line 168, in __init__
+    self.make_weights(num_positions + self.offset, embedding_dim, padding_idx)
+  File "/Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/transformers/models/xglm/modeling_xglm.py", line 170, in make_weights
+    def make_weights(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None):
+========== End debug info ==========
+ERROR FROM offset=54 filename /Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/transformers/models/xglm/modeling_xglm.py 453 AssertionError
+ERROR FROM offset=372 filename /Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/transformers/models/xglm/modeling_xglm.py 329 AssertionError
+Finally Proxy =  Proxy(arange)
+Finally Proxy =  Proxy(mul)
+Finally Proxy =  Proxy(exp)
+Finally Proxy =  Proxy(arange_1)
+Finally Proxy =  Proxy(unsqueeze)
+Finally Proxy =  Proxy(unsqueeze_1)
+Finally Proxy =  Proxy(mul_1)
+Finally Proxy =  Proxy(sin)
+Finally Proxy =  Proxy(cos)
+Finally Proxy =  Proxy(cat)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(module_weight)
+Finally Proxy =  Proxy(_stack0)
+Finally Proxy =  Proxy(module_weight)
+Finally Proxy =  Proxy(_stack0)
+Finally Proxy =  Proxy(zero_)
+Finally Proxy =  Proxy(input_ids)
+Finally Proxy =  Proxy(size)
+Finally Proxy =  Proxy(getitem)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(self_embed_tokens_weight)
+Finally Proxy =  Proxy(embedding)
+Finally Proxy =  Proxy(mul)
+Finally Proxy =  Proxy(getitem_1)
+*************************
+0
+GraphModule()
+
+
+
+def forward(self, input_ids : typing_Union[torch.Tensor,NoneType], self_embed_tokens_weight : torch.nn.parameter.Parameter):
+    size = input_ids.size()
+    getitem = size[-1]
+    view = input_ids.view(-1, getitem);  input_ids = getitem = None
+    embedding = torch.nn.functional.embedding(view, self_embed_tokens_weight, 1, None, 2.0, False, False);  view = self_embed_tokens_weight = None
+    mul = embedding * 32.0;  embedding = None
+    getitem_1 = size[-1];  size = None
+    gt = getitem_1 > 1;  getitem_1 = None
+    
+sat
+unsat
+Finally Proxy =  Proxy(gt)
+Finally Proxy =  Proxy(inputs_embeds)
+Finally Proxy =  Proxy(tensor)
+Finally Proxy =  Proxy(full)
+Finally Proxy =  Proxy(size)
+Finally Proxy =  Proxy(arange)
+Finally Proxy =  Proxy(add)
+Finally Proxy =  Proxy(size_1)
+Finally Proxy =  Proxy(view)
+*************************
+1
+GraphModule()
+
+
+
+def forward(self, inputs_embeds : torch.Tensor):
+    tensor = torch.tensor(-3.4028234663852886e+38)
+    full = torch.full((32, 32), tensor);  tensor = None
+    size = full.size(-1)
+    arange = torch.arange(size);  size = None
+    add = arange + 1
+    size_1 = full.size(-1);  full = None
+    view = add.view(size_1, 1);  add = size_1 = None
+    lt = arange < view;  arange = view = None
+    
+assertion error
+
+Finally Proxy =  Proxy(lt)
+Finally Proxy =  Proxy(masked_fill_)
+Finally Proxy =  Proxy(to)
+Finally Proxy =  Proxy(getitem)
+Finally Proxy =  Proxy(expand)
+Finally Proxy =  Proxy(to_1)
+Finally Proxy =  Proxy(_stack0)
+Finally Proxy =  Proxy(input_ids)
+Finally Proxy =  Proxy(inputs_embeds)
+Finally Proxy =  Proxy(input_ids)
+Finally Proxy =  Proxy(inputs_embeds)
+Finally Proxy =  Proxy(size)
+Finally Proxy =  Proxy(getitem)
+Finally Proxy =  Proxy(getitem_1)
+Finally Proxy =  Proxy(ne)
+Finally Proxy =  Proxy(int_1)
+Finally Proxy =  Proxy(cumsum)
+Finally Proxy =  Proxy(type_as)
+Finally Proxy =  Proxy(add)
+Finally Proxy =  Proxy(mul)
+Finally Proxy =  Proxy(long)
+Finally Proxy =  Proxy(add_1)
+Finally Proxy =  Proxy(to)
+Finally Proxy =  Proxy(add_2)
+Finally Proxy =  Proxy(add_3)
+Finally Proxy =  Proxy(self_weights)
+Finally Proxy =  Proxy(size_1)
+*************************
+2
+GraphModule()
+
+
+
+def forward(self, input_ids : torch.Tensor, inputs_embeds : torch.Tensor, self_weights : torch.Tensor):
+    size = input_ids.size()
+    getitem = size[1]
+    getitem_1 = size[0];  size = None
+    ne = input_ids.ne(1);  input_ids = None
+    int_1 = ne.int();  ne = None
+    cumsum = torch.cumsum(int_1, dim = 1)
+    type_as = cumsum.type_as(int_1);  cumsum = None
+    add = type_as + 0;  type_as = None
+    mul = add * int_1;  add = int_1 = None
+    long = mul.long();  mul = None
+    add_1 = long + 1;  long = None
+    to = add_1.to(device(type='cpu'));  add_1 = None
+    add_2 = 2 + getitem;  getitem = None
+    add_3 = add_2 + 0;  add_2 = None
+    size_1 = self_weights.size(0);  self_weights = None
+    gt = add_3 > size_1;  add_3 = size_1 = None
+    
+unsat
+sat
+Finally Proxy =  Proxy(gt)
+Finally Proxy =  Proxy(position_ids)
+Finally Proxy =  Proxy(self_weights)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(index_select)
+Finally Proxy =  Proxy(view_1)
+Finally Proxy =  Proxy(detach)
+Finally Proxy =  Proxy(_stack0)
+Finally Proxy =  Proxy(inputs_embeds)
+Finally Proxy =  Proxy(attention_mask)
+Finally Proxy =  Proxy(add)
+Finally Proxy =  Proxy(dropout)
+Finally Proxy =  Proxy(random_value_0)
+Finally Proxy =  Proxy(self_layers_0_self_attn_layer_norm_weight)
+Finally Proxy =  Proxy(self_layers_0_self_attn_layer_norm_bias)
+Finally Proxy =  Proxy(layer_norm)
+Finally Proxy =  Proxy(size)
+Finally Proxy =  Proxy(getitem)
+Finally Proxy =  Proxy(getitem_1)
+Finally Proxy =  Proxy(getitem_2)
+Finally Proxy =  Proxy(self_layers_0_self_attn_q_proj_weight)
+Finally Proxy =  Proxy(self_layers_0_self_attn_q_proj_bias)
+Finally Proxy =  Proxy(linear)
+Finally Proxy =  Proxy(mul)
+Finally Proxy =  Proxy(self_layers_0_self_attn_k_proj_weight)
+Finally Proxy =  Proxy(self_layers_0_self_attn_k_proj_bias)
+Finally Proxy =  Proxy(linear_1)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(transpose)
+Finally Proxy =  Proxy(contiguous)
+Finally Proxy =  Proxy(self_layers_0_self_attn_v_proj_weight)
+Finally Proxy =  Proxy(self_layers_0_self_attn_v_proj_bias)
+Finally Proxy =  Proxy(linear_2)
+Finally Proxy =  Proxy(view_1)
+Finally Proxy =  Proxy(transpose_1)
+Finally Proxy =  Proxy(contiguous_1)
+Finally Proxy =  Proxy(mul_1)
+Finally Proxy =  Proxy(view_2)
+Finally Proxy =  Proxy(transpose_2)
+Finally Proxy =  Proxy(contiguous_2)
+Finally Proxy =  Proxy(view_3)
+Finally Proxy =  Proxy(view_4)
+Finally Proxy =  Proxy(view_5)
+Finally Proxy =  Proxy(size_1)
+Finally Proxy =  Proxy(transpose_3)
+Finally Proxy =  Proxy(bmm)
+Finally Proxy =  Proxy(size_2)
+Finally Proxy =  Proxy(mul_2)
+*************************
+3
+GraphModule()
+
+
+
+def forward(self, _stack0 : torch.Tensor, inputs_embeds : torch.Tensor, attention_mask : torch.Tensor, random_value_0 : torch.Tensor, self_layers_0_self_attn_layer_norm_weight : torch.nn.parameter.Parameter, self_layers_0_self_attn_layer_norm_bias : torch.nn.parameter.Parameter, self_layers_0_self_attn_q_proj_weight : torch.nn.parameter.Parameter, self_layers_0_self_attn_q_proj_bias : torch.nn.parameter.Parameter, self_layers_0_self_attn_k_proj_weight : torch.nn.parameter.Parameter, self_layers_0_self_attn_k_proj_bias : torch.nn.parameter.Parameter, self_layers_0_self_attn_v_proj_weight : torch.nn.parameter.Parameter, self_layers_0_self_attn_v_proj_bias : torch.nn.parameter.Parameter):
+    add = inputs_embeds + _stack0;  inputs_embeds = _stack0 = None
+    dropout = torch.nn.functional.dropout(add, p = 0.1, training = False);  add = None
+    layer_norm = torch.nn.functional.layer_norm(dropout, (1024,), self_layers_0_self_attn_layer_norm_weight, self_layers_0_self_attn_layer_norm_bias, 1e-05);  dropout = self_layers_0_self_attn_layer_norm_weight = self_layers_0_self_attn_layer_norm_bias = None
+    size = layer_norm.size()
+    getitem = size[2]
+    getitem_1 = size[1]
+    getitem_2 = size[0];  size = None
+    linear = torch._C._nn.linear(layer_norm, self_layers_0_self_attn_q_proj_weight, self_layers_0_self_attn_q_proj_bias);  self_layers_0_self_attn_q_proj_weight = self_layers_0_self_attn_q_proj_bias = None
+    mul = linear * 0.125;  linear = None
+    linear_1 = torch._C._nn.linear(layer_norm, self_layers_0_self_attn_k_proj_weight, self_layers_0_self_attn_k_proj_bias);  self_layers_0_self_attn_k_proj_weight = self_layers_0_self_attn_k_proj_bias = None
+    view = linear_1.view(getitem_2, -1, 16, 64);  linear_1 = None
+    transpose = view.transpose(1, 2);  view = None
+    contiguous = transpose.contiguous();  transpose = None
+    linear_2 = torch._C._nn.linear(layer_norm, self_layers_0_self_attn_v_proj_weight, self_layers_0_self_attn_v_proj_bias);  layer_norm = self_layers_0_self_attn_v_proj_weight = self_layers_0_self_attn_v_proj_bias = None
+    view_1 = linear_2.view(getitem_2, -1, 16, 64);  linear_2 = None
+    transpose_1 = view_1.transpose(1, 2);  view_1 = None
+    contiguous_1 = transpose_1.contiguous();  transpose_1 = None
+    mul_1 = getitem_2 * 16
+    view_2 = mul.view(getitem_2, getitem_1, 16, 64);  mul = None
+    transpose_2 = view_2.transpose(1, 2);  view_2 = None
+    contiguous_2 = transpose_2.contiguous();  transpose_2 = None
+    view_3 = contiguous_2.view(mul_1, -1, 64);  contiguous_2 = None
+    view_4 = contiguous.view(mul_1, -1, 64);  contiguous = None
+    view_5 = contiguous_1.view(mul_1, -1, 64);  contiguous_1 = mul_1 = None
+    size_1 = view_4.size(1)
+    transpose_3 = view_4.transpose(1, 2);  view_4 = None
+    bmm = torch.bmm(view_3, transpose_3);  view_3 = transpose_3 = None
+    size_2 = bmm.size();  bmm = None
+    mul_2 = getitem_2 * 16;  getitem_2 = None
+    ne = size_2 != (mul_2, getitem_1, size_1);  size_2 = mul_2 = getitem_1 = size_1 = None
+    
+sat
+sat
+Finally Proxy =  Proxy(ne)
+Finally Proxy =  Proxy(hidden_states)
+Finally Proxy =  Proxy(attention_mask)
+Finally Proxy =  Proxy(self_self_attn_layer_norm_weight)
+Finally Proxy =  Proxy(self_self_attn_layer_norm_bias)
+Finally Proxy =  Proxy(layer_norm)
+Finally Proxy =  Proxy(size)
+Finally Proxy =  Proxy(getitem)
+Finally Proxy =  Proxy(getitem_1)
+Finally Proxy =  Proxy(getitem_2)
+Finally Proxy =  Proxy(self_self_attn_q_proj_weight)
+Finally Proxy =  Proxy(self_self_attn_q_proj_bias)
+Finally Proxy =  Proxy(linear)
+Finally Proxy =  Proxy(mul)
+Finally Proxy =  Proxy(self_self_attn_k_proj_weight)
+Finally Proxy =  Proxy(self_self_attn_k_proj_bias)
+Finally Proxy =  Proxy(linear_1)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(transpose)
+Finally Proxy =  Proxy(contiguous)
+Finally Proxy =  Proxy(self_self_attn_v_proj_weight)
+Finally Proxy =  Proxy(self_self_attn_v_proj_bias)
+Finally Proxy =  Proxy(linear_2)
+Finally Proxy =  Proxy(view_1)
+Finally Proxy =  Proxy(transpose_1)
+Finally Proxy =  Proxy(contiguous_1)
+Finally Proxy =  Proxy(mul_1)
+Finally Proxy =  Proxy(view_2)
+Finally Proxy =  Proxy(transpose_2)
+Finally Proxy =  Proxy(contiguous_2)
+Finally Proxy =  Proxy(view_3)
+Finally Proxy =  Proxy(view_4)
+Finally Proxy =  Proxy(view_5)
+Finally Proxy =  Proxy(size_1)
+Finally Proxy =  Proxy(transpose_3)
+Finally Proxy =  Proxy(bmm)
+Finally Proxy =  Proxy(size_2)
+Finally Proxy =  Proxy(mul_2)
+*************************
+4
+GraphModule()
+
+
+
+def forward(self, hidden_states : torch.Tensor, attention_mask : typing_Union[torch.Tensor,NoneType], self_self_attn_layer_norm_weight : torch.nn.parameter.Parameter, self_self_attn_layer_norm_bias : torch.nn.parameter.Parameter, self_self_attn_q_proj_weight : torch.nn.parameter.Parameter, self_self_attn_q_proj_bias : torch.nn.parameter.Parameter, self_self_attn_k_proj_weight : torch.nn.parameter.Parameter, self_self_attn_k_proj_bias : torch.nn.parameter.Parameter, self_self_attn_v_proj_weight : torch.nn.parameter.Parameter, self_self_attn_v_proj_bias : torch.nn.parameter.Parameter):
+    layer_norm = torch.nn.functional.layer_norm(hidden_states, (1024,), self_self_attn_layer_norm_weight, self_self_attn_layer_norm_bias, 1e-05);  hidden_states = self_self_attn_layer_norm_weight = self_self_attn_layer_norm_bias = None
+    size = layer_norm.size()
+    getitem = size[2]
+    getitem_1 = size[1]
+    getitem_2 = size[0];  size = None
+    linear = torch._C._nn.linear(layer_norm, self_self_attn_q_proj_weight, self_self_attn_q_proj_bias);  self_self_attn_q_proj_weight = self_self_attn_q_proj_bias = None
+    mul = linear * 0.125;  linear = None
+    linear_1 = torch._C._nn.linear(layer_norm, self_self_attn_k_proj_weight, self_self_attn_k_proj_bias);  self_self_attn_k_proj_weight = self_self_attn_k_proj_bias = None
+    view = linear_1.view(getitem_2, -1, 16, 64);  linear_1 = None
+    transpose = view.transpose(1, 2);  view = None
+    contiguous = transpose.contiguous();  transpose = None
+    linear_2 = torch._C._nn.linear(layer_norm, self_self_attn_v_proj_weight, self_self_attn_v_proj_bias);  layer_norm = self_self_attn_v_proj_weight = self_self_attn_v_proj_bias = None
+    view_1 = linear_2.view(getitem_2, -1, 16, 64);  linear_2 = None
+    transpose_1 = view_1.transpose(1, 2);  view_1 = None
+    contiguous_1 = transpose_1.contiguous();  transpose_1 = None
+    mul_1 = getitem_2 * 16
+    view_2 = mul.view(getitem_2, getitem_1, 16, 64);  mul = None
+    transpose_2 = view_2.transpose(1, 2);  view_2 = None
+    contiguous_2 = transpose_2.contiguous();  transpose_2 = None
+    view_3 = contiguous_2.view(mul_1, -1, 64);  contiguous_2 = None
+    view_4 = contiguous.view(mul_1, -1, 64);  contiguous = None
+    view_5 = contiguous_1.view(mul_1, -1, 64);  contiguous_1 = mul_1 = None
+    size_1 = view_4.size(1)
+    transpose_3 = view_4.transpose(1, 2);  view_4 = None
+    bmm = torch.bmm(view_3, transpose_3);  view_3 = transpose_3 = None
+    size_2 = bmm.size();  bmm = None
+    mul_2 = getitem_2 * 16;  getitem_2 = None
+    ne = size_2 != (mul_2, getitem_1, size_1);  size_2 = mul_2 = getitem_1 = size_1 = None
+    
+sat
+sat
+Finally Proxy =  Proxy(ne)
+Finally Proxy =  Proxy(hidden_states)
+Finally Proxy =  Proxy(attention_mask)
+Finally Proxy =  Proxy(size)
+Finally Proxy =  Proxy(getitem)
+Finally Proxy =  Proxy(getitem_1)
+Finally Proxy =  Proxy(getitem_2)
+Finally Proxy =  Proxy(self_q_proj_weight)
+Finally Proxy =  Proxy(self_q_proj_bias)
+Finally Proxy =  Proxy(linear)
+Finally Proxy =  Proxy(mul)
+Finally Proxy =  Proxy(self_k_proj_weight)
+Finally Proxy =  Proxy(self_k_proj_bias)
+Finally Proxy =  Proxy(linear_1)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(transpose)
+Finally Proxy =  Proxy(contiguous)
+Finally Proxy =  Proxy(self_v_proj_weight)
+Finally Proxy =  Proxy(self_v_proj_bias)
+Finally Proxy =  Proxy(linear_2)
+Finally Proxy =  Proxy(view_1)
+Finally Proxy =  Proxy(transpose_1)
+Finally Proxy =  Proxy(contiguous_1)
+Finally Proxy =  Proxy(mul_1)
+Finally Proxy =  Proxy(view_2)
+Finally Proxy =  Proxy(transpose_2)
+Finally Proxy =  Proxy(contiguous_2)
+Finally Proxy =  Proxy(view_3)
+Finally Proxy =  Proxy(view_4)
+Finally Proxy =  Proxy(view_5)
+Finally Proxy =  Proxy(size_1)
+Finally Proxy =  Proxy(transpose_3)
+Finally Proxy =  Proxy(bmm)
+Finally Proxy =  Proxy(size_2)
+Finally Proxy =  Proxy(mul_2)
+*************************
+5
+GraphModule()
+
+
+
+def forward(self, hidden_states : torch.Tensor, attention_mask : typing_Union[torch.Tensor,NoneType], self_q_proj_weight : torch.nn.parameter.Parameter, self_q_proj_bias : torch.nn.parameter.Parameter, self_k_proj_weight : torch.nn.parameter.Parameter, self_k_proj_bias : torch.nn.parameter.Parameter, self_v_proj_weight : torch.nn.parameter.Parameter, self_v_proj_bias : torch.nn.parameter.Parameter):
+    size = hidden_states.size()
+    getitem = size[2]
+    getitem_1 = size[1]
+    getitem_2 = size[0];  size = None
+    linear = torch._C._nn.linear(hidden_states, self_q_proj_weight, self_q_proj_bias);  self_q_proj_weight = self_q_proj_bias = None
+    mul = linear * 0.125;  linear = None
+    linear_1 = torch._C._nn.linear(hidden_states, self_k_proj_weight, self_k_proj_bias);  self_k_proj_weight = self_k_proj_bias = None
+    view = linear_1.view(getitem_2, -1, 16, 64);  linear_1 = None
+    transpose = view.transpose(1, 2);  view = None
+    contiguous = transpose.contiguous();  transpose = None
+    linear_2 = torch._C._nn.linear(hidden_states, self_v_proj_weight, self_v_proj_bias);  hidden_states = self_v_proj_weight = self_v_proj_bias = None
+    view_1 = linear_2.view(getitem_2, -1, 16, 64);  linear_2 = None
+    transpose_1 = view_1.transpose(1, 2);  view_1 = None
+    contiguous_1 = transpose_1.contiguous();  transpose_1 = None
+    mul_1 = getitem_2 * 16
+    view_2 = mul.view(getitem_2, getitem_1, 16, 64);  mul = None
+    transpose_2 = view_2.transpose(1, 2);  view_2 = None
+    contiguous_2 = transpose_2.contiguous();  transpose_2 = None
+    view_3 = contiguous_2.view(mul_1, -1, 64);  contiguous_2 = None
+    view_4 = contiguous.view(mul_1, -1, 64);  contiguous = None
+    view_5 = contiguous_1.view(mul_1, -1, 64);  contiguous_1 = mul_1 = None
+    size_1 = view_4.size(1)
+    transpose_3 = view_4.transpose(1, 2);  view_4 = None
+    bmm = torch.bmm(view_3, transpose_3);  view_3 = transpose_3 = None
+    size_2 = bmm.size();  bmm = None
+    mul_2 = getitem_2 * 16;  getitem_2 = None
+    ne = size_2 != (mul_2, getitem_1, size_1);  size_2 = mul_2 = getitem_1 = size_1 = None
+    
+unsat
+sat
+Finally Proxy =  Proxy(ne)
+Finally Proxy =  Proxy(tensor)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(transpose)
+Finally Proxy =  Proxy(contiguous)
+Finally Proxy =  Proxy(tensor)
+Finally Proxy =  Proxy(view)
+Finally Proxy =  Proxy(transpose)
+Finally Proxy =  Proxy(contiguous)
+Finally Proxy =  Proxy(input_1)
+Finally Proxy =  Proxy(gelu)
+Finally Proxy =  Proxy(_stack1_0_)
+Finally Proxy =  Proxy(_stack1_1_0_)
+Finally Proxy =  Proxy(_stack1_1_1_)
+Finally Proxy =  Proxy(attention_mask)
+Finally Proxy =  Proxy(self_layer_norm_weight)
+Finally Proxy =  Proxy(self_layer_norm_bias)
+Finally Proxy =  Proxy(layer_norm)
+FAILED
+
+=================================== FAILURES ===================================
+________________________ TorchDynamoUseCases.test_XGLM _________________________
+
+self = <tests.test_gradual_types.TorchDynamoUseCases testMethod=test_XGLM>
+
+    @skipIfNoZ3
+    # framecount before is 14
+    # framecount after is 9
+    def test_XGLM(self):
+        # torchdynamo.config.debug = True
+        torchdynamo.config.dynamic_shapes = True
+        cnts = torchdynamo.testing.CompileCounter()
+    
+        # n_graphs = 0
+        # def my_compiler(gm, args):
+        #     print("-->", gm)
+        #     nonlocal n_graphs
+        #     n_graphs += 1
+        #     return gm.forward
+    
+    
+        with torchdynamo.optimize(cnts):
+            m = generate_hf_model(XGLMModel, hidden_layers=1)
+            m.forward(torch.ones([4, 32], dtype=torch.long))
+    
+        # print("Nuum_graphs", n_graphs)
+>       self.assertEqual(cnts.frame_count, 14)
+E       AssertionError: 11 != 14
+
+tests/test_gradual_types.py:234: AssertionError
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap>:283
+  <frozen importlib._bootstrap>:283: DeprecationWarning: the load_module() method is deprecated and slated for removal in Python 3.12; use exec_module() instead
+
+tests/test_gradual_types.py: 10 warnings
+  /Users/migeedz/opt/anaconda3/envs/pytorch2/lib/python3.10/site-packages/torch/_subclasses/fake_tensor.py:141: UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad attribute won't be populated during autograd.backward(). If you indeed want the .grad field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See github.com/pytorch/pytorch/pull/30531 for more informations. (Triggered internally at /Users/migeedz/pytorch/build/aten/src/ATen/core/TensorBody.h:483.)
+    if t.grad is not None:
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_gradual_types.py::TorchDynamoUseCases::test_XGLM - Assertio...
+================ 1 failed, 4 deselected, 11 warnings in 48.27s =================

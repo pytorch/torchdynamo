@@ -1,0 +1,200 @@
+diff --git a/torchdynamo/__init__.py b/torchdynamo/__init__.py
+index 48ccef715..de96c2732 100644
+--- a/torchdynamo/__init__.py
++++ b/torchdynamo/__init__.py
+@@ -3,6 +3,7 @@
+ from . import eval_frame
+ from . import resume_execution
+ from .eval_frame import disable
++from .eval_frame import explain
+ from .eval_frame import export
+ from .eval_frame import optimize
+ from .eval_frame import optimize_assert
+@@ -16,6 +17,7 @@
+     "optimize",
+     "optimize_assert",
+     "export",
++    "explain",
+     "run",
+     "disable",
+     "reset",
+diff --git a/torchdynamo/eval_frame.py b/torchdynamo/eval_frame.py
+index 93ed22e7f..be51b7e1d 100644
+--- a/torchdynamo/eval_frame.py
++++ b/torchdynamo/eval_frame.py
+@@ -11,6 +11,7 @@
+ import torch
+ import torch.utils._pytree as pytree
+ 
++import torchdynamo
+ from torchdynamo.utils import checkpoint_params
+ from torchdynamo.utils import clone_inputs
+ from torchdynamo.utils import same
+@@ -288,7 +289,7 @@ def get_compiler_fn(compiler_fn):
+     return compiler_fn
+ 
+ 
+-def optimize(backend, nopython=False):
++def optimize(backend, nopython=False, guard_export_fn=None):
+     """
+     The main entrypoint of TorchDynamo.  Do graph capture and call
+     backend() to optimize extracted graphs.
+@@ -322,12 +323,68 @@ def toy_example(a, b):
+     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+ 
+     if nopython:
+-        return optimize_assert(backend, guard_export_fn=None)
++        return optimize_assert(backend, guard_export_fn=guard_export_fn)
+     return _optimize_catch_errors(
+-        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
++        convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
++        backend_ctx_ctor,
+     )
+ 
+ 
++@patch("torchdynamo.symbolic_convert.explain", True)
++def explain(f, *args, **kwargs):
++    # TODO(voz): Do we want a decorator for this?
++    torchdynamo.reset()
++
++    out_guards = []
++    graphs = []
++    ops_per_graph = []
++    op_count = 0
++    break_reasons = []
++
++    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
++        nonlocal graphs
++        nonlocal op_count
++        nonlocal ops_per_graph
++
++        graphs.append(gm)
++        ops = []
++        for node in gm.graph.nodes:
++            if node.op == "call_function":
++                ops.append(node.target)
++
++        op_count += len(ops)
++        ops_per_graph.append(ops)
++        if gm.compile_subgraph_reason is not None:
++            break_reasons.append(gm.compile_subgraph_reason)
++        return gm.forward
++
++    def guard_export_print(guards):
++        nonlocal out_guards
++        out_guards.append(guards)
++
++    with patch(f"{__name__}.most_recent_backend", None), optimize(
++        dynamo_graph_accumulating_compiler,
++        nopython=False,
++        guard_export_fn=guard_export_print,
++    ):
++        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
++        f(*args, **kwargs)
++
++    graph_count = len(graphs)
++
++    formatted_list = ""
++    for idx in range(0, len(break_reasons)):
++        formatted_list += f"{idx + 1}. {break_reasons[idx]} \n"
++
++    explanation = f"Dynamo produced {graph_count} graphs"
++    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
++    explanation += f"\n Break reasons: \n\n{formatted_list}"
++
++    # TODO(voz): Do we want a decorator for this?
++    torchdynamo.reset()
++    return explanation, out_guards, graphs, ops_per_graph
++
++
+ def export(f, *args, **kwargs):
+     f = innermost_fn(f)
+ 
+diff --git a/torchdynamo/output_graph.py b/torchdynamo/output_graph.py
+index c92b4e5f2..cb5745724 100644
+--- a/torchdynamo/output_graph.py
++++ b/torchdynamo/output_graph.py
+@@ -222,12 +222,17 @@ def wrap_name(module_key):
+ 
+         assert False
+ 
+-    def compile_subgraph(self, tx, partial_convert=False):
++    def compile_subgraph(self, tx, partial_convert=False, msg=None):
+         """
+         Generate a subgraph to continue execution on user code.
+         Automatically restore live variables.
+         """
+         self.partial_convert = partial_convert
++        if msg is not None:
++            stack = tx.frame_summary()
++            msgs = reversed(traceback.StackSummary.from_list([stack]).format())
++            msg = f"{msg} \n {''.join(msgs)}"
++        self.compile_subgraph_reason = msg
+ 
+         if not all(block.can_restore() for block in tx.block_stack):
+             unimplemented("compile_subgraph with block_depth != 0")
+@@ -349,6 +354,7 @@ def compile_and_call_fx_graph(self, tx, rv, root):
+ 
+         gm = fx.GraphModule(root, self.graph)
+         gm.recompile()
++        gm.compile_subgraph_reason = self.compile_subgraph_reason
+         name = unique_id("__compiled_fn")
+         compiled_fn = self.call_user_compiler(gm)
+         compiled_fn = torchdynamo.disable(compiled_fn)
+diff --git a/torchdynamo/symbolic_convert.py b/torchdynamo/symbolic_convert.py
+index de8512845..0627a38eb 100644
+--- a/torchdynamo/symbolic_convert.py
++++ b/torchdynamo/symbolic_convert.py
+@@ -118,7 +118,7 @@ def inner(self: "InstructionTranslatorBase", inst: Instruction):
+         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+             # compile a partial subgraph prefix then jump into user code
+             self.push(value)
+-            self.output.compile_subgraph(self)
++            self.output.compile_subgraph(self, msg="generic_jump")
+             self.pop()
+ 
+             if_next = self.create_call_resume_at(self.next_instruction)
+@@ -142,11 +142,15 @@ def inner(self: "InstructionTranslatorBase", inst: Instruction):
+     return inner
+ 
+ 
++explain = False
++
++
+ def break_graph_if_unsupported(*, push):
+     def decorator(inner_fn):
+         @functools.wraps(inner_fn)
+         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
+             state = self.copy_graphstate()
++            msg = None
+             try:
+                 return inner_fn(self, inst)
+             except Unsupported as exc:
+@@ -160,12 +164,16 @@ def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
+                     )
+                 )
+ 
+-                log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
++                # torchdynamo.explain() formats this a little nicer, and presents a slightly
++                # more actionable user code pointer
++                if not explain:
++                    log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
+ 
+                 exc.remove_from_stats()
+                 exc.add_to_stats("graph_break")
++                msg = exc.msg
+             self.restore_graphstate(state)
+-            self.output.compile_subgraph(self)
++            self.output.compile_subgraph(self, msg=msg)
+             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+ 
+             for _ in range(push):
+@@ -714,7 +722,7 @@ def STORE_ATTR(self, inst):
+             self.restore_graphstate(prior)
+ 
+         # break the graph
+-        self.output.compile_subgraph(self)
++        self.output.compile_subgraph(self, "store_attr")
+         self.output.add_output_instructions([inst])
+         self.popn(2)
+         self.output.add_output_instructions(

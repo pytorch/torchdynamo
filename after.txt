@@ -1,0 +1,23 @@
+Unimplemented - causing graph break: Guard setup for uninitialized class <class 'transformers.models.xglm.modeling_xglm.XGLMModel'>
+Unimplemented - causing graph break: Patched init cannot be inlined.
+Unimplemented - causing graph break: Guard setup for uninitialized class <class 'transformers.models.xglm.modeling_xglm.XGLMModel'>
+Unimplemented - causing graph break: Patched init cannot be inlined.
+Unimplemented - causing graph break: Guard setup for uninitialized class <class 'transformers.models.xglm.modeling_xglm.XGLMSinusoidalPositionalEmbedding'>
+Unimplemented - causing graph break: Patched init cannot be inlined.
+Unimplemented - causing graph break: Guard setup for uninitialized class <class 'transformers.models.xglm.modeling_xglm.XGLMDecoderLayer'>
+Unimplemented - causing graph break: Patched init cannot be inlined.
+Unimplemented - causing graph break: Guard setup for uninitialized class <class 'transformers.models.xglm.modeling_xglm.XGLMAttention'>
+Unimplemented - causing graph break: Patched init cannot be inlined.
+Unimplemented - causing graph break: Guard setup for uninitialized class <class 'torch.nn.modules.container.ModuleList'>
+Unimplemented - causing graph break: UnspecializedNNModuleVariable missing add_module
+Unimplemented - causing graph break: UnspecializedNNModuleVariable missing add_module
+Unimplemented - causing graph break: UnspecializedNNModuleVariable missing apply
+Unimplemented - causing graph break: UnspecializedNNModuleVariable missing apply
+Unimplemented - causing graph break: call_method GetAttrVariable(TensorVariable(), data) normal_ [] {'mean': ConstantVariable(float), 'std': ConstantVariable(float)}
+Unimplemented - causing graph break: call_method GetAttrVariable(TensorVariable(), data) __getitem__ (ConstantVariable(int),) {}
+Unimplemented - causing graph break: hasattr: HFPretrainedConfigVariable()
+Unimplemented - causing graph break: hasattr: HFPretrainedConfigVariable()
+Unimplemented - causing graph break: hasattr: HFPretrainedConfigVariable()
+Unimplemented - causing graph break: UnspecializedNNModuleVariable missing modules
+Unimplemented - causing graph break: hasattr: HFPretrainedConfigVariable()
+Unimplemented - causing graph break: hasattr: HFPretrainedConfigVariable()

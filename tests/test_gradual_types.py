@@ -202,7 +202,7 @@ class TorchDynamoUseCases(unittest.TestCase):
             m = generate_hf_model(XGLMModel, hidden_layers=1)
             m.forward(torch.ones([4, 32], dtype=torch.long))
 
-        print(cnts.frame_count)
+        # print(cnts.frame_count)
         # print(CompileProfiler)
         self.assertEqual(cnts.frame_count, 5)
 
@@ -284,38 +284,68 @@ class TorchDynamoUseCases(unittest.TestCase):
         # self.assertEqual(cnts.frame_count, 8)
 
 
+    # @skipIfNoZ3
+    # def test_T5Model(self):
+    #     # torchdynamo.config.debug = True
+    #     torchdynamo.config.dynamic_shapes = True
+    #     cnts = torchdynamo.testing.CompileCounter()
+    #     with torchdynamo.optimize(cnts):
+    #         m = generate_hf_model(T5Model, hidden_layers=0)
+    #         m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
+    #
+    #     print(cnts.frame_count)
+    #     # self.assertEqual(cnts.frame_count, 8)
+
+
+
+    # @skipIfNoZ3
+    # def test_MT5Model(self):
+    #     # torchdynamo.config.debug = True
+    #     torchdynamo.config.dynamic_shapes = True
+    #     cnts = torchdynamo.testing.CompileCounter()
+    #     with torchdynamo.optimize(cnts):
+    #         m = generate_hf_model(MT5Model)
+    #         m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
+    #
+    #     print(cnts.frame_count)
+
+
     @skipIfNoZ3
-    def test_T5Model(self):
+    def test_MarianModel(self):
         # torchdynamo.config.debug = True
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
         with torchdynamo.optimize(cnts):
-            m = generate_hf_model(T5Model, hidden_layers=0)
-            m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
-
-        print(cnts.frame_count)
-        # self.assertEqual(cnts.frame_count, 8)
-
-
-
-    @skipIfNoZ3
-    def test_MT5Model(self):
-        # torchdynamo.config.debug = True
-        torchdynamo.config.dynamic_shapes = True
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            m = generate_hf_model(MT5Model)
-            m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
-
-        print(cnts.frame_count)
-
-
-    @skipIfNoZ3
-    def test_MarianMTModel(self):
-        # torchdynamo.config.debug = True
-        torchdynamo.config.dynamic_shapes = True
-        cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            m = generate_hf_model(MarianModel, hidden_layers=1)
+            m = generate_hf_model(MarianModel, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
         self.assertEqual(cnts.frame_count, 30)
+
+    @skipIfNoZ3
+    def test_blenderbot(self):
+        # torchdynamo.config.debug = True
+        torchdynamo.config.dynamic_shapes = True
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            m = generate_hf_model(BlenderbotSmallModel, hidden_layers=0)
+            m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
+            print(cnts.frame_count)
+
+        # before: 30
+        # after:
+        # self.assertEqual(cnts.frame_count, 30)
+
+
+
+    @skipIfNoZ3
+    def test_marianMT(self):
+        # torchdynamo.config.debug = True
+        torchdynamo.config.dynamic_shapes = True
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            m = generate_hf_model(MarianMTModel, hidden_layers=0)
+            m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
+            # print(cnts.frame_count)
+        # before: 42
+        # before: 36
+
+        # self.assertEqual(cnts.frame_count, 30)
