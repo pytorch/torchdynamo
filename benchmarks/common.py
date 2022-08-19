@@ -1451,7 +1451,7 @@ def main(runner, original_dir=None):
         torch.set_num_threads(args.threads)
 
     if args.verbose:
-        torchdynamo.config.debug = True
+        torchdynamo.config.log_level = logging.DEBUG
 
     torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
@@ -1470,7 +1470,6 @@ def main(runner, original_dir=None):
 
     if args.inductor or args.inductor_dynamic or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
-        args.isolate = True
         args.cosine = True
         if args.float16:
             # TODO(jansel): check if correctness issue is real
@@ -1510,7 +1509,6 @@ def main(runner, original_dir=None):
         assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
         backend_str = "nvfuser" if args.nvfuser else "nnc"
         output_filename = f"cold_start_{backend_str}.csv"
-        args.isolate = True
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
@@ -1536,12 +1534,10 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups.csv"
-        args.isolate = True
     elif args.offline_autotune:
         optimize_ctx = torchdynamo.optimize(offline_autotuner, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups.csv"
-        args.isolate = True
     elif args.python_key:
         optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
         experiment = speedup_experiment
@@ -1554,24 +1550,20 @@ def main(runner, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "speedups_ltc.csv"
-        args.isolate = True
     elif args.speedup_ltc_trivial:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_trivial, nopython=args.nopython
         )
         experiment = speedup_experiment
         output_filename = "speedups_ltc_trivial.csv"
-        args.isolate = True
     elif args.speedup_fixed1:
         optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups_fixed1.csv"
-        args.isolate = True
     elif args.speedup_fixed2:
         optimize_ctx = torchdynamo.optimize(fixed_strategy2, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "speedups_fixed2.csv"
-        args.isolate = True
     elif args.speedup_ts:
         experiment = speedup_experiment_ts
         output_filename = "baseline_ts.csv"
@@ -1655,7 +1647,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = f"speedup_{args.backend}.csv"
-        args.isolate = True
     elif args.log_conv_args:
         optimize_ctx = torchdynamo.optimize(conv_args_analysis, nopython=args.nopython)
         output_filename = "log_conv_args.csv"
@@ -1678,11 +1669,7 @@ def main(runner, original_dir=None):
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
 
-    if args.find_batch_sizes:
-        args.isolate = True
-
     if args.find_batch_sizes and args.only:
-        assert args.isolate
         for device in args.devices:
             batch_size = runner.batch_size_finder(device, args.only, model_iter_fn)
             print(args.only, batch_size)
@@ -1710,8 +1697,8 @@ def main(runner, original_dir=None):
             args.profiler_trace_name = args.profiler_trace_name
 
     if args.batch_size_file:
-        if not (args.only or args.isolate):
-            raise RuntimeError("--batch-size-file requires --only or --isolate")
+        if not args.only:
+            raise RuntimeError("--batch-size-file requires --only")
 
     experiment = functools.partial(experiment, args, model_iter_fn)
 

@@ -36,12 +36,13 @@ lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
+	mypy
 	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
 		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
-	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs $(PIP) install
+	grep -E '(black|flake8|isort|click|torch|mypy)' requirements.txt | xargs $(PIP) install
 
 setup_lint: lint-deps
 
