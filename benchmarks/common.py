@@ -1143,9 +1143,6 @@ def parse_args():
         "--threads", "-t", type=int, help="number of threads to use for eager"
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
-    )
-    parser.add_argument(
         "--nopython", action="store_true", help="Turn graph breaks into errors"
     )
     parser.add_argument(
@@ -1247,6 +1244,14 @@ def parse_args():
     group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
+    )
+
+    group_printout = parser.add_mutually_exclusive_group()
+    group_printout.add_argument(
+        "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
+    )
+    group_printout.add_argument(
+        "--quiet", "-q", action="store_true", help="suppress debug printouts"
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1446,6 +1451,9 @@ def main(runner, original_dir=None):
 
     if args.verbose:
         torchdynamo.config.log_level = logging.DEBUG
+
+    if args.quiet:
+        torchdynamo.config.log_level = logging.ERROR
 
     torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
