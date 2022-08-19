@@ -714,7 +714,7 @@ def compilation_profiling_experiment(
         ctx = torchdynamo.optimize(cnt)
 
     def get_peak_memory():
-        return torch.cuda.max_memory_allocated() / 10 ** 9
+        return torch.cuda.max_memory_allocated() / 10**9
 
     # Exit the process after 600 seconds
     timeout = 600
@@ -1411,7 +1411,7 @@ def main(runner, original_dir=None):
 
     if (
         args.devices == ["cuda"]
-        and torch.cuda.get_device_properties(0).total_memory < 25 * 2 ** 30
+        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
     ):
         # OOM errors on an RTX 3090 with 24gb RAM
         runner.skip_models.update(
