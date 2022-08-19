@@ -2535,7 +2535,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args,
         nontensor_args,
         unflatten_args,
-        kwargs = None,
+        kwargs=None,
     ):
         super(FallbackKernel, self).__init__(
             layout,
@@ -2570,7 +2570,6 @@ class FallbackKernel(ExternKernelAlloc):
         kwargs = list(gen_kwarg(k, v) for k, v in self.kwargs.items())
 
         return list(map(repr, self.unflatten_args(tensor_args, constant_args))) + kwargs
-
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
