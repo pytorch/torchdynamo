@@ -11,7 +11,7 @@ from torchinductor.codecache import cache_dir
 
 def generate_repro_string(gm, args):
     model_str = textwrap.dedent(
-        f"""
+        """
         import torch
         from torch import tensor, device
         import torch.fx as fx
