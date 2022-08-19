@@ -356,9 +356,11 @@ class OutputGraph(fx.Tracer):
         self.install_global(name, compiled_fn)
 
         try:
-            log.info(
-                f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
-            )
+            # the call to tabulate can cause a lot of memory to be allocated
+            if config.log_level <= logging.INFO:
+                log.info(
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
+                )
         except ImportError:
             log.warning(
                 "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
