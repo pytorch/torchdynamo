@@ -1,5 +1,6 @@
 import functools
 import logging
+import math
 import os
 from collections import Counter
 from collections import defaultdict
@@ -24,28 +25,59 @@ TORCHBENCH_DIR = os.path.join(OP_INP_DIRECTORY, "torchbench_train")
 aten = torch.ops.aten
 tensor_type = torch._C.TensorType.get()
 
+dtype_abbrs = {
+    torch.bfloat16: "bf16",
+    torch.float64: "f64",
+    torch.float32: "f32",
+    torch.float16: "f16",
+    torch.complex32: "c32",
+    torch.complex64: "c64",
+    torch.complex128: "c128",
+    torch.int8: "i8",
+    torch.int16: "i16",
+    torch.int32: "i32",
+    torch.int64: "i64",
+    torch.bool: "b8",
+    torch.uint8: "u8",
+}
+
+dtype_abbrs_parsing = {value: key for key, value in dtype_abbrs.items()}
+
+
+def truncate_inp(arg):
+    if arg in dtype_abbrs:
+        return dtype_abbrs[arg]
+    elif isinstance(arg, torch.device):
+        return arg.type
+    else:
+        return arg
+
 
 # Serialize Function Call
 class FuncCallWrapper:
-    def __init__(self, call, args, kwargs=None):
+    def __init__(self, call, *args, **kwargs):
         self.call = call
-        self.args = args
-        self.kwargs = kwargs if kwargs is not None else {}
+        self.args = tree_map(truncate_inp, args)
+        self.kwargs = tree_map(truncate_inp, kwargs) if kwargs is not None else {}
 
     def __repr__(self):
         args = ", ".join([repr(arg) for arg in self.args])
-        kwargs = ", ".join([f"{key}={value}" for key, value in self.kwargs.items()])
-        return f"{self.call}({args}{kwargs})"
+        kwargs = "".join(
+            [f", {str(key)}={value}" for key, value in self.kwargs.items()]
+        )
+        out = f"{self.call}({args}{kwargs})".strip('"')
+        # f strings introduce quotations we dont want
+        for key in dtype_abbrs_parsing:
+            out = out.replace(f"'{key}'", key)
+        return out
 
 
 def serialize_sparse_tensor(e):
     if isinstance(e, torch._subclasses.FakeTensor):
-        return FuncCallWrapper(
-            "ST", (list(e.shape), e.dtype, e.layout, e.is_coalesced())
-        )
+        return FuncCallWrapper("ST", list(e.shape), e.dtype, e.layout, e.is_coalesced())
     else:
         return FuncCallWrapper(
-            "ST", (list(e.shape), e.dtype, e.layout, e.is_coalesced(), e._nnz())
+            "ST", list(e.shape), e.dtype, e.layout, e.is_coalesced(), e._nnz()
         )
 
 
@@ -57,14 +89,21 @@ def deserialize_tensor(size, dtype, stride=None):
     if stride is not None:
         return torch.empty_strided(size, stride, dtype=dtype)
     else:
-        return torch.empty(size, dtype=dtype)
+        try:
+            return torch.empty(size, dtype=dtype)
+        except Exception as e:
+            import pdb
+
+            pdb.set_trace()
+            print(e)
+            raise e
 
 
 def serialize_tensor(e):
     if not e.is_contiguous():
-        return FuncCallWrapper("T", (list(e.shape), e.dtype, e.stride()))
+        return FuncCallWrapper("T", list(e.shape), e.dtype, stride=e.stride())
     else:
-        return FuncCallWrapper("T", (list(e.shape), e.dtype))
+        return FuncCallWrapper("T", list(e.shape), e.dtype)
 
 
 def serialize_torch_args(e):
@@ -156,8 +195,9 @@ class OperatorInputsMode(TorchDispatchMode):
                 f.write(f"Operator: {operator}\n")
                 operator_inputs = self.func_db[operator]
                 for inps, count in operator_inputs.items():
-                    inp_repr = repr(inps).replace("torch", "th")
-                    f.write(f"cnt: {count}, {inp_repr}\n")
+                    f.write(f"cnt: {count}, ")
+                    f.write(inps)
+                    f.write("\n")
 
 
 def map_to_device(e, device):
@@ -172,10 +212,17 @@ def map_to_dtype(e, dtype):
 
 
 def deserialize_args(inps):
-    return eval(
-        inps.strip().strip("'"),
-        {"T": deserialize_tensor, "ST": deserialize_sparse_tensor, "th": torch},
-    )
+    inps = inps.strip().strip("'")
+    global_vals = {
+        "T": deserialize_tensor,
+        "ST": deserialize_sparse_tensor,
+        "th": torch,
+        "inf": math.inf,
+    } | dtype_abbrs_parsing
+    # f strings introduce quotations we dont want
+    for key in dtype_abbrs_parsing:
+        inps = inps.replace(f"'{key}'", key)
+    return eval(inps.strip().strip("'").strip('"'), global_vals)
 
 
 class OperatorInputsLoader:
@@ -201,7 +248,7 @@ class OperatorInputsLoader:
             self.operator_db[operator] = op_inps
 
     def get_inputs_for_operator(
-        self, operator, dtype, device="cuda"
+        self, operator, dtype=None, device="cuda"
     ) -> Generator[Tuple[Iterable[Any], Dict[str, Any]], None, None]:
         assert (
             str(operator) in self.operator_db
@@ -212,12 +259,17 @@ class OperatorInputsLoader:
             yield
             return
 
-        # counter represents number of times these inputs occured, ignored for now
-        for inps, counter in self.operator_db[str(operator)].items():
+        # line[1] represents number of times these inputs occured, ignored for now
+        for line in self.operator_db[str(operator)].items():
+            inps = line[0]
+
             args, kwargs = deserialize_args(inps)
 
-            to_dtype = partial(map_to_dtype, dtype=dtype)
-            args, kwargs = tree_map(to_dtype, (args, kwargs))
+            # Backwards require some inputs to be float16 and some to be float32
+            # So we record on half and upcast to float when specified
+            if dtype and dtype != torch.float16:
+                to_dtype = partial(map_to_dtype, dtype=dtype)
+                args, kwargs = tree_map(to_dtype, (args, kwargs))
 
             if device:
                 to_device = partial(map_to_device, device=torch.device(device))
