@@ -143,8 +143,10 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
         loader = OperatorInputsLoader.get_torchbench_loader()
 
     assert dtype in ("float16", "float32"), f"got {dtype}"
-    filename = f"timings_{suite}_{dtype}.txt"
-    f = open(filename, "a")
+
+    if op == "all":
+        filename = f"timings_{suite}_{op.replace('.', '_')}{dtype}.txt"
+        f = open(filename, "a")
 
     dtype = torch.float16 if dtype == "float16" else torch.float32
 
@@ -187,10 +189,12 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
         q = torch.tensor([0.2, 0.5, 0.8], dtype=torch.float64)
         output = f"\n{operator}:\nNVFUSER Speedups : {(torch.quantile(timings[0] / timings[1], q)).tolist()}"
         output = f"{output}\nInductor Speedups : {(torch.quantile(timings[0] / timings[2], q)).tolist()}"
-        f.write(output)
+        if op == "all":
+            f.write(output)
         print(output)
 
-    f.close()
+    if op == "all":
+        f.close()
 
 
 if __name__ == "__main__":
