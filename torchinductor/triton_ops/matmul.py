@@ -22,6 +22,7 @@ def _kernel(
     stride_bn,
     stride_cm,
     stride_cn,
+    allow_tf32: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -58,7 +59,7 @@ def _kernel(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.0)
             b = tl.load(B, mask=rk[:, None] < k, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=False)
+        acc += tl.dot(a, b, allow_tf32=allow_tf32)
         A += BLOCK_K * SPLIT_K * stride_ak
         B += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to(C.dtype.element_ty)
@@ -78,7 +79,7 @@ class _matmul_out:
     kernel = _kernel
 
     @staticmethod
-    def _call(a, b, out):
+    def _call(a, b, out, allow_tf32=True):
         # handle non-contiguous inputs if necessary
         if a.stride(0) > 1 and a.stride(1) > 1:
             a = a.contiguous()
@@ -121,13 +122,14 @@ class _matmul_out:
             b.stride(1),
             c.stride(0),
             c.stride(1),
+            allow_tf32=allow_tf32,
             GROUP_M=8,
             ACC_TYPE=ACC_TYPE,
         )
 
     @staticmethod
-    def forward(a, b, out):
-        return _matmul_out._call(a, b, out)
+    def forward(a, b, out, allow_tf32=True):
+        return _matmul_out._call(a, b, out, allow_tf32)
 
 
 matmul_out = _matmul_out.forward

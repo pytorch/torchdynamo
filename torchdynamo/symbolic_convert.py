@@ -29,7 +29,6 @@ from torchdynamo.source import GlobalWeakRefSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
-from . import config
 from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
@@ -49,6 +48,7 @@ from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
+from .utils import filter_stack
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
@@ -152,6 +152,16 @@ def break_graph_if_unsupported(*, push):
             except Unsupported as exc:
                 if not self.should_compile_partial_graph():
                     raise
+                user_stack = "".join(
+                    traceback.format_list(
+                        filter_stack(traceback.extract_stack())
+                        + [self.frame_summary()]
+                        + list(reversed(exc.real_stack))
+                    )
+                )
+
+                log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
+
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
             self.restore_graphstate(state)
@@ -281,8 +291,7 @@ class InstructionTranslatorBase(object):
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
-        if config.trace:
-            print("TRACE", inst.opname, inst.argval, self.stack)
+        log.debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
 
         try:
             if not hasattr(self, inst.opname):
@@ -293,6 +302,11 @@ class InstructionTranslatorBase(object):
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
                 raise
+        except Exception as exc:
+            real_stack = getattr(exc, "real_stack", [])
+            real_stack.append(self.frame_summary())
+            exc.real_stack = real_stack
+            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -312,21 +326,7 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (
-            exc.BackendCompilerFailed,
-            exc.RestartAnalysis,
-            exc.SkipFrame,
-            exc.TorchRuntimeError,
-            exc.Unsupported,
-        ):
-            raise
-        except Exception as e:
-            if config.debug or config.trace or config.print_internal_exceptions:
-                sys.stderr.write(
-                    f"ERROR FROM offset={self.current_instruction.offset} "
-                    f"filename {self.code_options.get('co_filename')} "
-                    f"{self.lineno} {typestr(e)}\n"
-                )
+        except Exception:
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -439,12 +439,12 @@ class InstructionTranslatorBase(object):
 
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
-        if level.as_python_constant() != 0:
-            unimplemented("IMPORT_NAME with level")
-
-        # Import name imports the top level package
-        module_name = inst.argval.split(".")[0]
-        value = importlib.import_module(module_name)
+        module_name = inst.argval
+        value = __import__(
+            module_name,
+            fromlist=fromlist.as_python_constant(),
+            level=level.as_python_constant(),
+        )
         source = self.import_source(module_name)
 
         if is_allowed(value):
@@ -772,6 +772,7 @@ class InstructionTranslatorBase(object):
             assert isinstance(k, ConstantVariable) or (
                 isinstance(k, TensorVariable) and k.parameter_value is not None
             )
+
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
@@ -1192,7 +1193,9 @@ class InstructionTranslatorBase(object):
         self.f_code: types.CodeType = f_code
 
         if fake_tensors_available:
-            self._fake_mode = torch._subclasses.FakeTensorMode(inner=None)
+            with torch._subclasses.FakeTensorMode() as fake_mode:
+                pass
+            self._fake_mode = fake_mode
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []
@@ -1370,7 +1373,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as exc:
-            print(func.get_filename(), func.get_function(), args, kwargs, exc)
+            log.warning(
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
+            )
             unimplemented("arg mismatch inlining")
 
         for v in itertools.chain(sub_locals.values(), closure_cells.values()):
@@ -1381,10 +1386,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        if config.trace:
-            print("INLINING ", code)
-            dis.dis(code)
-            print()
+        log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -1403,8 +1405,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        if config.trace:
-            print("DONE INLINING", code)
+        log.debug(f"DONE INLINING {code}")
 
         if is_generator(code):
             assert tracer.symbolic_result.as_python_constant() is None

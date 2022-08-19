@@ -4,9 +4,12 @@ import functools
 import inspect
 import logging
 import threading
+import types
 import warnings
+from unittest.mock import patch
 
 import torch
+import torch.utils._pytree as pytree
 
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
@@ -16,6 +19,7 @@ from . import config
 from . import convert_frame
 from . import skipfiles
 from . import utils
+from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 
 log = logging.getLogger(__name__)
@@ -36,19 +40,45 @@ unsupported = _eval_frame.unsupported
 skip_code = _eval_frame.skip_code
 set_guard_fail_hook = _eval_frame.set_guard_fail_hook
 set_guard_error_hook = _eval_frame.set_guard_error_hook
-
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
+null_context = contextlib.nullcontext
+unset = object()
+compile_lock = threading.Lock()
+most_recent_backend = None
+
+
+def remove_from_cache(f):
+    """
+    Make sure f.__code__ is not cached to force a recompile
+    """
+    if isinstance(f, types.CodeType):
+        reset_code(f)
+    elif hasattr(f, "__code__"):
+        reset_code(f.__code__)
+    elif hasattr(getattr(f, "forward", None), "__code__"):
+        reset_code(f.forward.__code__)
+    else:
+        from torchdynamo import reset
+
+        reset()
+        log.warning("could not determine __code__ for %s", f)
 
 
 def nothing():
     pass
 
 
-null_context = contextlib.nullcontext
-
-unset = object()
-
-compile_lock = threading.Lock()
+def innermost_fn(fn):
+    """
+    In case of nesting of _TorchDynamoContext calls, find the innermost
+    function. TorchDynamo caches on fn.__code__ object, so its necessary to find
+    the innermost function to pass on the optimize, run, disable etc.
+    """
+    unaltered_fn = fn
+    while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
+        unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
+        assert callable(unaltered_fn)
+    return unaltered_fn
 
 
 class _TorchDynamoContext:
@@ -79,6 +109,34 @@ class _TorchDynamoContext:
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        fn = innermost_fn(fn)
+        # Optimize the forward method of torch.nn.Module object
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            optimized_forward = self(mod.forward)
+
+            class TorchDynamoNNModuleWrapper:
+                """
+                A wrapper that redirects the forward call to the optimized
+                forward, while for rest it redirects the calls to the original
+                module.
+                """
+
+                def __getattr__(self, name):
+                    return getattr(mod, name)
+
+                def forward(self, *args, **kwargs):
+                    return optimized_forward(*args, **kwargs)
+
+                def __call__(self, *args, **kwargs):
+                    return self.forward(*args, **kwargs)
+
+            new_mod = TorchDynamoNNModuleWrapper()
+            # Save the function pointer to find the original callable while nesting
+            # of decorators.
+            new_mod._torchdynamo_orig_callable = mod
+            return new_mod
+
         assert callable(fn)
         callback = self.callback
         on_enter = self.on_enter
@@ -94,7 +152,7 @@ class _TorchDynamoContext:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                backend_ctx.__exit__()
+                backend_ctx.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -102,22 +160,34 @@ class _TorchDynamoContext:
         else:
             _fn._torchdynamo_inline = fn
 
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn
+
         # If the function is called with torchdynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
-            callable_fn = fn
-            if isinstance(fn, torch.nn.Module):
-                callable_fn = fn.forward
-            always_optimize_code_objects[callable_fn.__code__] = True
+            always_optimize_code_objects[fn.__code__] = True
 
         return _fn
 
 
 class OptimizeContext(_TorchDynamoContext):
     def __init__(self, callback, backend_ctx_ctor):
+        def on_enter():
+            global most_recent_backend
+            if (
+                most_recent_backend is not None
+                and most_recent_backend is not compiler_fn
+            ):
+                raise ResetRequired()
+            most_recent_backend = compiler_fn
+            install_generation_tagging_init()
+
+        compiler_fn = innermost_fn(callback)
         super().__init__(
             callback=callback,
-            on_enter=install_generation_tagging_init,
+            on_enter=on_enter,
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
         )
@@ -138,8 +208,7 @@ def catch_errors_wrapper(callback):
     def catch_errors(frame, cache_size):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                if config.debug:
-                    print(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+                log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
                 return None
             if (
                 frame.f_code.co_filename == "<string>"
@@ -154,6 +223,7 @@ def catch_errors_wrapper(callback):
             logging.exception("Error while processing frame")
             raise
 
+    catch_errors._torchdynamo_orig_callable = callback
     return catch_errors
 
 
@@ -209,13 +279,13 @@ def get_compiler_fn(compiler_fn):
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
 
-        return compile_fx
+        compiler_fn = compile_fx
     elif isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
-        return BACKENDS[compiler_fn]
-    else:
-        return compiler_fn
+        compiler_fn = BACKENDS[compiler_fn]
+
+    return compiler_fn
 
 
 def optimize(backend, nopython=False):
@@ -259,7 +329,7 @@ def optimize(backend, nopython=False):
 
 
 def export(f, *args, **kwargs):
-    import torch.utils._pytree as pytree
+    f = innermost_fn(f)
 
     graph = None
     out_guards = None
@@ -321,11 +391,13 @@ def export(f, *args, **kwargs):
     # TODO(voz): Handle kwargs properly?
     flat_args, in_spec = pytree.tree_flatten(args)
 
-    result_traced = None
-
-    with optimize_assert(dynamo_normalization_capturing_compiler, guard_export_print):
+    remove_from_cache(f)
+    with patch(f"{__name__}.most_recent_backend", None), optimize_assert(
+        dynamo_normalization_capturing_compiler, guard_export_print
+    ):
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = f(*args, **kwargs)
+    remove_from_cache(f)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
@@ -387,6 +459,7 @@ def optimize_assert(backend, guard_export_fn=None):
 def run(fn=None):
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
+        fn = innermost_fn(fn)
         assert callable(fn)
         return RunOnlyContext()(fn)
     return RunOnlyContext()
@@ -395,6 +468,7 @@ def run(fn=None):
 def disable(fn=None):
     """Decorator and context manager to disable TorchDynamo"""
     if fn is not None:
+        fn = innermost_fn(fn)
         assert callable(fn)
         return DisableContext()(fn)
     return DisableContext()
@@ -407,6 +481,7 @@ def skip(fn=None):
     """
     if fn is None:
         return skip
+    fn = innermost_fn(fn)
     assert callable(fn)
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True

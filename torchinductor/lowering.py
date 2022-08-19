@@ -7,6 +7,11 @@ from typing import List
 import sympy
 import torch
 import torch.fx
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common import Number
+from torch._prims_common import elementwise_dtypes
+from torch._prims_common import is_boolean_dtype
+from torch._prims_common import is_integer_dtype
 
 from . import config
 from . import ir
@@ -89,12 +94,45 @@ def decode_dtype(dtype: int):
     return dtype
 
 
+def is_integer_type(x):
+    if isinstance(x, TensorBox):
+        return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    else:
+        return isinstance(x, int)
+
+
+def is_boolean_type(x):
+    if isinstance(x, TensorBox):
+        return is_boolean_dtype(x.get_dtype())
+    else:
+        return isinstance(x, bool)
+
+
 def decode_device(device):
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
-        return torch.device(device)
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=torch.cuda.current_device())
     return device
+
+
+def get_promoted_dtype(*args):
+    def construct_input(inp):
+        if isinstance(inp, Number):
+            return inp
+        else:
+            assert hasattr(inp, "get_dtype")
+            dim = len(inp.get_size())
+            # construct a tmp tensor to feed into torch.result_type
+            return torch.zeros([1] * dim, dtype=inp.get_dtype())
+
+    inps = [construct_input(arg) for arg in args]
+    _, dtype = elementwise_dtypes(
+        *inps, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    return dtype
 
 
 def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
@@ -117,9 +155,11 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
         if type_promote and indices:
-            dtype = functools.reduce(
-                torch.promote_types, [args[i].get_dtype() for i in indices]
-            )
+            # FIXME that's a crude approximation for promoting args
+            promoting_args = [
+                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+            ]
+            dtype = get_promoted_dtype(*promoting_args)
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
@@ -369,7 +409,7 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering([aten.alias, aten.detach, aten.lift])
+@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift])
 def nop(x):
     return x  # AOT autograd handles this for us
 
@@ -378,7 +418,7 @@ if hasattr(aten, "lift_fresh"):
     register_lowering(aten.lift_fresh)(nop)
 
 
-@register_lowering(aten.squeeze)
+@register_lowering(aten.squeeze, type_promote=False)
 def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
@@ -391,7 +431,7 @@ def squeeze(x, dim=None):
     return view(x, new_shape)
 
 
-@register_lowering(aten.expand)
+@register_lowering(aten.expand, type_promote=False)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -405,7 +445,7 @@ def expand(x, sizes):
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
-@register_lowering(prims.broadcast_in_dim)
+@register_lowering(prims.broadcast_in_dim, type_promote=False)
 def broadcast_in_dim(a, shape, broadcast_dimensions):
     s = list(shape)
     for broadcast_dimension in broadcast_dimensions:
@@ -419,7 +459,7 @@ def broadcast_in_dim(a, shape, broadcast_dimensions):
     return expand(v, shape)
 
 
-@register_lowering(aten.expand_as)
+@register_lowering(aten.expand_as, type_promote=False)
 def expand_as(x, y):
     return expand(x, y.get_size())
 
@@ -465,30 +505,30 @@ def repeat(x, repeats):
     )
 
 
-@register_lowering(aten._unsafe_view)
-@register_lowering(aten.view)
-@register_lowering(aten.reshape)
+@register_lowering(aten._unsafe_view, type_promote=False)
+@register_lowering(aten.view, type_promote=False)
+@register_lowering(aten.reshape, type_promote=False)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
     return TensorBox(View.create(x.data, sizes))
 
 
-@register_lowering(aten.permute)
+@register_lowering(aten.permute, type_promote=False)
 def permute(x, dims):
     assert isinstance(x, TensorBox)
     assert isinstance(dims, (list, tuple))
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
 
-@register_lowering(aten.slice)
+@register_lowering(aten.slice, type_promote=False)
 def slice_(x, dim, start, end, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
-@register_lowering(aten.roll)
+@register_lowering(aten.roll, type_promote=False)
 def roll(a, shifts, dims=tuple()):
     """
     This is based on torch._refs.roll(), but uses ir.ModularIndexing().
@@ -546,7 +586,7 @@ def roll(a, shifts, dims=tuple()):
     )
 
 
-@register_lowering(aten.as_strided)
+@register_lowering(aten.as_strided, type_promote=False)
 def as_strided(x, size, stride, storage_offset=None):
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
         # as_strided ignores views
@@ -616,7 +656,7 @@ def unbind(x, dim=0):
     return result
 
 
-@register_lowering(aten.unsqueeze)
+@register_lowering(aten.unsqueeze, type_promote=False)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
@@ -624,7 +664,7 @@ def unsqueeze(x, dim):
     return view(x, new_shape)
 
 
-@register_lowering(aten.unsqueeze_)
+@register_lowering(aten.unsqueeze_, type_promote=False)
 def unsqueeze_(x, dim):
     val = unsqueeze(x, dim)
     assert isinstance(x, TensorBox)
@@ -796,7 +836,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.argmax)
 make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
@@ -811,7 +850,6 @@ make_fallback(aten.im2col_backward)
 make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
-make_fallback(aten.reflection_pad2d_backward)
 make_fallback(aten.sort)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
@@ -919,7 +957,7 @@ def arange(
     assert isinstance(end, int)
     assert isinstance(step, int)
 
-    dtype = dtype or torch.get_default_dtype()
+    dtype = dtype or torch.int64
     length = (end - start) // step
     start = sympy.Integer(start)
     step = sympy.Integer(step)
@@ -1152,11 +1190,22 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
-    assert isinstance(value, (int, float)), "Expected int or float"
+    if isinstance(value, (int, float)):
+
+        def inner_fn(index):
+            return ops.constant(value, dtype)
+
+    else:
+        assert len(value.get_size()) == 0
+        value_loader = value.make_loader()
+
+        def inner_fn(index):
+            return value_loader([])
+
     return Pointwise.create(
         device=device,
         dtype=dtype,
-        inner_fn=lambda index: ops.constant(value, dtype),
+        inner_fn=inner_fn,
         ranges=list(size),
     )
 
@@ -1341,30 +1390,46 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     )
 
 
-@register_lowering(aten.index, type_promote=False)
-def index(x, indices):
-    assert isinstance(indices, (list, tuple))
-    x_loader = x.make_loader()
-    indices_loaders = [i.make_loader() for i in indices if i is not None]
-    indices_sizes = [i.get_size() for i in indices if i is not None]
-    output_size = list(indices_sizes[0])
-    for i in range(1, len(indices_sizes)):
-        assert len(indices_sizes[i]) == len(output_size)
-        for j in range(len(output_size)):
-            output_size[j] = V.graph.sizevars.guard_equals(
-                output_size[j], indices_sizes[i][j]
-            )
-
+def check_and_broadcast_indices(indices):
+    assert all(
+        [
+            i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+            for i in indices
+            if i is not None
+        ]
+    ), "indices must be int64, byte or bool"
+    assert all(
+        [i.get_dtype() == torch.int64 for i in indices if i is not None]
+    ), "bool indices are not supported yet"
+    valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
+    assert len(valid_idxs) > 0, "requires at least 1 non-None index"
+    new_indices = [None] * len(indices)
+    for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
+        new_indices[i] = x
+        output_dim = len(x.get_size())
     start_offset = 0
     # only support None at start or end for now
-    tmp = list(indices)
+    tmp = list(new_indices)
     while tmp and tmp[-1] is None:
         tmp.pop()
     while tmp and tmp[0] is None:
         tmp.pop(0)
         start_offset += 1
     assert all((i is not None) for i in tmp)
-    end_offset = len(output_size) + start_offset
+    end_offset = output_dim + start_offset
+
+    return new_indices, start_offset, end_offset
+
+
+@register_lowering(aten.index, type_promote=False)
+def index(x, indices):
+    assert isinstance(indices, (list, tuple))
+    x_loader = x.make_loader()
+    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    indices_sizes = [i.get_size() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+    # no guards on output size, all the guards are set in broadcast_tensors
+    output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
     output_size = [
@@ -1393,39 +1458,39 @@ def index(x, indices):
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
+    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    indices_sizes = [i.get_size() for i in indices if i is not None]
+    indices_loaders = [i.make_loader() for i in indices if i is not None]
+
     assert isinstance(self, TensorBox)
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    iter_ranges = []
-    index_loaders = []
+    x_size = self.get_size()
+    output_size = list(indices_sizes[0])
+    expected_vals_size = [
+        *x_size[:start_offset],
+        *output_size,
+        *x_size[start_offset + len(indices_sizes) :],
+    ]
 
-    for s_size, idx, v_size in itertools.zip_longest(
-        self.get_size(), indices, values.get_size()
-    ):
-        assert s_size is not None
-        assert v_size is not None
-        if idx is not None:
-            (i_size,) = idx.get_size()
-            iter_ranges.append(V.graph.sizevars.guard_equals(i_size, v_size))
-            index_loaders.append(idx.make_loader())
-        else:
-            iter_ranges.append(V.graph.sizevars.guard_equals(s_size, v_size))
-            index_loaders.append(None)
+    values = expand(values, expected_vals_size)
+    # all guards are set above during broadcast_tensors and expand
 
     def output_indexer(index):
-        assert len(index) == len(index_loaders)
-        index = list(index)
-        for i, loader in enumerate(index_loaders):
-            if loader is not None:
-                index[i] = ops.indirect_indexing(loader([index[i]]))
-        return index
+        assert len(index) == len(expected_vals_size)
+        new_index = [
+            ops.indirect_indexing(loader(index[start_offset:end_offset]))
+            for loader in indices_loaders
+        ]
+        new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
+        return new_index
 
     scatter = ir.Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
-        ranges=iter_ranges,
+        ranges=expected_vals_size,  # iter_ranges,
         output_indexer=output_indexer,
         scatter_mode="atomic_add" if accumulate else None,
     )
@@ -1479,7 +1544,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     assert reduce is None or reduce in {"sum"}
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(self.get_size())
+    assert -len(self.get_size()) <= dim < len(self.get_size())
 
     self.realize()
     V.graph.realize_users_of(self.get_name())
@@ -1819,7 +1884,82 @@ def reflection_pad2d(x, padding):
     )
 
 
-@register_lowering(aten.constant_pad_nd)
+@register_lowering(aten.reflection_pad2d_backward)
+def reflection_pad2d_backward(grad_output, x, padding):
+    assert len(padding) == 4
+    left, right, top, bot = padding
+
+    *_, h, w = x.get_size()
+    h = V.graph.sizevars.guard_static_shape(h) - 1
+    w = V.graph.sizevars.guard_static_shape(w) - 1
+    grad_loader = grad_output.make_loader()
+
+    def fn(idx):
+        *b, x, y = idx
+
+        def load_from_output(x, y):
+            x = ops.indirect_indexing(ops.index_expr(x, torch.int32))
+            y = ops.indirect_indexing(ops.index_expr(y, torch.int32))
+            return grad_loader([*b, x, y])
+
+        def index_range_condition(index_range):
+            i, lb, ub = index_range
+            i = ops.index_expr(i, torch.int32)
+            return ops.and_(ops.ge(i, lb), ops.le(i, ub))
+
+        def accumulate(out_x, out_y, index_range1, index_range2=None):
+            nonlocal grad
+
+            # If the upper bound is less than the lower bound, we can get rid of one accumulation.
+            # This happens when the padding size is zero.
+            if index_range1[2] < index_range1[1]:
+                return
+            cond = index_range_condition(index_range1)
+            if index_range2 is not None:
+                if index_range2[2] < index_range2[1]:
+                    return
+                cond = ops.and_(cond, index_range_condition(index_range2))
+            g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
+            grad = ops.add(grad, g)
+
+        # Areas after reflection:
+        #
+        #   top-left    |   top     |   top-right
+        # -----------------------------------------
+        #   left        |   center  |   right
+        # -----------------------------------------
+        #   bottom-left |   bottom  |   bottom-right
+        #
+        # The center area is the orignial matrix. Other areas are reflections.
+
+        center_x, center_y = x + top, y + left
+        top_reflect_x, left_reflect_y = top - x, left - y
+        bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
+
+        # Accumulate gradients from different areas
+        grad = load_from_output(center_x, center_y)
+        accumulate(center_x, left_reflect_y, (y, 1, left))
+        accumulate(center_x, right_reflect_y, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top))
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1))
+        accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
+        accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
+        accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
+        accumulate(
+            bot_reflect_x, right_reflect_y, (x, h - bot, h - 1), (y, w - right, w - 1)
+        )
+
+        return grad
+
+    return Pointwise.create(
+        device=grad_output.get_device(),
+        dtype=grad_output.get_dtype(),
+        inner_fn=fn,
+        ranges=list(x.get_size()),
+    )
+
+
+@register_lowering(aten.constant_pad_nd, type_promote=False)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
@@ -2308,7 +2448,7 @@ def avg_pool2d_backward(
     return rv
 
 
-@register_lowering(aten._adaptive_avg_pool2d)
+@register_lowering(aten._adaptive_avg_pool2d, type_promote=False)
 def _adaptive_avg_pool2d(x, output_size):
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
@@ -2379,7 +2519,8 @@ def make_reduction(reduction_type: str, override_dtype=None):
         inner_loader = x.make_loader()
         result = Reduction.create(
             device=x.get_device(),
-            dtype=override_dtype or x.get_dtype(),
+            dst_dtype=override_dtype or x.get_dtype(),
+            src_dtype=x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
@@ -2529,24 +2670,75 @@ def copy_(dst, src, non_blocking=False):
     return mutate_to(dst, src)
 
 
-sum_ = register_lowering([prims.sum, aten.sum])(make_reduction("sum"))
+@make_pointwise
+def floordiv(a, b):
+    return ops.floordiv(a, b)
+
+
+@make_pointwise
+def truncdiv(a, b):
+    return ops.truncdiv(a, b)
+
+
+@register_lowering(aten.div.Tensor_mode)
+def div_mode(a, b, rounding_mode=None):
+    both_integer = is_integer_type(a) and is_integer_type(b)
+    both_boolean = is_boolean_type(a) and is_boolean_type(b)
+
+    # floordiv and truncdiv need special handling for integer tensors on Triton,
+    # see the discussion at https://github.com/openai/triton/issues/605
+    if rounding_mode == "floor":
+        assert not both_boolean, "floordiv operands can not be boolean at the same time"
+        return floordiv(a, b) if both_integer else floor(div(a, b))
+    if rounding_mode == "trunc":
+        assert not both_boolean, "truncdiv operands can not be boolean at the same time"
+        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+    return div(a, b)
+
+
+@register_lowering([aten.div, prims.div], broadcast=True)
+def div(a, b):
+    def fn(*args):
+        return ops.div(*args)
+
+    dtype = get_promoted_dtype(a, b)
+    # truediv produces a float tensor even if both operands are integer types
+    if is_integer_type(a) and is_integer_type(b):
+        dtype = torch.get_default_dtype()
+    return make_pointwise(fn, override_dtype=dtype)(
+        a if isinstance(a, Number) else to_dtype(a, dtype),
+        b if isinstance(b, Number) else to_dtype(b, dtype),
+    )
+
+
+@register_lowering([aten.sum, prims.sum])
+def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+    fn = make_reduction("sum", override_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 register_lowering(aten.amax)(make_reduction("amax"))
 register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
-register_lowering(aten.argmax)(make_reduction("argmax"))
-register_lowering(aten.argmin)(make_reduction("argmin"))
+register_lowering(aten.argmax)(make_reduction("argmax", override_dtype=torch.int64))
+register_lowering(aten.argmin)(make_reduction("argmin", override_dtype=torch.int64))
 
 add = register_pointwise(aten.add)
-div = register_pointwise(aten.div)
 exp = register_pointwise(aten.exp)
+floor = register_pointwise(aten.floor)
 mul = register_pointwise(aten.mul)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub)
+trunc = register_pointwise(aten.trunc)
 
 register_pointwise(aten.cos)
 register_pointwise(aten.sin)
@@ -2565,8 +2757,6 @@ register_pointwise(aten.remainder)
 register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
-register_pointwise(aten.trunc)
-register_pointwise(aten.floor)
 register_pointwise(aten.ceil)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
 register_pointwise(aten.isnan, override_dtype=torch.bool)

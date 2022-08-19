@@ -122,7 +122,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2):
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 256, 1), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 1), 8))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -216,7 +216,14 @@ def reduction_heuristics(size_hints):
         return autotune(
             [
                 triton_config_reduction(size_hints, 64, 64),
-                triton_config_reduction(size_hints, 8, 512),
+                #                triton_config_reduction(size_hints, 16, 64),
+                #                triton_config_reduction(size_hints, 32, 128),
+                triton_config_reduction(
+                    size_hints, 128, 8
+                ),  # this one is the best for outer reduction
+                triton_config_reduction(
+                    size_hints, 8, 512
+                ),  # this and the next one seem very similar but both are needed for perf
                 triton_config_reduction(size_hints, 1, 2048, num_stages=1),
             ],
             key=["xnumel", "rnumel"],

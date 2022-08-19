@@ -369,12 +369,13 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, slice):
-            start = ConstantVariable(value.start)
-            stop = ConstantVariable(value.stop)
-            step = ConstantVariable(value.step)
-            return SliceVariable(
-                [start, stop, step], guards=make_guards(GuardBuilder.CONSTANT_MATCH)
-            )
+            items = [
+                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
+                    getattr(value, k)
+                )
+                for k in ("start", "stop", "step")
+            ]
+            return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         else:
             result = UserDefinedObjectVariable(
                 value,

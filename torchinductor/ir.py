@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -7,8 +8,11 @@ from collections import OrderedDict
 from functools import partial
 from typing import Any
 from typing import Callable
+from typing import ClassVar
 from typing import List
 from typing import Optional
+from typing import Set
+from typing import Tuple
 from unittest.mock import patch
 
 import numpy
@@ -17,6 +21,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
+from torch._prims_common import is_float_dtype
 
 from . import config
 from . import dependencies
@@ -183,7 +188,9 @@ class IndexingDiv(sympy.Function):
                     return IndexingDiv(base - a, divisor) + a / gcd
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
-            return IndexingDiv(base / gcd, divisor / gcd)
+            return IndexingDiv(
+                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+            )
 
 
 class CleanDiv(IndexingDiv):
@@ -195,13 +202,37 @@ class CleanDiv(IndexingDiv):
     pass
 
 
-def is_triton(device):
+def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
-    return device.type == "cuda"
+    if getattr(x, "get_device", None):
+        return is_triton(x.get_device())
+    if isinstance(x, torch.device):
+        return x.type == "cuda"
+    return False
 
 
+@dataclasses.dataclass
 class IRNode(object):
+    _current_origins: ClassVar[Set[Any]] = set()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_origins(origins: Set[torch.fx.Node]):
+        old = IRNode._current_origins
+        IRNode._current_origins = old | origins
+        yield
+        IRNode._current_origins = old
+
+    def __post_init__(self):
+        self.origins = set(self._current_origins)
+
+    def common_repr(self):
+        return (
+            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+        )
+
     def str_helper(self, lines):
+        lines = lines + self.common_repr()
         lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
@@ -304,7 +335,7 @@ class Pointwise(Loops):
 @dataclasses.dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[List[Expr]], Expr]
-    scatter_mode: str = None
+    scatter_mode: Optional[str] = None
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -332,6 +363,8 @@ class Scatter(Pointwise):
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
+    # self.dtype represents the dst dtype
+    src_dtype: torch.dtype
 
     def __str__(self):
         return Loops.__str__(
@@ -350,6 +383,7 @@ class Reduction(Loops):
         return ops.reduction(
             output_name,
             self.dtype,
+            self.src_dtype,
             self.reduction_type,
             indexer(vars),
             self.inner_fn(vars, reduction_vars),
@@ -380,13 +414,160 @@ class Reduction(Loops):
             self.ranges,
             self.reduction_ranges,
             self.reduction_type,
+            self.src_dtype,
         )
+
+    @staticmethod
+    def num_splits(
+        device,
+        dst_dtype,
+        src_dtype,
+        inner_fn,
+        ranges,
+        reduction_ranges,
+        reduction_type,
+        reduction_numel,
+    ):
+        num_sm = torch.cuda.get_device_properties(device).multi_processor_count
+        min_elements_per_thread = 32
+        max_elements_per_thread = 512
+        threads_per_sm = 2048
+        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
+        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
+
+        def inner_reduction_splits(reduction_numel_hint, numel_hint):
+            # do heuristics that's close to eager mode for split inner reduction
+            # we leak reduction autotune configs here, and will need to refactor to avoid this later
+            num_warps = 8
+            num_threads = 32 * num_warps
+            if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
+                return 1
+            if reduction_numel_hint <= 8192:
+                return 1
+            if reduction_numel_hint * numel_hint <= min_elements_per_device:
+                split_size = min_elements_per_thread
+            elif reduction_numel_hint * numel_hint < max_elements_per_device:
+                target_blocks = num_sm * threads_per_sm // (2 * num_threads)
+                blocks_per_output = (target_blocks + numel_hint - 1) // numel_hint
+                tmp_split_size = (
+                    reduction_numel_hint + num_threads * blocks_per_output - 1
+                ) // (num_threads * blocks_per_output)
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
+                if abs(closest - tmp_split_size) < 30:
+                    # prefer even splits, but never smalle than min_elements_per_thread
+                    split_size = max(closest, min_elements_per_thread)
+                else:
+                    split_size = tmp_split_size
+            else:
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
+                if abs(closest - max_elements_per_thread) < 50:
+                    # prefer even splits
+                    split_size = closest
+                else:
+                    split_size = max_elements_per_thread
+            return (reduction_numel_hint + split_size * num_threads - 1) // (
+                split_size * num_threads
+            )
+
+        def outer_reduction_splits(reduction_numel_hint, numel_hint):
+            # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
+            # extend to even smaller number of outputs
+            num_warps = 8
+            num_threads = num_warps * 32
+            rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
+            xvals_per_block = 128
+            xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
+            if reduction_numel_hint * numel_hint < min_elements_per_device:
+                split_size = min_elements_per_thread
+            elif reduction_numel_hint * numel_hint < max_elements_per_device:
+                target_blocks = num_sm * threads_per_sm // (num_threads)
+                target_blocks = (target_blocks + xblocks - 1) // xblocks
+                tmp_split_size = (
+                    reduction_numel_hint + rvals_per_thread * target_blocks - 1
+                ) // (rvals_per_thread * target_blocks)
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
+                if abs(tmp_split_size - closest) < 20:
+                    split_size = max(closest, min_elements_per_thread)
+                else:
+                    split_size = tmp_split_size
+            else:
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
+                if abs(closest - max_elements_per_thread) < 50:
+                    # prefer even splits
+                    split_size = closest
+                else:
+                    split_size = max_elements_per_thread
+
+            return (reduction_numel_hint + rvals_per_thread * split_size - 1) // (
+                rvals_per_thread * split_size
+            )
+
+        reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        # easy cases
+        if numel_hint == 1:
+            return inner_reduction_splits(reduction_numel_hint, numel_hint)
+        if (
+            reduction_numel_hint <= min_elements_per_thread
+            or numel_hint >= num_sm * 2 * 32
+        ):
+            return 1
+
+        r = Reduction(
+            device,
+            dst_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            src_dtype,
+        )
+        read_writes = ComputedBuffer(
+            name=None,
+            layout=FlexibleLayout(
+                device=r.get_device(),
+                dtype=r.get_dtype(),
+                size=r.get_size(),
+            ),
+            data=r,
+        ).get_read_writes()
+        # try finding the full size producer
+        # TODO this will fail for something like ((1, N) * (N, 1)).sum()
+        # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
+        # TODO maybe go over all full size producers and pick the most common one?
+        range_vars = [
+            r
+            for r in read_writes.range_vars
+            if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
+        ]
+        index = None
+        for md in read_writes.reads:
+            if all([r in md.index.free_symbols for r in range_vars]):
+                index = md.index
+                break
+        if not index:
+            # TODO determine splits when all inputs are broadcasted
+            return 1
+        reduction_vars = [
+            rv for rv in range_vars if read_writes.var_ranges[rv] in reduction_ranges
+        ]
+        strides = V.graph.sizevars.stride_hints(index, reduction_vars)
+        outer = all([s > 1 for s in strides])
+        if not outer:
+            return inner_reduction_splits(reduction_numel_hint, numel_hint)
+        else:  # outer reduction
+            return outer_reduction_splits(reduction_numel_hint, numel_hint)
 
     @classmethod
     def create(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
         inner_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
@@ -399,21 +580,26 @@ class Reduction(Loops):
                 reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
                 return inner_fn(index, reduction_index)
 
-            return Pointwise.create(device, dtype, fn, ranges)
+            return Pointwise.create(device, dst_dtype, fn, ranges)
 
-        if is_triton(device):
-            reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
-            numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-            if (
-                reduction_numel_hint > 8192
-                and numel_hint == 1
-                and reduction_type not in {"argmax", "argmin"}
-            ):
+        if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
+            # triton doesn't support reduce to single element well, so break it up
+            split = cls.num_splits(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                reduction_numel,
+            )
+            if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
-                split = 128
                 return cls.create_multilayer(
                     device,
-                    dtype,
+                    dst_dtype,
+                    src_dtype,
                     inner_fn,
                     ranges,
                     reduction_ranges,
@@ -424,30 +610,40 @@ class Reduction(Loops):
         return TensorBox.create(
             Reduction(
                 device,
-                dtype,
+                dst_dtype,
                 inner_fn,
                 ranges,
                 reduction_ranges,
                 reduction_type,
+                src_dtype,
             )
         )
 
     @staticmethod
     def default_value(reduction_type, dtype):
+        if reduction_type in {"max", "argmax"}:
+            return (
+                torch.finfo(dtype).min
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).min
+            )
+        if reduction_type in {"min", "argmin"}:
+            return (
+                torch.finfo(dtype).max
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).max
+            )
         return {
             "sum": 0,
-            "max": float("-inf"),
-            "min": float("inf"),
             "any": 0,
-            "argmax": float("-inf"),
-            "argmin": float("inf"),
         }[reduction_type]
 
     @classmethod
     def create_multilayer(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
         inner_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
@@ -493,7 +689,9 @@ class Reduction(Loops):
                     ops.index_expr(indices, torch.int32),
                     ops.index_expr(reduction_numel, torch.int32),
                 )
-                return ops.masked(mask, body, cls.default_value(reduction_type, dtype))
+                return ops.masked(
+                    mask, body, cls.default_value(reduction_type, dst_dtype)
+                )
             else:
                 return body()
 
@@ -501,11 +699,14 @@ class Reduction(Loops):
         # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
         # in fp32 and not reduce precision by breaking up the kernel into multiple layers
         intermediate_dtype = (
-            dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
         )
         intermediate = Reduction.create(
             device,
             intermediate_dtype,
+            src_dtype,
             wrapper_fn,
             [*ranges, split],
             [block_size],
@@ -520,11 +721,12 @@ class Reduction(Loops):
         return TensorBox.create(
             Reduction(
                 device,
-                dtype,
+                dst_dtype,
                 intermediate_fn,
                 ranges,
                 [split],
                 reduction_type,
+                src_dtype,
             )
         )
 
@@ -775,12 +977,12 @@ class SqueezeView(BaseView):
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
-    def squeezer(size):
+    def squeezer(size: Tuple[sympy.Expr, ...]):
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index):
+        def reindex(index: List[sympy.Expr]) -> List[sympy.Expr]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.Integer(0)] * length
             for idx, s in zip(not_one, index):
@@ -1316,7 +1518,7 @@ class MutationLayout(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            None,
+            None,  # type: ignore[arg-type]
         )
         self.target = target
 
@@ -1612,7 +1814,9 @@ class ComputedBuffer(Buffer):
         # the reordering_reindex in reads' simplify_reorder_and_tile
         reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
         for i, reads_buf in enumerate(reads_bufs):
-            if isinstance(reads_buf, ComputedBuffer):
+            if isinstance(reads_buf, ComputedBuffer) and hasattr(
+                reads_buf, "iter_reordering_reindex"
+            ):
                 reordering_reindex[i] = reads_buf.iter_reordering_reindex
 
         def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
@@ -1650,91 +1854,6 @@ class ComputedBuffer(Buffer):
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
         )
         return (iter_ranges, reduce_ranges), body
-
-    @classmethod
-    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides):
-        """
-        Break iter_ranges up into at most max_tiles tiles based on stride==1
-        dimensions.
-
-        Transformation on iter_range like:
-            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
-
-        Where each group will be tiled in a different dimension in the
-        output kernel.
-        """
-        tiles = []
-        current_tile = []
-        max_tiles = config.triton.max_tiles
-
-        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
-        for i in range(len(iter_ranges)):
-            current_tile.append(iter_ranges[i])
-            # break tiles on stride 1
-            if any(stride[i] == 1 for stride in strides):
-                tiles.append(current_tile)
-                current_tile = []
-
-        if current_tile:
-            tiles.append(current_tile)
-
-        if len(tiles) > max_tiles:
-            split = len(tiles) - max_tiles + 1
-            tiles = [[*itertools.chain(*tiles[:split])]] + tiles[split:]
-            assert len(tiles) == max_tiles, (len(tiles), max_tiles, split)
-
-        return tiles
-
-    @classmethod
-    def _tile_broadcasting(cls, iter_ranges: List[sympy.Expr], body, strides):
-        """
-        Break ranges up so that one dimension is all broadcasting.
-
-        Transformation on iter_ranges like:
-            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
-
-        Where each group will be tiled in a different dimension in the
-        output kernel.
-        """
-        broadcasting_strides = [
-            stride for stride in strides if any(s == 0 for s in stride)
-        ]
-        if not broadcasting_strides:
-            return (iter_ranges,), body
-
-        # TODO(jansel): consider another load?  for now just take first one
-        broadcasting_stride = broadcasting_strides[0]
-
-        broadcast_ranges = []
-        broadcast_index = []
-        other_ranges = []
-        other_index = []
-
-        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
-        for i in range(len(iter_ranges)):
-            if broadcasting_stride[i] == 0:
-                broadcast_index.append(i)
-                broadcast_ranges.append(iter_ranges[i])
-            else:
-                other_index.append(i)
-                other_ranges.append(iter_ranges[i])
-
-        def call(broadcast, other, reduction=None):
-            assert not reduction
-            assert len(broadcast) == len(broadcast_index)
-            assert len(other) == len(other_index)
-            args = [None] * len(iter_ranges)
-            for i, v in itertools.chain(
-                zip(broadcast_index, broadcast),
-                zip(other_index, other),
-            ):
-                args[i] = v
-            return body(args)
-
-        if broadcast_ranges and other_ranges:
-            return (broadcast_ranges, other_ranges), call
-        else:
-            return (iter_ranges,), body
 
     @staticmethod
     def _apply_loop_reordering(
@@ -1874,6 +1993,7 @@ class ConcatKernel(NopKernel):
             )
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+
         return kernel
 
     @classmethod
@@ -1908,13 +2028,16 @@ class ConcatKernel(NopKernel):
 
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
-    constant_args: List[Any] = ()
+    constant_args: Tuple[Any, ...] = ()
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
         self.freeze_layout()
+
+    def codegen(self, wrapper):
+        raise NotImplementedError
 
     @staticmethod
     def copy_input(x):
@@ -2069,7 +2192,7 @@ class ExternKernel(InputsKernel):
         sizevars = V.graph.sizevars
         sizes = self.get_size()
         strides = self.get_stride()
-        strides = [sizevars.guard_static_shape(x) for x in strides]
+        strides = [sizevars.size_hint(x) for x in strides]
         index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
@@ -2088,6 +2211,13 @@ class ExternKernel(InputsKernel):
 
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
+
+    def __str__(self):
+        lines = [
+            f"{field.name}={getattr(self, field.name)}"
+            for field in dataclasses.fields(self)
+        ]
+        return self.str_helper(lines)
 
 
 @dataclasses.dataclass
@@ -2256,6 +2386,7 @@ class MatrixMultiply(ExternKernelOut):
             [
                 ("GROUP_M", "8"),
                 ("ACC_TYPE", ACC_TYPE),
+                ("allow_tf32", f"{torch.backends.cuda.matmul.allow_tf32}"),
             ]
         )
 
@@ -2316,13 +2447,13 @@ class BatchMatrixMultiply(ExternKernelOut):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
-        V.graph.device_types.add(device.type)
-        V.graph.device_types.add(x.get_device().type)
-
         if not x.is_extern() and all(
             (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
         ):
             return x.constant_to_device(device)
+
+        V.graph.device_types.add(device.type)
+        V.graph.device_types.add(x.get_device().type)
 
         log.warning("DeviceCopy")
         return DeviceCopy(
@@ -2569,20 +2700,20 @@ class Convolution(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride_: List[int],
+        padding_: List[int],
+        dilation_: List[int],
         transposed: bool,
-        output_padding: List[int],
+        output_padding_: List[int],
         groups: int,
     ):
         x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
-        stride = tuple(stride)
-        padding = tuple(padding)
-        dilation = tuple(dilation)
+        stride = tuple(stride_)
+        padding = tuple(padding_)
+        dilation = tuple(dilation_)
         assert isinstance(transposed, bool)
-        output_padding = tuple(output_padding)
+        output_padding = tuple(output_padding_)
         assert isinstance(groups, int)
 
         weight_shape = [
@@ -2668,7 +2799,6 @@ class Convolution(ExternKernelAlloc):
             assert config_conv == "autotune"
             from .codegen.autotuner import tuned_conv
 
-            # kernel = "tuned_conv"
             kernel = tuned_conv(
                 x.get_size(),
                 weight.get_size(),
@@ -2686,11 +2816,31 @@ class Convolution(ExternKernelAlloc):
 
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
+            output_layout_str = "torch.channels_last"
+        elif config.tune_layout:
+            from .codegen.autotuner import tuned_conv_layout
+
+            output_layout_str = tuned_conv_layout(
+                kernel,
+                x.get_size(),
+                weight.get_size(),
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                x.get_device(),
+                x.get_dtype(),
+            )
+        else:
+            output_layout_str = "torch.contiguous_format"
+
+        if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
-        # for conv1d, output layout is not preserved with inputs
         else:
             stride_order = list(reversed(range(len(output_size))))
 
@@ -3012,9 +3162,11 @@ class LoopBodyBlock:
                 index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
-            def reduction(self, name, dtype, reduction_type, index, value):
+            def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
                 index = add_index(index, "writes", name)
-                return self._inner.reduction(name, dtype, reduction_type, index, value)
+                return self._inner.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
@@ -3032,7 +3184,7 @@ class LoopBodyBlock:
                     return V.ops.masked(mask, subblock, other)
 
                 name = self.body.add_submodule(shim, "masked_subblock")
-                subblock = LoopBodyBlock(self.body, masked_body, ())
+                subblock = LoopBodyBlock(self.body, masked_body, [])
                 self.body.subblocks[name] = subblock
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}

@@ -5,9 +5,11 @@ import functools
 import itertools
 import logging
 import os
+import re
 from typing import Any
 from typing import Dict
 from typing import List
+from typing import Optional
 
 import numpy as np
 import sympy
@@ -62,10 +64,10 @@ class OutputNode:
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler = scheduler
-        self.node = node
-        self.users = None
-        self.inverse_users = []
+        self.scheduler: "Scheduler" = scheduler
+        self.node: ir.Buffer = node
+        self.users: Optional[List[NodeUser]] = None
+        self.inverse_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
 
     def __repr__(self):
@@ -79,7 +81,7 @@ class BaseSchedulerNode:
 
     def set_users(self, users: List["NodeUser"]):
         # deduplicate
-        result = {}
+        result: Dict[int, NodeUser] = {}
         for use in users:
             if id(use.node) in result:
                 result[id(use.node)] = NodeUser(
@@ -95,8 +97,8 @@ class BaseSchedulerNode:
     def get_mutations(self):
         return self.node.get_mutation_names()
 
-    def set_read_writes(self, rw):
-        self.read_writes = rw
+    def set_read_writes(self, rw: dependencies.ReadWrites):
+        self.read_writes: dependencies.ReadWrites = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
 
@@ -109,6 +111,12 @@ class BaseSchedulerNode:
 
     def get_name(self):
         return self.node.get_name()
+
+    def get_sort_order(self):
+        name = self.get_name()
+        m = re.search(r"(\d+)$", name)
+        assert m, f"expected '{name}' to end with a number"
+        return int(m.group(1))
 
     def get_device(self):
         return self.node.get_device()
@@ -141,6 +149,8 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
+    node: ir.ExternKernel
+
     def __init__(self, scheduler: "Scheduler", node: ir.ExternKernel, group_fn):
         super().__init__(scheduler, node)
         if should_use_template(node):
@@ -389,24 +399,23 @@ class FusedSchedulerNode(BaseSchedulerNode):
     its unmet dependencies as the union of its constituent nodes.
     """
 
-    def __init__(self, scheduler: "Scheduler", snodes):
+    def __init__(self, scheduler: "Scheduler", snodes: List[SchedulerNode]):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
-        self.node = None
+        self.node = None  # type: ignore[assignment]
         self.users = None
         self.inverse_users = []
-        node = snodes[0].node
         self.group = snodes[0].group
         reads = set(self.snodes[0].read_writes.reads)
-        for node in snodes[1:]:
-            reads |= node.read_writes.reads
-            assert self.group == node.group
+        for snode in snodes[1:]:
+            reads |= snode.read_writes.reads
+            assert self.group == snode.group
         node_bufs = set([node.get_name() for node in snodes])
-        reads = [read for read in reads if read.name not in node_bufs]
+        reads = set([read for read in reads if read.name not in node_bufs])
         # self.read_writes field shouldn't really be needed for much, but it's
         # useful for visualization to track what buffers it reads from
-        self.set_read_writes(dependencies.ReadWrites(reads, None, None, None))
+        self.set_read_writes(dependencies.ReadWrites(list(reads), None, None, None))  # type: ignore[arg-type]
         self.prune_deps()
 
     def get_name(self):
@@ -463,18 +472,19 @@ class FusedSchedulerNode(BaseSchedulerNode):
 class SchedulerNodeBox:
     """Allow us to invalidate a blocked node"""
 
-    value: SchedulerNode
+    value: Optional[SchedulerNode]
 
     def __bool__(self):
         return self.value is not None
 
     def pop(self) -> SchedulerNode:
-        assert self
+        assert self.value is not None
         val = self.value
         self.value = None
         return val
 
     def peek(self) -> SchedulerNode:
+        assert self.value is not None
         return self.value
 
 
@@ -496,20 +506,29 @@ class BlockedNodes:
 
     def pop_fusable(self, deps, group):
         assert isinstance(deps, set)
+        unpacked_something = False
         result = []
         for dep in deps:
             self.dep_to_nodes[dep] = [x for x in self.dep_to_nodes[dep] if x]
             for box in self.dep_to_nodes[dep]:
                 if (
-                    len(box.peek().unmet_dependencies - deps) == 0
+                    box.peek()
+                    and len(box.peek().unmet_dependencies - deps) == 0
                     and box.peek().group == group
                 ):
                     out = box.pop()
                     if isinstance(out, FusedSchedulerNode):
                         for x in out.snodes:
-                            result.append(x)
+                            if len(x.unmet_dependencies) == 0:
+                                result.append(x)
+                            else:
+                                self.add(x)
+                            unpacked_something = True
                     else:
                         result.append(out)
+        if unpacked_something:
+            # in case there are dependencies inside pre fused nodes
+            result.extend(self.pop_fusable(deps, group))
         return result
 
 
@@ -536,7 +555,7 @@ def draw_buffers(nodes, fname, print_graph=False):
     nodes is a list of SchedulerNode objects.
     """
 
-    from functorch._src.partitioners import draw_graph
+    from functorch.compile import draw_graph
     from torch.fx.graph_module import GraphModule
     from torch.fx.passes.shape_prop import TensorMetadata
     from torch.fx.passes.tools_common import legalize_graph
@@ -547,6 +566,8 @@ def draw_buffers(nodes, fname, print_graph=False):
         if "fusion_meta" not in node.meta:
             continue
         group = node.meta["fusion_meta"].group
+        if isinstance(group, tuple):
+            group = group[1]
 
         # gather meta data
         dtype = None
@@ -615,6 +636,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     first_node = None
 
     outputs = []
+    group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
         if isinstance(snode, ExternKernelSchedulerNode):
@@ -625,10 +647,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             group = node_type
         elif isinstance(snode, SchedulerNode):
             node_type = "compute"
-            group = snode.group[1]
+            group = snode.group
         elif isinstance(snode, FusedSchedulerNode):
             node_type = "fused"
-            group = snode.group[1]
+            group = snode.group
         else:
             raise RuntimeError("Unknown node type")
         node_func = func_dict[node_type]
@@ -818,6 +840,9 @@ class Scheduler:
         self.check_can_free = set()
         self.fusable_deps = set()
         for node in nodes:
+            assert (
+                node.origins is not None
+            ), "All nodes passed to scheduling must have an origin"
             if node.is_no_op():
                 self.nodes.append(NopKernelSchedulerNode(self, node))
             elif isinstance(node, ir.ComputedBuffer):
@@ -856,7 +881,7 @@ class Scheduler:
 
         if INDUCTOR_SCHEDULER_GRAPH:
             try:
-                from functorch._src.aot_autograd import get_graph_being_compiled
+                from functorch.compile import get_graph_being_compiled
 
                 graph_name = get_graph_being_compiled()
             except ImportError:
@@ -1004,7 +1029,11 @@ class Scheduler:
         # If all the uses of this buffer are also in self.pending_buffer_names,
         # it means the buffer becomes kernel-local after fusion
         for name in self.pending_buffer_names:
-            if name in V.kernel.must_keep_buffers:
+            if (
+                name in V.kernel.must_keep_buffers
+                or name in V.kernel.args.input_buffers
+                or name in self.mutation_renames
+            ):
                 continue
             node = self.name_to_node[name]
             is_live = any(
@@ -1125,7 +1154,7 @@ class Scheduler:
         nodes = [True]
         while nodes:
             nodes = list(self.unordered_pop_group(group_without_device))
-            nodes.sort(key=lambda x: x.get_name())
+            nodes.sort(key=lambda x: x.get_sort_order())
             yield from nodes
 
     def pop_groups(self, groups):

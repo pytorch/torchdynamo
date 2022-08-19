@@ -36,6 +36,15 @@ def ifdyn(count1, count2):
         return count2
 
 
+def has_detectron2():
+    try:
+        from detectron2.layers.mask_ops import _paste_masks_tensor_shape
+
+        return _paste_masks_tensor_shape is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True):
     # from detectron2 mask_ops.py
 
@@ -933,8 +942,9 @@ class ReproTests(torchdynamo.testing.TestCase):
         def fn4(x):
             return x[0] + 1
 
+        cnt = torchdynamo.testing.CompileCounter()
         for fn in (fn1, fn2, fn3, fn4):
-            cnt = torchdynamo.testing.CompileCounter()
+            cnt.clear()
             with torchdynamo.optimize_assert(cnt):
                 self.assertTrue(same(fn(ex), ex.a + 1))
             self.assertEqual(cnt.frame_count, 1)
@@ -1464,3 +1474,22 @@ class ReproTests(torchdynamo.testing.TestCase):
         res = optimized_fn(a, sample)
 
         self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not has_detectron2(), "requires detectron2")
+    def test_multi_import(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def to_bitmasks(boxes):
+            from detectron2.layers.mask_ops import _paste_masks_tensor_shape
+            from detectron2.layers.mask_ops import paste_masks_in_image
+
+            if (
+                paste_masks_in_image is not None
+                and _paste_masks_tensor_shape is not None
+            ):
+                return boxes + 1
+
+        self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())
+
+
+if __name__ == "__main__":
+    unittest.main()

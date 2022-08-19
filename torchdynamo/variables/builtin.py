@@ -1,6 +1,7 @@
 import functools
 import inspect
 import itertools
+import logging
 import math
 import operator
 import types
@@ -29,6 +30,8 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
+
+log = logging.getLogger(__name__)
 
 
 class BuiltinVariable(VariableTracker):
@@ -326,8 +329,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                if config.debug:
-                    print("WARN: incorrect arg count", handler, exc)
+                log.warning(f"incorrect arg count {handler} {exc}")
                 handler = None
 
         if handler:

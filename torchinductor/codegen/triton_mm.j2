@@ -23,6 +23,7 @@ def {{kernel_name}}(
     {% for i in extra_argdefs %}
     {{i}},
     {% endfor %}
+    allow_tf32: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -59,7 +60,7 @@ def {{kernel_name}}(
         else:
             a = tl.load(A_ptrs, mask=rk[None, :] < k, other=0.0)
             b = tl.load(B_ptrs, mask=rk[:, None] < k, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=False)
+        acc += tl.dot(a, b, allow_tf32=allow_tf32)
         A_ptrs += BLOCK_K * SPLIT_K * stride_ak
         B_ptrs += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to({{out_def}}.dtype.element_ty)

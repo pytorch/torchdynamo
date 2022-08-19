@@ -201,11 +201,26 @@ class TritonOverrides(OpOverrides):
             return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
 
     @staticmethod
+    def floordiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Similar to div_floor_kernel_cuda in pytorch core.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        quot = f"{a} // {b}"
+        rem = f"{a} % {b}"
+        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+
+    @staticmethod
     def trunc(x):
         if has_triton_libdevice():
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        return f"{a} // {b}"
 
     @staticmethod
     def ceil(x):
@@ -648,12 +663,10 @@ class TritonKernel(Kernel):
         return index_str, " & ".join(mask)
 
     def var_ranges(self):
-        return (
-            dict(
-                itertools.chain.from_iterable(
-                    tree.var_ranges.items() for tree in self.range_trees
-                )
-            ),
+        return dict(
+            itertools.chain.from_iterable(
+                tree.var_ranges.items() for tree in self.range_trees
+            )
         )
 
     def codegen_indexing(self, expr: sympy.Expr):
@@ -715,9 +728,9 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, dtype))
+        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
@@ -732,17 +745,17 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
-            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
+        if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}) + {default}"
             )
             accumulator_index = None
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
                 self.body.writeline(
-                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int32)"
+                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
                 )
 
             updated = value
@@ -783,7 +796,7 @@ class TritonKernel(Kernel):
                     f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
                 )
         else:
-            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
+            var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)
@@ -1094,10 +1107,10 @@ class TritonScheduling:
 
     @staticmethod
     @functools.lru_cache(32)
-    def select_node_tiling(node):
+    def candidate_tilings(node):
         ranges, reduction_ranges = node.get_ranges()
         if len(ranges) <= 1:
-            return None
+            return ()
 
         rw = node.pointwise_read_writes()
         assert len(rw.range_vars) == len(ranges)
@@ -1107,22 +1120,47 @@ class TritonScheduling:
             for dep in itertools.chain(rw.reads, rw.writes)
             if dep.name not in V.graph.removed_buffers
         ]
-        strides = [
-            V.graph.sizevars.stride_hints(dep.index, rw.range_vars) for dep in deps
-        ]
+        write_names = {dep.name for dep in rw.writes}
 
-        if strides:
-            tiled_ranges = ir.ComputedBuffer._tile_contiguous(ranges, strides)
-            tiled_groups = tuple(
-                V.graph.sizevars.simplify(sympy_product(x)) for x in tiled_ranges
+        tilings = []
+
+        for dep in deps:
+            strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
+            assert len(strides) == len(ranges)
+            try:
+                split = strides.index(1) + 1
+                if split == len(ranges):
+                    continue
+                if all(s == 0 for s in strides[split:]):
+                    # if this is a broadcasted tensor and all dimensions after split are broadcast,
+                    # this is not a real split
+                    continue
+
+            except ValueError:
+                continue
+            tiled_groups = (
+                V.graph.sizevars.simplify(sympy_product(ranges[:split])),
+                V.graph.sizevars.simplify(sympy_product(ranges[split:])),
             )
-            if len(tiled_ranges) > 1:
-                return tiled_groups
+            # score by number of elements
+            score = V.graph.sizevars.size_hint(
+                sympy_product(
+                    size for size, stride in zip(ranges, strides) if stride != 0
+                )
+            )
+            if dep.name in write_names:
+                # ngimel said contiguous writes is more important than reads
+                score *= 2
+            if CandidateTiling.is_good_size(tiled_groups[0]):
+                score *= 2
+            if CandidateTiling.is_good_size(tiled_groups[1]):
+                score *= 2
 
-            # TODO(jansel): ir.ComputedBuffer._tile_broadcasting()?
+            tilings.append(CandidateTiling(tiled_groups, score, dep.name))
+        return tilings
 
-    @staticmethod
-    def select_tiling(node_schedule, numel, reduction_numel):
+    @classmethod
+    def select_tiling(cls, node_schedule, numel, reduction_numel):
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
@@ -1131,19 +1169,39 @@ class TritonScheduling:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
 
         """
-        if reduction_numel != 1:
+        if reduction_numel != 1 or config.triton.max_tiles <= 1:
             # TODO(jansel): should we tile reductions?
             return (numel, reduction_numel)
 
+        seen_names = set()
         candidate_tiles = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
-            tiled_groups = TritonScheduling.select_node_tiling(node)
-            if tiled_groups:
-                candidate_tiles[tiled_groups] += 1
+            for tiling in cls.candidate_tilings(node):
+                if tiling.name in seen_names:
+                    continue
+                seen_names.add(tiling.name)
+                candidate_tiles[tiling.tiling] += tiling.score
 
-        # TODO(jansel): join two 2D tiles into a 3D tile
-        # TODO(jansel): add a cost function for tiling instead of most_common
-        for tiled_groups, count in candidate_tiles.most_common():
+        ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
+
+        if config.triton.max_tiles >= 3:
+            # Add one 3D tiling choice
+            for i in range(1, len(ranked_tilings)):
+                a0, a1 = ranked_tilings[0]
+                b0, b1 = ranked_tilings[i]
+                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+                    continue
+                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                    # swap so a0 is bigger
+                    a0, a1 = ranked_tilings[i]
+                    b0, b1 = ranked_tilings[0]
+                assert V.graph.sizevars.size_hint(a1 - b1) > 0
+                if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
+                    tiling = (a0, ir.IndexingDiv(a1, b1), b1)
+                    ranked_tilings = [tiling] + ranked_tilings
+                    break  # only 1 choice for now
+
+        for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)
             if all(
                 TritonKernel.is_compatible(new_groups, node.get_ranges())
@@ -1151,6 +1209,9 @@ class TritonScheduling:
                 if isinstance(node, torchinductor.scheduler.SchedulerNode)
             ):
                 return new_groups
+            else:
+                log.warning("incompatible tiling %s -- %s", new_groups, ranked_tilings)
+
         return (numel, reduction_numel)
 
     def is_better_tiling_ready(self, numel, reduction_numel):
@@ -1158,20 +1219,35 @@ class TritonScheduling:
         Check for a pending node wanting a different tiling strategy
         than the given reduction.
         """
-        better_tiled = False
-        nodes_to_reschedule = []
-        for node in self.scheduler.pop_group(
-            (numel * reduction_numel, sympy.Integer(1))
-        ):
-            tiling = self.select_node_tiling(node)
-            if tiling and tuple(tiling) != (numel, reduction_numel):
-                better_tiled = True
-            nodes_to_reschedule.append(node)
-        self.scheduler.enqueue(nodes_to_reschedule)
-        return better_tiled
+        nodes = list(
+            self.scheduler.pop_group((numel * reduction_numel, sympy.Integer(1)))
+        )
+        self.scheduler.enqueue(nodes)
+
+        tiling = tuple(
+            self.select_tiling(nodes, numel * reduction_numel, sympy.Integer(1))
+        )
+        return tiling and tiling not in [
+            (numel, reduction_numel),
+            (numel, reduction_numel, sympy.Integer(1)),
+            (numel * reduction_numel, sympy.Integer(1)),
+        ]
 
     def flush(self):
         pass
+
+
+@dataclasses.dataclass
+class CandidateTiling:
+    tiling: List[sympy.Expr]
+    score: int  # higher is better
+    name: str = None
+
+    @staticmethod
+    def is_good_size(s):
+        """Somewhat arbitrary heuristic used to boost scores for some sizes"""
+        s = V.graph.sizevars.size_hint(s)
+        return s >= 32 and (s % 32 == 0)
 
 
 class DisableReduction:

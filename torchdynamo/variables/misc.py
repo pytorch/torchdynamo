@@ -292,51 +292,18 @@ class GradModeVariable(ContextWrappingVariable):
             return "no_grad"
 
 
-class ProfileRecordFunctionVariable(ContextWrappingVariable):
-    def __init__(self, target_value, initial_value=None, **kwargs):
-        self.entered = kwargs.pop("entered", False)
-        proxy_value = kwargs.pop("proxy_value", None)
-        if proxy_value is not None:
-            self.proxy_value = proxy_value
-
-        super(ProfileRecordFunctionVariable, self).__init__(
-            target_value=target_value, initial_value=initial_value, **kwargs
-        )
+class FakeContextWrappingVariable(ContextManagerVariable):
+    def __init__(self, **kwargs):
+        super(FakeContextWrappingVariable, self).__init__(**kwargs)
 
     def enter(self, tx):
-        self.entered = True
-        super(ProfileRecordFunctionVariable, self).enter(tx)
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        self.entered = False
-        super(ProfileRecordFunctionVariable, self).exit(tx)
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def _call_func(self, tx, value):
-        if self.entered:
-            self.proxy_value = tx.output.create_proxy(
-                "call_function",
-                torch.ops.profiler._record_function_enter,
-                (value,),
-                {},
-                current_tx=tx,
-            )
-        else:
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.profiler._record_function_exit,
-                (self.proxy_value,),
-                {},
-                current_tx=tx,
-            )
-
-    def _func_name(self):
-        if self.entered:
-            return "torch.ops.profiler._record_function_enter"
-        else:
-            return "torch.ops.profiler._record_function_exit"
-
-    def _initial_value(self):
-        return self.target_value
+    def fn_name(self):
+        return "autograd.profiler.profile"
 
 
 class WithExitFunctionVariable(VariableTracker):

@@ -1,5 +1,6 @@
 from . import allowed_functions
 from . import convert_frame
+from . import eval_frame
 from . import resume_execution
 from .eval_frame import disable
 from .eval_frame import export
@@ -34,6 +35,7 @@ def reset():
     orig_code_map.clear()
     guard_failures.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
+    eval_frame.most_recent_backend = None
 
 
 def list_backends():
