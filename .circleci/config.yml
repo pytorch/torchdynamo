@@ -8,34 +8,50 @@ jobs:
     resource_class: gpu.nvidia.large
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
             source .circleci/setup_env.sh
       - run:
+          name: TorchBench install
+          command: |
+            FILE=torchbenchmark/env-v2.key
+            if test -f "$FILE"; then
+              # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
+              echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
+            else
+              source .circleci/setup_env.sh
+              conda install -y -c conda-forge git-lfs
+              git lfs install --skip-repo
+              # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+              # above doesn't work due to git-lfs auth issues, workaround with a tarball:
+              wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+              tar jxvf torchbenchmark.tar.bz2
+              (cd torchbenchmark && python install.py && touch env-v2.key)
+            fi
+      - save_cache:
+          key: env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          paths:
+            - conda
+            - env
+            - torchbenchmark
+      - run:
           name: Tests
           command: |
             source .circleci/setup_env.sh
+            make develop
             mkdir test-results
             pytest -v --junitxml=test-results/junit.xml
       - store_test_results:
           path: test-results
       - run:
-          name: TorchBench install
-          command: |
-            source .circleci/setup_env.sh
-            conda install -y -c conda-forge git-lfs
-            git lfs install --skip-repo
-            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
-            # above doesn't work due to git-lfs auth issues, workaround with a tarball:
-            wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
-            tar jxvf torchbenchmark.tar.bz2
-            (cd torchbenchmark && python install.py)
-      - run:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
+            python benchmarks/torchbench.py --ci --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
       - store_artifacts:
           path: coverage.csv
       - run:
@@ -50,6 +66,9 @@ jobs:
     resource_class: gpu.nvidia.large
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
           name: Setup
           command: |
@@ -57,19 +76,32 @@ jobs:
       - run:
           name: TorchBench install
           command: |
-            source .circleci/setup_env.sh
-            conda install -y -c conda-forge git-lfs
-            git lfs install --skip-repo
-            # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
-            # above doesn't work due to git-lfs auth issues, workaround with a tarball:
-            wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
-            tar jxvf torchbenchmark.tar.bz2
-            (cd torchbenchmark && python install.py)
+            FILE=torchbenchmark/env-v2.key
+            if test -f "$FILE"; then
+              # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
+              echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
+            else
+              source .circleci/setup_env.sh
+              conda install -y -c conda-forge git-lfs
+              git lfs install --skip-repo
+              # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
+              # above doesn't work due to git-lfs auth issues, workaround with a tarball:
+              wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+              tar jxvf torchbenchmark.tar.bz2
+              (cd torchbenchmark && python install.py && touch env-v2.key)
+            fi
+      - save_cache:
+          key: env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          paths:
+            - conda
+            - env
+            - torchbenchmark
       - run:
           name: TorchBench AotAutograd Eager run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 --use-eval-mode --output=aot_eager.csv
+            make develop
+            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
       - run:

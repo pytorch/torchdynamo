@@ -1,3 +1,4 @@
+import logging
 import os
 from os.path import abspath
 from os.path import dirname
@@ -12,14 +13,12 @@ try:
 except ImportError:
     HAS_REFS_PRIMS = False
 
-# print out lots of stuff
-debug = False
-
-# an unreasonable amount of debug printouts
-trace = False
-
-# print the torchdynamo internal exceptions
-print_internal_exceptions = True
+# log level (levels print what it says + all levels listed below it)
+# DEBUG print full traces <-- lowest level + print tracing of every instruction
+# INFO print compiled functions + graphs
+# WARN print warnings (including graph breaks)
+# ERROR print exceptions (and what user code was being processed when it occurred)
+log_level = logging.WARNING
 
 # verify the correctness of optimized backend
 verify_correctness = False

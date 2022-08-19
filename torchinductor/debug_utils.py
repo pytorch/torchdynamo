@@ -2,6 +2,9 @@ import os
 import subprocess
 import textwrap
 import uuid
+from collections import Counter
+
+import torch
 
 import torchdynamo
 from torchinductor.codecache import cache_dir
@@ -20,6 +23,34 @@ def generate_repro_string(gm, args):
 
         """
     )
+    model_str += f"# torch version: {torch.version.__version__}\n"
+    model_str += f"# torch cuda version: {torch.version.cuda}\n"
+    model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
+    if torch.cuda.is_available():
+        model_str += "# CUDA Info: \n"
+        cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
+        cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
+        cuda_version_out = "".join(
+            [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
+        )
+        model_str += f"{cuda_version_out}\n"
+        gpu_names = subprocess.run(
+            ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
+            stdout=subprocess.PIPE,
+        )
+        gpu_names = gpu_names.stdout.decode().split("\n")
+        gpu_names = [name for name in gpu_names if name not in ("", "name")]
+        gpu_names = Counter(gpu_names)
+
+        model_str += "# GPU Hardware Info: \n"
+        for name, count in gpu_names.items():
+            model_str += f"# {name} : {count} \n"
+        model_str += "\n"
+    else:
+        model_str += (
+            "torch.cuda.is_available() returned False - no GPU info collected \n"
+        )
+
     model_str += "class Repro(torch.nn.Module):\n"
     attrs = dir(gm)
     for attr in attrs:

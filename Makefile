@@ -36,12 +36,13 @@ lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
+	mypy
 	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
 		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
-	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs $(PIP) install
+	grep -E '(black|flake8|isort|click|torch|mypy)' requirements.txt | xargs $(PIP) install
 
 setup_lint: lint-deps
 
@@ -53,20 +54,18 @@ setup_nightly:
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -r requirements.txt
-	python setup.py develop
 
 setup_nightly_gpu:
-	conda install -y -c pytorch magma-cuda113 cudatoolkit=11.3
+	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
                       torchvision==0.14.0.$(PYTORCH_VERSION) \
                       torchaudio==0.13.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
-                      --extra-index-url https://download.pytorch.org/whl/nightly/cu113
+                      --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja
 	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
-	python setup.py develop
 
 clean:
 	python setup.py clean

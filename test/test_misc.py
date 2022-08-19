@@ -1295,6 +1295,25 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    def test_autograd_profiler(self):
+        # wrap torch.autograd.profiler.* as FakeContextWrappingVariable and do nothing
+        def fn(x):
+            y = x**2
+            with torch.autograd.profiler.profile():
+                y = y + 2
+                with torch.autograd.profiler.record_function("my_function"):
+                    z = y**3
+                    z.tolist()  # graph break
+                    z = z + 1
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            res = fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
