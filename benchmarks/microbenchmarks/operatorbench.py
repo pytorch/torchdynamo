@@ -91,14 +91,6 @@ def skip_operator(operator):
         print(f"Skipping {operator}, input generator nyi")
         return True
 
-    # illegal memory address in inductor: TODO - debug
-    if (
-        operator == aten.native_layer_norm.default
-        or operator == aten.native_layer_norm_backward.default
-    ):
-        print(f"Skipping {operator}, inductor illegal memory address")
-        return True
-
     # not covered by other non-compute operator heuristics
     if operator == torch.ops.aten._unsafe_view.default:
         print(f"Skipping {operator}, non compute operator")
@@ -159,7 +151,7 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
     if op == "all":
         ops = loader.get_all_ops()
     else:
-        ops = [op]
+        ops = [eval(op)]
 
     for operator in ops:
         if skip_operator(operator):
