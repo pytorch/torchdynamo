@@ -2,6 +2,7 @@ import os
 import subprocess
 import textwrap
 import uuid
+import torch
 
 import torchdynamo
 from torchinductor.codecache import cache_dir
@@ -9,7 +10,7 @@ from torchinductor.codecache import cache_dir
 
 def generate_repro_string(gm, args):
     model_str = textwrap.dedent(
-        """
+        f"""
         import torch
         from torch import tensor, device
         import torch.fx as fx
@@ -20,6 +21,15 @@ def generate_repro_string(gm, args):
 
         """
     )
+    model_str += f"# torch version: {torch.version.__version__}\n"
+    model_str += f"# torch cuda version: {torch.version.cuda}\n"
+    model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
+    if torch.cuda.is_available():
+        cuda_version_out = subprocess.run(['nvcc', '--version'], stdout=subprocess.PIPE)
+        cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
+        cuda_version_out = "".join([f"# {s} \n" for s in cuda_version_lines if s not in ['']])
+        model_str += f"{cuda_version_out}\n\n"
+
     model_str += "class Repro(torch.nn.Module):\n"
     attrs = dir(gm)
     for attr in attrs:
