@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 import torch.utils._pytree as pytree
 
+import torchdynamo
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import same
@@ -329,10 +330,10 @@ def optimize(backend, nopython=False, guard_export_fn=None):
     )
 
 
+@patch("torchdynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
-    import torchdynamo.symbolic_convert as symbolic_convert
-
-    symbolic_convert.explain = True
+    # TODO(voz): Do we want a decorator for this?
+    torchdynamo.reset()
 
     out_guards = []
     graphs = []
@@ -378,7 +379,9 @@ def explain(f, *args, **kwargs):
     explanation = f"Dynamo produced {graph_count} graphs"
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
     explanation += f"\n Break reasons: \n\n{formatted_list}"
-    symbolic_convert.explain = False
+
+    # TODO(voz): Do we want a decorator for this?
+    torchdynamo.reset()
     return explanation, out_guards, graphs, ops_per_graph
 
 
