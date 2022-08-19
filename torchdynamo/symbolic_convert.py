@@ -143,6 +143,8 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
 
 
 explain = False
+
+
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
@@ -161,8 +163,8 @@ def break_graph_if_unsupported(*, push):
                         + list(reversed(exc.real_stack))
                     )
                 )
-                
-                # torchdynamo.explain() formats this a little nicer, and presents a slightly 
+
+                # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if not explain:
                     log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
