@@ -15,6 +15,7 @@ from torchdynamo import config
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
+from torchinductor.debug_utils import wrap_debug
 
 from .analysis import has_mutation
 from .backends import BACKENDS
@@ -248,7 +249,7 @@ class AotPrimsNvfuser(AotAutogradStrategy):
         return BACKENDS["aot_autograd"](
             self.gm,
             self.example_inputs,
-            fw_compiler=self.nvfuser,
+            fw_compiler=wrap_debug(self.nvfuser, "nvfuser_fails"),
             partition_fn=self.min_cut_rematerialization_partition,
             hasher_type="StaticShapeHasher",
             decompositions=self.aten2aten_decompositions,

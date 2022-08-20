@@ -3,11 +3,14 @@ import subprocess
 import textwrap
 import uuid
 from collections import Counter
+import functools
+import copy
 
 import torch
 
 import torchdynamo
 from torchinductor.codecache import cache_dir
+from torchinductor import config
 
 
 def generate_repro_string(gm, args):
@@ -83,7 +86,7 @@ def dump_to_repro(gm, args):
 
 
 def dump_state_inductor(gm, args):
-    subdir = f"{cache_dir()}/minimizer_checkpoints"
+    subdir = f"{cache_dir()}/minifier_checkpoints"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
@@ -100,10 +103,10 @@ def dump_state_inductor(gm, args):
         )
 
 
-def isolate_inductor_fails(fx_g, args, env=None):
+def isolate_fails(fx_g, args, compiler_fails: str, env=None):
     if env is None:
         env = {}
-    subdir = f"{cache_dir()}/minimizer"
+    subdir = f"{cache_dir()}/minifier"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
@@ -111,15 +114,15 @@ def isolate_inductor_fails(fx_g, args, env=None):
         fd.write(generate_repro_string(fx_g, args))
         fd.write(
             textwrap.dedent(
-                """
-                from torchinductor.debug_utils import inductor_fails
+                f"""
+                from torchinductor.debug_utils import {compiler_fails}
                 """
             )
         )
         fd.write(
             textwrap.dedent(
-                """
-                if inductor_fails(mod, args):
+                f"""
+                if {compiler_fails}(mod, args):
                     exit(1)
                 else:
                     exit(0)
@@ -159,32 +162,73 @@ def inductor_fails(fx_g, args, check_str=None):
     return False
 
 
-def dump_to_minify(gm, args):
+def nvfuser_fails(fx_g, args, check_str=None):
+    from torch.fx.passes.backends.nvfuser import NvFuserBackend
+
+    nvfuser = NvFuserBackend()
+
+    config.autotune = False
+
+    try:
+        compile_mod = nvfuser(fx_g, args)
+        compile_mod = compile_mod(*args)
+    except Exception as e:
+        if check_str is not None and check_str not in repr(e):
+            return False
+        print(repr(e))
+        return True
+    return False
+
+
+def dump_to_minify(gm, args, compiler_fails: str):
     with open(
-        os.path.join(torchdynamo.config.base_dir, "minimizer_repro.py"), "w"
+        os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py"), "w"
     ) as fd:
         fd.write(generate_repro_string(gm, args))
         fd.write("\n")
         fd.write(
             textwrap.dedent(
-                """
+                f"""
                 from functools import partial
                 from torchinductor.debug_utils import (
-                    inductor_fails,
-                    isolate_inductor_fails,
+                    {compiler_fails},
+                    isolate_fails,
                     dump_state_inductor,
                 )
                 from functorch.compile import minifier
 
-                env_variables = {"CUDA_VISIBLE_DEVICES": "1"}
+                env_variables = {{"CUDA_VISIBLE_DEVICES": "1"}}
 
                 minifier(
                     mod,
                     args,
-                    module_fails=partial(isolate_inductor_fails, env=env_variables),
+                    module_fails=partial(isolate_fails, env=env_variables, compiler_fails="{compiler_fails}"),
                     dump_state=dump_state_inductor,
                 )
                 """
             )
         )
-    print("wrote out to minimizer_repro.py")
+    print("wrote out to minifier_launcher.py")
+
+
+def wrap_debug(compiler, compiler_fails: str):
+    @functools.wraps(compiler)
+    def debug_wrapper(gm, example_inputs, **kwargs):
+        orig_gm = copy.deepcopy(gm)
+        if config.repro_level == 3:
+            dump_to_minify(orig_gm, example_inputs, compiler_fails)
+
+        try:
+            compiled_fn = compiler(gm, example_inputs, **kwargs)
+            if config.repro_level > 0:
+                compiled_fn(*example_inputs)
+        except Exception as e:
+            if config.repro_level == 1:
+                dump_to_repro(orig_gm, example_inputs)
+            elif config.repro_level == 2:
+                dump_to_minify(orig_gm, example_inputs, compiler_fails)
+            raise e
+
+        return compiled_fn
+
+    return debug_wrapper
