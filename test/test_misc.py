@@ -2052,6 +2052,21 @@ class MiscTests(torchdynamo.testing.TestCase):
             res = fn(x, m)
         self.assertEqual(ref, res)
 
+    def test_tensor_dot_grad_no_graph_break(self):
+        def fn(a, b):
+            y = 3 * a**3 - b**2
+            y.backward(gradient=torch.tensor([1.0, 1.0]))
+            b.grad.zero_()
+            return a.grad, b.grad
+
+        a = torch.tensor([2.0, 3.0], requires_grad=True)
+        b = torch.tensor([6.0, 4.0], requires_grad=True)
+        cnts = torchdynamo.testing.CompileCounter()
+        with torchdynamo.optimize(cnts):
+            _, b_grad = fn(a, b)
+        self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_change_backends(self):
         @torchdynamo.optimize("eager", nopython=True)
         def fn1():

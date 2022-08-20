@@ -182,9 +182,14 @@ def is_numpy_float_type(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    return istype(
-        obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
+    tensor_list = (
+        torch.Tensor,
+        torch.nn.Parameter,
+        *config.traceable_tensor_subclasses,
     )
+    if fake_tensors_available:
+        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    return istype(obj, tensor_list)
 
 
 def is_lazy_module(mod):
