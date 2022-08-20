@@ -14,10 +14,10 @@ from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
+from torchdynamo.debug_utils import wrap_debug
 
 from . import config
 from . import overrides
-from .debug_utils import wrap_debug
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
@@ -93,7 +93,7 @@ def compile_fx_python_key(
     return compile_fx_inner(gm, example_inputs, wrap=wrap, cudagraphs=cudagraphs)
 
 
-@functools.partial(wrap_debug, compiler_fails="inductor_fails")
+@functools.partial(wrap_debug, compiler_name="inductor")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -131,9 +131,6 @@ def compile_fx_inner(
             log.warning("skipping cudagraphs due to multiple devices")
         elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
-
-    if config.repro_level > 0:
-        compiled_fn(*example_inputs)
 
     return compiled_fn
 

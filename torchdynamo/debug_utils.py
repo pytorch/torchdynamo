@@ -10,7 +10,7 @@ import torch
 
 import torchdynamo
 from torchinductor.codecache import cache_dir
-from torchinductor import config
+from torchdynamo import config
 
 
 def generate_repro_string(gm, args):
