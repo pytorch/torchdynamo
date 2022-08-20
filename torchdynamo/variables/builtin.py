@@ -694,7 +694,7 @@ class BuiltinVariable(VariableTracker):
             member = obj.value.__dict__[name]
 
             if config.replay_record_enabled:
-                tx.exec_recorder.add_module_access(obj.value, name, member)
+                tx.exec_recorder.record_module_access(obj.value, name, member)
 
             return VariableBuilder(tx, source)(member).add_guards(guards)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):

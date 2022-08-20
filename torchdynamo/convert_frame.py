@@ -266,100 +266,113 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 + f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
-        output = None
 
         if not has_tensor_in_frame(frame):
             return None
 
+        return _compile(
+            frame.f_code,
+            frame.f_globals,
+            frame.f_locals,
+            frame.f_builtins,
+            compiler_fn,
+            one_graph,
+            guard_export_fn,
+            frame,
+        )
+
         # from .utils import print_once;  print_once(code.co_filename)
-
-        def transform(instructions, code_options):
-            nonlocal output
-            tracer = InstructionTranslator(
-                instructions,
-                frame.f_code,
-                frame.f_locals,
-                frame.f_globals,
-                frame.f_builtins,
-                code_options,
-                compiler_fn,
-                one_graph,
-            )
-            tracer.run()
-            output = tracer.output
-            assert output.output_instructions
-            instructions[:] = output.output_instructions
-            code_options.update(output.code_options)
-
-            if config.dead_code_elimination:
-                instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
-
-        def format_bytecode(prefix, bytecode):
-            return f"{prefix} {code.co_name} {code.co_filename} \
-                {code.co_firstlineno} \n{dis.Bytecode(bytecode).dis()}\n "
-
-        try:
-            for attempt in itertools.count():
-                try:
-                    code = transform_code_object(frame.f_code, transform)
-                    orig_code_map[code] = frame.f_code
-                    break
-                except exc.RestartAnalysis:
-                    log.debug("Restarting analysis ...")
-                    if attempt > 100:
-                        unimplemented("100+ RestartAnalysis() calls")
-                except exc.SkipFrame:
-                    log.debug(
-                        f"Skipping frame {frame.f_code.co_name} \
-                        {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
-                    )
-                    if one_graph:
-                        log.debug("No graph captured with one_graph=True")
-                    return None
-
-            output_codes.add(code)
-
-            log.info(format_bytecode("ORIGINAL BYTECODE", frame.f_code))
-            log.info(format_bytecode("MODIFIED BYTECODE", code))
-
-            assert output.guards is not None
-            CleanupManager.instance[code] = output.cleanups
-            check_fn = CheckFunctionManager(
-                output.guards, frame.f_locals, frame.f_globals
-            )
-
-            guarded_code = GuardedCode(code, check_fn.check_fn)
-            guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [f" - {str(guard)}" for guard in sorted(output.guards)]
-            )
-
-            log.info(guard_str)
-
-            if guard_export_fn is not None:
-                guard_export_fn(output.guards)
-
-            return guarded_code
-        except (
-            Unsupported,
-            TorchRuntimeError,
-            BackendCompilerFailed,
-            AssertionError,
-        ) as e:
-            log.error(
-                format_bytecode("WONT CONVERT", frame.f_code)
-                + format_exception(e, frame)
-            )
-            raise
-        except Exception as e:
-            log.error(
-                format_bytecode("WONT CONVERT", frame.f_code)
-                + format_exception(e, frame)
-            )
-            raise InternalTorchDynamoError()
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
     return wrap_convert_context(_convert_frame_assert)
+
+
+def _compile(
+    code,
+    globals,
+    locals,
+    builtins,
+    compiler_fn,
+    one_graph,
+    guard_export_fn=None,
+    frame=None,
+):
+    output = None
+
+    def transform(instructions, code_options):
+        nonlocal output
+        tracer = InstructionTranslator(
+            instructions,
+            code,
+            locals,
+            globals,
+            builtins,
+            code_options,
+            compiler_fn,
+            one_graph,
+        )
+        tracer.run()
+        output = tracer.output
+        assert output.output_instructions
+        instructions[:] = output.output_instructions
+        code_options.update(output.code_options)
+
+        if config.dead_code_elimination:
+            instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+
+    def format_bytecode(prefix, bytecode):
+        return f"{prefix} {code.co_name} {code.co_filename} \
+            {code.co_firstlineno} \n{dis.Bytecode(bytecode).dis()}\n "
+
+    try:
+        for attempt in itertools.count():
+            try:
+                out_code = transform_code_object(code, transform)
+                orig_code_map[out_code] = out_code
+                break
+            except exc.RestartAnalysis:
+                log.debug("Restarting analysis ...")
+                if attempt > 100:
+                    unimplemented("100+ RestartAnalysis() calls")
+            except exc.SkipFrame:
+                log.debug(
+                    f"Skipping frame {code.co_name} \
+                    {code.co_filename} {code.co_firstlineno}"
+                )
+                if one_graph:
+                    log.debug("No graph captured with one_graph=True")
+                return None
+
+        output_codes.add(code)
+
+        log.info(format_bytecode("ORIGINAL BYTECODE", code))
+        log.info(format_bytecode("MODIFIED BYTECODE", out_code))
+
+        assert output.guards is not None
+        CleanupManager.instance[out_code] = output.cleanups
+        check_fn = CheckFunctionManager(output.guards, locals, globals)
+
+        guarded_code = GuardedCode(code, check_fn.check_fn)
+        guard_str = "GUARDS:\n"
+        guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
+
+        log.info(guard_str)
+
+        if guard_export_fn is not None:
+            guard_export_fn(output.guards)
+
+        return guarded_code
+    except (
+        Unsupported,
+        TorchRuntimeError,
+        BackendCompilerFailed,
+        AssertionError,
+    ) as e:
+        log.error(format_bytecode("WONT CONVERT", code) + format_exception(e, frame))
+        raise
+    except Exception as e:
+        log.error(format_bytecode("WONT CONVERT", code) + format_exception(e, frame))
+        raise InternalTorchDynamoError()
 
 
 def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
@@ -385,8 +398,10 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
     return _convert_frame
 
 
-# TODO mlazos: add support for same args
+# TODO mlazos: add support for same args, or record them
 def replay(filename):
+    from .optimizations.backends import eager  # Maybe record the backend?
+
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False
     init_logging()
@@ -395,71 +410,17 @@ def replay(filename):
     record.globals = (
         record.globals | globals()
     )  # TODO: add tracing of modules, so we don't need to replicate the environment
-    output = None
-    one_graph = False
-    guard_export_fn = None
-
-    def transform(instructions, code_options):
-        nonlocal output
-        tracer = InstructionTranslator(
-            instructions,
-            record.code,
-            record.locals,
-            record.globals,
-            record.builtins,  # TODO mlazos: fill this in
-            record.code_options,  # TODO mlazos: fill this in
-            lambda: None,
-            one_graph,
-        )
-        tracer.run()
-        output = tracer.output
-        assert output.output_instructions
-        instructions[:] = output.output_instructions
-        code_options.update(output.code_options)
-
-        if config.dead_code_elimination:
-            instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
-
-    def format_bytecode(prefix, bytecode):
-        return f"{prefix} {record.code_options['co_name']} {record.code_options['co_filename']} \
-            {record.code_options['co_firstlineno']} \n{dis.Bytecode(bytecode).dis()}\n "
 
     try:
-        for attempt in itertools.count():
-            try:
-                transform(record.instrs, record.code_options)
-                break
-            except exc.RestartAnalysis:
-                if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
-            except exc.SkipFrame:
-                if one_graph and config.debug:
-                    print("ERROR: No graph captured with one_graph=True")
-                return None
-
-        # TODO mlazos: add debug printing back
-
-        assert output.guards is not None
-        CheckFunctionManager(output.guards, record.locals, record.globals)
-
-        if config.debug:
-            print("\nGUARDS:")
-            for guard in sorted(output.guards):
-                print(" -", str(guard))
-            print()
-
-        if guard_export_fn is not None:
-            guard_export_fn(output.guards)
-    except (
-        Unsupported,
-        TorchRuntimeError,
-        BackendCompilerFailed,
-        AssertionError,
-    ) as e:
-        log.error(format_bytecode("WONT CONVERT", record.code) + format_exception(e))
-        raise
-    except Exception as e:
-        log.error(format_bytecode("WONT CONVERT", record.code) + format_exception(e))
-        raise InternalTorchDynamoError()
+        _compile(
+            record.code,
+            record.globals,
+            record.locals,
+            record.builtins,
+            eager,
+            False,  # one_graph, maybe we should record
+            None,  # export_fn
+            None,  # frame
+        )
     finally:
         config.replay_record_enabled = original_replay_val

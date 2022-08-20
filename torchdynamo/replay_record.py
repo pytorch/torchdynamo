@@ -39,6 +39,8 @@ class ExecutionRecord:
 
 @dataclasses.dataclass
 class ExecutionRecorder:
+    LOCAL_MOD_PREFIX = "___local_mod_"
+
     code: CodeType
     instrs: List[Instruction] = field(default_factory=list)
     globals: dict[str, Any] = field(default_factory=dict)
@@ -54,8 +56,17 @@ class ExecutionRecorder:
 
         self.globals[name] = var
 
-    def add_module_access(self, mod, name, val):
-        self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
+    def add_local_mod(self, name, mod):
+        assert isinstance(mod, ModuleType)
+        self.add_global_var(self.LOCAL_MOD_PREFIX + name, mod)
+
+    def record_module_access(self, mod, name, val):
+        # check local mods first
+        local_mod_name = self.LOCAL_MOD_PREFIX + mod.__name__
+        if local_mod_name in self.name_to_modrec:
+            self.name_to_modrec[local_mod_name].accessed_attrs[name] = val
+        else:
+            self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
 
     def get_record(self):
         return ExecutionRecord(

@@ -22,6 +22,7 @@ import torch
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
+from torchdynamo import config
 from torchdynamo.source import AttrSource
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import GlobalSource
@@ -44,6 +45,7 @@ from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardBuilder
 from .output_graph import OutputGraph
+from .replay_record import DummyModule
 from .replay_record import ExecutionRecorder
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
@@ -333,7 +335,8 @@ class InstructionTranslatorBase(object):
             ):
                 pass
         except Exception as e:
-            self.write_record_to_file(str(type(e).__name__))
+            if config.replay_record_enabled:
+                self.write_record_to_file(str(type(e).__name__))
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -364,7 +367,7 @@ class InstructionTranslatorBase(object):
     def LOAD_FAST(self, inst):
         name = inst.argval
 
-        if torchdynamo.config.replay_record_enabled and name in self.f_locals:
+        if config.replay_record_enabled and name in self.f_locals:
             self.exec_recorder.locals[name] = self.f_locals[name]
 
         if name.startswith(".") and name not in self.symbolic_locals:
@@ -415,7 +418,7 @@ class InstructionTranslatorBase(object):
     def LOAD_GLOBAL(self, inst):
         name = inst.argval
 
-        if torchdynamo.config.replay_record_enabled:
+        if config.replay_record_enabled:
             if name in self.f_globals:
                 self.exec_recorder.add_global_var(name, self.f_globals[name])
             else:
@@ -459,16 +462,26 @@ class InstructionTranslatorBase(object):
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
         module_name = inst.argval
-        value = __import__(
-            module_name,
-            fromlist=fromlist.as_python_constant(),
-            level=level.as_python_constant(),
-        )
+
+        # Are we replaying? if so, load recorded module
+        recorded_name = ExecutionRecorder.LOCAL_MOD_PREFIX + module_name
+        if recorded_name in self.f_globals:
+            value = self.f_globals[recorded_name]
+        else:
+            value = __import__(
+                module_name,
+                fromlist=fromlist.as_python_constant(),
+                level=level.as_python_constant(),
+            )
+
         source = self.import_source(module_name)
+
+        if config.replay_record_enabled:
+            self.exec_recorder.add_local_mod(module_name, value)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
-        elif istype(value, types.ModuleType):
+        elif istype(value, (types.ModuleType, DummyModule)):
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")
