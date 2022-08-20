@@ -44,7 +44,7 @@ from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardBuilder
 from .output_graph import OutputGraph
-from .replay_record import ExecutionRecord
+from .replay_record import ExecutionRecorder
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
@@ -278,13 +278,13 @@ class InstructionTranslatorBase(object):
 
     def write_record_to_file(self, filename):
         with open(f"{filename}.record", "wb") as f:
-            self.exec_record.dump(f)
+            self.exec_recorder.get_record().dump(f)
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         inst = self.instructions[self.instruction_pointer]
         self.current_instruction = inst
-        self.exec_record.instrs.append(inst)
+        self.exec_recorder.instrs.append(inst)
         self.instruction_pointer += 1
         if self.instruction_pointer < len(self.instructions):
             self.next_instruction = self.instructions[self.instruction_pointer]
@@ -364,8 +364,8 @@ class InstructionTranslatorBase(object):
     def LOAD_FAST(self, inst):
         name = inst.argval
 
-        if torchdynamo.config.record_replay_enabled and name in self.f_locals:
-            self.exec_record.locals[name] = self.f_locals[name]
+        if torchdynamo.config.replay_record_enabled and name in self.f_locals:
+            self.exec_recorder.locals[name] = self.f_locals[name]
 
         if name.startswith(".") and name not in self.symbolic_locals:
             # This happens in dict/list comprehensions
@@ -414,6 +414,14 @@ class InstructionTranslatorBase(object):
 
     def LOAD_GLOBAL(self, inst):
         name = inst.argval
+
+        if torchdynamo.config.replay_record_enabled:
+            if name in self.f_globals:
+                self.exec_recorder.add_global_var(name, self.f_globals[name])
+            else:
+                assert name in self.f_builtins
+                self.exec_recorder.builtins[name] = self.f_builtins[name]
+
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
@@ -1206,7 +1214,7 @@ class InstructionTranslatorBase(object):
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        self.exec_record = ExecutionRecord(code=f_code, code_options=code_options)
+        self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode() as fake_mode:

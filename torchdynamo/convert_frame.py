@@ -387,10 +387,14 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
 
 # TODO mlazos: add support for same args
 def replay(filename):
+    original_replay_val = config.replay_record_enabled
+    config.replay_record_enabled = False
     init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
-    record.globals = globals()
+    record.globals = (
+        record.globals | globals()
+    )  # TODO: add tracing of modules, so we don't need to replicate the environment
     output = None
     one_graph = False
     guard_export_fn = None
@@ -457,3 +461,5 @@ def replay(filename):
     except Exception as e:
         log.error(format_bytecode("WONT CONVERT", record.code) + format_exception(e))
         raise InternalTorchDynamoError()
+    finally:
+        config.replay_record_enabled = original_replay_val
