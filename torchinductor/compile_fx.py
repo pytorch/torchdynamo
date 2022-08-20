@@ -8,13 +8,13 @@ from typing import List
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
+from torchdynamo.debug_utils import wrap_debug
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
-from torchdynamo.debug_utils import wrap_debug
 
 from . import config
 from . import overrides
@@ -114,11 +114,7 @@ def compile_fx_inner(
     # make sure it works, causes issues for mutation
     # compiled_fn(*example_inputs)
 
-    if (
-        cudagraphs
-        and set(graph.device_types) == {"cuda"}
-        and not graph.mutated_inputs
-    ):
+    if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
         compiled_fn = cudagraphify(
             compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
         )
@@ -211,7 +207,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
     with overrides.patch_functions():
-        # model_ = normalize_ir(model_, example_inputs_)
+        model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)

@@ -1,16 +1,21 @@
+import copy
+import functools
+import getpass
 import os
+import shutil
 import subprocess
 import textwrap
 import uuid
 from collections import Counter
-import functools
-import copy
 
 import torch
 
 import torchdynamo
-from torchinductor.codecache import cache_dir
 from torchdynamo import config
+
+
+def minifier_dir():
+    return f"/tmp/minifier_{getpass.getuser()}"
 
 
 def generate_repro_string(gm, args):
@@ -21,7 +26,6 @@ def generate_repro_string(gm, args):
         import torch.fx as fx
         from torchdynamo.testing import rand_strided
         from math import inf
-        from torchinductor.compile_fx import compile_fx_inner
         from torch.fx.experimental.proxy_tensor import make_fx
 
         """
@@ -68,59 +72,47 @@ def generate_repro_string(gm, args):
     model_str += "mod = make_fx(Repro())(*args)\n"
     return model_str
 
-INDUCTOR_IMPORT = f"""
+
+INDUCTOR_IMPORT = """
 from torchinductor.compile_fx import compile_fx_inner
 """
 
-NVFUSER_IMPORT = f"""
+NVFUSER_IMPORT = """
 from torch.fx.passes.backends.nvfuser import NvFuserBackend
 nvfuser = NvFuserBackend()
 """
 
 COMPILER_REPRO_OPTIONS = {
     "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
-    "nvfuser": (NVFUSER_IMPORT, "nvfuser", "nvfuser_fails")
+    "nvfuser": (NVFUSER_IMPORT, "nvfuser", "nvfuser_fails"),
 }
 
-def dump_to_repro(gm, args):
-    with open(os.path.join(torchdynamo.config.base_dir, "repro.py"), "w") as fd:
-        fd.write(generate_repro_string(gm, args))
-        fd.write(
-            textwrap.dedent(
-                """
-                expected = Repro().forward(*args)
-                with torchdynamo.optimize("inductor", nopython=True):
-                    actual = Repro().forward(*args)
-                assert same(actual, expected)
-                """
-            )
-        )
-        print("wrote repro.py")
 
-
-def dump_state(gm, args, compiler):
-    subdir = f"{cache_dir()}/minifier_checkpoints"
+def dump_state(gm, args, compiler_name):
+    subdir = f"{minifier_dir()}/checkpoints"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
     print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
         fd.write(generate_repro_string(gm, args))
-        fd.write(COMPILER_REPRO_OPTIONS[compiler][0])
+        fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
         fd.write(
             textwrap.dedent(
                 f"""
-                compiled = {COMPILER_REPRO_OPTIONS[compiler][1]}(mod, args)
+                compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
                 compiled(*args)
                 """
             )
         )
+    repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
+    shutil.copyfile(file_name, repro_path)
 
 
 def isolate_fails(fx_g, args, compiler_name: str, env=None):
     if env is None:
         env = {}
-    subdir = f"{cache_dir()}/minifier"
+    subdir = f"{minifier_dir()}/isolate"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
@@ -160,11 +152,18 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
     return False
 
 
-def inductor_fails(fx_g, args, check_str=None):
+def inductor_fails(fx_g, args, check_str="CompilationError"):
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx_inner
 
-    config.autotune = False
+    config.triton.autotune = False
+
+    try:
+        result = fx_g(*args)
+        assert isinstance(result, (tuple, list))
+        assert not any([isinstance(x, (tuple, list)) for x in result])
+    except Exception:
+        return False
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
@@ -236,7 +235,7 @@ def wrap_debug(compiler, compiler_name: str):
                 compiled_fn(*example_inputs)
         except Exception as e:
             if config.repro_level == 1:
-                dump_to_repro(orig_gm, example_inputs)
+                dump_state(orig_gm, example_inputs, compiler_name)
             elif config.repro_level == 2:
                 dump_to_minify(orig_gm, example_inputs, compiler_name)
             raise e

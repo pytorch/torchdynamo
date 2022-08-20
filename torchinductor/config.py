@@ -1,5 +1,3 @@
-import os
-
 # add some debug printouts
 debug = False
 

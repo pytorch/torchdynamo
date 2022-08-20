@@ -12,10 +12,10 @@ from torch.utils._pytree import tree_map
 
 import torchdynamo
 from torchdynamo import config
+from torchdynamo.debug_utils import wrap_debug
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import count_calls
 from torchdynamo.utils import counters
-from torchdynamo.debug_utils import wrap_debug
 
 from .analysis import has_mutation
 from .backends import BACKENDS
