@@ -101,7 +101,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 --use-eval-mode --output=aot_eager.csv
+            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 -x yolov3 --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
       - run:
