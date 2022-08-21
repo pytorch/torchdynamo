@@ -50,8 +50,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -65,11 +65,11 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         """Wrap the second call with torchdynamo as well"""
-        with torchdynamo.optimize(cnts):
-            res2 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x)
         self.assertTrue(same(res2 - res1, 2 * torch.ones(10)))
 
     def test_store_global_new(self):
@@ -81,8 +81,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         self.assertTrue(same(res1, x + x + 1))
 
     def test_store_global_list(self):
@@ -98,8 +98,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -112,8 +112,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -130,8 +130,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -144,8 +144,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -158,8 +158,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -173,8 +173,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
 
         x = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res1 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
 
@@ -193,8 +193,8 @@ class TestGlobals(torchdynamo.testing.TestCase):
         a = torch.randn(10)
         b = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            v0, s0 = fn(a, b)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
 
@@ -217,7 +217,7 @@ class TestGlobals(torchdynamo.testing.TestCase):
         a = torch.randn(10)
         b = torch.randn(10)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            v0, s0 = fn(a, b)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()

@@ -97,8 +97,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         d = 4
         r1 = None
         r2 = fn(a, (b, c), d)
-        with torchdynamo.optimize_assert(compiler_fn):
-            r3 = fn(a, (b, c), d)
+        opt_fn = torchdynamo.optimize_assert(compiler_fn)(fn)
+        r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
         self.assertTrue(same(r1, r2))
@@ -109,8 +109,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        with torchdynamo.optimize(fixed_strategy1):
-            r2 = s(i)
+        opt_s = torchdynamo.optimize(fixed_strategy1)(s)
+        r2 = opt_s(i)
         self.assertTrue(same(r1, r2))
 
     @patch.object(config, "verify_correctness", True)
@@ -118,8 +118,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        with torchdynamo.optimize("nnc"):
-            r2 = s(i)
+        opt_s = torchdynamo.optimize("nnc")(s)
+        r2 = opt_s(i)
         self.assertTrue(same(r1, r2))
 
     @patch.object(config, "verify_correctness", True)
@@ -138,8 +138,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
 
         toy_example(i1, i2)
         try:
-            with torchdynamo.optimize(incorrect_compile_fn):
-                toy_example(i1, i2)
+            opt_toy_example = torchdynamo.optimize(incorrect_compile_fn)(toy_example)
+            opt_toy_example(i1, i2)
         except RuntimeError:
             pass
         else:
@@ -160,8 +160,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
             return transform(gm).forward
 
         r1 = toy_example(i1, i2)
-        with torchdynamo.optimize(incorrect_compile_fn):
-            r2 = toy_example(i1, i2)
+        opt_toy_example = torchdynamo.optimize(incorrect_compile_fn)(toy_example)
+        r2 = opt_toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
@@ -170,8 +170,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        with torchdynamo.optimize_assert(offline_autotuner):
-            r2 = s(i)
+        opt_s = torchdynamo.optimize_assert(offline_autotuner)(s)
+        r2 = opt_s(i)
         self.assertTrue(same(r1, r2))
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
@@ -182,8 +182,9 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        with torchdynamo.optimize(backends.ipex_fp32), torch.no_grad():
-            r2 = model(input)
+        opt_model = torchdynamo.optimize(backends.ipex_fp32)(model)
+        with torch.no_grad():
+            r2 = opt_model(input)
         self.assertTrue(same(r1, r2))
         self.assertEqual(r2.dtype, torch.float32)
 
@@ -195,9 +196,8 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        with torchdynamo.optimize(
-            backends.ipex_bf16
-        ), torch.no_grad(), torch.cpu.amp.autocast():
-            r2 = model(input)
+        opt_model = torchdynamo.optimize(backends.ipex_bf16)(model)
+        with torch.no_grad(), torch.cpu.amp.autocast():
+            r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
