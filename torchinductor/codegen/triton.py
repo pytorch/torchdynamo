@@ -201,11 +201,26 @@ class TritonOverrides(OpOverrides):
             return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
 
     @staticmethod
+    def floordiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Similar to div_floor_kernel_cuda in pytorch core.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        quot = f"{a} // {b}"
+        rem = f"{a} % {b}"
+        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+
+    @staticmethod
     def trunc(x):
         if has_triton_libdevice():
             return f"tl.libdevice.trunc({x})"
         else:
             return f"{x}.to(tl.int32).to(tl.float32)"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        return f"{a} // {b}"
 
     @staticmethod
     def ceil(x):
@@ -648,12 +663,10 @@ class TritonKernel(Kernel):
         return index_str, " & ".join(mask)
 
     def var_ranges(self):
-        return (
-            dict(
-                itertools.chain.from_iterable(
-                    tree.var_ranges.items() for tree in self.range_trees
-                )
-            ),
+        return dict(
+            itertools.chain.from_iterable(
+                tree.var_ranges.items() for tree in self.range_trees
+            )
         )
 
     def codegen_indexing(self, expr: sympy.Expr):
@@ -715,9 +728,9 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, dtype))
+        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
@@ -732,17 +745,17 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
-            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
+        if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}) + {default}"
             )
             accumulator_index = None
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
                 self.body.writeline(
-                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int32)"
+                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
                 )
 
             updated = value
@@ -783,7 +796,7 @@ class TritonKernel(Kernel):
                     f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
                 )
         else:
-            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
+            var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)
@@ -1118,6 +1131,11 @@ class TritonScheduling:
                 split = strides.index(1) + 1
                 if split == len(ranges):
                     continue
+                if all(s == 0 for s in strides[split:]):
+                    # if this is a broadcasted tensor and all dimensions after split are broadcast,
+                    # this is not a real split
+                    continue
+
             except ValueError:
                 continue
             tiled_groups = (
@@ -1151,7 +1169,7 @@ class TritonScheduling:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
 
         """
-        if reduction_numel != 1:
+        if reduction_numel != 1 or config.triton.max_tiles <= 1:
             # TODO(jansel): should we tile reductions?
             return (numel, reduction_numel)
 
@@ -1164,22 +1182,24 @@ class TritonScheduling:
                 seen_names.add(tiling.name)
                 candidate_tiles[tiling.tiling] += tiling.score
 
-        # Add one 3D tiling choice
         ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
-        for i in range(1, len(ranked_tilings)):
-            a0, a1 = ranked_tilings[0]
-            b0, b1 = ranked_tilings[i]
-            if V.graph.sizevars.size_hint(a1 - b1) == 0:
-                continue
-            if V.graph.sizevars.size_hint(a1 - b1) < 0:
-                # swap so a0 is bigger
-                a0, a1 = ranked_tilings[i]
-                b0, b1 = ranked_tilings[0]
-            assert V.graph.sizevars.size_hint(a1 - b1) > 0
-            if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
-                tiling = (a0, ir.IndexingDiv(a1, b1), b1)
-                ranked_tilings = [tiling] + ranked_tilings
-                break  # only 1 choice for now
+
+        if config.triton.max_tiles >= 3:
+            # Add one 3D tiling choice
+            for i in range(1, len(ranked_tilings)):
+                a0, a1 = ranked_tilings[0]
+                b0, b1 = ranked_tilings[i]
+                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+                    continue
+                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                    # swap so a0 is bigger
+                    a0, a1 = ranked_tilings[i]
+                    b0, b1 = ranked_tilings[0]
+                assert V.graph.sizevars.size_hint(a1 - b1) > 0
+                if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
+                    tiling = (a0, ir.IndexingDiv(a1, b1), b1)
+                    ranked_tilings = [tiling] + ranked_tilings
+                    break  # only 1 choice for now
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)

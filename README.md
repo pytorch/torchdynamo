@@ -321,8 +321,8 @@ has warmed up.  For example, if you are serving production traffic in a
 latency critical application.  For this, TorchDynamo provides an alternate
 mode where prior compiled graphs are used, but no new ones are generated:
 ```py
-with torchdynamo.run():
-    toy_example(torch.randn(10), torch.randn(10))
+frozen_toy_example = torchdynamo.run(toy_example)
+frozen_toy_example(torch.randn(10), torch.randn(10))
 ```
 
 ## Single Whole-Program Graph Mode
@@ -506,7 +506,7 @@ make lint-deps
 
 Run tests with
 ```shell
-pytest tests
+pytest test
 ```
 
 To debug a specific test (with more debug prints) do:

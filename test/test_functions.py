@@ -35,7 +35,29 @@ def make_test(fn):
     return test_fn
 
 
+@torch.jit.script_if_tracing
+def inline_script_if_tracing(x):
+    return x + 1.2
+
+
+@torch.jit.ignore
+def inline_ignore(x):
+    return x + 3.4
+
+
+@torch.jit.unused
+def inline_unused(x):
+    return x + 5.6
+
+
 class FunctionTests(torchdynamo.testing.TestCase):
+    @make_test
+    def test_inline_jit_annotations(x):
+        x = inline_script_if_tracing(x)
+        x = inline_ignore(x)
+        x = inline_unused(x)
+        return
+
     @make_test
     def test_add(a, b):
         return a + b

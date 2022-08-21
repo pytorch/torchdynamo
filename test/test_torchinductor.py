@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
@@ -15,6 +16,7 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.compile_fx import compile_fx_inner
 
 try:
     import sympy
@@ -128,7 +130,15 @@ class InputGen:
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
 @patch("torchdynamo.config.raise_on_backend_error", True)
-def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True):
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+    tol=1e-4,
+    *,
+    check_lowp=True,
+    exact_dtype=True,
+):
     torchdynamo.reset()
 
     # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
@@ -168,7 +178,9 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat, _ = tree_flatten(actual)
     correct_flat = tuple(
-        y.to(x.dtype) if isinstance(y, torch.Tensor) else y
+        y.to(x.dtype)
+        if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
+        else y
         for x, y in zip(actual_flat, correct_flat)
     )
     correct = tree_unflatten(correct_flat, correct_spec)
@@ -176,11 +188,15 @@ def check_model(self: TestCase, model, example_inputs, tol=1e-4, check_lowp=True
     # print(correct)
     # print(actual)
     # print(correct - actual)
-    self.assertTrue(same(actual, correct, tol=tol, equal_nan=True))
+    self.assertTrue(
+        same(actual, correct, tol=tol, equal_nan=True, exact_dtype=exact_dtype)
+    )
 
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
-def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
+def check_model_cuda(
+    self: TestCase, model, example_inputs, *, check_lowp=True, exact_dtype=True
+):
     if hasattr(model, "to"):
         model = model.to("cuda")
 
@@ -193,7 +209,7 @@ def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
         ).copy_(x)
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
-    check_model(self, model, example_inputs)
+    check_model(self, model, example_inputs, exact_dtype=exact_dtype)
 
     if check_lowp:
 
@@ -207,7 +223,7 @@ def check_model_cuda(self: TestCase, model, example_inputs, check_lowp=True):
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
-        check_model(self, model, example_inputs, 2e-3)
+        check_model(self, model, example_inputs, 2e-3, exact_dtype=exact_dtype)
 
 
 class SweepInputs2:
@@ -516,6 +532,21 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_sum_int(self):
+        def fn(x):
+            return 2 * x.sum(-1) + x.sum()
+
+        dtypes = torch.bool, torch.uint8, torch.int
+        inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
+        for i in inps:
+            self.common(fn, (i,), check_lowp=False)
+
+    def test_sum_dtype(self):
+        def fn(x):
+            return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
+
+        self.common(fn, (torch.ones(32, 32) * 70,))
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
@@ -530,6 +561,13 @@ class CommonTemplate:
             return tmp, tmp + rng2
 
         self.common(fn, (torch.randn(8, 8),))
+
+    def test_arange1(self):
+        def fn(x):
+            rng1 = torch.arange(8, device=x.device)
+            return (x + rng1,)
+
+        self.common(fn, (torch.randint(4, (8, 8)),), check_lowp=False)
 
     def test_linspace(self):
         def fn(x):
@@ -684,7 +722,7 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
-    def test_div(self):
+    def test_div1(self):
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
@@ -693,6 +731,82 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
+
+    def test_div2(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(fn, (torch.randint(-100, 100, [8, 8]), 100 * torch.randn(8, 8)))
+
+    def test_div3(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        a = torch.randint(1, 100, [8, 8])
+        self.common(fn, (a * 2, a))
+
+    def test_div4(self):
+        def fn(a, b):
+            return aten.div(a, b, rounding_mode="floor")
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(
+            fn,
+            (torch.randint(-100, 0, [8, 8]), torch.randint(1, 10, [8, 8])),
+        )
+
+    def test_div5(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        # divide a scalar
+        self.common(fn, (torch.randint(-100, 0, [8, 8]), 16))
+
+    def test_div6(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        # treat boolean as integer
+        self.common(
+            fn,
+            (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8])),
+        )
+
+    def test_div7(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(2**32, 2**40, [100, 100]),
+                torch.randint(-10, -1, [100, 100]),
+            ),
+        )
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -1654,6 +1768,14 @@ class CommonTemplate:
                 torch.tensor([3, 4, 4, 3], dtype=torch.int64),
             ),
         )
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8, 12),
+                torch.tensor([[0, 0, 2, 2]], dtype=torch.int64),
+                torch.tensor([[3], [4], [4], [3]], dtype=torch.int64),
+            ),
+        )
 
     def test_index2(self):
         def fn(a, b):
@@ -2156,6 +2278,9 @@ class CommonTemplate:
                 torch.randn([601, 256, 7, 7]),
             ],
         )
+        self.common(
+            fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
+        )
 
     def test_index_put2(self):
         def fn(a, b, c):
@@ -2170,6 +2295,22 @@ class CommonTemplate:
             ],
             # workaround for https://github.com/openai/triton/issues/558
             check_lowp=False,
+        )
+
+    def test_index_put3(self):
+        def fn(a, b, c):
+            torch.ops.aten.index_put_(a, (None, b, None), c)
+            a1 = a + 1
+            torch.ops.aten.index_put_(a1, (None, b + 1, None), c + 1)
+            return (a, a1)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1024, 4, 2]),
+                torch.arange(3),
+                torch.randn([1024, 1, 2]),
+            ],
         )
 
     @unittest.skipIf(not config.fallback_random, "requires config.fallback_random")
@@ -2251,7 +2392,7 @@ class CommonTemplate:
             fn,
             [
                 torch.zeros(2, 3),
-                0,
+                -1,
                 torch.tensor([[0]]),
                 torch.ones(2, 3),
             ],
@@ -2679,6 +2820,26 @@ class CommonTemplate:
             ],
         )
 
+    @unittest.skip(
+        """
+        FIXME: In the case of having equally max/min elements, our implementation returns
+        the last index instead of the first one
+        """
+    )
+    def test_argmax_argmin3(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, -1),
+                aten.argmin(x, -1),
+            )
+
+        self.common(
+            fn,
+            [torch.randint(0, 5, [10, 10])],
+        )
+
     def test_vdd_clamp(self):
         def fn(x):
             return torch.clamp_min(x, 3)
@@ -2689,6 +2850,55 @@ class CommonTemplate:
                 torch.randn([16], requires_grad=True) * 10,
             ],
         )
+
+    def test_tmp_not_defined_issue(self):
+        def forward(
+            primals_3,
+            primals_4,
+            add_tensor,
+            convert_element_type_default,
+            div_default,
+            reciprocal_default,
+        ):
+            var_default = torch.ops.prims.var.default(
+                convert_element_type_default, [2], correction=0
+            )
+            sub_tensor = torch.ops.aten.sub.Tensor(add_tensor, div_default)
+            mul_tensor_1 = torch.ops.aten.mul.Tensor(sub_tensor, reciprocal_default)
+            mul_tensor_2 = torch.ops.aten.mul.Tensor(mul_tensor_1, primals_3)
+            add_tensor_2 = torch.ops.aten.add.Tensor(mul_tensor_2, primals_4)
+            convert_element_type_default_1 = (
+                torch.ops.prims.convert_element_type.default(
+                    add_tensor_2, torch.float32
+                )
+            )
+            convert_element_type_default_2 = (
+                torch.ops.prims.convert_element_type.default(
+                    convert_element_type_default_1, torch.float32
+                )
+            )
+            var_default_1 = torch.ops.prims.var.default(
+                convert_element_type_default_2, [2], correction=0
+            )
+            broadcast_in_dim_default_2 = torch.ops.prims.broadcast_in_dim.default(
+                var_default_1, [1, 512, 1], [0, 1]
+            )
+            sum_default_1 = torch.ops.prims.sum.default(
+                convert_element_type_default_2, [2]
+            )
+            add_tensor_3 = torch.ops.aten.add.Tensor(broadcast_in_dim_default_2, 1e-05)
+            return (var_default, sum_default_1, add_tensor_3)
+
+        inps = [
+            (torch.Size([1024]), torch.float32),
+            (torch.Size([1024]), torch.float32),
+            (torch.Size([1, 512, 1024]), torch.float32),
+            (torch.Size([1, 512, 1024]), torch.float32),
+            (torch.Size([1, 512, 1]), torch.float32),
+            (torch.Size([1, 512, 1]), torch.float32),
+        ]
+        inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
+        self.common(forward, inps)
 
 
 if HAS_CPU:
@@ -2719,3 +2929,42 @@ if HAS_CUDA:
             )
 
     CommonTemplate.install(GpuTests, "cuda")
+
+    class GPUReproTests(TestCase):
+        def test_index_put_issue(self):
+            def forward(
+                self,
+                arg76_1,
+                expand_default,
+                full_like_default,
+                _to_copy_default_67,
+                zeros,
+            ):
+                sum_sym_int_19 = torch.ops.aten.sum.SymInt(
+                    _to_copy_default_67, [0], True
+                )
+                view_default_57 = torch.ops.aten.view.default(
+                    sum_sym_int_19, [512, 768]
+                )
+                where_self = torch.ops.aten.where.self(
+                    expand_default, view_default_57, full_like_default
+                )
+                clone_default_12 = torch.ops.aten.clone.default(zeros)
+                index_put__default = torch.ops.aten.index_put_.default(
+                    clone_default_12, [arg76_1], where_self, True
+                )
+                return (index_put__default,)
+
+            inps = [
+                (torch.Size([512]), torch.int64),
+                (torch.Size([512, 768]), torch.bool),
+                (torch.Size([512, 768]), torch.float16),
+                (torch.Size([4, 512, 768]), torch.float16),
+                (torch.Size([512, 768]), torch.float16),
+            ]
+            inps = [torch.zeros(())] + [
+                torch.ones(shape, dtype=dtype, device="cuda") for (shape, dtype) in inps
+            ]
+            mod = make_fx(forward)(*inps)
+            compiled = compile_fx_inner(mod, inps)
+            compiled(*inps)
