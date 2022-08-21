@@ -704,8 +704,8 @@ def make_fallback(kernel):
     add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
-    def handler(*args):
-        result = ir.FallbackKernel.create(kernel, *args)
+    def handler(*args, **kwargs):
+        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):
             return list(map(TensorBox.create, result))
         else:
@@ -1271,7 +1271,8 @@ def constant_like(fill_value):
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
 ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
-rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+if not config.fallback_random:
+    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
 
 def new_constant(fill_value):
