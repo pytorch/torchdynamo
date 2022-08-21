@@ -21,9 +21,9 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
                 torchdynamo.config, "cache_size_limit", cls.cache_limit
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(torchdynamo.config, "debug", False)
-        )
+        # cls._exit_stack.enter_context(
+        #     unittest.mock.patch.object(torchdynamo.config, "debug", False)
+        # )
 
     def test_drop_cache_on_skip(self):
         def model(x, i):
@@ -48,8 +48,8 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
 
         x = torch.randn(2)
         for i in range(2):
-            with torchdynamo.optimize(compiler):
-                model(x, i)
+            opt_model = torchdynamo.optimize(compiler)(model)
+            opt_model(x, i)
 
         self.assertTrue(triggered)
 
@@ -65,8 +65,8 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         for _ in range(10):
             x = torch.randn(3)
             iters = torch.randint(low=0, high=1000, size=())
-            with torchdynamo.optimize(compile_counter):
-                loop_torture(x, iters)
+            opt_loop_torture = torchdynamo.optimize(compile_counter)(loop_torture)
+            opt_loop_torture(x, iters)
 
         # Currently, we recompile each time,
         # We'd probably like to bail out quickly and warn
@@ -92,8 +92,8 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
                 for _ in range(10):
                     bsz = torch.randint(low=0, high=1000, size=())
                     x = torch.randn((bsz, 3, 4))
-                    with torchdynamo.optimize(compile_counter):
-                        model(x)
+                    opt_model = torchdynamo.optimize(compile_counter)(model)
+                    opt_model(x)
 
         self.assertEqual(compile_counter.frame_count, expected_recompiles)
         self.assertEqual(len(logs.records), 1)
@@ -120,18 +120,18 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         compile_counter = torchdynamo.testing.CompileCounter()
 
         with unittest.mock.patch.object(torchdynamo.config, "cache_size_limit", 2):
-            with torchdynamo.optimize(compile_counter):
-                func(a, b, c)  # warmup
-                self.assertEqual(compile_counter.frame_count, 1)
+            opt_func = torchdynamo.optimize(compile_counter)(func)
+            opt_func(a, b, c)  # warmup
+            self.assertEqual(compile_counter.frame_count, 1)
 
-                func(a, b, c)  # no guard fail or recompile
-                self.assertEqual(compile_counter.frame_count, 1)
+            opt_func(a, b, c)  # no guard fail or recompile
+            self.assertEqual(compile_counter.frame_count, 1)
 
-                func(a, b_v, c)  # a view should not cause nvfuser recompile
-                self.assertEqual(compile_counter.frame_count, 1)
+            opt_func(a, b_v, c)  # a view should not cause nvfuser recompile
+            self.assertEqual(compile_counter.frame_count, 1)
 
-                func(a, b_p, c)  # a permutation should cause recompile
-                self.assertEqual(compile_counter.frame_count, 2)
+            opt_func(a, b_p, c)  # a permutation should cause recompile
+            self.assertEqual(compile_counter.frame_count, 2)
 
     def assert_single_log_contains(self, logs, contains_str):
         self.assertEqual(len(logs.records), 1)
@@ -151,13 +151,13 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient
             torchdynamo.reset()
             torchdynamo.utils.counters.clear()
-            with torchdynamo.optimize("eager"):
-                # warmup
-                func(cached_input)
+            opt_func = torchdynamo.optimize("eager")(func)
+            # warmup
+            opt_func(cached_input)
 
             with self.assertLogs(level="WARNING") as logs:
-                with torchdynamo.optimize("eager"):
-                    func(missed_input)
+                opt_func = torchdynamo.optimize("eager")(func)
+                opt_func(missed_input)
             self.assert_single_log_contains(logs, expected_failure)
 
         a = torch.rand(3, 4, 5)
@@ -189,13 +189,13 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         def func(a, b):
             return a + b
 
-        with torchdynamo.optimize("eager"):
-            # warmup
-            func(a, b)
+        opt_func = torchdynamo.optimize("eager")(func)
+        # warmup
+        opt_func(a, b)
 
         with self.assertLogs(level="WARNING") as logs:
-            with torchdynamo.optimize("eager"):
-                func(a, 1)
+            opt_func = torchdynamo.optimize("eager")(func)
+            opt_func(a, 1)
         self.assert_single_log_contains(
             logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
         )

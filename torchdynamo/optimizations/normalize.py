@@ -398,8 +398,6 @@ class Functionalization(Transformer):
 def swap_node(graph, old_node, new_node):
     old_node.replace_all_uses_with(new_node)
     graph.erase_node(old_node)
-    assert not new_node.meta, "New node must not have meta populated"
-    new_node.meta = old_node.meta
 
 
 def normalize(gm: torch.fx.GraphModule):
