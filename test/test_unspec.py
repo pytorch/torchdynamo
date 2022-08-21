@@ -68,8 +68,8 @@ class UnspecTests(torchdynamo.testing.TestCase):
         z = np.int64(12)
         res1 = fn(x, y, z)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res2 = fn(x, y, z)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2))
 
     def test_no_recompilations(self):
@@ -79,9 +79,9 @@ class UnspecTests(torchdynamo.testing.TestCase):
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            for i in range(10):
-                fn(x, np.int64(i))
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        for i in range(10):
+            opt_fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
@@ -95,8 +95,8 @@ class UnspecTests(torchdynamo.testing.TestCase):
         z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         res1 = fn(x, y, z)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res2 = fn(x, y, z)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2))
 
     def test_feed_random_values_into_graph_only(self):
@@ -109,9 +109,9 @@ class UnspecTests(torchdynamo.testing.TestCase):
         random.seed(1)
         res1 = fn(shape)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            random.seed(1)
-            res2 = fn(shape)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        random.seed(1)
+        res2 = opt_fn(shape)
 
         self.assertTrue(same(res1, res2))
 
@@ -128,9 +128,9 @@ class UnspecTests(torchdynamo.testing.TestCase):
         random.seed(1)
         res1 = fn(x)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            random.seed(1)
-            res2 = fn(x)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        random.seed(1)
+        res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
     def test_builtin_getitem(self):
@@ -141,8 +141,8 @@ class UnspecTests(torchdynamo.testing.TestCase):
         x = list(range(50))
         ref = fn(x, 48)  # 48 is unspecialized
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res = fn(x, 48)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x, 48)
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -156,8 +156,8 @@ class UnspecTests(torchdynamo.testing.TestCase):
         scaler = 0.23  # 0.23 is unspecialized
         ref = fn(x, scaler)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res = fn(x, scaler)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x, scaler)
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
 
@@ -178,6 +178,6 @@ class UnspecTests(torchdynamo.testing.TestCase):
         scale_factor = 1.873536229133606
         ref = fn(x, scale_factor)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            res = fn(x, scale_factor)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
