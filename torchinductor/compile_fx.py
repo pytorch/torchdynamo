@@ -2,7 +2,6 @@ import dataclasses
 import functools
 import logging
 import operator
-import os
 from typing import List
 
 import torch.fx
@@ -67,48 +66,6 @@ class CheckEachNode(torch.fx.Interpreter):
         assert same(expected, actual)
 
         return expected
-
-
-def dump_to_repro(gm, *args):
-    with open(os.path.join(torchdynamo.config.base_dir, "repro.py"), "w") as fd:
-        fd.write(
-            textwrap.dedent(
-                """
-                import torch
-                import torchdynamo
-                from torchdynamo.testing import rand_strided, same
-                """
-            )
-        )
-        fd.write("class Repro:\n")
-        for i in itertools.count():
-            try:
-                val = getattr(gm, f"_tensor_constant{i}")
-            except AttributeError:
-                break
-            fd.write(f"    _tensor_constant{i} = {val.item()!r}\n")
-        fd.write(textwrap.indent(gm.code, "    "))
-        fd.write("\n")
-
-        fd.write("args = (\n")
-        for arg in args:
-            fd.write(
-                f"  rand_strided({tuple(arg.size())!r}, {tuple(arg.stride())!r},"
-                f" {arg.dtype!r}, {arg.device.type!r}),"
-            )
-            fd.write("\n")
-        fd.write(")\n")
-        fd.write(
-            textwrap.dedent(
-                """
-                expected = Repro().forward(*args)
-                with torchdynamo.optimize("inductor", nopython=True):
-                    actual = Repro().forward(*args)
-                assert same(actual, expected)
-                """
-            )
-        )
-        print("wrote repro.py")
 
 
 def compile_fx_inner(

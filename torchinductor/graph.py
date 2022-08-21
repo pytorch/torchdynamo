@@ -7,6 +7,7 @@ import torch
 import torch.fx
 from sympy import Integer
 from torch._decomp import get_decompositions
+from torch.utils._mode_utils import no_dispatch
 
 from . import config
 from . import ir
@@ -231,18 +232,16 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
-        if value.shape == ():
-            return Constant(value.item(), value.dtype, value.device)
-        if len(value.shape) == 1 and value.shape[0] <= 8:
-            # tensor lowering has constant inlining logic
-            from .lowering import tensor
+        with no_dispatch():
+            if value.shape == ():
+                return Constant(value.item(), value.dtype, value.device)
+            if len(value.shape) == 1 and value.shape[0] <= 8:
+                # tensor lowering has constant inlining logic
+                from .lowering import tensor
 
-            return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        # we should not be hitting this case if
-        # python key tracing is working properly, see:
-        # https://github.com/pytorch/torchdynamo/issues/203
-        return self.add_tensor_constant(value)
+            return self.add_tensor_constant(value)
 
     def call_module(self, target, args, kwargs):
         assert False

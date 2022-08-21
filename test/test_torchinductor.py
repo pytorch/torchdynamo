@@ -23,6 +23,7 @@ try:
 
     importlib.import_module("functorch")
 
+    from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
 
     import torchinductor.config
@@ -2051,6 +2052,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn([8, 1, 1]),))
 
     @patch.object(config.triton, "cudagraphs", True)
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -2072,6 +2074,7 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -2088,6 +2091,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -2108,8 +2112,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    # TODO(voz): Figure out why, re-enable
-    @unittest.skip("Disabled during functorch bump")
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -2122,6 +2125,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -2925,9 +2929,7 @@ if HAS_CUDA:
                 _to_copy_default_67,
                 zeros,
             ):
-                sum_sym_int_19 = torch.ops.aten.sum.SymInt(
-                    _to_copy_default_67, [0], True
-                )
+                sum_sym_int_19 = torch.ops.aten.sum(_to_copy_default_67, [0], True)
                 view_default_57 = torch.ops.aten.view.default(
                     sum_sym_int_19, [512, 768]
                 )
