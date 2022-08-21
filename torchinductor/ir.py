@@ -6,6 +6,7 @@ import logging
 import textwrap
 from collections import OrderedDict
 from functools import partial
+from functorch.compile import get_aot_compilation_context
 from typing import Any
 from typing import Callable
 from typing import List
@@ -2778,7 +2779,9 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout = "torch.channels_last"
-        elif config.tune_layout:
+        # diable tuned_conv_layout for training because aot_autograd will transform
+        # all inputs to be contigous, resulting extra memory transfomation
+        elif config.tune_layout and get_aot_compilation_context()[0] == ["inference"]:
             from .codegen.autotuner import tuned_conv_layout
 
             output_layout = tuned_conv_layout(

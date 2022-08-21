@@ -80,7 +80,7 @@ def {{kernel_name}}(
     # load inc ptr of x, upade x_ptrs
     if not CONV1X1_NHWC:
         delta_x_ptrs = delta_x_ptr + off_x_crs
-        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS, other=0)
+        off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
     else:
         x_ptrs = x + off_x_nhw[:, None] + off_x_crs[None, :]
@@ -117,7 +117,7 @@ def {{kernel_name}}(
         if not CONV1X1_NHWC:
             delta_x_ptrs += BLOCK_K
             off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
-            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS, other=0)
+            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
             x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         else:
             off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
