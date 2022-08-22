@@ -1,19 +1,19 @@
 Operator: aten._log_softmax.default
 cnt: 1, ((T([1024, 50265], f16), 1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 1, ((T([1024, 50265], f16), T([1024, 50265], f16), 1, torch.float16), {})
+cnt: 1, ((T([1024, 50265], f16), T([1024, 50265], f16), 1, f16), {})
 Operator: aten._softmax.default
 cnt: 12, ((T([1, 1024, 12, 513], f16, stride=(6303744, 513, 525312, 1)), -1, True), {})
 Operator: aten._softmax_backward_data.default
-cnt: 12, ((T([1, 1024, 12, 513], f32), T([1, 1024, 12, 513], f32), -1, torch.float16), {})
+cnt: 12, ((T([1, 1024, 12, 513], f32), T([1, 1024, 12, 513], f32), -1, f16), {})
 Operator: aten._to_copy.default
-cnt: 1, ((T([1, 1, 1, 1024], f32),), {'dtype': torch.float16})
-cnt: 1, ((T([1, 1024], b8),), {'dtype': torch.int32})
-cnt: 1, ((T([1, 1024], i64),), {'dtype': torch.int32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 1, ((T([1, 1024], i32),), {'dtype': torch.int64})
-cnt: 12, ((T([1, 1024, 1, 1], b8),), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 12, ((T([1, 1024, 12, 513], f32),), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 12, ((T([1, 1024, 12, 513], f16, stride=(6303744, 513, 525312, 1)),), {'dtype': torch.float32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([1, 1, 1, 1024], f32),), {'dtype': f16})
+cnt: 1, ((T([1, 1024], b8),), {'dtype': i32})
+cnt: 1, ((T([1, 1024], i64),), {'dtype': i32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([1, 1024], i32),), {'dtype': i64})
+cnt: 12, ((T([1, 1024, 1, 1], b8),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 12, ((T([1, 1024, 12, 513], f32),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 12, ((T([1, 1024, 12, 513], f16, stride=(6303744, 513, 525312, 1)),), {'dtype': f32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
 Operator: aten._unsafe_view.default
 cnt: 12, ((T([12, 3, 512, 64, 1], f16), [36, 512, 64]), {})
 cnt: 12, ((T([12, 3, 64, 512, 1], f16), [36, 64, 512]), {})
@@ -136,15 +136,15 @@ Operator: aten.ne.Scalar
 cnt: 1, ((T([1, 1024], i64), 1), {})
 cnt: 12, ((T([1, 1024], f16), 0), {})
 Operator: aten.new_empty.default
-cnt: 12, ((T([12, 3, 512, 513], f16), [12, 4, 256, 513]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 12, ((T([1, 3, 512, 513], f16), [1, 4, 256, 513]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 12, ((T([12, 3, 512, 513], f16), [12, 4, 256, 513]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 12, ((T([1, 3, 512, 513], f16), [1, 4, 256, 513]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
 Operator: aten.new_empty_strided.default
 cnt: 84, ((T([12, 4, 256, 513], f16), [12, 4, 256, 513], [525312, 131328, 513, 1]), {})
 cnt: 12, ((T([1024, 768], f16), [1024, 768], [768, 1]), {})
 Operator: aten.new_ones.default
-cnt: 12, ((T([1, 1024, 12, 513], f16, stride=(6303744, 513, 525312, 1)), [256, 257]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 12, ((T([1, 1024, 1, 1], f16), [1, 1024, 1, 1]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 12, ((T([1, 1024, 1, 513], f16), [256, 257]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 12, ((T([1, 1024, 12, 513], f16, stride=(6303744, 513, 525312, 1)), [256, 257]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 12, ((T([1, 1024, 1, 1], f16), [1, 1024, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 12, ((T([1, 1024, 1, 513], f16), [256, 257]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
 Operator: aten.new_zeros.default
 cnt: 12, ((T([12, 4, 768, 64], f16), [1179648]), {})
 cnt: 12, ((T([1024, 12, 513], f16), [6303744]), {})

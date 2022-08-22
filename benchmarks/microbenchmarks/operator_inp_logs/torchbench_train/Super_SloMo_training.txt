@@ -1,5 +1,5 @@
 Operator: aten._to_copy.default
-cnt: 12, ((T([6, 352, 352], i64, stride=(0, 352, 1)),), {'dtype': torch.float16})
+cnt: 12, ((T([6, 352, 352], i64, stride=(0, 352, 1)),), {'dtype': f16})
 Operator: aten.abs.default
 cnt: 5, ((T([6, 3, 352, 352], f16),), {})
 cnt: 2, ((T([6, 2, 352, 351], f16),), {})

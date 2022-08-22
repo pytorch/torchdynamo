@@ -1,13 +1,13 @@
 Operator: aten._log_softmax.default
 cnt: 2, ((T([8, 128], f16), 1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 2, ((T([8, 128], f16), T([8, 128], f16), 1, torch.float16), {})
+cnt: 2, ((T([8, 128], f16), T([8, 128], f16), 1, f16), {})
 Operator: aten._softmax.default
 cnt: 24, ((T([8, 16, 128, 128], f16), -1, False), {})
 Operator: aten._softmax_backward_data.default
-cnt: 24, ((T([8, 16, 128, 128], f16), T([8, 16, 128, 128], f16), -1, torch.float16), {})
+cnt: 24, ((T([8, 16, 128, 128], f16), T([8, 16, 128, 128], f16), -1, f16), {})
 Operator: aten._to_copy.default
-cnt: 1, ((T([8, 1, 1, 128], f32),), {'dtype': torch.float16})
+cnt: 1, ((T([8, 1, 1, 128], f32),), {'dtype': f16})
 Operator: aten._unsafe_view.default
 cnt: 72, ((T([8, 16, 128, 64], f16), [128, 128, 64]), {})
 cnt: 24, ((T([8, 16, 64, 128], f16), [128, 64, 128]), {})

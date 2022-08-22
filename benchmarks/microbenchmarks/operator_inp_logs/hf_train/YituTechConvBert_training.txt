@@ -1,15 +1,15 @@
 Operator: aten._log_softmax.default
 cnt: 1, ((T([512, 30522], f16), 1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 1, ((T([512, 30522], f16), T([512, 30522], f16), 1, torch.float16), {})
+cnt: 1, ((T([512, 30522], f16), T([512, 30522], f16), 1, f16), {})
 Operator: aten._softmax.default
 cnt: 12, ((T([3072, 9, 1], f16), 1, False), {})
 cnt: 12, ((T([1, 6, 512, 512], f16), -1, False), {})
 Operator: aten._softmax_backward_data.default
-cnt: 12, ((T([1, 6, 512, 512], f16), T([1, 6, 512, 512], f16), -1, torch.float16), {})
-cnt: 12, ((T([3072, 9, 1], f16), T([3072, 9, 1], f16), 1, torch.float16), {})
+cnt: 12, ((T([1, 6, 512, 512], f16), T([1, 6, 512, 512], f16), -1, f16), {})
+cnt: 12, ((T([3072, 9, 1], f16), T([3072, 9, 1], f16), 1, f16), {})
 Operator: aten._to_copy.default
-cnt: 1, ((T([1, 1, 1, 512], f32),), {'dtype': torch.float16})
+cnt: 1, ((T([1, 1, 1, 512], f32),), {'dtype': f16})
 Operator: aten._unsafe_view.default
 cnt: 12, ((T([1, 512, 54], f16), [1, 512, 54]), {})
 cnt: 12, ((T([1, 512, 384, 9], f16), [3072, 64, 9]), {})
@@ -101,7 +101,7 @@ cnt: 26, ((T([1, 512, 768], f16), [768], T([768], f16), T([768], f16), 1e-12), {
 Operator: aten.native_layer_norm_backward.default
 cnt: 26, ((T([1, 512, 768], f16), T([1, 512, 768], f16), [768], T([1, 512, 1], f32), T([1, 512, 1], f32), T([768], f16), T([768], f16), [True, True, True]), {})
 Operator: aten.new_empty_strided.default
-cnt: 12, ((T([54, 384], f16, stride=(1, 54)), [54, 384], [384, 1]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 12, ((T([54, 384], f16, stride=(1, 54)), [54, 384], [384, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([512, 30522], f16), T([512], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

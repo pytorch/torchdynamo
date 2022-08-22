@@ -89,14 +89,7 @@ def deserialize_tensor(size, dtype, stride=None):
     if stride is not None:
         return torch.empty_strided(size, stride, dtype=dtype)
     else:
-        try:
-            return torch.empty(size, dtype=dtype)
-        except Exception as e:
-            import pdb
-
-            pdb.set_trace()
-            print(e)
-            raise e
+        return torch.empty(size, dtype=dtype)
 
 
 def serialize_tensor(e):
@@ -111,10 +104,8 @@ def serialize_torch_args(e):
         if e.is_sparse:
             return serialize_sparse_tensor(e)
         return serialize_tensor(e)
-    elif isinstance(e, torch.device):
-        return f"torch.device('{e.type}')"
     else:
-        return e
+        return truncate_inp(e)
 
 
 def contains_tensor(elems):
@@ -196,6 +187,9 @@ class OperatorInputsMode(TorchDispatchMode):
                 operator_inputs = self.func_db[operator]
                 for inps, count in operator_inputs.items():
                     f.write(f"cnt: {count}, ")
+                    # repr will add quotation marks around the dtype strings
+                    for dtype_abbr in dtype_abbrs.values():
+                        inps = inps.replace("'" + dtype_abbr + "'", dtype_abbr)
                     f.write(inps)
                     f.write("\n")
 

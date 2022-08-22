@@ -1,20 +1,20 @@
 Operator: aten._log_softmax.default
 cnt: 2, ((T([4, 512], f16), 1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 2, ((T([4, 512], f16), T([4, 512], f16), 1, torch.float16), {})
+cnt: 2, ((T([4, 512], f16), T([4, 512], f16), 1, f16), {})
 Operator: aten._softmax.default
 cnt: 12, ((T([4, 12, 512, 512], f16), -1, False), {})
 Operator: aten._softmax_backward_data.default
-cnt: 12, ((T([4, 12, 512, 512], f16), T([4, 12, 512, 512], f16), -1, torch.float16), {})
+cnt: 12, ((T([4, 12, 512, 512], f16), T([4, 12, 512, 512], f16), -1, f16), {})
 Operator: aten._to_copy.default
-cnt: 25, ((T([4, 512, 768], f16),), {'dtype': torch.float32})
-cnt: 25, ((T([4, 512, 768], f32),), {'dtype': torch.float16})
-cnt: 1, ((T([4, 512, 1], f32),), {'dtype': torch.float16})
+cnt: 25, ((T([4, 512, 768], f16),), {'dtype': f32})
+cnt: 25, ((T([4, 512, 768], f32),), {'dtype': f16})
+cnt: 1, ((T([4, 512, 1], f32),), {'dtype': f16})
 cnt: 1, ((T([4, 1, 512, 512], f32),), {'dtype': torch.uint8})
-cnt: 12, ((T([], f32),), {'dtype': torch.float16, 'device': "torch.device('cpu')"})
+cnt: 12, ((T([], f32),), {'dtype': f16, 'device': "torch.device('cpu')"})
 cnt: 12, ((T([4, 1, 512, 512], u8),), {'dtype': torch.bool})
-cnt: 25, ((T([4, 512, 768], f16),), {'dtype': torch.float32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 25, ((T([4, 512, 768], f32),), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 25, ((T([4, 512, 768], f16),), {'dtype': f32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 25, ((T([4, 512, 768], f32),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
 Operator: aten._unsafe_view.default
 cnt: 12, ((T([2048, 2304], f16), [4, 512, 2304]), {})
 cnt: 36, ((T([4, 12, 512, 64], f16), [48, 512, 64]), {})

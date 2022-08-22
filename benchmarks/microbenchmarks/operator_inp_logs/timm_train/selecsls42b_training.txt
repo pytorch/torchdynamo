@@ -1,7 +1,7 @@
 Operator: aten._log_softmax.default
 cnt: 1, ((T([128, 1000], f16), 1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 1, ((T([128, 1000], f16), T([128, 1000], f16), 1, torch.float16), {})
+cnt: 1, ((T([128, 1000], f16), T([128, 1000], f16), 1, f16), {})
 Operator: aten.add.Tensor
 cnt: 1, ((T([128, 152, 14, 14], f16, stride=(178752, 196, 14, 1)), T([128, 152, 14, 14], f16)), {})
 cnt: 2, ((T([128, 304, 14, 14], f16, stride=(178752, 196, 14, 1)), T([128, 304, 14, 14], f16)), {})

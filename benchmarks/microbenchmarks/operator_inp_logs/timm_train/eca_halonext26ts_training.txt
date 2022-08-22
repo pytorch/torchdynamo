@@ -1,15 +1,15 @@
 Operator: aten._log_softmax.default
 cnt: 1, ((T([128, 1000], f16), 1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 1, ((T([128, 1000], f16), T([128, 1000], f16), 1, torch.float16), {})
+cnt: 1, ((T([128, 1000], f16), T([128, 1000], f16), 1, f16), {})
 Operator: aten._softmax.default
 cnt: 1, ((T([1024, 4, 64, 144], f16), -1, False), {})
 cnt: 1, ((T([1024, 4, 16, 144], f16), -1, False), {})
 cnt: 1, ((T([1024, 1, 64, 144], f16), -1, False), {})
 Operator: aten._softmax_backward_data.default
-cnt: 1, ((T([1024, 1, 64, 144], f16), T([1024, 1, 64, 144], f16), -1, torch.float16), {})
-cnt: 1, ((T([1024, 4, 16, 144], f16), T([1024, 4, 16, 144], f16), -1, torch.float16), {})
-cnt: 1, ((T([1024, 4, 64, 144], f16), T([1024, 4, 64, 144], f16), -1, torch.float16), {})
+cnt: 1, ((T([1024, 1, 64, 144], f16), T([1024, 1, 64, 144], f16), -1, f16), {})
+cnt: 1, ((T([1024, 4, 16, 144], f16), T([1024, 4, 16, 144], f16), -1, f16), {})
+cnt: 1, ((T([1024, 4, 64, 144], f16), T([1024, 4, 64, 144], f16), -1, f16), {})
 Operator: aten._unsafe_view.default
 cnt: 1, ((T([1024, 16, 8, 8, 2, 2], f16), [1024, 16, 64, 4]), {})
 cnt: 1, ((T([128, 384, 2, 2, 12, 12], f16), [1024, 48, 4, 144]), {})

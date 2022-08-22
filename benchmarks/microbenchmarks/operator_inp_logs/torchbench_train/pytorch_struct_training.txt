@@ -3,9 +3,9 @@ cnt: 1, ((T([30, 4771], f16, stride=(1, 30)), -1, False), {})
 cnt: 1, ((T([30, 3600], f16), -1, False), {})
 cnt: 1, ((T([30], f16), -1, False), {})
 Operator: aten._log_softmax_backward_data.default
-cnt: 1, ((T([30], f16), T([30], f16), -1, torch.float16), {})
-cnt: 1, ((T([30, 3600], f16), T([30, 3600], f16), -1, torch.float16), {})
-cnt: 1, ((T([30, 4771], f16), T([30, 4771], f16), -1, torch.float16), {})
+cnt: 1, ((T([30], f16), T([30], f16), -1, f16), {})
+cnt: 1, ((T([30, 3600], f16), T([30, 3600], f16), -1, f16), {})
+cnt: 1, ((T([30, 4771], f16), T([30, 4771], f16), -1, f16), {})
 Operator: aten.add.Tensor
 cnt: 4, ((T([30, 256], f16), T([30, 256], f16)), {})
 cnt: 1, ((T([], f16), 0), {})
@@ -41,7 +41,7 @@ cnt: 8, ((T([256, 30], f16, stride=(1, 256)), T([30, 256], f16)), {})
 cnt: 2, ((T([30, 256], f16, stride=(1, 30)), T([256, 256], f16)), {})
 cnt: 2, ((T([256, 30], f16), T([30, 256], f16)), {})
 Operator: aten.new_empty_strided.default
-cnt: 1, ((T([60, 60, 256], f16, stride=(60, 1, 3600)), [60, 60, 256], [15360, 256, 1]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([60, 60, 256], f16, stride=(60, 1, 3600)), [60, 60, 256], [15360, 256, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
 Operator: aten.new_zeros.default
 cnt: 1, ((T([40, 29, 30, 1], f16, stride=(0, 0, 0, 1)), [40, 29, 30, 4771]), {})
 Operator: aten.relu.default

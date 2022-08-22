@@ -74,8 +74,8 @@ cnt: 1, ((T([3, 256, 128, 128], f16, stride=(4194304, 1, 32768, 256)), T([3, 256
 cnt: 1, ((T([3, 128, 256, 256], f16, stride=(8388608, 1, 32768, 128)), T([3, 128, 256, 256], f16, stride=(8388608, 1, 32768, 128)), T([128], f16), T([128], f16), T([128], f16), T([128], f32), T([128], f32), False, 1e-05, [True, True, True]), {})
 cnt: 1, ((T([3, 64, 512, 512], f16, stride=(16777216, 1, 32768, 64)), T([3, 64, 512, 512], f16, stride=(16777216, 1, 32768, 64)), T([64], f16), T([64], f16), T([64], f16), T([64], f32), T([64], f32), False, 1e-05, [True, True, True]), {})
 Operator: aten.new_empty_strided.default
-cnt: 1, ((T([256, 128, 3, 3], f16, stride=(1152, 1, 384, 128)), [256, 128, 3, 3], [1152, 9, 3, 1]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 1, ((T([128, 64, 3, 3], f16, stride=(576, 1, 192, 64)), [128, 64, 3, 3], [576, 9, 3, 1]), {'dtype': torch.float16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([256, 128, 3, 3], f16, stride=(1152, 1, 384, 128)), [256, 128, 3, 3], [1152, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([128, 64, 3, 3], f16, stride=(576, 1, 192, 64)), [128, 64, 3, 3], [576, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
 Operator: aten.reflection_pad2d.default
 cnt: 2, ((T([3, 3, 512, 512], f16), [3, 3, 3, 3]), {})
 cnt: 1, ((T([3, 1, 512, 512], f16), [3, 3, 3, 3]), {})

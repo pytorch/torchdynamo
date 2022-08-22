@@ -3,9 +3,9 @@ cnt: 6, ((T([256, 8, 33, 33], f16), -1, False), {})
 cnt: 6, ((T([256, 8, 31, 31], f16), -1, False), {})
 cnt: 6, ((T([256, 8, 31, 33], f16), -1, False), {})
 Operator: aten._softmax_backward_data.default
-cnt: 6, ((T([256, 8, 31, 33], f16), T([256, 8, 31, 33], f16), -1, torch.float16), {})
-cnt: 6, ((T([256, 8, 31, 31], f16), T([256, 8, 31, 31], f16), -1, torch.float16), {})
-cnt: 6, ((T([256, 8, 33, 33], f16), T([256, 8, 33, 33], f16), -1, torch.float16), {})
+cnt: 6, ((T([256, 8, 31, 33], f16), T([256, 8, 31, 33], f16), -1, f16), {})
+cnt: 6, ((T([256, 8, 31, 31], f16), T([256, 8, 31, 31], f16), -1, f16), {})
+cnt: 6, ((T([256, 8, 33, 33], f16), T([256, 8, 33, 33], f16), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([1, 31, 31], f32),), {'dtype': torch.bool})
 Operator: aten._unsafe_view.default

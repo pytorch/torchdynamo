@@ -1,7 +1,7 @@
 Operator: aten._softmax.default
 cnt: 12, ((T([8, 6, 197, 197], f16), -1, False), {})
 Operator: aten._softmax_backward_data.default
-cnt: 12, ((T([8, 6, 197, 197], f16), T([8, 6, 197, 197], f16), -1, torch.float16), {})
+cnt: 12, ((T([8, 6, 197, 197], f16), T([8, 6, 197, 197], f16), -1, f16), {})
 Operator: aten._unsafe_view.default
 cnt: 36, ((T([8, 6, 197, 64], f16), [48, 197, 64]), {})
 cnt: 12, ((T([8, 6, 64, 197], f16), [48, 64, 197]), {})
