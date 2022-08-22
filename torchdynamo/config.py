@@ -19,7 +19,7 @@ except ImportError:
 # INFO print compiled functions + graphs
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
-log_level = logging.ERROR
+log_level = logging.WARNING
 
 # verify the correctness of optimized backend
 verify_correctness = False
