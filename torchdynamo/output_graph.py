@@ -472,6 +472,11 @@ class OutputGraph(fx.Tracer):
 
         # append stack trace to fx node
         tx = current_tx if current_tx else self.root_tx
+
+        nn_module_stack = getattr(tx, "nn_module_stack")
+        if nn_module_stack:
+           rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())
