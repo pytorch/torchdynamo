@@ -1441,14 +1441,17 @@ class CommonTemplate:
     def test_triton_mm2(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def fn(x, y):
-            return torch.mm(x, y)
+            return torch.relu(torch.mm(x, y))
 
         N = 1024
         a = torch.randn([N, N], device=self.device, dtype=torch.float32)
         b = torch.randn([N, N], device=self.device, dtype=torch.float32)
-        c1 = torch.mm(a, b)
+        c1 = torch.relu(torch.mm(a, b))
+        torchinductor.metrics.reset()
         c = fn(a, b)
         assert torch.allclose(c1, c, atol=1e-3, rtol=1e-3)
+        if self.device == "cuda":
+            assert torchinductor.metrics.generated_kernel_count == 1
 
     def test_std(self):
         def fn(x):

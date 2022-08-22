@@ -2342,6 +2342,14 @@ class MatrixMultiply(ExternKernelOut):
             kernel=kernel,
         )
 
+    def get_template_tiling(self):
+        tile1, tile2 = self.get_size()
+        return (
+            tile1,
+            tile2,
+            sympy.Integer(1),
+        )
+
     def map_args(self):
         # a, b
         in_args = [x.codegen_reference() for x in self.inputs]
@@ -2615,7 +2623,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
-                MultiOutputLayout(),
+                MultiOutputLayout(tensor_args[0].get_device()),
                 kernel,
                 tensor_args,
                 non_tensor_args,
@@ -2657,8 +2665,9 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
+@dataclasses.dataclass
 class MultiOutputLayout(IRNode):
-    pass
+    device: torch.device
 
 
 class MultiOutput(ExternKernel):
@@ -2973,6 +2982,14 @@ class Convolution(ExternKernelAlloc):
         )
 
         return inout_dict, args_dict, const_dict, other_dict
+
+    def get_template_tiling(self):
+        n, c, h, w = self.get_size()
+        return (
+            n * h * w,
+            c,
+            sympy.Integer(1),
+        )
 
 
 @dataclasses.dataclass

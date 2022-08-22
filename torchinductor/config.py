@@ -56,6 +56,12 @@ tune_layout = False
 # 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
 repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
 
+# fuse even in cases without common reads
+aggressive_fusion = True
+
+# maximum iterations of fusions to do
+fusion_passes = 3
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -106,3 +112,7 @@ class triton:
     autotune = True
 
     use_bmm = False
+
+    # should we stop a fusion to allow better tiling?
+    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_reduction_fusion = True

@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "Torchdynamo: [%(levelname)s] %(message)s"},
+        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
