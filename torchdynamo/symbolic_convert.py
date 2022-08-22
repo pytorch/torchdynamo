@@ -442,16 +442,62 @@ class InstructionTranslatorBase(object):
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
+    def resolve_name(self, name, package, level):
+        """
+        Copied from the Cpython implementation of __import__
+        Resolve a relative module name to an absolute one.
+        """
+        bits = package.rsplit(".", level - 1)
+        if len(bits) < level:
+            raise ImportError("attempted relative import beyond top-level package")
+        base = bits[0]
+        return "{}.{}".format(base, name) if name else base
+
+    def calc_package(self):
+        """
+        Copied from the Cpython implementation of __import__
+        """
+        package = self.f_globals.get("__package__")
+        spec = self.f_globals.get("__spec__")
+        if package is not None:
+            if spec is not None and package != spec.parent:
+                log.warn(
+                    "__package__ != __spec__.parent "
+                    f"({package!r} != {spec.parent!r})",
+                    ImportWarning,
+                    stacklevel=3,
+                )
+            return package
+        elif spec is not None:
+            return spec.parent
+        else:
+            log.warn(
+                "can't resolve package from __spec__ or __package__, "
+                "falling back on __name__ and __path__",
+                ImportWarning,
+                stacklevel=3,
+            )
+            package = self.f_globals["__name__"]
+            if "__path__" not in self.f_globals:
+                package = package.rpartition(".")[0]
+        return package
+
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
         level = level.as_python_constant()
         fromlist = fromlist.as_python_constant()
         module_name = inst.argval
+
         value = __import__(
             module_name,
             fromlist=fromlist,
             level=level,
+            globals=self.f_globals,
         )
+
+        if level != 0:
+            pkg = self.calc_package()
+            module_name = self.resolve_name(module_name, pkg, level)
 
         # For __import__, when the name variable is of the form package.module,
         # normally, the top-level package (the name up till the first dot) is
