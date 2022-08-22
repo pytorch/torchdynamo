@@ -1,3 +1,5 @@
+import os
+
 # add some debug printouts
 debug = False
 
@@ -38,6 +40,22 @@ fallback_random = False
 # python_key_normalize versus aot_autograd
 aot_autograd = True
 
+# automatically create fallbacks when encountering an unhandled op
+implicit_fallbacks = True
+
+# Enables a fusion pass that groups nodes together before the scheduler
+prefuse_nodes = True
+
+# do bench to decide best layout, currently only for aten.conv
+tune_layout = False
+
+# Inductor compilation debug info
+# 0: Nothing printed out when compilation fails
+# 1: Dump the graph out to repro.py if compilation fails
+# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
+# 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
+repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -68,25 +86,23 @@ class triton:
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 
+    # choose mm backend, "aten" or "triton" or "autotune"
+    mm = "aten"
+
     # Always load full blocks (rather than broadcasting inside the block)
     # Set default as True because otherwise will encouter `map::at` error
     # in triton if loading from 1-dim tensor using 2-dim pointer offset
     # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
     # could be set as False if triton fixes the bug later
-    dense_indexing = True if convolution != "aten" else False
+    dense_indexing = False
 
     # limit tiling dimensions
-    # Disable tiling until we figure out how tiling and fusion work together
     max_tiles = 2
-    tile_broadcasting = False
 
     # put each kernel in its own file
     many_files = False
 
     # use triton.autotune?
     autotune = True
-
-    # enable codegen to use Triton's mm
-    use_mm = False
 
     use_bmm = False

@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import functools
 import itertools
 import logging
 import math
@@ -13,6 +14,8 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
+from ..utils import freeze_inputs
+from ..utils import sympy_dot
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -20,6 +23,8 @@ from ..virtualized import ops
 log = logging.getLogger(__name__)
 
 
+@freeze_inputs
+@functools.lru_cache(256)
 def _simplify_loops(index_vars, sizes, index_formulas):
     """
     Try to remove as many axis from loop iterations as possible, by:
@@ -27,7 +32,8 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         2) fuse contiguous dimensions into a single loop
         If channel_last = True, we will prevent the last dim fused with other dims
     """
-    sizes = list(sizes)
+    sizevars = V.graph.sizevars
+    sizes = list(map(V.graph.sizevars.simplify, sizes))
 
     strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
     assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
@@ -39,14 +45,16 @@ def _simplify_loops(index_vars, sizes, index_formulas):
 
     def can_merge_dims(a, b):
         for k in range(len(strides)):
-            if strides[k][a] * sizes[a] == strides[k][b]:
+            if sizevars.simplify(strides[k][a] * sizes[a]) == sizevars.simplify(
+                strides[k][b]
+            ):
                 # approximate test passed, try sound version
                 va = index_vars[a]
                 vb = index_vars[b]
                 v = sympy.Symbol("_merge_tester")
                 expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
                 expr2 = index_formulas[k].subs({va: 0, vb: v})
-                if expr1 == expr2:
+                if V.graph.sizevars.simplify(expr1) == V.graph.sizevars.simplify(expr2):
                     continue
             return False
         return True
@@ -80,6 +88,13 @@ def _simplify_loops(index_vars, sizes, index_formulas):
         return [i for i, s in zip(index, sizes) if s is not None]
 
     return [x for x in sizes if x is not None], reindex, prune
+
+
+def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
+    from ..ir import FlexibleLayout
+
+    # added contiguous index prevents reordering
+    return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
 class ExprPrinter(Printer):
@@ -287,6 +302,10 @@ class DeferredIndentedBuffer(IndentedBuffer):
             return super().writeline(line)
         assert "buf" in name
         return super().writeline(DeferredLine(name, line))
+
+    def writelines(self, name, lines):
+        for line in lines:
+            self.writeline(name, line)
 
 
 class BracesBuffer(IndentedBuffer):
@@ -552,7 +571,7 @@ class Kernel(CodeGen):
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -593,8 +612,10 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, reduction_type, index, value):
-                return self.reduction(name, dtype, reduction_type, index, value)
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                return self.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())
@@ -609,8 +630,7 @@ class Kernel(CodeGen):
     def rename_indexing(self, index) -> sympy.Expr:
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
-        index = sympy.expand(index)
-        index = sympy.simplify(index.subs(V.graph.sizevars.replacements))
+        index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
         return index.subs(subs)

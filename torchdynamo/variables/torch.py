@@ -1,3 +1,4 @@
+import logging
 import re
 import types
 from typing import Dict
@@ -7,18 +8,22 @@ import torch._C
 import torch.nn
 
 from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import ProfileRecordFunctionVariable
+from torchdynamo.variables.misc import FakeContextWrappingVariable
 
 from .. import config
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..utils import check_constant_args
+from ..utils import check_unspec_python_args
 from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
+
+log = logging.getLogger(__name__)
 
 
 class TorchVariable(VariableTracker):
@@ -75,11 +80,12 @@ class TorchVariable(VariableTracker):
 
     def can_constant_fold_through(self):
         if self.value in (
+            torch._assert,
             torch.device,
             torch.finfo,
             torch.iinfo,
-            torch.is_tensor,
             torch.is_floating_point,
+            torch.is_tensor,
             torch.overrides.is_tensor_like,
         ):
             return True
@@ -93,12 +99,14 @@ class TorchVariable(VariableTracker):
         from . import TensorVariable
 
         constant_args = check_constant_args(args, kwargs)
+        unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
-        elif self.can_constant_fold_through() and constant_args:
+        elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return ConstantVariable(
                 self.as_python_constant()(
@@ -119,7 +127,9 @@ class TorchVariable(VariableTracker):
             in (
                 torch.is_tensor,
                 torch.is_floating_point,
+                torch.is_complex,
                 torch.overrides.is_tensor_like,
+                torch.is_complex,
             )
             and isinstance(args[0], TensorVariable)
             and args[0].dtype is not None
@@ -128,6 +138,8 @@ class TorchVariable(VariableTracker):
                 return ConstantVariable(True, **options)
             elif self.value is torch.is_floating_point:
                 return ConstantVariable(args[0].dtype.is_floating_point, **options)
+            elif self.value is torch.is_complex:
+                return ConstantVariable(args[0].dtype.is_complex, **options)
             else:
                 assert False
         elif (
@@ -188,14 +200,25 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
+        elif self.value is torch.autograd.profiler.profile:
+            if len(args) == 0 or len(args) > 0 and args[0]:
+                log.warning("Profiler will be ignored")
+            return FakeContextWrappingVariable(**options)
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
-            return ProfileRecordFunctionVariable(str(args[0].as_proxy()), **options)
+            log.warning("Profiler will be ignored")
+            return FakeContextWrappingVariable(**options)
+        elif self.value is torch.jit.annotate:
+            assert len(args) == 2
+            return args[1]
         else:
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_function", self.value, *proxy_args_kwargs(args, kwargs)
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -265,6 +288,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -328,6 +352,7 @@ class TorchVariable(VariableTracker):
                         ],
                         {},
                     ),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [

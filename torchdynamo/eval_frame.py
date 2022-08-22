@@ -1,12 +1,17 @@
 import contextlib
 import copy
 import functools
+import inspect
 import logging
 import threading
+import types
 import warnings
+from unittest.mock import patch
 
 import torch
+import torch.utils._pytree as pytree
 
+import torchdynamo
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import same
@@ -15,6 +20,7 @@ from . import config
 from . import convert_frame
 from . import skipfiles
 from . import utils
+from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 
 log = logging.getLogger(__name__)
@@ -35,19 +41,45 @@ unsupported = _eval_frame.unsupported
 skip_code = _eval_frame.skip_code
 set_guard_fail_hook = _eval_frame.set_guard_fail_hook
 set_guard_error_hook = _eval_frame.set_guard_error_hook
-
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
+null_context = contextlib.nullcontext
+unset = object()
+compile_lock = threading.Lock()
+most_recent_backend = None
+
+
+def remove_from_cache(f):
+    """
+    Make sure f.__code__ is not cached to force a recompile
+    """
+    if isinstance(f, types.CodeType):
+        reset_code(f)
+    elif hasattr(f, "__code__"):
+        reset_code(f.__code__)
+    elif hasattr(getattr(f, "forward", None), "__code__"):
+        reset_code(f.forward.__code__)
+    else:
+        from torchdynamo import reset
+
+        reset()
+        log.warning("could not determine __code__ for %s", f)
 
 
 def nothing():
     pass
 
 
-null_context = contextlib.nullcontext
-
-unset = object()
-
-compile_lock = threading.Lock()
+def innermost_fn(fn):
+    """
+    In case of nesting of _TorchDynamoContext calls, find the innermost
+    function. TorchDynamo caches on fn.__code__ object, so its necessary to find
+    the innermost function to pass on the optimize, run, disable etc.
+    """
+    unaltered_fn = fn
+    while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
+        unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
+        assert callable(unaltered_fn)
+    return unaltered_fn
 
 
 class _TorchDynamoContext:
@@ -78,6 +110,34 @@ class _TorchDynamoContext:
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        fn = innermost_fn(fn)
+        # Optimize the forward method of torch.nn.Module object
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            optimized_forward = self(mod.forward)
+
+            class TorchDynamoNNModuleWrapper:
+                """
+                A wrapper that redirects the forward call to the optimized
+                forward, while for rest it redirects the calls to the original
+                module.
+                """
+
+                def __getattr__(self, name):
+                    return getattr(mod, name)
+
+                def forward(self, *args, **kwargs):
+                    return optimized_forward(*args, **kwargs)
+
+                def __call__(self, *args, **kwargs):
+                    return self.forward(*args, **kwargs)
+
+            new_mod = TorchDynamoNNModuleWrapper()
+            # Save the function pointer to find the original callable while nesting
+            # of decorators.
+            new_mod._torchdynamo_orig_callable = mod
+            return new_mod
+
         assert callable(fn)
         callback = self.callback
         on_enter = self.on_enter
@@ -93,13 +153,17 @@ class _TorchDynamoContext:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                backend_ctx.__exit__()
+                backend_ctx.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
             _fn._torchdynamo_disable = True
         else:
             _fn._torchdynamo_inline = fn
+
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn
 
         # If the function is called with torchdynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -111,9 +175,20 @@ class _TorchDynamoContext:
 
 class OptimizeContext(_TorchDynamoContext):
     def __init__(self, callback, backend_ctx_ctor):
+        def on_enter():
+            global most_recent_backend
+            if (
+                most_recent_backend is not None
+                and most_recent_backend is not compiler_fn
+            ):
+                raise ResetRequired()
+            most_recent_backend = compiler_fn
+            install_generation_tagging_init()
+
+        compiler_fn = innermost_fn(callback)
         super().__init__(
             callback=callback,
-            on_enter=install_generation_tagging_init,
+            on_enter=on_enter,
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
         )
@@ -134,8 +209,7 @@ def catch_errors_wrapper(callback):
     def catch_errors(frame, cache_size):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                if config.debug:
-                    print(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+                log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
                 return None
             if (
                 frame.f_code.co_filename == "<string>"
@@ -150,6 +224,7 @@ def catch_errors_wrapper(callback):
             logging.exception("Error while processing frame")
             raise
 
+    catch_errors._torchdynamo_orig_callable = callback
     return catch_errors
 
 
@@ -200,7 +275,21 @@ class WrapperBackend:
             self.restore()
 
 
-def optimize(backend, nopython=False):
+def get_compiler_fn(compiler_fn):
+    """Expand backend strings to functions"""
+    if compiler_fn == "inductor":
+        from torchinductor.compile_fx import compile_fx
+
+        compiler_fn = compile_fx
+    elif isinstance(compiler_fn, str):
+        from .optimizations import BACKENDS
+
+        compiler_fn = BACKENDS[compiler_fn]
+
+    return compiler_fn
+
+
+def optimize(backend, nopython=False, guard_export_fn=None):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -228,19 +317,76 @@ def optimize(backend, nopython=False):
         with torchdynamo.optimize(my_compiler):
            ...
     """
-    backend_ctx_ctor = null_context
-    if hasattr(backend, "backend_ctx_ctor"):
-        backend_ctx_ctor = getattr(backend, "backend_ctx_ctor")
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(backend, backend_ctx_ctor, guard_export_fn=None)
+        return optimize_assert(backend, guard_export_fn=guard_export_fn)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
+        backend_ctx_ctor,
     )
 
 
+@patch("torchdynamo.symbolic_convert.explain", True)
+def explain(f, *args, **kwargs):
+    # TODO(voz): Do we want a decorator for this?
+    torchdynamo.reset()
+
+    out_guards = []
+    graphs = []
+    ops_per_graph = []
+    op_count = 0
+    break_reasons = []
+
+    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+        nonlocal graphs
+        nonlocal op_count
+        nonlocal ops_per_graph
+
+        graphs.append(gm)
+        ops = []
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+
+        op_count += len(ops)
+        ops_per_graph.append(ops)
+        if gm.compile_subgraph_reason is not None:
+            break_reasons.append(gm.compile_subgraph_reason)
+        return gm.forward
+
+    def guard_export_print(guards):
+        nonlocal out_guards
+        out_guards.append(guards)
+
+    with patch(f"{__name__}.most_recent_backend", None), optimize(
+        dynamo_graph_accumulating_compiler,
+        nopython=False,
+        guard_export_fn=guard_export_print,
+    ):
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        f(*args, **kwargs)
+
+    graph_count = len(graphs)
+
+    formatted_list = ""
+    for idx in range(0, len(break_reasons)):
+        formatted_list += f"{idx + 1}. {break_reasons[idx]} \n"
+
+    explanation = f"Dynamo produced {graph_count} graphs"
+    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
+    explanation += f"\n Break reasons: \n\n{formatted_list}"
+
+    # TODO(voz): Do we want a decorator for this?
+    torchdynamo.reset()
+    return explanation, out_guards, graphs, ops_per_graph
+
+
 def export(f, *args, **kwargs):
-    import torch.utils._pytree as pytree
+    f = innermost_fn(f)
 
     graph = None
     out_guards = None
@@ -256,10 +402,23 @@ def export(f, *args, **kwargs):
 
         for i in range(0, len(candidate_args)):
             arg = candidate_args[i]
-            assert (
-                id(arg) in dict_of_source_args
-            ), "Dynamo input and output is a strict subset of traced input/output"
-            matched_elements_positions.append(dict_of_source_args[id(arg)])
+            # 1-element tensor arg can be unspec int/float
+            if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
+                if id(arg) in dict_of_source_args:
+                    matched_elements_positions.append(dict_of_source_args[id(arg)])
+                elif id(arg.item()) in dict_of_source_args:
+                    matched_elements_positions.append(
+                        dict_of_source_args[id(arg.item())]
+                    )
+                else:
+                    assert (
+                        False
+                    ), "Dynamo input/output is not consistent with traced input/output"
+            else:
+                assert (
+                    id(arg) in dict_of_source_args
+                ), "Dynamo input and output is a strict subset of traced input/output"
+                matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
@@ -286,18 +445,19 @@ def export(f, *args, **kwargs):
 
         return result_capturing_wrapper
 
-    backend_ctx_ctor = null_context
+    # TODO(voz): Handle kwargs properly?
+    flat_args, in_spec = pytree.tree_flatten(args)
 
-    result_traced = None
-    with optimize_assert(
-        dynamo_normalization_capturing_compiler, backend_ctx_ctor, guard_export_print
+    remove_from_cache(f)
+    with patch(f"{__name__}.most_recent_backend", None), optimize_assert(
+        dynamo_normalization_capturing_compiler, guard_export_print
     ):
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = f(*args, **kwargs)
+    remove_from_cache(f)
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -339,10 +499,15 @@ def export(f, *args, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None):
+def optimize_assert(backend, guard_export_fn=None):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
     )
@@ -351,6 +516,7 @@ def optimize_assert(backend, backend_ctx_ctor=null_context, guard_export_fn=None
 def run(fn=None):
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
+        fn = innermost_fn(fn)
         assert callable(fn)
         return RunOnlyContext()(fn)
     return RunOnlyContext()
@@ -359,6 +525,7 @@ def run(fn=None):
 def disable(fn=None):
     """Decorator and context manager to disable TorchDynamo"""
     if fn is not None:
+        fn = innermost_fn(fn)
         assert callable(fn)
         return DisableContext()(fn)
     return DisableContext()
@@ -371,6 +538,7 @@ def skip(fn=None):
     """
     if fn is None:
         return skip
+    fn = innermost_fn(fn)
     assert callable(fn)
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True
@@ -396,6 +564,29 @@ class TorchPatcher:
 
         if proxy_tensor is not None:
             proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
+
+        optimizers = [
+            opt
+            for opt in torch.optim.__dict__.values()
+            if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
+        ]
+
+        # disable profile hook
+        for opt in optimizers:
+            opt._cuda_graph_capture_health_check = disable(
+                opt._cuda_graph_capture_health_check
+            )
+            # disable any currently set hooks
+            # Note: we only want to disable the profiling hook
+            # which is the *last* hook applied, we want to keep the no_grad hook
+            hooked = getattr(opt.step, "hooked", False)
+            if hooked:
+                unwrapped_step = getattr(opt.step, "__wrapped__", None)
+                if unwrapped_step:
+                    opt.step = unwrapped_step
+
+            # disable future hooking
+            setattr(opt.step, "hooked", True)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

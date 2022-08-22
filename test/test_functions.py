@@ -3,6 +3,7 @@ import functools
 import inspect
 import itertools
 import operator
+from typing import Any
 
 import torch
 from torch import sub
@@ -34,7 +35,29 @@ def make_test(fn):
     return test_fn
 
 
+@torch.jit.script_if_tracing
+def inline_script_if_tracing(x):
+    return x + 1.2
+
+
+@torch.jit.ignore
+def inline_ignore(x):
+    return x + 3.4
+
+
+@torch.jit.unused
+def inline_unused(x):
+    return x + 5.6
+
+
 class FunctionTests(torchdynamo.testing.TestCase):
+    @make_test
+    def test_inline_jit_annotations(x):
+        x = inline_script_if_tracing(x)
+        x = inline_ignore(x)
+        x = inline_unused(x)
+        return
+
     @make_test
     def test_add(a, b):
         return a + b
@@ -570,6 +593,19 @@ class FunctionTests(torchdynamo.testing.TestCase):
         y = torch.rand(5, 8)
         z = x.new(y.shape)
         assert z.size() == y.size()
+
+    @make_test
+    def test_jit_annotate(x):
+        y = torch.jit.annotate(Any, x + 1)
+        return y + 2
+
+    @requires_static_shapes
+    @make_test
+    def test_is_contiguous_memory_format(tensor):
+        if torch.jit.is_scripting():
+            return None
+        elif tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return tensor + 1
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.

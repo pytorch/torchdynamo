@@ -36,6 +36,7 @@ for torchbench_dir in (
 assert exists(torchbench_dir), "../../torchbenchmark does not exist"
 original_dir = abspath(os.getcwd())
 torchbench_dir = abspath(torchbench_dir)
+
 os.chdir(torchbench_dir)
 sys.path.append(torchbench_dir)
 
@@ -48,7 +49,6 @@ USE_SMALL_BATCH_SIZE = {
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
 }
-
 
 DETECTRON2_MODELS = {
     "detectron2_fasterrcnn_r_101_c4",
@@ -63,6 +63,12 @@ DETECTRON2_MODELS = {
     "detectron2_maskrcnn_r_50_fpn",
 }
 
+SKIP = {
+    # https://github.com/pytorch/torchdynamo/issues/101
+    "detectron2_maskrcnn",
+    # https://github.com/pytorch/torchdynamo/issues/145
+    "fambench_xlmr",
+}
 
 # Additional models that are skipped in training
 SKIP_TRAIN = {
@@ -76,12 +82,10 @@ SKIP_TRAIN = {
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
-
 # Some models have bad train dataset. We read eval dataset.
 # yolov3 - seems to have different number of inputs between eval and train
 # timm_efficientdet - loader only exists for eval mode.
 ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
-
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
@@ -101,14 +105,6 @@ REQUIRE_HIGHER_TOLERANCE = {
     "vision_maskrcnn",
 }
 
-SKIP = {
-    # https://github.com/pytorch/torchdynamo/issues/101
-    "detectron2_maskrcnn",
-    # https://github.com/pytorch/torchdynamo/issues/145
-    "fambench_xlmr",
-}
-
-
 # These models need >1e-3 tolerance
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "soft_actor_critic",
@@ -123,14 +119,12 @@ REQUIRE_COSINE_TOLERACE = {
 # non-deterministic output / cant check correctness
 NONDETERMINISTIC = set()
 
-
 # These benchmarks took >600s on an i9-11900K CPU
 VERY_SLOW_BENCHMARKS = {
     "hf_BigBird",  # 3339s
     "hf_Longformer",  # 3062s
     "hf_T5",  # 930s
 }
-
 
 # These benchmarks took >60s on an i9-11900K CPU
 SLOW_BENCHMARKS = {
@@ -170,18 +164,17 @@ INDUCTOR_INFERENCE_NOT_YET_WORKING = {
     *AOT_AUTOGRAD_NOT_YET_WORKING,
     # RuntimeError: The tensor has a non-zero number of elements,
     "fastNLP_Bert",
-    # missing ops: scatter / argmax
+    # Accuracy errors
+    "hf_Longformer",
     "hf_Reformer",
     "maml",
-    # as_strided issue
-    "hf_Longformer",
-    # RuntimeError: CUDA out of memory.
-    "timm_efficientdet",
 }
-
 
 INDUCTOR_TRAINING_NOT_YET_WORKING = {
     *INDUCTOR_INFERENCE_NOT_YET_WORKING,
+    # Invalid address
+    # https://github.com/pytorch/torchdynamo/issues/741
+    "hf_GPT2",
     # load_mask nesting needed
     "Super_SloMo",
     # float16 issue or CUDA error: operation not permitted when stream is capturing
@@ -205,17 +198,9 @@ TRT_NOT_YET_WORKING = {
     "resnext50_32x4d",
 }
 
-
 DYNAMIC_SHAPES_NOT_YET_WORKING = {
     "demucs",
     "timm_nfnet",
-}
-
-SKIP = {
-    # https://github.com/pytorch/torchdynamo/issues/101
-    "detectron2_maskrcnn",
-    # https://github.com/pytorch/torchdynamo/issues/145
-    "fambench_xlmr",
 }
 
 
@@ -272,7 +257,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
-        if is_training and model_name in USE_SMALL_BATCH_SIZE:
+
+        if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
         if is_training and model_name not in ONLY_EVAL_DATASET:
@@ -296,10 +282,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             model.eval()
         gc.collect()
+        batch_size = benchmark.batch_size
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
-        return device, benchmark.name, model, example_inputs
+        return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):

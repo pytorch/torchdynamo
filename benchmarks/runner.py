@@ -24,13 +24,19 @@ If you want to test float16
 """
 
 import argparse
+import io
 import itertools
 import os
+from os.path import exists
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import torch
 from matplotlib import rcParams
+from scipy.stats import gmean
 from tabulate import tabulate
+
+import torchdynamo
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -40,21 +46,29 @@ DEFAULT_OUTPUT_DIR = "benchmark_logs"
 
 TABLE = {
     "training": {
-        "ts_nnc": "--training --speedup-ts --use-eval-mode --isolate",
-        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode --isolate",
-        "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode --isolate",
-        "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode --isolate",
-        "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode --isolate",
-        "inductor_cudagraphs": "--training --inductor --use-eval-mode --isolate",
+        "ts_nnc": "--training --speedup-ts --use-eval-mode ",
+        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode ",
+        "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode ",
+        "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode ",
+        "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode ",
+        "inductor_cudagraphs": "--training --inductor --use-eval-mode",
     },
     "inference": {
-        "ts_nnc": "-dcuda --isolate --speedup-ts",
-        "ts_nvfuser": "-dcuda --isolate -n100 --speedup-ts --nvfuser",
-        "trt": "-dcuda --isolate -n100 --speedup-trt",
-        "eager_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs",
-        "nnc_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
-        "ts_nvfuser_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --backend=cudagraphs_ts",
-        "inductor_cudagraphs": "-dcuda --inductor-settings --float32 -n50 --inductor",
+        "ts_nnc": "--speedup-ts",
+        "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
+        "trt": "-n100 --speedup-trt",
+        "eager_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs",
+        "nnc_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
+        "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
+        "inductor_cudagraphs": "--inductor-settings --float32 -n50 --inductor",
+    },
+    "profile_compiler": {
+        "pytorch": "--training --profile-backend=pytorch",
+        "eager": "--training --profile-backend=eager",
+        "ts_nvfuser": "--training --profile-backend=nvfuser",
+        "aot_eager": "--training --profile-backend=aot_nop",
+        "aot_nvfuser": "--training --profile-backend=aot_nvfuser",
+        "inductor_cudagraphs": "--training --profile-backend=inductor",
     },
 }
 
@@ -62,8 +76,15 @@ INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
 TRAINING_COMPILERS = tuple(TABLE["training"].keys())
 
 DEFAULTS = {
-    "training": ["ts_nvfuser", "aot_nvfuser", "inductor_cudagraphs"],
+    "training": ["ts_nvfuser", "aot_eager", "aot_nvfuser", "inductor_cudagraphs"],
     "inference": ["ts_nvfuser_cudagraphs", "inductor_cudagraphs"],
+    "profile_compiler": [
+        "pytorch",
+        "eager",
+        "aot_eager",
+        "aot_nvfuser",
+        "inductor_cudagraphs",
+    ],
     "dtypes": [
         "float32",
     ],
@@ -72,6 +93,10 @@ DEFAULTS = {
         "cuda",
     ],
 }
+
+
+def percentage(part, whole, decimals=2):
+    return round(100 * float(part) / float(whole), decimals)
 
 
 def parse_args():
@@ -118,13 +143,28 @@ def parse_args():
     group_mode.add_argument(
         "--training", action="store_true", help="Only run training related tasks"
     )
+    group_mode.add_argument(
+        "--profile_compiler",
+        action="store_true",
+        help="Runs profile_compiler experiment",
+    )
 
     args = parser.parse_args()
     return args
 
 
+def get_mode(args):
+    if args.inference:
+        return "inference"
+    elif args.training:
+        return "training"
+    else:
+        assert args.profile_compiler
+        return "profile_compiler"
+
+
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
-    mode = "inference" if args.inference else "training"
+    mode = get_mode(args)
     with open("run.sh", "w") as runfile:
         lines = []
 
@@ -138,14 +178,16 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
             lines.append(
                 f"# Commands for {suite} for device={device}, dtype={dtype} for {mode}"
             )
-
             info = TABLE[mode]
             for compiler in compilers:
                 base_cmd = info[compiler]
                 output_filename = (
                     f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
                 )
-                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --output={output_filename} {base_cmd}"
+                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename}"
+                cmd = f"{cmd} {base_cmd}"
+                if args.profile_compiler:
+                    cmd = f"{cmd} --raise-on-assertion-error --raise-on-backend-error"
                 if args.quick:
                     if suite == "torchbench":
                         cmd = f"{cmd} --only=resnet18"
@@ -160,81 +202,389 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         runfile.writelines([line + "\n" for line in lines])
 
 
-def pp_dataframe(df, title, output_dir):
-    # Pretty print
-    print(tabulate(df, headers="keys", tablefmt="pretty", showindex="never"))
+def generate_dropdown_comment(title, body):
+    str_io = io.StringIO()
+    str_io.write(f"{title}\n")
+    str_io.write("<details>\n")
+    str_io.write("<summary>see more</summary>\n")
+    str_io.write(f"{body}")
+    str_io.write("\n")
+    str_io.write("</details>\n\n")
+    return str_io.getvalue()
 
-    # Save to csv, can be copy pasted in google sheets
-    df.to_csv(f"{output_dir}/{title}.csv", index=False)
 
-    # Graph
-    labels = df.columns.values.tolist()
-    labels = labels[2:]
-    df.plot(
-        x="name",
-        y=labels,
-        kind="bar",
-        title=title,
-        ylabel="Speedup over eager",
-        xlabel="",
-        grid=True,
-        figsize=(max(len(df.index) / 4, 5), 10),
-        edgecolor="black",
+def build_summary():
+    import git
+
+    out_io = io.StringIO()
+
+    def print_commit_hash(path, name):
+        if exists(path):
+            repo = git.Repo(path, search_parent_directories=True)
+            sha = repo.head.object.hexsha
+            out_io.write(f"{name} commit: {sha}\n")
+        else:
+            out_io.write(f"{name} Absent\n")
+
+    def env_var(name):
+        out_io.write(f"{name} = {os.environ[name]}\n")
+
+    out_io.write("## Commit hashes ##\n")
+    print_commit_hash(".", "torchdynamo")
+    print_commit_hash("../pytorch", "pytorch")
+    print_commit_hash("../functorch", "functorch")
+    print_commit_hash("../torchbenchmark", "torchbench")
+
+    out_io.write("\n")
+    out_io.write("## TorchDynamo config flags ##\n")
+    for key in dir(torchdynamo.config):
+        val = getattr(torchdynamo.config, key)
+        if not key.startswith("__") and isinstance(val, bool):
+            out_io.write(f"torchdynamo.config.{key} = {val}\n")
+
+    out_io.write("\n")
+    out_io.write("## Torch version ##\n")
+    out_io.write(f"torch: {torch.__version__}\n")
+
+    out_io.write("\n")
+    out_io.write("## Environment variables ##\n")
+    env_var("TORCH_CUDA_ARCH_LIST")
+    env_var("CUDA_HOME")
+    env_var("USE_LLVM")
+
+    out_io.write("\n")
+    out_io.write("## GPU details ##\n")
+    out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
+    out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
+    out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
+    out_io.write(
+        f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
     )
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/{title}.png")
+
+    title = "## Build Summary"
+    comment = generate_dropdown_comment(title, out_io.getvalue())
+    with open(f"{output_dir}/gh_build_summary.txt", "w") as gh_fh:
+        gh_fh.write(comment)
 
 
-def read_csv(output_filename):
-    has_header = False
-    n_cols = 3
-    with open(output_filename, "r") as f:
-        line = f.readline()
-        if "dev" in line:
-            has_header = True
-            n_cols = len(line.rstrip().split())
+class Parser:
+    def __init__(self, suites, devices, dtypes, compilers, mode, output_dir):
+        self.suites = suites
+        self.devices = devices
+        self.dtypes = dtypes
+        self.compilers = compilers
+        self.output_dir = output_dir
+        self.mode = mode
 
-    if has_header:
+    def has_header(self, output_filename):
+        header_present = False
+        with open(output_filename, "r") as f:
+            line = f.readline()
+            if "dev" in line:
+                header_present = True
+        return header_present
+
+    def gen_github_comment(self):
+        comment = self.prettyprint()
+        print(comment)
+        with open(f"{self.output_dir}/gh_{self.mode}.txt", "w") as gh_fh:
+            gh_fh.write(comment)
+
+
+class ParseCompilerProfileLogs(Parser):
+    def __init__(self, suites, devices, dtypes, compilers, mode, output_dir):
+        super().__init__(suites, devices, dtypes, compilers, mode, output_dir)
+        self.parsed_frames = {}
+        self.metrics = ["time", "memory", "graphs"]
+        self.title = {
+            "time": "Compilation Latency",
+            "memory": "Peak Memory",
+            "graphs": "Number of graphs",
+        }
+        self.threshold = 50
+        self.units = {
+            "time": "seconds",
+            "memory": "GB",
+            "graphs": "graphs",
+        }
+        self.parse()
+
+    def read_csv(self, output_filename):
+        assert self.has_header(output_filename)
         return pd.read_csv(output_filename)
-    else:
-        assert n_cols == 3
-        return pd.read_csv(
-            output_filename, names=["dev", "name", "speedup"], header=None
+
+    def parse(self):
+        for metric in self.metrics:
+            self.parsed_frames[metric] = self.extract_df(metric)
+
+    def extract_df(self, metric):
+        # frames = collections.defaultdict()
+        frames_per_suite = []
+        for iter in itertools.product(self.suites, self.devices, self.dtypes):
+            suite, device, dtype = iter
+            # Collect results from all the files
+            frames = []
+            for compiler in self.compilers:
+                output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}.csv"
+
+                df = self.read_csv(output_filename)
+                df.insert(1, "suite", suite)
+                batch_size_idx = df.columns.to_list().index("batch_size")
+                common_columns = df.columns.to_list()[: batch_size_idx + 1]
+                subset_df = df[df.columns[0 : batch_size_idx + 1]]
+                subset_df.insert(batch_size_idx + 1, compiler, df[metric])
+                frames.append(subset_df)
+
+            if len(frames) == 1:
+                df = frames[0]
+            else:
+                # Merge data frames
+                df = pd.merge(frames[0], frames[1], on=common_columns)
+                for idx in range(2, len(frames)):
+                    df = pd.merge(df, frames[idx], on=common_columns)
+
+            baseline = df["pytorch"]
+            for compiler in self.compilers:
+                df[compiler] = df[compiler] - baseline
+            frames_per_suite.append(df)
+
+        # Concat data frames
+        if len(frames_per_suite) == 1:
+            df = frames_per_suite[0]
+        else:
+            df = pd.concat(frames_per_suite)
+
+        # Sort in descending order
+        # df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+        df = df.sort_values(by=self.compilers[-2], ascending=False)
+        df = df.round(3)
+
+        # For graph breaks, just print one column
+        if metric == "graphs":
+            batch_size_idx = df.columns.to_list().index("batch_size")
+            common_columns = df.columns.to_list()[: batch_size_idx + 1]
+            subset_df = df[df.columns[0 : batch_size_idx + 1]]
+            subset_df.insert(batch_size_idx + 1, "graphs", df["eager"])
+            df = subset_df
+        return df
+
+    def prepare_message_for_metric(self, metric):
+        pd.options.display.float_format = "{:,.2f}".format
+        title = f"## {self.title[metric]} ##"
+        df = self.parsed_frames[metric]
+        df = df.head(self.threshold)
+        df = df.drop("dev", axis=1)
+        tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+        str_io = io.StringIO()
+        str_io.write("\n")
+        str_io.write(f"dtype={self.dtypes[0]}, unit={self.units[metric]}\n")
+        str_io.write("~~~\n")
+        str_io.write(f"{tabform}\n")
+        str_io.write("~~~\n")
+        body = str_io.getvalue()
+        comment = generate_dropdown_comment(title, body)
+        return comment
+
+    def prettyprint(self):
+        str_io = io.StringIO()
+        str_io.write("\n")
+        str_io.write("# Compilation Profile #\n")
+        str_io.write(
+            f"The tables show the worst {self.threshold} models for different metrics"
         )
+        str_io.write("\n")
+        for metric in self.metrics:
+            str_io.write(self.prepare_message_for_metric(metric))
+        str_io.write("\n")
+        return str_io.getvalue()
+
+
+class ParsePerformanceLogs(Parser):
+    def __init__(self, suites, devices, dtypes, compilers, mode, output_dir):
+        super().__init__(suites, devices, dtypes, compilers, mode, output_dir)
+        self.parsed_frames = {}
+        self.parse()
+
+    def plot_graph(self, df, title):
+        labels = df.columns.values.tolist()
+        labels = labels[3:]
+        df.plot(
+            x="name",
+            y=labels,
+            kind="bar",
+            width=0.65,
+            title=title,
+            ylabel="Speedup over eager",
+            xlabel="",
+            grid=True,
+            figsize=(max(len(df.index) / 4, 5), 10),
+            edgecolor="black",
+        )
+        plt.tight_layout()
+        plt.savefig(f"{self.output_dir}/{title}.png")
+
+    def read_csv(self, output_filename):
+        if self.has_header(output_filename):
+            return pd.read_csv(output_filename)
+        else:
+            return pd.read_csv(
+                output_filename,
+                names=["dev", "name", "batch_size", "speedup"],
+                header=None,
+            )
+
+    def parse(self):
+        self.extract_df()
+        self.generate_executive_summary()
+        for suite in self.suites:
+            self.plot_graph(self.parsed_frames[suite], f"{suite}_{self.dtypes[0]}")
+
+    def clean_batch_sizes(self, frames):
+        # Clean up batch sizes when its 0
+        if len(frames) == 1:
+            return frames
+        batch_sizes = frames[0]["batch_size"].to_list()
+        for frame in frames[1:]:
+            frame_batch_sizes = frame["batch_size"].to_list()
+            for idx, (batch_a, batch_b) in enumerate(
+                zip(batch_sizes, frame_batch_sizes)
+            ):
+                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, print(
+                    f"a={batch_a}, b={batch_b}"
+                )
+                batch_sizes[idx] = max(batch_a, batch_b)
+        for frame in frames:
+            frame["batch_size"] = batch_sizes
+        return frames
+
+    def extract_df(self):
+        for iter in itertools.product(self.suites, self.devices, self.dtypes):
+            suite, device, dtype = iter
+            frames = []
+            for compiler in self.compilers:
+                output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}.csv"
+                df = self.read_csv(output_filename)
+                df.rename(columns={"speedup": compiler}, inplace=True)
+                df["batch_size"] = df["batch_size"].astype(int)
+                frames.append(df)
+
+            # Merge the results
+            frames = self.clean_batch_sizes(frames)
+            if len(self.compilers) == 1:
+                df = frames[0]
+            else:
+                # Merge data frames
+                df = pd.merge(frames[0], frames[1], on=["dev", "name", "batch_size"])
+                for idx in range(2, len(frames)):
+                    df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
+
+            df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+            self.parsed_frames[suite] = df
+
+    def geomean(self, compiler, df):
+        return f"{round(gmean(df[compiler][df[compiler] > 0].clip(1)), 2)}x"
+
+    def passrate(self, compiler, df):
+        total = len(df.index)
+        passing = df[df[compiler] > 0.0][compiler].count()
+        perc = int(percentage(passing, total, decimals=0))
+        return f"{perc}%, {passing}/{total}"
+
+    def exec_summary_df(self, fn):
+        """
+        Generate a table with passrate and geomean perf
+        """
+        cols = {}
+        cols["Compiler"] = self.compilers
+        for suite in self.suites:
+            df = self.parsed_frames[suite]
+            # speedups = [self.geomean(compiler, df) for compiler in self.compilers]
+            speedups = [fn(compiler, df) for compiler in self.compilers]
+            col = pd.Series(data=speedups, index=self.compilers)
+            cols[suite] = col
+        df = pd.DataFrame(cols)
+        return df
+
+    def exec_summary_text(self, caption, fn):
+        df = self.exec_summary_df(fn)
+        tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+
+        str_io = io.StringIO()
+        str_io.write(f"{caption}")
+        str_io.write("~~~\n")
+        str_io.write(f"{tabform}\n")
+        str_io.write("~~~\n")
+        return str_io.getvalue()
+
+    def generate_executive_summary(self):
+        str_io = io.StringIO()
+        str_io.write("\n")
+        str_io.write("## Executive Summary ##\n")
+        description = (
+            "Majority of our efforts are currently on improving the correctness and "
+            "performance on OSS training models - torchbench, huggingface and timm models. "
+            "This is the current performance and accuracy numbers for the float32 and float16 "
+            "precision.\n"
+            "For measuring accuracy, we show the accuracy pass rate, i.e., "
+            "percentage of models passing numerical checks for forward pass outputs and "
+            "gradients.\n"
+            "For performance, we use geometric mean speedup normalized to Pytorch "
+            "eager, which is calculated by clipping the individual speedups at 1.0x. We skip "
+            "the failing models during the gmean calculation. This essentially represents "
+            '"speedups we expect once we fixed the failures, assuming similar distribution". '
+            "All of our experiments are on A100 GPUs.\n\n"
+        )
+        str_io.write(description)
+
+        speedup_caption = (
+            f"Geometric mean speedup for {self.dtypes[0]} precision on A100 GPU\n"
+        )
+        speedup_summary = self.exec_summary_text(speedup_caption, self.geomean)
+
+        passrate_caption = f"Passrate for {self.dtypes[0]} precision on A100 GPU\n"
+        passrate_summary = self.exec_summary_text(passrate_caption, self.passrate)
+
+        str_io.write(passrate_summary)
+        str_io.write(speedup_summary)
+        self.executive_summary = str_io.getvalue()
+
+    def prepare_message(self, suite):
+        title = f"## {suite} suite with {self.dtypes[0]} precision ##"
+        df = self.parsed_frames[suite]
+        df = df.drop("dev", axis=1)
+        tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+        str_io = io.StringIO()
+        str_io.write("\n")
+        str_io.write("~~~\n")
+        str_io.write(f"{tabform}\n")
+        str_io.write("~~~\n")
+        body = str_io.getvalue()
+        comment = generate_dropdown_comment(title, body)
+        return comment
+
+    def prettyprint(self):
+        str_io = io.StringIO()
+        str_io.write("\n")
+        str_io.write(f"# Performance Dashboard for {self.dtypes[0]} precision ##\n")
+        str_io.write("\n")
+        str_io.write(self.executive_summary)
+        for suite in self.suites:
+            str_io.write(self.prepare_message(suite))
+        str_io.write("\n")
+        return str_io.getvalue()
 
 
 def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
-    mode = "inference" if args.inference else "training"
-    for iter in itertools.product(suites, devices, dtypes):
-        suite, device, dtype = iter
-        frames = []
-        best_compiler = compilers[-1]
-        # Collect results from all the files
-        for compiler in compilers:
-            output_filename = (
-                f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
-            )
+    mode = get_mode(args)
+    build_summary()
 
-            df = read_csv(output_filename)
-            df.rename(
-                columns={"speedup": compiler, "ts": compiler, "ofi": f"ofi_{compiler}"},
-                inplace=True,
-            )
-            frames.append(df)
+    parser_class = ParsePerformanceLogs
+    if args.profile_compiler:
+        parser_class = ParseCompilerProfileLogs
 
-        # Merge the results
-        if len(compilers) == 1:
-            df = frames[0]
-        else:
-            df = pd.merge(*frames, on=["dev", "name"])
-
-        # Pretty print and also write to a bargraph
-        title = f"{suite}_{dtype}_{mode}_{device}"
-        pp_dataframe(df, title, output_dir)
-
-        # Sort the dataframe and pretty print
-        sorted_df = df.sort_values(by=best_compiler, ascending=False)
-        pp_dataframe(sorted_df, f"sorted_{title}", output_dir)
+    parser = parser_class(suites, devices, dtypes, compilers, mode, output_dir)
+    parser.gen_github_comment()
+    return
 
 
 if __name__ == "__main__":
@@ -249,8 +599,13 @@ if __name__ == "__main__":
 
     if args.inference:
         compilers = DEFAULTS["inference"] if args.compilers is None else args.compilers
-    else:  # args.training
+    elif args.training:  # args.training
         compilers = DEFAULTS["training"] if args.compilers is None else args.compilers
+    else:
+        assert args.profile_compiler
+        compilers = (
+            DEFAULTS["profile_compiler"] if args.compilers is None else args.compilers
+        )
 
     output_dir = args.output_dir if args.output_dir is not None else DEFAULT_OUTPUT_DIR
 

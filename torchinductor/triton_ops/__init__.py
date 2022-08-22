@@ -8,6 +8,8 @@ from .conv_analytic import _conv_analytic
 from .conv_analytic import conv_analytic
 from .conv_split import _conv_split
 from .conv_split import conv_split
+from .matmul import _matmul_out
+from .matmul import matmul_out
 
 __all__ = [
     "_conv",
@@ -20,4 +22,6 @@ __all__ = [
     "conv_analytic",
     "_conv_split",
     "conv_split",
+    "_matmul_out",
+    "matmul_out",
 ]

@@ -2,42 +2,21 @@
 import argparse
 import inspect
 import sys
-import time
 
 import numpy as np
 import tabulate
 import torch
-from torch.cuda import synchronize
 
 import torchinductor
 from torchdynamo.optimizations.backends import cudagraphs_inner
 from torchdynamo.testing import same
 from torchinductor.compile_fx import compile_fx
+from torchinductor.utils import timed
 
 try:
-    import tests.test_torchinductor as tti
+    import test.test_torchinductor as tti
 except ImportError:
     tti = None
-
-
-def timed(model, example_inputs, times=1):
-    synchronize()
-    torch.manual_seed(1337)
-    t0 = time.perf_counter()
-    for _ in range(times):
-        result = model(*example_inputs)
-        synchronize()
-    t1 = time.perf_counter()
-    # GC the result after timing
-    assert result is not None
-    return t1 - t0
-
-
-def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
-    timings = [timed(fn, args, times) for _ in range(repeat)]
-    took = np.median(timings)
-    print(f"{took/baseline:.6f}")
-    return took
 
 
 def compute_speedups(args, models, example_inputs):

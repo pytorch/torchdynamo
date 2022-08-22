@@ -33,8 +33,8 @@ class TestHFPretrained(torchdynamo.testing.TestCase):
         x = torch.randn(2)
         tmp = PretrainedConfig(return_dict=True, max_length=20)
         ref = fn(x, tmp)
-        with torchdynamo.optimize("eager", nopython=True):
-            res = fn(x, tmp)
+        opt_fn = torchdynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, tmp)
         self.assertTrue(same(ref, res))
 
 
@@ -59,8 +59,8 @@ class TestModelOutput(torchdynamo.testing.TestCase):
         obj1 = fn(*args)
 
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize_assert(cnts):
-            obj2 = fn(*args)
+        opt_fn = torchdynamo.optimize_assert(cnts)(fn)
+        obj2 = opt_fn(*args)
         self.assertTrue(same(obj1.last_hidden_state, obj2.last_hidden_state))
         self.assertTrue(same(obj1.hidden_states, obj2.hidden_states))
         self.assertTrue(same(obj1.attentions, obj2.attentions))
@@ -75,8 +75,8 @@ class TestModelOutput(torchdynamo.testing.TestCase):
         ]
         obj1 = fn(*args)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize_assert(cnts):
-            obj2 = fn(*args)
+        opt_fn = torchdynamo.optimize_assert(cnts)(fn)
+        obj2 = opt_fn(*args)
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, op_count)
@@ -151,9 +151,9 @@ class TestModelOutput(torchdynamo.testing.TestCase):
         obj1 = MyDataClass(*tensors)
         correct1 = fn(obj1)
 
+        obj2 = MyDataClass(*tensors)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            obj2 = MyDataClass(*tensors)
-            self.assertTrue(same(fn(obj2), correct1))
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)

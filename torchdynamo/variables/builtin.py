@@ -1,6 +1,7 @@
 import functools
 import inspect
 import itertools
+import logging
 import math
 import operator
 import types
@@ -13,6 +14,7 @@ import torch
 from torchdynamo.guards import GuardBuilder
 from torchdynamo.variables.dicts import ConstDictVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
+from torchdynamo.variables.tensor import FakeItemVariable
 
 from .. import config
 from .. import variables
@@ -22,10 +24,14 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
 from ..utils import check_constant_args
+from ..utils import check_unspec_python_args
 from ..utils import istype
 from ..utils import proxy_args_kwargs
+from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
+
+log = logging.getLogger(__name__)
 
 
 class BuiltinVariable(VariableTracker):
@@ -168,6 +174,9 @@ class BuiltinVariable(VariableTracker):
         return any(
             isinstance(i, variables.TensorVariable)
             for i in itertools.chain(args, kwargs.values())
+        ) and not any(
+            isinstance(i, variables.GetAttrVariable)
+            for i in itertools.chain(args, kwargs.values())
         )
 
     def unspec_numpy_args(self, *args, **kwargs):
@@ -187,19 +196,7 @@ class BuiltinVariable(VariableTracker):
         )
 
     def unspec_python_args(self, *args, **kwargs):
-        return all(
-            isinstance(
-                i,
-                (
-                    variables.UnspecializedPythonVariable,
-                    variables.ConstantVariable,
-                ),
-            )
-            for i in itertools.chain(args, kwargs.values())
-        ) and any(
-            isinstance(x, variables.UnspecializedPythonVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
+        return check_unspec_python_args(args, kwargs)
 
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
@@ -234,8 +231,11 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
+        unspec_python_args = self.unspec_python_args(*args, **kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        has_constant_handler = self.can_constant_fold_through() and constant_args
+        has_constant_handler = self.can_constant_fold_through() and (
+            constant_args or unspec_python_args
+        )
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
 
@@ -247,6 +247,13 @@ class BuiltinVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
+
+        # args[0] is list and args[1] is unspec
+        if self.fn is operator.getitem and not isinstance(
+            args[0], variables.TensorVariable
+        ):
+            tensor_args = False
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
 
         if (
             self.can_insert_in_graph()
@@ -266,9 +273,15 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, *proxy_args_kwargs(args, kwargs)
+                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
-                if self.unspec_numpy_args(*args, **kwargs):
+                if any([isinstance(arg, FakeItemVariable) for arg in args]):
+                    return variables.FakeItemVariable.create(
+                        tx,
+                        proxy,
+                        **options,
+                    )
+                elif self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
                     return variables.UnspecializedNumpyVariable.create(
@@ -280,11 +293,13 @@ class BuiltinVariable(VariableTracker):
                 elif self.unspec_python_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
+
                     need_unwrap = any(
                         x.need_unwrap
                         for x in itertools.chain(args, kwargs.values())
                         if isinstance(x, variables.UnspecializedPythonVariable)
                     )
+
                     return variables.UnspecializedPythonVariable.create(
                         tx,
                         proxy,
@@ -293,6 +308,12 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 else:
+                    # Work around for vision_maskrcnn due to precision difference
+                    # specialize the dividend when float divide by tensor
+                    if self.fn is operator.truediv and isinstance(
+                        args[0], variables.UnspecializedPythonVariable
+                    ):
+                        args[0] = args[0].convert_to_constant(tx)
                     return variables.TensorVariable.create(tx, proxy, **options)
 
             except NotImplementedError:
@@ -308,8 +329,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                if config.debug:
-                    print("WARN: incorrect arg count", handler, exc)
+                log.warning(f"incorrect arg count {handler} {exc}")
                 handler = None
 
         if handler:
@@ -324,6 +344,7 @@ class BuiltinVariable(VariableTracker):
                 exc.remove_from_stats()
 
         if has_constant_handler:
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return variables.ConstantVariable(
                 self.as_python_constant()(
@@ -340,6 +361,11 @@ class BuiltinVariable(VariableTracker):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
             assert isinstance(a, variables.TensorVariable)
+
+            # result of an item call is a scalar
+            # convert to a tensor
+            if isinstance(a, FakeItemVariable):
+                a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
 
             # convert min/max to torch ops
             if b.is_python_constant():
@@ -363,6 +389,10 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
+
+                if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
+                    return variables.FakeItemVariable.from_tensor_variable(result)
+
                 if b.is_python_constant():
                     raw_b = b.as_python_constant()
                 else:
@@ -388,6 +418,13 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
+        elif isinstance(a, variables.ConstantVariable) and isinstance(
+            b, variables.ConstantVariable
+        ):
+            if self.fn is max:
+                return variables.ConstantVariable(max(a.value, b.value))
+            else:
+                return variables.ConstantVariable(min(a.value, b.value))
         else:
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
@@ -395,7 +432,10 @@ class BuiltinVariable(VariableTracker):
     call_max = _call_min_max
 
     def call_range(self, tx, *args, **kwargs):
-        if self.constant_args(*args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs) or self.constant_args(
+            *args, **kwargs
+        ):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             return variables.RangeVariable(
                 value=range(
                     *[x.value for x in args],
@@ -493,6 +533,8 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
 
     def call_getitem(self, tx, *args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):

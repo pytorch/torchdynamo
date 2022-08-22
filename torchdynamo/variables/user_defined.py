@@ -21,6 +21,7 @@ from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
+from .misc import FakeContextWrappingVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -82,7 +83,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if is_namedtuple_cls(self.value):
+        if self.value is torch.autograd.profiler.profile:
+            return FakeContextWrappingVariable()
+        elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -127,7 +130,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __str__(self):
         inner = self.value_type.__name__
-        if inner == "builtin_function_or_method":
+        if inner in [
+            "builtin_function_or_method",
+            "getset_descriptor",
+            "method_descriptor",
+            "method",
+        ]:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
@@ -318,6 +326,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             name not in getattr(value, "__dict__", {})
             and type(value).__module__.startswith("torch.")
+            and "torch.optim" not in type(value).__module__
             and not callable(value)
         ):
             if not source:
@@ -331,6 +340,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     ),
                     name,
                 )
+
             return VariableBuilder(tx, source)(subobj).add_options(options)
 
         if isinstance(

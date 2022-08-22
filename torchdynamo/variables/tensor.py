@@ -2,6 +2,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import math
 import numbers
 import operator
 from contextlib import contextmanager
@@ -37,6 +38,7 @@ from ..utils import proxy_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
+from .constant import ConstantVariable
 from .lists import ShapeVariable
 from .lists import SizeVariable
 
@@ -67,7 +69,6 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-        "is_complex",
     ]
 
     @staticmethod
@@ -229,17 +230,29 @@ class TensorVariable(VariableTracker):
             return variables.ConstantVariable(example_value, **options)
         elif (
             isinstance(example_value, numbers.Number)
-            and proxy.node.target == "item"
+            and (
+                proxy.node.target == "item"
+                or proxy.node.target in {math.sqrt, math.pow}
+            )
             and config.capture_scalar_outputs
         ):
-            return UnspecializedPythonVariable.create(
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                raw_value=example_value,
-                need_unwrap=False,
-                **options,
-            )
+            if use_fake_tensors:
+                # item raw value should not be accessed
+                return FakeItemVariable.create(
+                    tx=tx,
+                    proxy=proxy,
+                    example_value=torch.tensor(example_value),
+                    **options,
+                )
+            else:
+                return UnspecializedPythonVariable.create(
+                    tx=tx,
+                    proxy=proxy,
+                    example_value=torch.tensor(example_value),
+                    raw_value=None if use_fake_tensors else example_value,
+                    need_unwrap=False,
+                    **options,
+                )
         else:
             assert (
                 False
@@ -256,7 +269,6 @@ class TensorVariable(VariableTracker):
         requires_grad=None,
         is_quantized=None,
         is_contiguous=None,
-        is_complex=None,
         is_sparse=None,
         class_type=torch.Tensor,
         parameter_value=None,
@@ -272,7 +284,6 @@ class TensorVariable(VariableTracker):
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
-        self.is_complex = is_complex
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.parameter_value = parameter_value
@@ -317,7 +328,6 @@ class TensorVariable(VariableTracker):
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
-            "is_complex": value.is_complex(),
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
@@ -391,6 +401,8 @@ class TensorVariable(VariableTracker):
         from . import ConstantVariable
         from . import TupleVariable
 
+        kwargs = dict(kwargs)
+
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "stride" and self.stride is not None:
@@ -405,14 +417,18 @@ class TensorVariable(VariableTracker):
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
         elif name == "is_contiguous" and self.is_contiguous is not None:
+            if (
+                "memory_format" in kwargs
+                and kwargs["memory_format"].as_python_constant()
+                == torch.contiguous_format
+            ):
+                kwargs.pop("memory_format")
             constant_result = ConstantVariable(self.is_contiguous, **options)
-        elif name == "is_complex" and self.is_complex is not None:
-            constant_result = ConstantVariable(self.is_complex, **options)
         else:
             constant_result = None
 
         if constant_result:
-            assert not kwargs
+            assert not kwargs, f"Tensor.{name}() unhandled kwargs"
             if len(args) == 1:
                 return constant_result.getitem_const(args[0])
             elif args:
@@ -437,7 +453,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}
+                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -451,7 +467,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}
+                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -461,6 +477,7 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + args, kwargs),
+                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         else:
@@ -477,7 +494,10 @@ class TensorVariable(VariableTracker):
             return self.__class__.create(
                 tx,
                 tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -624,7 +644,7 @@ class UnspecializedNumpyVariable(TensorVariable):
     """
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", True)
+        raw_value = kwargs.pop("raw_value", None)
         super(UnspecializedNumpyVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value
 
@@ -635,6 +655,17 @@ class UnspecializedNumpyVariable(TensorVariable):
             **dict(tensor_variable.__dict__), raw_value=raw_value
         )
 
+    def as_specialized(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+
+        for g in self.guards:
+            if g.is_volatile:
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable(value=self.raw_value, guards=self.guards)
+
 
 class UnspecializedPythonVariable(TensorVariable):
     """
@@ -642,7 +673,7 @@ class UnspecializedPythonVariable(TensorVariable):
     """
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", True)
+        raw_value = kwargs.pop("raw_value", None)
         need_unwrap = kwargs.pop("need_unwrap", True)
         super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value
@@ -656,3 +687,28 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+    def as_specialized(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+
+        for g in self.guards:
+            if g.is_volatile:
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable(value=self.raw_value, guards=self.guards)
+
+
+class FakeItemVariable(TensorVariable):
+    """An unspecialized python variable which prevents access to the underlying raw value.
+    This is needed if item is called on a FakeTensor."""
+
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        need_unwrap = kwargs.pop("need_unwrap", False)
+        super(FakeItemVariable, self).__init__(proxy, **kwargs)
+        self.need_unwrap = need_unwrap
+
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable):
+        return FakeItemVariable(**dict(tensor_variable.__dict__))

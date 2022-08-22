@@ -12,7 +12,6 @@ from .autotune import conv_heuristics
 def _kernel_delta_x_hwc(
     x,
     w,
-    bias,
     y,
     # stride of tensor
     stride_xn,
@@ -92,9 +91,9 @@ def _kernel_delta_x_hwc(
         delta_xh_ptrs = delta_xh_ptr + off_x_crs
         delta_xw_ptrs = delta_xw_ptr + off_x_crs
         delta_xc_ptrs = delta_xc_ptr + off_x_crs
-        delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
-        delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
-        delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
+        delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS, other=0)
+        delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS, other=0)
+        delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS, other=0)
         off_x_crs_unpacked = (
             delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
         )
@@ -120,9 +119,9 @@ def _kernel_delta_x_hwc(
     mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
 
     # ------ load x ------
-    matrix_x = tl.load(x_ptrs, mask=mask_x)
+    matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
     # ------ load w ------
-    matrix_w = tl.load(w_ptrs, mask=mask_w)
+    matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
 
     # -----------------------------------------------------------
     # allocate accumulator
@@ -139,9 +138,9 @@ def _kernel_delta_x_hwc(
             delta_xh_ptrs += BLOCK_K
             delta_xw_ptrs += BLOCK_K
             delta_xc_ptrs += BLOCK_K
-            delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS)
-            delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS)
-            delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS)
+            delta_xh = tl.load(delta_xh_ptrs, mask=off_x_crs < CRS, other=0)
+            delta_xw = tl.load(delta_xw_ptrs, mask=off_x_crs < CRS, other=0)
+            delta_xc = tl.load(delta_xc_ptrs, mask=off_x_crs < CRS, other=0)
             off_x_crs_unpacked = (
                 delta_xh * stride_xh + delta_xw * stride_xw + delta_xc * stride_xc
             )
@@ -160,17 +159,9 @@ def _kernel_delta_x_hwc(
         mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
         # ------ prefetch ------
         # ------ load x ------
-        matrix_x = tl.load(x_ptrs, mask=mask_x)
+        matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
         # ------ load w ------
-        matrix_w = tl.load(w_ptrs, mask=mask_w)
-
-    # add bias if is not None
-    if bias is not None:
-        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-        bias_ptrs = bias + off_bias_k * stride_biasn
-        mask_bias = off_bias_k < KERNEL_N
-        _bias = tl.load(bias_ptrs, mask=mask_bias)
-        acc += _bias[None, :]
+        matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
 
     acc = acc.to(y.dtype.element_ty)
 
@@ -211,7 +202,6 @@ def _kernel_delta_x_hwc(
 def _kernel_delta_x(
     x,
     w,
-    bias,
     y,
     # stride of tensor
     stride_xn,
@@ -307,9 +297,9 @@ def _kernel_delta_x(
     mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
 
     # ------ load x ------
-    matrix_x = tl.load(x_ptrs, mask=mask_x)
+    matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
     # ------ load w ------
-    matrix_w = tl.load(w_ptrs, mask=mask_w)
+    matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
 
     # -----------------------------------------------------------
     # allocate accumulator
@@ -324,7 +314,7 @@ def _kernel_delta_x(
         if not CONV1X1_NHWC:
             delta_x_ptrs += BLOCK_K
             off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
-            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS)
+            off_x_crs_unpacked = tl.load(delta_x_ptrs, mask=off_x_crs < CRS, other=0)
             x_ptrs = x + off_x_nhw[:, None] + off_x_crs_unpacked[None, :]
         else:
             off_x_crs = crs + BLOCK_K + tl.arange(0, BLOCK_K)
@@ -340,17 +330,9 @@ def _kernel_delta_x(
         mask_w = (off_x_crs < CRS)[:, None] & (off_w_k < KERNEL_N)[None, :]
         # ------ prefetch ------
         # ------ load x ------
-        matrix_x = tl.load(x_ptrs, mask=mask_x)
+        matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
         # ------ load w ------
-        matrix_w = tl.load(w_ptrs, mask=mask_w)
-
-    # add bias if is not None
-    if bias is not None:
-        off_bias_k = pid_k * BLOCK_N + tl.arange(0, BLOCK_N)
-        bias_ptrs = bias + off_bias_k * stride_biasn
-        mask_bias = off_bias_k < KERNEL_N
-        _bias = tl.load(bias_ptrs, mask=mask_bias)
-        acc += _bias[None, :]
+        matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
 
     acc = acc.to(y.dtype.element_ty)
 
@@ -622,7 +604,6 @@ class _conv:
             _kernel_delta_x[grid](
                 x,
                 w,
-                bias,
                 y,
                 # stride nchw for x,w,y tensor
                 stride_x[xn],
@@ -675,7 +656,6 @@ class _conv:
             _kernel_delta_x_hwc[grid](
                 x,
                 w,
-                bias,
                 y,
                 # stride nchw for x,w,y tensor
                 stride_x[xn],
@@ -724,6 +704,10 @@ class _conv:
                 GROUP_H=1,
             )
 
+        if bias is not None:
+            if len(bias.shape) == 1:
+                bias = bias.reshape([1, bias.shape[0], 1, 1])
+            y += bias
         return y
 
     @staticmethod

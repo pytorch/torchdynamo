@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -7,8 +8,11 @@ from collections import OrderedDict
 from functools import partial
 from typing import Any
 from typing import Callable
+from typing import ClassVar
 from typing import List
 from typing import Optional
+from typing import Set
+from typing import Tuple
 from unittest.mock import patch
 
 import numpy
@@ -17,12 +21,15 @@ import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
+from torch._prims_common import is_float_dtype
 
 from . import config
 from . import dependencies
 from .codegen.common import _simplify_loops
+from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
@@ -67,6 +74,58 @@ def stride_order2fill_order(order):
     return fill_order
 
 
+def reads_from_conv(buf, var_ranges):
+    """
+    return:
+    if reads_from_conv: boolean
+    the new memory_addr: Sympy Expression
+    """
+    if buf is None:
+        return False, None
+    if isinstance(buf, Convolution):
+        indexer = buf.layout.as_fixed().make_indexer()
+        index_vars = sorted(var_ranges, key=lambda var: var.name)
+        index = indexer(index_vars)
+        return True, index
+    # for case like
+    # buf0 = conv(x, w)
+    # return torch.cat([buf0, buf1]), torch.cat([buf0, buf2])
+    # Because of ConcatKernel, it will create two bufs buf3 and 4
+    # buf3 has the AliasedLayout which reads from buf0(Convolution)
+    # but buf4 is a copy of buf3 which reads from buf3
+    # we want to know that buf4 also follows buf0 conv's layout
+    if isinstance(buf.layout, AliasedLayout):
+        reads = buf.get_read_writes().reads
+        reads_bufs = [
+            V.graph.name_to_buffer[r.name]
+            if r.name in V.graph.name_to_buffer.keys()
+            else None
+            for r in reads
+        ]
+        for reads_buf in reads_bufs:
+            read_from_conv, addr = reads_from_conv(reads_buf, var_ranges)
+            if read_from_conv:
+                return True, addr
+    return False, None
+
+
+def layout_priority_idx(reads_bufs, memory_addrs, var_ranges):
+    """
+    if reads from conv that needs to use specific layout
+    return:
+    priority_idx regarding memory_addrs idx
+    memory_addrs - update memory_addrs with the true addr if needed
+    """
+
+    priority_idx = []
+    for i, reads_buf in enumerate(reads_bufs):
+        read_from_conv, mem_addr = reads_from_conv(reads_buf, var_ranges)
+        if read_from_conv:
+            priority_idx.append(i)
+            memory_addrs[i] = mem_addr
+    return priority_idx, memory_addrs
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c
@@ -99,6 +158,9 @@ class ModularIndexing(sympy.Function):
             if len(new_terms) != len(base.args):
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
+        if isinstance(base, IndexingDiv):
+            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
 
 class IndexingDiv(sympy.Function):
     """
@@ -116,9 +178,19 @@ class IndexingDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
+        if isinstance(base, IndexingDiv):
+            return IndexingDiv(base.args[0], base.args[1] * divisor)
+
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return IndexingDiv(base - a, divisor) + a / gcd
         gcd = sympy.gcd(base, divisor)
         if gcd != 1:
-            return IndexingDiv(base / gcd, divisor / gcd)
+            return IndexingDiv(
+                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+            )
 
 
 class CleanDiv(IndexingDiv):
@@ -130,13 +202,37 @@ class CleanDiv(IndexingDiv):
     pass
 
 
-def is_triton(device):
+def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
-    return device.type == "cuda"
+    if getattr(x, "get_device", None):
+        return is_triton(x.get_device())
+    if isinstance(x, torch.device):
+        return x.type == "cuda"
+    return False
 
 
+@dataclasses.dataclass
 class IRNode(object):
+    _current_origins: ClassVar[Set[Any]] = set()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_origins(origins: Set[torch.fx.Node]):
+        old = IRNode._current_origins
+        IRNode._current_origins = old | origins
+        yield
+        IRNode._current_origins = old
+
+    def __post_init__(self):
+        self.origins = set(self._current_origins)
+
+    def common_repr(self):
+        return (
+            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
+        )
+
     def str_helper(self, lines):
+        lines = lines + self.common_repr()
         lines = indent(",\n".join(map(str, lines)))
         return f"{type(self).__name__}(\n{lines}\n)"
 
@@ -239,7 +335,7 @@ class Pointwise(Loops):
 @dataclasses.dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[List[Expr]], Expr]
-    scatter_mode: str = None
+    scatter_mode: Optional[str] = None
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -267,6 +363,8 @@ class Scatter(Pointwise):
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
+    # self.dtype represents the dst dtype
+    src_dtype: torch.dtype
 
     def __str__(self):
         return Loops.__str__(
@@ -285,6 +383,7 @@ class Reduction(Loops):
         return ops.reduction(
             output_name,
             self.dtype,
+            self.src_dtype,
             self.reduction_type,
             indexer(vars),
             self.inner_fn(vars, reduction_vars),
@@ -315,13 +414,160 @@ class Reduction(Loops):
             self.ranges,
             self.reduction_ranges,
             self.reduction_type,
+            self.src_dtype,
         )
+
+    @staticmethod
+    def num_splits(
+        device,
+        dst_dtype,
+        src_dtype,
+        inner_fn,
+        ranges,
+        reduction_ranges,
+        reduction_type,
+        reduction_numel,
+    ):
+        num_sm = torch.cuda.get_device_properties(device).multi_processor_count
+        min_elements_per_thread = 32
+        max_elements_per_thread = 512
+        threads_per_sm = 2048
+        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
+        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
+
+        def inner_reduction_splits(reduction_numel_hint, numel_hint):
+            # do heuristics that's close to eager mode for split inner reduction
+            # we leak reduction autotune configs here, and will need to refactor to avoid this later
+            num_warps = 8
+            num_threads = 32 * num_warps
+            if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
+                return 1
+            if reduction_numel_hint <= 8192:
+                return 1
+            if reduction_numel_hint * numel_hint <= min_elements_per_device:
+                split_size = min_elements_per_thread
+            elif reduction_numel_hint * numel_hint < max_elements_per_device:
+                target_blocks = num_sm * threads_per_sm // (2 * num_threads)
+                blocks_per_output = (target_blocks + numel_hint - 1) // numel_hint
+                tmp_split_size = (
+                    reduction_numel_hint + num_threads * blocks_per_output - 1
+                ) // (num_threads * blocks_per_output)
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
+                if abs(closest - tmp_split_size) < 30:
+                    # prefer even splits, but never smalle than min_elements_per_thread
+                    split_size = max(closest, min_elements_per_thread)
+                else:
+                    split_size = tmp_split_size
+            else:
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
+                if abs(closest - max_elements_per_thread) < 50:
+                    # prefer even splits
+                    split_size = closest
+                else:
+                    split_size = max_elements_per_thread
+            return (reduction_numel_hint + split_size * num_threads - 1) // (
+                split_size * num_threads
+            )
+
+        def outer_reduction_splits(reduction_numel_hint, numel_hint):
+            # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
+            # extend to even smaller number of outputs
+            num_warps = 8
+            num_threads = num_warps * 32
+            rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
+            xvals_per_block = 128
+            xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
+            if reduction_numel_hint * numel_hint < min_elements_per_device:
+                split_size = min_elements_per_thread
+            elif reduction_numel_hint * numel_hint < max_elements_per_device:
+                target_blocks = num_sm * threads_per_sm // (num_threads)
+                target_blocks = (target_blocks + xblocks - 1) // xblocks
+                tmp_split_size = (
+                    reduction_numel_hint + rvals_per_thread * target_blocks - 1
+                ) // (rvals_per_thread * target_blocks)
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
+                if abs(tmp_split_size - closest) < 20:
+                    split_size = max(closest, min_elements_per_thread)
+                else:
+                    split_size = tmp_split_size
+            else:
+                divisors = sympy.divisors(reduction_numel_hint)
+                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
+                if abs(closest - max_elements_per_thread) < 50:
+                    # prefer even splits
+                    split_size = closest
+                else:
+                    split_size = max_elements_per_thread
+
+            return (reduction_numel_hint + rvals_per_thread * split_size - 1) // (
+                rvals_per_thread * split_size
+            )
+
+        reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        # easy cases
+        if numel_hint == 1:
+            return inner_reduction_splits(reduction_numel_hint, numel_hint)
+        if (
+            reduction_numel_hint <= min_elements_per_thread
+            or numel_hint >= num_sm * 2 * 32
+        ):
+            return 1
+
+        r = Reduction(
+            device,
+            dst_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            src_dtype,
+        )
+        read_writes = ComputedBuffer(
+            name=None,
+            layout=FlexibleLayout(
+                device=r.get_device(),
+                dtype=r.get_dtype(),
+                size=r.get_size(),
+            ),
+            data=r,
+        ).get_read_writes()
+        # try finding the full size producer
+        # TODO this will fail for something like ((1, N) * (N, 1)).sum()
+        # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
+        # TODO maybe go over all full size producers and pick the most common one?
+        range_vars = [
+            r
+            for r in read_writes.range_vars
+            if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
+        ]
+        index = None
+        for md in read_writes.reads:
+            if all([r in md.index.free_symbols for r in range_vars]):
+                index = md.index
+                break
+        if not index:
+            # TODO determine splits when all inputs are broadcasted
+            return 1
+        reduction_vars = [
+            rv for rv in range_vars if read_writes.var_ranges[rv] in reduction_ranges
+        ]
+        strides = V.graph.sizevars.stride_hints(index, reduction_vars)
+        outer = all([s > 1 for s in strides])
+        if not outer:
+            return inner_reduction_splits(reduction_numel_hint, numel_hint)
+        else:  # outer reduction
+            return outer_reduction_splits(reduction_numel_hint, numel_hint)
 
     @classmethod
     def create(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
         inner_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
@@ -334,17 +580,26 @@ class Reduction(Loops):
                 reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
                 return inner_fn(index, reduction_index)
 
-            return Pointwise.create(device, dtype, fn, ranges)
+            return Pointwise.create(device, dst_dtype, fn, ranges)
 
-        if is_triton(device):
-            reduction_numel_hint = V.graph.sizevars.size_hint(reduction_numel)
-            numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-            if reduction_numel_hint > 8192 and numel_hint == 1:
+        if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
+            # triton doesn't support reduce to single element well, so break it up
+            split = cls.num_splits(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                reduction_numel,
+            )
+            if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
-                split = 128
                 return cls.create_multilayer(
                     device,
-                    dtype,
+                    dst_dtype,
+                    src_dtype,
                     inner_fn,
                     ranges,
                     reduction_ranges,
@@ -355,25 +610,40 @@ class Reduction(Loops):
         return TensorBox.create(
             Reduction(
                 device,
-                dtype,
+                dst_dtype,
                 inner_fn,
                 ranges,
                 reduction_ranges,
                 reduction_type,
+                src_dtype,
             )
         )
 
     @staticmethod
     def default_value(reduction_type, dtype):
-        return {"sum": 0, "max": float("-inf"), "min": float("inf"), "any": 0}[
-            reduction_type
-        ]
+        if reduction_type in {"max", "argmax"}:
+            return (
+                torch.finfo(dtype).min
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).min
+            )
+        if reduction_type in {"min", "argmin"}:
+            return (
+                torch.finfo(dtype).max
+                if is_float_dtype(dtype)
+                else torch.iinfo(dtype).max
+            )
+        return {
+            "sum": 0,
+            "any": 0,
+        }[reduction_type]
 
     @classmethod
     def create_multilayer(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
         inner_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
@@ -419,7 +689,9 @@ class Reduction(Loops):
                     ops.index_expr(indices, torch.int32),
                     ops.index_expr(reduction_numel, torch.int32),
                 )
-                return ops.masked(mask, body, cls.default_value(reduction_type, dtype))
+                return ops.masked(
+                    mask, body, cls.default_value(reduction_type, dst_dtype)
+                )
             else:
                 return body()
 
@@ -427,11 +699,14 @@ class Reduction(Loops):
         # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
         # in fp32 and not reduce precision by breaking up the kernel into multiple layers
         intermediate_dtype = (
-            dtype if dtype not in (torch.float16, torch.bfloat16) else torch.float
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
         )
         intermediate = Reduction.create(
             device,
             intermediate_dtype,
+            src_dtype,
             wrapper_fn,
             [*ranges, split],
             [block_size],
@@ -446,11 +721,12 @@ class Reduction(Loops):
         return TensorBox.create(
             Reduction(
                 device,
-                dtype,
+                dst_dtype,
                 intermediate_fn,
                 ranges,
                 [split],
                 reduction_type,
+                src_dtype,
             )
         )
 
@@ -532,6 +808,9 @@ class BaseView(IRNode):
     def realize(self):
         return self.data.realize()
 
+    def realize_hint(self):
+        return self.data.realize_hint()
+
     def get_storage_numel(self):
         return self.data.get_storage_numel()
 
@@ -544,6 +823,18 @@ class BaseView(IRNode):
                 self.make_loader(),
                 self.get_size(),
             ).reads
+
+    def unwrap_view(self):
+        x = self
+        while isinstance(x, BaseView):
+            x = x.data
+        return x
+
+    def constant_to_device(self, device):
+        """Move this to a given device. Requires that all reads are to constants."""
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return Pointwise(device, self.get_dtype(), loader, self.get_size())
 
 
 @dataclasses.dataclass
@@ -678,16 +969,20 @@ class SqueezeView(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        # redirect to a generic view
-        return View.create(x, [s for s in x.get_size() if s != 1])
+        if dim is None:
+            # redirect to a generic view
+            return View.create(x, [s for s in x.get_size() if s != 1])
+        else:
+            assert x.get_size()[dim] == 1
+            return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
-    def squeezer(size):
+    def squeezer(size: Tuple[sympy.Expr, ...]):
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index):
+        def reindex(index: List[sympy.Expr]) -> List[sympy.Expr]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.Integer(0)] * length
             for idx, s in zip(not_one, index):
@@ -900,7 +1195,7 @@ class ReinterpretView(BaseView):
         def loader(index):
             indexer = self.layout.make_indexer()
             upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype == torch.bfloat16
+                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
             )
             return ops.load(self.get_name(), indexer(index), upcast)
 
@@ -1083,6 +1378,15 @@ class Layout(IRNode):
         ), f"convert {type(self).__name__} to FixedLayout first"
         return self.as_fixed().make_indexer()
 
+    def __eq__(self, other) -> bool:
+        return (
+            self.device == other.device
+            and self.dtype == other.dtype
+            and self.size == other.size
+            and self.stride == other.stride
+            and self.offset == other.offset
+        )
+
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
@@ -1214,7 +1518,7 @@ class MutationLayout(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            None,
+            None,  # type: ignore[arg-type]
         )
         self.target = target
 
@@ -1367,6 +1671,13 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class RandSeedBuffer(ConstantBuffer):
+    def codegen_reference(self):
+        # Clone makes sure if we pass this from forwards to backwards
+        # the value does not get clobbered by the time backwards is run.
+        return self.get_name() + ".clone()"
+
+
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
@@ -1418,7 +1729,10 @@ class ComputedBuffer(Buffer):
             ]
             priority_idx = []
             for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
+                if (
+                    isinstance(reads_buf, Convolution)
+                    and reads_buf.kernel != "aten.convolution"
+                ):
                     # prioritize Conv layout order
                     priority_idx.append(i)
             # only consider reads to buffer of same size
@@ -1441,16 +1755,15 @@ class ComputedBuffer(Buffer):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
 
-    def simplify_reorder_and_tile(self):
+    def simplify_and_reorder(self):
         """
-        This is the main place where we do loop transformations in a
+        This is a main place where we do loop transformations in a
         backend-agnostic way.
 
         Here we:
             1) Remove any 1 dimensions
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
-            4) Split dimensions into tiles
         """
         _, args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
@@ -1462,20 +1775,26 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
         index_formulas = [*body.indexing_exprs.values()]
-        memory_addrs = [*body.reads_name2expr.values(), *body.writes_name2expr.values()]
+        reads_bufs = [
+            V.graph.name_to_buffer[reads_name]
+            if reads_name in V.graph.name_to_buffer.keys()
+            else None
+            for reads_name in body.reads_name2expr.keys()
+        ]
         priority_idx = []
-        if config.triton.convolution != "aten":
-            reads_bufs = [
-                V.graph.name_to_buffer[reads_name]
-                if reads_name in V.graph.name_to_buffer.keys()
-                else None
-                for reads_name in body.reads_name2expr.keys()
+        if config.triton.convolution == "aten":
+            memory_addrs = [
+                *body.reads_name2expr.values(),
+                *body.writes_name2expr.values(),
             ]
+        else:
+            # prioritize reads layout/loop_ordering over writes
+            if len(body.reads_name2expr.values()) > 0:
+                memory_addrs = [*body.reads_name2expr.values()]
+            else:
+                memory_addrs = [*body.writes_name2expr.values()]
             for i, reads_buf in enumerate(reads_bufs):
                 if isinstance(reads_buf, Convolution):
-                    # [ 3, 0, 2, 1] to [ 1, 3, 2, 0]
-                    # preferred_stride_order = reads_buf.preferred_stride_order
-                    # preferred_order = stride_order2fill_order(preferred_stride_order)
                     priority_idx.append(i)
 
         index_vars = []
@@ -1492,22 +1811,41 @@ class ComputedBuffer(Buffer):
                 reduce_vars.append(v)
                 reduce_size.append(s)
 
-        def simplify_and_reorder(x_vars, sizes):
+        # the reordering_reindex in reads' simplify_reorder_and_tile
+        reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
+        for i, reads_buf in enumerate(reads_bufs):
+            if isinstance(reads_buf, ComputedBuffer) and hasattr(
+                reads_buf, "iter_reordering_reindex"
+            ):
+                reordering_reindex[i] = reads_buf.iter_reordering_reindex
+
+        def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, sizes, memory_addrs, priority_idx
+                x_vars, sizes, memory_addrs, reordering_reindex, priority_idx
             )
+            # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = _simplify_loops(x_vars, sizes, index_formulas)
+            sizes, reindex2, prune = _simplify_loops(
+                x_vars,
+                sizes,
+                index_prevent_reordering(index_formulas, x_vars, sizes),
+            )
             x_vars = prune(x_vars)
             # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
             # x_vars = prune(x_vars)
             # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
-            return sizes, reindex
+            return sizes, reindex, reindex1
 
-        iter_ranges, iter_reindex = simplify_and_reorder(index_vars, index_size)
-        reduce_ranges, reduce_reindex = simplify_and_reorder(reduce_vars, reduce_size)
+        iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
+            index_vars, index_size, reordering_reindex
+        )
+        reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
+            reduce_vars, reduce_size
+        )
 
+        # remember the reordering order
+        self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
@@ -1515,126 +1853,12 @@ class ComputedBuffer(Buffer):
         body = LoopBody(
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
         )
-
-        # TODO(jansel): support tiling with modular indexing
-        has_modular_indexing = any(
-            ("ModularIndexing" in str(expr) or "IndexingDiv" in str(expr))
-            for expr in body.indexing_exprs.values()
-        )
-
-        if (
-            is_triton(self.get_device())
-            and not self.get_reduction_type()
-            and iter_ranges
-            and not has_modular_indexing
-            and config.triton.max_tiles > 1
-        ):
-            # TODO(jansel): should we include store strides here or just loads?
-            strides = [
-                V.graph.sizevars.stride_hints(expr, iter_vars)
-                for expr in body.reads
-                # TODO(jansel): how should we tile indirect loads?
-                if "indirect" not in str(expr)
-            ]
-            tiled_ranges = self._tile_contiguous(iter_ranges, strides)
-            if len(tiled_ranges) > 1:
-                return (*tiled_ranges, reduce_ranges), body
-
-            if config.triton.tile_broadcasting:
-                # alternate tiling heuristic
-                tiled_ranges, call = self._tile_broadcasting(iter_ranges, body, strides)
-                if len(tiled_ranges) > 1:
-                    return (*tiled_ranges, reduce_ranges), call
-
         return (iter_ranges, reduce_ranges), body
 
-    @classmethod
-    def _tile_contiguous(cls, iter_ranges: List[sympy.Expr], strides):
-        """
-        Break iter_ranges up into at most max_tiles tiles based on stride==1
-        dimensions.
-
-        Transformation on iter_range like:
-            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
-
-        Where each group will be tiled in a different dimension in the
-        output kernel.
-        """
-        tiles = []
-        current_tile = []
-        max_tiles = config.triton.max_tiles
-
-        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
-        for i in range(len(iter_ranges)):
-            current_tile.append(iter_ranges[i])
-            # break tiles on stride 1
-            if any(stride[i] == 1 for stride in strides):
-                tiles.append(current_tile)
-                current_tile = []
-
-        if current_tile:
-            tiles.append(current_tile)
-
-        if len(tiles) > max_tiles:
-            split = len(tiles) - max_tiles + 1
-            tiles = [[*itertools.chain(*tiles[:split])]] + tiles[split:]
-            assert len(tiles) == max_tiles, (len(tiles), max_tiles, split)
-
-        return tiles
-
-    @classmethod
-    def _tile_broadcasting(cls, iter_ranges: List[sympy.Expr], body, strides):
-        """
-        Break ranges up so that one dimension is all broadcasting.
-
-        Transformation on iter_ranges like:
-            (s0, s1, s2, s3) => (s0, s1), (s2, s3)
-
-        Where each group will be tiled in a different dimension in the
-        output kernel.
-        """
-        broadcasting_strides = [
-            stride for stride in strides if any(s == 0 for s in stride)
-        ]
-        if not broadcasting_strides:
-            return (iter_ranges,), body
-
-        # TODO(jansel): consider another load?  for now just take first one
-        broadcasting_stride = broadcasting_strides[0]
-
-        broadcast_ranges = []
-        broadcast_index = []
-        other_ranges = []
-        other_index = []
-
-        # TODO(jansel): this is a placeholder heuristic, we should be able to do much better
-        for i in range(len(iter_ranges)):
-            if broadcasting_stride[i] == 0:
-                broadcast_index.append(i)
-                broadcast_ranges.append(iter_ranges[i])
-            else:
-                other_index.append(i)
-                other_ranges.append(iter_ranges[i])
-
-        def call(broadcast, other, reduction=None):
-            assert not reduction
-            assert len(broadcast) == len(broadcast_index)
-            assert len(other) == len(other_index)
-            args = [None] * len(iter_ranges)
-            for i, v in itertools.chain(
-                zip(broadcast_index, broadcast),
-                zip(other_index, other),
-            ):
-                args[i] = v
-            return body(args)
-
-        if broadcast_ranges and other_ranges:
-            return (broadcast_ranges, other_ranges), call
-        else:
-            return (iter_ranges,), body
-
     @staticmethod
-    def _apply_loop_reordering(index_vars, sizes, memory_addrs, priority_idx=[]):
+    def _apply_loop_reordering(
+        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=[]
+    ):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -1649,6 +1873,14 @@ class ComputedBuffer(Buffer):
                 dtype=numpy.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
+            # consider both layout(strides) and reordering(reordering_reindex)
+            if reordering_reindex is not None:
+                for i in range(len(memory_addrs)):
+                    try:
+                        strides[i] = reordering_reindex[i](strides[i])
+                    # if len(order) != len(strides), do not reorder
+                    except AssertionError:
+                        pass
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
@@ -1686,6 +1918,7 @@ class InputsKernel(Buffer):
             {dependencies.StarDep(self.get_name())},
             set(),
             [],
+            None,
         )
 
     @staticmethod
@@ -1696,6 +1929,8 @@ class InputsKernel(Buffer):
                 x = x.data
             if isinstance(x, StorageBox):
                 x = x.data
+            if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
+                x = ExternKernel.realize_input(x)
             assert isinstance(x, (Buffer, ReinterpretView)), x
             inputs_new.append(x)
         return inputs_new
@@ -1758,6 +1993,7 @@ class ConcatKernel(NopKernel):
             )
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+
         return kernel
 
     @classmethod
@@ -1792,13 +2028,16 @@ class ConcatKernel(NopKernel):
 
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
-    constant_args: List[Any] = ()
+    constant_args: Tuple[Any, ...] = ()
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
         self.freeze_layout()
+
+    def codegen(self, wrapper):
+        raise NotImplementedError
 
     @staticmethod
     def copy_input(x):
@@ -1822,17 +2061,20 @@ class ExternKernel(InputsKernel):
         if isinstance(x, ReinterpretView):
             return x
 
-        x.data.freeze_layout()
+        x.unwrap_view().freeze_layout()
         rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
         assert len(rw.reads) == 1
 
-        index = V.graph.sizevars.simplify(list(rw.reads)[0].index)
+        index = V.graph.sizevars.simplify_with_ranges(
+            list(rw.reads)[0].index, rw.var_ranges
+        )
         strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
         offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+        expected = sympy_dot(rw.range_vars, strides) + offset
 
-        if sum([a * b for a, b in zip(strides, rw.range_vars)]) + offset != index:
+        if index != expected:
             log.debug(
-                "convert_to_reinterpret_view failed: stride=%s offset=%s index=%",
+                "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
                 strides,
                 offset,
                 index,
@@ -1858,15 +2100,21 @@ class ExternKernel(InputsKernel):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
             )
+        if isinstance(x, ConstantBuffer):
+            return x
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return x
-        if isinstance(x, BaseView) and is_storage_and_layout(x.data):
-            try:
-                return cls.convert_to_reinterpret_view(x)
-            except NotImplementedError:
-                pass
+        if isinstance(x, BaseView):
+            x.realize()
+            if is_storage_and_layout(x.unwrap_view()) and not isinstance(
+                x.unwrap_view().data, ExternKernelAlloc
+            ):
+                try:
+                    return cls.convert_to_reinterpret_view(x)
+                except NotImplementedError:
+                    pass
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
@@ -1935,6 +2183,41 @@ class ExternKernel(InputsKernel):
         _stride = self.get_stride()
         # iter_ranges = _size of output tensor, reduce_range = [] because no reduction
         return [_size, []], _stride
+
+    def canonicalize(self):
+        """
+        Manually get cononicalization of the output index
+        """
+        # manually generate index formula for conv
+        sizevars = V.graph.sizevars
+        sizes = self.get_size()
+        strides = self.get_stride()
+        strides = [sizevars.size_hint(x) for x in strides]
+        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        # reorder index vars according to stride
+        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        lookup = {pos: idx for idx, pos in enumerate(index_order)}
+        order = [lookup[i] for i in range(len(lookup))]
+        index_vars = [index_vars[i] for i in order]
+        indexer = self.make_indexer()
+        index = indexer(index_vars)
+
+        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+
+        # assign new variables each dimension to deal with numbering mismatches
+        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
+        _, add_var = var_builder("c")
+        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
+
+        index = sympy.expand(index).subs(replacement)
+        return index, tuple(new_sizes)
+
+    def __str__(self):
+        lines = [
+            f"{field.name}={getattr(self, field.name)}"
+            for field in dataclasses.fields(self)
+        ]
+        return self.str_helper(lines)
 
 
 @dataclasses.dataclass
@@ -2010,14 +2293,11 @@ class InplaceBernoulliFallback(ExternKernel):
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+    def __init__(
+        self, layout, inputs, constant_args=(), output_view=None, kernel="aten.mm.out"
+    ):
         super().__init__(layout, inputs, constant_args, output_view)
-        if (
-            config.triton.use_mm
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_mm_out"
+        self.kernel = kernel
 
     @classmethod
     def create(cls, a, b):
@@ -2031,6 +2311,27 @@ class MatrixMultiply(ExternKernelOut):
         else:
             a = cls.require_stride1(a)
         b = cls.require_stride1(b)
+
+        # choose runtime kernel
+        config_mm = config.triton.mm
+        # default kernel is aten
+        kernel = "aten.mm.out"
+        if config_mm == "aten":
+            kernel = "aten.mm.out"
+        elif config_mm == "triton" and a.get_device().type == "cuda":
+            kernel = "triton_ops.matmul_out"
+        elif config_mm == "autotune":
+            from .codegen.autotuner import tuned_mm
+
+            kernel = tuned_mm(
+                a.get_size(),
+                b.get_size(),
+                a.get_stride(),
+                b.get_stride(),
+                a.get_device(),
+                a.get_dtype(),
+            )
+
         return MatrixMultiply(
             layout=FlexibleLayout(
                 device=a.get_device(),
@@ -2038,7 +2339,60 @@ class MatrixMultiply(ExternKernelOut):
                 size=list(m) + [n],
             ),
             inputs=[a, b],
+            kernel=kernel,
         )
+
+    def map_args(self):
+        # a, b
+        in_args = [x.codegen_reference() for x in self.inputs]
+        # const_args = self.constant_args
+        inout_dict = OrderedDict(
+            [
+                ("A", f"{in_args[0]}"),
+                ("B", f"{in_args[1]}"),
+                ("C", f"{self.get_name()}"),
+            ]
+        )
+        # batch==1 bmm->mm
+        if len(self.get_stride()) == 3:
+            assert self.get_size()[0] == 1
+            stride_cm = self.get_stride()[1]
+            stride_cn = self.get_stride()[2]
+        else:
+            stride_cm = self.get_stride()[0]
+            stride_cn = self.get_stride()[1]
+        args_dict = OrderedDict(
+            [
+                ("M", f"{self.inputs[0].get_size()[0]}"),
+                ("N", f"{self.inputs[1].get_size()[1]}"),
+                ("K", f"{self.inputs[0].get_size()[1]}"),
+                ("stride_am", f"{self.inputs[0].get_stride()[0]}"),
+                ("stride_ak", f"{self.inputs[0].get_stride()[1]}"),
+                ("stride_bk", f"{self.inputs[1].get_stride()[0]}"),
+                ("stride_bn", f"{self.inputs[1].get_stride()[1]}"),
+                ("stride_cm", f"{stride_cm}"),
+                ("stride_cn", f"{stride_cn}"),
+            ]
+        )
+        # accumulator types
+        ACC_TYPE = (
+            "tl.float32"
+            if self.inputs[0].get_dtype()
+            in [torch.float16, torch.bfloat16, torch.float32]
+            else "tl.int32"
+        )
+        # dict for tl.constexpr
+        const_dict = OrderedDict(
+            [
+                ("GROUP_M", "8"),
+                ("ACC_TYPE", ACC_TYPE),
+                ("allow_tf32", f"{torch.backends.cuda.matmul.allow_tf32}"),
+            ]
+        )
+
+        other_dict = OrderedDict()
+
+        return inout_dict, args_dict, const_dict, other_dict
 
 
 class BatchMatrixMultiply(ExternKernelOut):
@@ -2093,24 +2447,22 @@ class BatchMatrixMultiply(ExternKernelOut):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
-        V.graph.device_types.add(device.type)
-        V.graph.device_types.add(x.get_device().type)
-
-        x = cls.realize_input(x)
-        read_writes = x.get_read_writes()
         if not x.is_extern() and all(
-            (r.name in V.graph.constants and hasattr(r, "index"))
-            for r in read_writes.reads
+            (r.name in V.graph.constants and hasattr(r, "index")) for r in x.get_reads()
         ):
             return x.constant_to_device(device)
 
+        V.graph.device_types.add(device.type)
+        V.graph.device_types.add(x.get_device().type)
+
+        log.warning("DeviceCopy")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
                 dtype=x.get_dtype(),
                 size=x.get_size(),
             ),
-            [x],
+            [cls.realize_input(x)],
         )
 
     def codegen(self, wrapper):
@@ -2332,14 +2684,9 @@ class Convolution(ExternKernelAlloc):
         self.preferred_stride_order = preferred_stride_order
 
     def codegen(self, wrapper):
-        if self.kernel == "triton_ops_conv":
+        if self.kernel == "triton_ops.conv":
             wrapper.header.writeline(
                 f"import torchinductor.triton_ops.conv as {self.kernel}"
-            )
-        # choose from different conv kernels
-        elif self.kernel == "tuned_conv":
-            wrapper.header.writeline(
-                f"from torchinductor.codegen.autotuner import {self.kernel}"
             )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
@@ -2353,20 +2700,20 @@ class Convolution(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride_: List[int],
+        padding_: List[int],
+        dilation_: List[int],
         transposed: bool,
-        output_padding: List[int],
+        output_padding_: List[int],
         groups: int,
     ):
         x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
-        stride = tuple(stride)
-        padding = tuple(padding)
-        dilation = tuple(dilation)
+        stride = tuple(stride_)
+        padding = tuple(padding_)
+        dilation = tuple(dilation_)
         assert isinstance(transposed, bool)
-        output_padding = tuple(output_padding)
+        output_padding = tuple(output_padding_)
         assert isinstance(groups, int)
 
         weight_shape = [
@@ -2451,17 +2798,66 @@ class Convolution(ExternKernelAlloc):
                 V.graph.sizevars.guard_static_shape(output_size[-1])
             )
 
-        # for conv2d or conv3d, prefer channels last format
+        # choose runtime kernel
+        config_conv = config.triton.convolution
         if (
-            len(kernel_size) > 1
-            and is_triton(x.get_device())
-            and config.triton.convolution != "aten"
+            config_conv == "aten"
+            or len(kernel_size) != 2  # triton conv only supports conv2d
+            or not is_triton(x.get_device())
+            or transposed
+            or groups != 1
+            # or x.get_dtype() == torch.float16
+            # or x.get_dtype() == torch.bfloat16
         ):
+            kernel = "aten.convolution"
+        elif config_conv == "triton":
+            kernel = "triton_ops.conv"
+        else:
+            assert config_conv == "autotune"
+            from .codegen.autotuner import tuned_conv
+
+            kernel = tuned_conv(
+                x.get_size(),
+                weight.get_size(),
+                x.get_stride(),
+                weight.get_stride(),
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                x.get_device(),
+                x.get_dtype(),
+            )
+
+        # for conv2d or conv3d, prefer channels last format
+        if kernel == "triton_ops.conv":
+            output_layout_str = "torch.channels_last"
+        elif config.tune_layout:
+            from .codegen.autotuner import tuned_conv_layout
+
+            output_layout_str = tuned_conv_layout(
+                kernel,
+                x.get_size(),
+                weight.get_size(),
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                x.get_device(),
+                x.get_dtype(),
+            )
+        else:
+            output_layout_str = "torch.contiguous_format"
+
+        if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
-        # for conv1d, output layout is not preserved with inputs
         else:
             stride_order = list(reversed(range(len(output_size))))
 
@@ -2496,32 +2892,6 @@ class Convolution(ExternKernelAlloc):
         self.inputs[0] = x
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
-    def canonicalize(self):
-        """
-        Manually get cononicalization of the conv output index
-        """
-        # manually generate index formula for conv
-        sizes = self.get_size()
-        strides = self.get_stride()
-        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
-        # reorder index vars according to stride
-        index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
-        lookup = {pos: idx for idx, pos in enumerate(index_order)}
-        order = [lookup[i] for i in range(len(lookup))]
-        index_vars = [index_vars[i] for i in order]
-        indexer = self.make_indexer()
-        index = indexer(index_vars)
-
-        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
-
-        # assign new variables each dimension to deal with numbering mismatches
-        # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
-        _, add_var = var_builder("c")
-        replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
-
-        index = sympy.expand(index).subs(replacement)
-        return index, tuple(new_sizes)
-
     def map_args(self):
         # x, w, bias
         in_args = [x.codegen_reference() for x in self.inputs]
@@ -2535,7 +2905,6 @@ class Convolution(ExternKernelAlloc):
             [
                 ("x", f"{in_args[0]}"),
                 ("w", f"{in_args[1]}"),
-                ("bias", f"{in_args[2]}" if len(in_args) >= 3 else "None"),
                 ("y", f"{self.get_name()}"),
             ]
         )
@@ -2682,26 +3051,44 @@ class StorageBox(MutableBox):
         self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
+    def realize_hint(self):
+        """
+        Called on buffers we expect to be forced to realize later.
+        """
+        if self.num_reads() > 1:
+            self.realize()
+
     def mark_reuse(self, users):
         if users <= 1:
             return
         if isinstance(self.data, (Pointwise, Reduction)):
-            read_writes = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=self.data.get_device(),
-                    dtype=self.data.get_dtype(),
-                    size=self.data.get_size(),
-                ),
-                data=self.data,
-            ).get_read_writes()
+            num_reads = self.num_reads()
 
             # TODO(jansel): this heuristic is a wild guess
             if (
-                len(read_writes.reads) > config.realize_reads_threshold
+                num_reads > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
             ):
                 self.realize()
+
+    def num_reads(self):
+        data = self.data
+        if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
+            return 1
+        if isinstance(data, ComputedBuffer):
+            read_writes = data.get_read_writes()
+        else:
+            assert isinstance(data, (Pointwise, Reduction)), type(data)
+            read_writes = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=data.get_device(),
+                    dtype=data.get_dtype(),
+                    size=data.get_size(),
+                ),
+                data=data,
+            ).get_read_writes()
+        return len(read_writes.reads)
 
 
 class LoopBody:
@@ -2751,9 +3138,18 @@ class LoopBody:
         self.indirect_vars.append([var])
         return var
 
+    def replace_indirect(self, old, new):
+        """Swap in a variable used in indirect indexing"""
+        if str(old) == str(new):
+            return
+        self.indexing = {k: v.subs({old: new}) for k, v in self.indexing.items()}
+
+    def get_index(self, name):
+        return self.indexing[name]
+
     def __call__(self, *indices):
         index = list(itertools.chain(*indices))
-        assert len(index) == len(self.var_ranges)
+        assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
         self.indexing = {
@@ -2773,12 +3169,14 @@ class LoopBodyBlock:
     """
 
     def __init__(self, body: LoopBody, fn: Callable, args: List[Any]):
-        self.gm = None
         self.body = body
 
         def add_index(expr, category, buf_name=None):
             return tracer.create_proxy(
-                "get_attr", self.body.add_index_expr(expr, category, buf_name), (), {}
+                "call_module",
+                "get_index",
+                (self.body.add_index_expr(expr, category, buf_name),),
+                {},
             )
 
         class CaptureIndexing(V.WrapperHandler):
@@ -2790,9 +3188,11 @@ class LoopBodyBlock:
                 index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
-            def reduction(self, name, dtype, reduction_type, index, value):
+            def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
                 index = add_index(index, "writes", name)
-                return self._inner.reduction(name, dtype, reduction_type, index, value)
+                return self._inner.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
@@ -2810,7 +3210,7 @@ class LoopBodyBlock:
                     return V.ops.masked(mask, subblock, other)
 
                 name = self.body.add_submodule(shim, "masked_subblock")
-                subblock = LoopBodyBlock(self.body, masked_body, ())
+                subblock = LoopBodyBlock(self.body, masked_body, [])
                 self.body.subblocks[name] = subblock
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}
@@ -2824,7 +3224,7 @@ class LoopBodyBlock:
                 """
 
                 def set_indirect(new_var):
-                    self.replace_indirect(var, V.ops.indirect_indexing(new_var))
+                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
 
                 var = self.body.add_indirect()
                 tracer.create_proxy(
@@ -2846,19 +3246,8 @@ class LoopBodyBlock:
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph
 
-    def replace_indirect(self, old, new):
-        """Swap in a variable used in indirect indexing"""
-        if str(old) == str(new):
-            return
-        for name in self.body.indexing.keys():
-            expr = getattr(self.gm, name)
-            if old in expr.free_symbols:
-                setattr(self.gm, name, expr.subs({old: new}))
-
     def __call__(self):
-        self.gm = torch.fx.GraphModule(
-            {**self.body.indexing, **self.body.submodules}, self.graph
+        gm = torch.fx.GraphModule(
+            {**self.body.submodules, "get_index": self.body.get_index}, self.graph
         )
-        result = self.gm.forward(V.get_ops_handler())
-        self.gm = None
-        return result
+        return gm.forward(V.get_ops_handler())

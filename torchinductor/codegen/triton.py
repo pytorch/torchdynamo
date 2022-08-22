@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -11,6 +12,8 @@ from typing import List
 import sympy
 import torch
 
+import torchinductor
+
 from .. import codecache
 from .. import config
 from .. import ir
@@ -23,6 +26,7 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+from .common import index_prevent_reordering
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +156,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
+    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
+        return f"tl.randn({seed}, {offset})"
+
+    @staticmethod
+    def pow(a, b):
+        return f"tl.libdevice.pow({a}, {b})"
+
+    @staticmethod
     def log(x):
         if has_triton_libdevice():
             return f"tl.libdevice.log({x}) if {x}.dtype is tl.float64 else tl.log({x})"
@@ -189,6 +201,15 @@ class TritonOverrides(OpOverrides):
             return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
 
     @staticmethod
+    def floordiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Similar to div_floor_kernel_cuda in pytorch core.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        quot = f"{a} // {b}"
+        rem = f"{a} % {b}"
+        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+
+    @staticmethod
     def trunc(x):
         if has_triton_libdevice():
             return f"tl.libdevice.trunc({x})"
@@ -196,12 +217,18 @@ class TritonOverrides(OpOverrides):
             return f"{x}.to(tl.int32).to(tl.float32)"
 
     @staticmethod
+    def truncdiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        return f"{a} // {b}"
+
+    @staticmethod
     def ceil(x):
         return f"tl.libdevice.ceil({x})"
 
 
 @dataclasses.dataclass
-class RangeTree:
+class IterationRanges:
     """
     Each range tree represents multiple sets of iteration indexing
     in a single tiled dimension in the output kernel.
@@ -223,45 +250,33 @@ class RangeTree:
         var_ranges: Dict[sympy.Symbol, sympy.Expr],
         numel: sympy.Expr,
         prefix: str,
-        depth=0,
+        divisor=sympy.Integer(1),
         length=sympy.Integer(1),
     ):
-        super(RangeTree, self).__init__()
+        super(IterationRanges, self).__init__()
         self.name = name
-        self.children: Dict[sympy.Expr, RangeTreeEntry] = {}
         self.var_list = var_list
         self.var_ranges = var_ranges
         self.numel = numel
         self.prefix = prefix
-        self.depth = depth
+        self.divisor = divisor
         self.length = length
-
-    def cache_clear(self):
-        for child in self.children.values():
-            child.cache_clear()
 
     def is_loop(self):
         return self.prefix == "r"
 
-    def child_node(self, length):
-        if length not in self.children:
-            node = RangeTreeEntry(
-                f"{self.prefix}{next(V.kernel.iter_vars_count)}", length, self
-            )
-            self.children[length] = node
-            V.kernel.range_tree_nodes[node.symbol()] = node
-            self.var_list.append(node.symbol())
-            self.var_ranges[node.symbol()] = length
-        else:
-            node = self.children[length]
-        return node
 
-
-class RangeTreeRoot(RangeTree):
+class IterationRangesRoot(IterationRanges):
     def __init__(
-        self, name: str, numel: sympy.Expr, prefix: str, index: int, kernel: "Kernel"
+        self,
+        name: str,
+        numel: sympy.Expr,
+        prefix: str,
+        index: int,
+        kernel: "Kernel",
+        pid_cache={},
     ):
-        super(RangeTreeRoot, self).__init__(
+        super(IterationRangesRoot, self).__init__(
             name=name,
             var_list=[],
             var_ranges={},
@@ -270,58 +285,124 @@ class RangeTreeRoot(RangeTree):
         )
         self.index = index
         self.kernel = kernel
+        # Store all the nodes in one flat list
+        self.nodes: Dict[sympy.Expr, IterationRangesEntry] = {}
+        # This is for re-ordering program ID in triton mm template
+        # pid_cache["tl.program_id(0)"] = pid_m
+        self.pid_cache: Dict[str, str] = pid_cache
 
-    def codegen_next(self):
-        return self.name
+    def cache_clear(self):
+        for node in self.nodes.values():
+            node.cache_clear()
 
-    def simplify(self, expr, nodes):
-        return expr
+    def lookup(self, divisor, length):
+        """
+        Lookup a given RangeTreeEntry, creating it if needed
+        """
+        if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
+            expr = ir.IndexingDiv(sympy.Symbol(f"{self.prefix}index"), divisor)
+        else:
+            expr = ir.ModularIndexing(
+                sympy.Symbol(f"{self.prefix}index"), divisor, length
+            )
 
-    def construct(self, lengths):
-        node = self
+        if expr not in self.nodes:
+            node = IterationRangesEntry(
+                f"{self.prefix}{next(V.kernel.iter_vars_count)}",
+                divisor,
+                length,
+                expr,
+                self,
+            )
+            V.kernel.range_tree_nodes[node.symbol()] = node
+            self.var_list.append(node.symbol())
+            self.var_ranges[node.symbol()] = length
+            self.nodes[expr] = node
+        return self.nodes[expr]
+
+    def construct(self, lengths: List[sympy.Expr]):
+        divisor = sympy.Integer(1)
         itervars = []
-        for sv in reversed(lengths):
-            node = node.child_node(sv)
-            itervars.append(node.symbol())
+        for length in reversed(lengths):
+            itervars.append(self.lookup(divisor, length).symbol())
+            divisor = divisor * length
         return list(reversed(itervars))
+
+    def vars_and_sizes(self, index: sympy.Expr):
+        """Figure out vars from this tree used in index"""
+        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
+        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        divisor = sympy.Integer(1)
+        index_vars = []
+        sizes = []
+
+        def add(node):
+            nonlocal divisor
+            index_vars.append(node.symbol())
+            sizes.append(node.length)
+            divisor = divisor * node.length
+
+        for node in nodes:
+            if not V.graph.sizevars.maybe_guard_equals(node.divisor, divisor):
+                # fill in unused index var
+                add(self.lookup(divisor, ir.IndexingDiv(node.divisor, divisor)))
+                divisor = node.divisor
+            add(node)
+        if not V.graph.sizevars.maybe_guard_equals(self.numel, divisor):
+            # fill in unused index var
+            add(self.lookup(divisor, ir.IndexingDiv(self.numel, divisor)))
+
+        return list(reversed(index_vars)), list(reversed(sizes))
 
     def ranges_code(self):
         size = self.kernel.reshape_size_str(self.index, self.prefix)
         return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+
+    def pid_cache_lookup(self, key):
+        if key in self.pid_cache:
+            return self.pid_cache[key]
+        return key
 
     def codegen_header(self, code):
         x = self.prefix
         if self.is_loop():
             code.writeline(f"{self.name} = {x}offset + {x}base")
         else:
+            pid = self.pid_cache_lookup(f"tl.program_id({self.index})")
             code.writelines(
                 [
-                    f"{x}offset = tl.program_id({self.index}) * {x.upper()}BLOCK",
+                    f"{x}offset = {pid} * {x.upper()}BLOCK",
                     f"{self.name} = {x}offset + {self.ranges_code()}",
                 ]
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
-class RangeTreeEntry(RangeTree):
-    def __init__(self, name: str, length: sympy.Expr, parent: RangeTree):
-        super(RangeTreeEntry, self).__init__(
+class IterationRangesEntry(IterationRanges):
+    def __init__(
+        self,
+        name: str,
+        divisor: sympy.Expr,
+        length: sympy.Expr,
+        expr: sympy.Expr,
+        parent: IterationRanges,
+    ):
+        super(IterationRangesEntry, self).__init__(
             name=name,
             numel=parent.numel / length,
             var_list=parent.var_list,
             var_ranges=parent.var_ranges,
             prefix=parent.prefix,
+            divisor=divisor,
             length=length,
-            depth=parent.depth + 1,
         )
         self.parent = parent
         self.codegen = functools.lru_cache(None)(self._codegen)
-        self.codegen_next = functools.lru_cache(None)(self._codegen_next)
+        self.expr = expr
 
     def cache_clear(self):
         self.codegen.cache_clear()
-        self.codegen_next.cache_clear()
-        super().cache_clear()
 
     def writeline(self, line):
         if self.is_loop():
@@ -330,53 +411,12 @@ class RangeTreeEntry(RangeTree):
             # lift non-reduction stores outside loop
             V.kernel.body.writeline(line)
 
-    def _codegen_next(self):
-        denom = texpr(V.kernel.rename_indexing(self.length))
-        self.writeline(
-            f"{self.name}_next = {self.parent.codegen_next()} // {TritonPrinter.paren(denom)}"
-        )
-        return f"{self.name}_next"
-
     def _codegen(self):
-        denom = texpr(V.kernel.rename_indexing(self.length))
-        if self.numel == 1:
-            line = f"{self.name} = {self.parent.codegen_next()}"
-        else:
-            line = f"{self.name} = {self.parent.codegen_next()} % {TritonPrinter.paren(denom)}"
-        self.writeline(line)
+        self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
     def symbol(self):
         return sympy.Symbol(self.name)
-
-    def next_symbol(self):
-        return sympy.Symbol(f"{self.name}_next")
-
-    def simplify(self, expr: sympy.Expr):
-        """
-        Merge the indexing math for contiguous dimensions
-        """
-        if isinstance(self.parent, RangeTreeRoot):
-            return expr
-
-        v1 = sympy.Symbol("subs_var1")
-        v2 = sympy.Symbol("subs_var2")
-        pl = self.parent.length
-        test_expr = sympy.expand(
-            expr.subs({self.name: 0, self.parent.name: (v1 * pl + v2)}).subs(
-                {
-                    v1: self.name,
-                    v2: self.parent.name,
-                }
-            )
-        )
-        if test_expr == sympy.expand(expr):
-            # we can compact this dimension into a a single one
-            node = self.parent.parent.child_node(self.length * self.parent.length)
-            new_expr = expr.subs({self.name: 0, self.parent.name: node.symbol()})
-            return node.simplify(new_expr)
-
-        return expr
 
     def __hash__(self):
         return hash(self.name)
@@ -393,7 +433,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups):
+    def __init__(self, *groups, pid_cache={}):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -405,13 +445,15 @@ class TritonKernel(Kernel):
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
-        self.initialize_range_tree()
+        self.initialize_range_tree(pid_cache)
 
-    def initialize_range_tree(self):
+    def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
             self.range_trees.append(
-                RangeTreeRoot(names[i], self.numels[i], names[i][0], i, self)
+                IterationRangesRoot(
+                    names[i], self.numels[i], names[i][0], i, self, pid_cache
+                )
             )
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
@@ -425,7 +467,8 @@ class TritonKernel(Kernel):
     def disable_reduction(self):
         @contextlib.contextmanager
         def ctx():
-            if not self.inside_reduction:
+            if self.numels[-1] == 1:
+                assert not self.inside_reduction
                 yield
                 return
             # calling codegen_body() will flush all the pending buffers
@@ -433,6 +476,8 @@ class TritonKernel(Kernel):
             self.codegen_body()
             self.inside_reduction = False
             yield
+            # flush out any code before opening the next loop
+            self.codegen_body()
             self.inside_reduction = True
 
         return ctx()
@@ -444,22 +489,13 @@ class TritonKernel(Kernel):
             for length, ranges in zip(lengths, self.range_trees)
         ]
 
-    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
-        """
-        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
-
-        To do this we need to split up the iteration space of i0 into something like:
-            for i1 in s0:
-              for i2 in s1:
-                i0 = i1*s1 + i2
-                ....
-
-        This function matches and resplits lengths to the groups of
-        this kernel to enable tiled + non-tiled fusions.
-        """
+    @staticmethod
+    def _split_iteration_ranges(
+        groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]
+    ):
         sv = V.graph.sizevars
-        new_ranges = [[] for _ in self.range_trees]
-        remaining = [sv.simplify(rt.numel) for rt in self.range_trees]
+        new_ranges = [[] for _ in groups]
+        remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
 
         def add_range(i, expr):
@@ -483,6 +519,10 @@ class TritonKernel(Kernel):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
+                if sv.maybe_guard_equals(size, 1):
+                    return_getters.append(lambda _: sympy.Integer(0))
+                    continue
+
                 while (
                     current_group < len(remaining)
                     and sv.size_hint(remaining[current_group]) == 1
@@ -507,10 +547,48 @@ class TritonKernel(Kernel):
                     return_getters.append(
                         operator.itemgetter(add_range(current_group, size))
                     )
-
             return_getters_groups.append(return_getters)
 
-        assert all(s == 1 for s in remaining)
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
+
+        return new_ranges, return_getters_groups
+
+    @classmethod
+    def is_compatible(cls, groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]):
+        try:
+            cls._split_iteration_ranges(groups, lengths)
+            return True
+        except CantSplit:
+            return False
+
+    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
+        """
+        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
+
+        To do this we need to split up the iteration space of i0 into something like:
+            for i1 in s0:
+              for i2 in s1:
+                i0 = i1*s1 + i2
+                ....
+
+        This function matches and resplits lengths to the groups of
+        this kernel to enable tiled + non-tiled fusions.
+        """
+        groups = [rt.numel for rt in self.range_trees]
+        if not self.inside_reduction:
+            groups[-1] = sympy.Integer(1)
+
+        if len(lengths) == len(self.range_trees) and all(
+            V.graph.sizevars.simplify(sympy_product(x) - g) == 0
+            for x, g in zip(lengths, groups)
+        ):
+            return self.set_ranges(*lengths)
+
+        new_ranges, return_getters_groups = self._split_iteration_ranges(
+            groups, lengths
+        )
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
@@ -522,14 +600,38 @@ class TritonKernel(Kernel):
             for v in index_vars
         )
 
-    def indexing(self, index: sympy.Expr, copy_shape=None):
+    def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
+        """
+        More aggressive simplification to merge contiguous dims
+        """
+        index_vars, sizes = tree.vars_and_sizes(index)
+        if len(sizes) <= 1:
+            return index
+        new_sizes, reindex, prune = ir._simplify_loops(
+            index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
+        )
+        if new_sizes == sizes:
+            return index
+        new_index_vars = tree.construct(new_sizes)
+        new_index = index.subs(dict(zip(index_vars, reindex(new_index_vars))))
+        return new_index
+
+    def indexing(self, index: sympy.Expr, copy_shape=None, dense_indexing=False):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
+        index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
+        for tree in self.range_trees:
+            index = self.combine_contiguous_dims(index, tree)
         index_vars = set(index.free_symbols)
-        index_str = texpr(self.rename_indexing(self.simplify_indexing(index)))
+        index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
         indirect_indexing = self.is_indirect_indexing(index)
-        need_dense = (config.triton.dense_indexing or indirect_indexing) and index != 0
+        need_dense = (
+            config.triton.dense_indexing
+            or dense_indexing
+            or indirect_indexing
+            or self._load_mask is not None
+        ) and index != 0
         have_dense = True
         have_loop_vars = False
         mask = []
@@ -561,38 +663,26 @@ class TritonKernel(Kernel):
         return index_str, " & ".join(mask)
 
     def var_ranges(self):
-        return (
-            dict(
-                itertools.chain.from_iterable(
-                    tree.var_ranges.items() for tree in self.range_trees
-                )
-            ),
+        return dict(
+            itertools.chain.from_iterable(
+                tree.var_ranges.items() for tree in self.range_trees
+            )
         )
 
-    def simplify_indexing(self, expr: sympy.Expr):
+    def codegen_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
-        sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
-        nodes = [
-            self.range_tree_nodes[sym]
-            for sym in sorted_expr_symbols
-            if sym in self.range_tree_nodes
-        ]
-        if nodes:
-            nodes.sort(key=lambda x: x.depth)
-            expr = nodes[-1].simplify(expr)
-            sorted_expr_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
-
-        for sym in sorted_expr_symbols:
+        for sym in sorted(expr.free_symbols, key=str):
             if sym in self.range_tree_nodes:
                 self.range_tree_nodes[sym].codegen()
-
         return expr
 
     @contextlib.contextmanager
     def mask_loads(self, mask):
         """Context manager to add an additional mask to tl.load/store"""
-        assert self._load_mask is None, "TODO: nesting"
         prior = self._load_mask
+        if prior:
+            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+
         self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):
             # TODO(jansel): do we need a reshape here?
@@ -638,30 +728,40 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, dtype))
+        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
         sizes[-1] = "1"
+        reduction_range_prefix = self.range_trees[-1].prefix
+        reduction_sizes = ["1" for _ in self.range_trees]
+        reduction_sizes[-1] = f"{reduction_range_prefix.upper()}BLOCK"
+
         if reduction_type == "any":
             reduction_type = "max"
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        if (dtype, reduction_type, value) not in self.cse.reduction_cache:
-            self.cse.reduction_cache[(dtype, reduction_type, value)] = result_var
+        if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
+            self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(dtype)}) + {default}"
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}) + {default}"
             )
+            accumulator_index = None
+            if reduction_type in {"argmax", "argmin"}:
+                accumulator_index = f"_{result_var}_index"
+                self.body.writeline(
+                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
+                )
 
             updated = value
-            if reduction_type == "min":
+            if reduction_type in {"min", "argmin"}:
                 masks.append(f"({accumulator} > {value})")
-            elif reduction_type == "max":
+            elif reduction_type in {"max", "argmax"}:
                 masks.append(f"({accumulator} < {value})")
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
@@ -669,15 +769,34 @@ class TritonKernel(Kernel):
                 raise NotImplementedError(f"reduction_type {reduction_type}")
 
             cond = " & ".join(masks)
+
+            if accumulator_index:
+                # argmax or argmin
+                self.compute.writeline(
+                    f"{accumulator_index} = tl.where({cond},  {reduction_range_prefix}index, {accumulator_index})",
+                )
             self.compute.writeline(
                 f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
             )
 
-            self.suffix.writeline(
-                f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
-            )
+            if accumulator_index:
+                # argmax, argmin
+                self.suffix.writelines(
+                    [
+                        f"{accumulator_index}_reduce = tl.reshape(",
+                        f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
+                        f"{accumulator_index}_mask = (tl.reshape(tl.arange(0, {reduction_range_prefix.upper()}BLOCK),",
+                        f"\t[{', '.join(reduction_sizes)}]) == {accumulator_index}_reduce)",
+                        f"{result_var} = tl.reshape(tl.sum(",
+                        f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
+                    ]
+                )
+            else:
+                self.suffix.writeline(
+                    f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+                )
         else:
-            var_name = self.cse.reduction_cache[(dtype, reduction_type, value)]
+            var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
         index, mask = self.indexing(index, result_var)
@@ -836,6 +955,7 @@ class TritonScheduling:
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
+    # TODO(panyj): remove this
     def group_fn_NHW_C(self, sizes):
         # group to size of NHW, C for 4d tensor
         group = ()
@@ -849,66 +969,125 @@ class TritonScheduling:
                 group += (V.graph.sizevars.simplify(sympy_product(s)),)
         return group
 
-    def codegen(self, *groups):
-        log.info(f"codegen {groups}")
+    # TODO(panyj): remove this
+    def group_fn_M_N(self, sizes):
+        group = ()
+        for s in sizes:
+            if len(s) == 2:
+                group += (s[0], s[1])
+            # batch == 1
+            elif len(s) == 3 and s[0] == 1:
+                group += (s[1], s[2])
+            else:
+                group += (V.graph.sizevars.simplify(sympy_product(s)),)
+        return group
+
+    def create_node_schedule_pointwise(self, numel: sympy.Expr):
+        """
+        Get a list of SchedulerNode to execute in a single triton kernel.
+
+        `numel` is the number of elements in the input/output
+        """
+        node_schedule = []
+        for node in self.scheduler.pop_group(
+            (numel, sympy.Integer(1)),
+        ):
+            node.mark_run()
+            node_schedule.append(node)
+            node.mark_fusable()
+        return node_schedule
+
+    def create_node_schedule_reduction(
+        self, numel: sympy.Expr, reduction_numel: sympy.Expr
+    ):
+        """
+        Get a list of SchedulerNode to execute in a single triton kernel.
+
+        `numel * reduction_numel` is the elements in the input
+        `numel` is the number of elements in the output
+        """
+        node_schedule = []
+        # nodes with incompatible dimensions we failed to schedule
+        nodes_to_reschedule = []
+
+        for _ in self.scheduler.iter_fixed_point():
+            for node in self.scheduler.pop_group(
+                (numel * reduction_numel, sympy.Integer(1)),
+            ):
+                if TritonKernel.is_compatible(
+                    (numel, reduction_numel), node.get_ranges()
+                ):
+                    node.mark_run()
+                    node_schedule.append(node)
+                    node.mark_fusable()
+                else:
+                    log.debug(
+                        "rescheduling due to not is_compatible(%s, %s)",
+                        (numel, reduction_numel),
+                        node.get_ranges(),
+                    )
+                    nodes_to_reschedule.append(node)
+
+            # scheduler.pop_group will keep iterating all reachable fusable nodes
+            reductions_to_mark_fusable = []
+            for node in self.scheduler.pop_group((numel, reduction_numel)):
+                node.mark_run()
+                node_schedule.append(node)
+                reductions_to_mark_fusable.append(node)
+            # mark reductions fusable later as they rely on the loop break below
+            for node in reductions_to_mark_fusable:
+                node.mark_fusable(broadcast_after_reduce=True)
+
+            node_schedule.append(DisableReduction)  # close reduction loop
+            # Add more pointwise with fewer dimensions
+            for node in self.scheduler.pop_group((numel, sympy.Integer(1))):
+                node.mark_run()
+                node_schedule.append(node)
+                node.mark_fusable()
+            node_schedule.append(EnableReduction)  # open new reduction loop
+
+            if self.is_better_tiling_ready(numel, reduction_numel):
+                # early exit to prevent a fusion that would result in worse tiling
+                break
+
+        self.scheduler.enqueue(nodes_to_reschedule)
+        return node_schedule
+
+    def codegen(self, numel, reduction_numel):
+        """
+        Generate a single triton kernel.  If reduction_numel != 1 this is
+        a reduction kernel, otherwise pointwise.
+        """
+        if reduction_numel == 1:
+            node_schedule = self.create_node_schedule_pointwise(numel)
+        else:
+            if self.is_better_tiling_ready(numel, reduction_numel):
+                # preempt this reduction kernel with a tiled pointwise
+                self.codegen(numel * reduction_numel, sympy.Integer(1))
+            node_schedule = self.create_node_schedule_reduction(numel, reduction_numel)
+
+        nodes = [
+            n
+            for n in node_schedule
+            if isinstance(n, torchinductor.scheduler.SchedulerNode)
+        ]
+        log.info(
+            f"codegen numel={numel} reduction_numel={reduction_numel} nodes={len(nodes)}"
+        )
+
+        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+
+        with self.scheduler.kernel(TritonKernel(*tiled_groups)) as kernel:
+            stack = contextlib.ExitStack()
+            for node in node_schedule:
+                if node is DisableReduction:
+                    stack.enter_context(kernel.disable_reduction())
+                elif node is EnableReduction:
+                    stack.close()
+                else:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+
         wrapper = V.graph.wrapper_code
-        scheduler = self.scheduler
-
-        reduction_nodes = []
-        reschedule = []
-        with scheduler.kernel(TritonKernel(*groups)) as kernel:
-            for _ in scheduler.iter_fixed_point():
-                # scheduler.pop_group will keep iterating all reachable fusable nodes
-                for node in scheduler.pop_group(groups):
-                    node.run(*kernel.set_ranges(*node.get_ranges()))
-                    if kernel.inside_reduction:
-                        reduction_nodes.append(node)
-                    else:
-                        node.mark_fusable()
-
-                # the rest of this function could be correctly removed
-                # it is various cases of horizonal fusions
-                if kernel.inside_reduction:
-                    # TODO(jansel): rewrite this to support tiled reductions
-                    group, reduction_group = groups
-
-                    # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_groups(
-                        [
-                            (group * reduction_group, sympy.Integer(1)),
-                            (group, reduction_group, sympy.Integer(1)),
-                        ]
-                    ):
-                        try:
-                            node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                            node.mark_fusable()
-                        except CantSplit:
-                            reschedule.append(node)
-
-                    # we mark reductions fusable here as they rely on the loop break below
-                    for node in reduction_nodes:
-                        node.mark_fusable(broadcast_after_reduce=True)
-                    reduction_nodes.clear()
-
-                    # Add more pointwise with fewer dimensions
-                    # disable_reduction() will close the current reduction loop
-                    with kernel.disable_reduction():
-                        for node in scheduler.pop_group((group, sympy.Integer(1))):
-                            node.run(*kernel.set_ranges(*node.get_ranges()))
-                            node.mark_fusable()
-
-                elif len(groups) == 3:
-                    tile1, tile2, _ = groups
-                    # Add pointwise with compatible dimensions
-                    for node in scheduler.pop_group(
-                        (tile1 * tile2, sympy.Integer(1)),
-                    ):
-                        try:
-                            node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                            node.mark_fusable()
-                        except CantSplit:
-                            reschedule.append(node)
-
         if config.triton.many_files:
             kernel_name = wrapper.next_kernel_name()
             wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
@@ -921,15 +1100,184 @@ class TritonScheduling:
                 wrapper.kernels[src_code] = kernel_name
                 code = src_code.format(kernel_name=kernel_name)
                 wrapper.header.splice(code)
-
         kernel.call_kernel(wrapper, kernel_name)
 
-        scheduler.enqueue(reschedule)
-        scheduler.barrier()
-        scheduler.maybe_free_buffers()
+        self.scheduler.barrier()
+        self.scheduler.maybe_free_buffers()
+
+    @staticmethod
+    @functools.lru_cache(32)
+    def candidate_tilings(node):
+        ranges, reduction_ranges = node.get_ranges()
+        if len(ranges) <= 1:
+            return ()
+
+        rw = node.pointwise_read_writes()
+        assert len(rw.range_vars) == len(ranges)
+
+        deps = [
+            dep
+            for dep in itertools.chain(rw.reads, rw.writes)
+            if dep.name not in V.graph.removed_buffers
+        ]
+        write_names = {dep.name for dep in rw.writes}
+
+        tilings = []
+
+        for dep in deps:
+            strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
+            assert len(strides) == len(ranges)
+            try:
+                split = strides.index(1) + 1
+                if split == len(ranges):
+                    continue
+                if all(s == 0 for s in strides[split:]):
+                    # if this is a broadcasted tensor and all dimensions after split are broadcast,
+                    # this is not a real split
+                    continue
+
+            except ValueError:
+                continue
+            tiled_groups = (
+                V.graph.sizevars.simplify(sympy_product(ranges[:split])),
+                V.graph.sizevars.simplify(sympy_product(ranges[split:])),
+            )
+            # score by number of elements
+            score = V.graph.sizevars.size_hint(
+                sympy_product(
+                    size for size, stride in zip(ranges, strides) if stride != 0
+                )
+            )
+            if dep.name in write_names:
+                # ngimel said contiguous writes is more important than reads
+                score *= 2
+            if CandidateTiling.is_good_size(tiled_groups[0]):
+                score *= 2
+            if CandidateTiling.is_good_size(tiled_groups[1]):
+                score *= 2
+
+            tilings.append(CandidateTiling(tiled_groups, score, dep.name))
+        return tilings
+
+    @classmethod
+    def select_tiling(cls, node_schedule, numel, reduction_numel):
+        """
+        Heuristics to decide how to tile kernels.
+        Currently, we tile based on stride-1 dimensions.
+
+        Returns:
+            `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
+
+        """
+        if reduction_numel != 1 or config.triton.max_tiles <= 1:
+            # TODO(jansel): should we tile reductions?
+            return (numel, reduction_numel)
+
+        seen_names = set()
+        candidate_tiles = collections.Counter()
+        for node in EnableReduction.filter(node_schedule):
+            for tiling in cls.candidate_tilings(node):
+                if tiling.name in seen_names:
+                    continue
+                seen_names.add(tiling.name)
+                candidate_tiles[tiling.tiling] += tiling.score
+
+        ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
+
+        if config.triton.max_tiles >= 3:
+            # Add one 3D tiling choice
+            for i in range(1, len(ranked_tilings)):
+                a0, a1 = ranked_tilings[0]
+                b0, b1 = ranked_tilings[i]
+                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+                    continue
+                if V.graph.sizevars.size_hint(a1 - b1) < 0:
+                    # swap so a0 is bigger
+                    a0, a1 = ranked_tilings[i]
+                    b0, b1 = ranked_tilings[0]
+                assert V.graph.sizevars.size_hint(a1 - b1) > 0
+                if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
+                    tiling = (a0, ir.IndexingDiv(a1, b1), b1)
+                    ranked_tilings = [tiling] + ranked_tilings
+                    break  # only 1 choice for now
+
+        for tiled_groups in ranked_tilings:
+            new_groups = (*tiled_groups, reduction_numel)
+            if all(
+                TritonKernel.is_compatible(new_groups, node.get_ranges())
+                for node in node_schedule
+                if isinstance(node, torchinductor.scheduler.SchedulerNode)
+            ):
+                return new_groups
+            else:
+                log.warning("incompatible tiling %s -- %s", new_groups, ranked_tilings)
+
+        return (numel, reduction_numel)
+
+    def is_better_tiling_ready(self, numel, reduction_numel):
+        """
+        Check for a pending node wanting a different tiling strategy
+        than the given reduction.
+        """
+        nodes = list(
+            self.scheduler.pop_group((numel * reduction_numel, sympy.Integer(1)))
+        )
+        self.scheduler.enqueue(nodes)
+
+        tiling = tuple(
+            self.select_tiling(nodes, numel * reduction_numel, sympy.Integer(1))
+        )
+        return tiling and tiling not in [
+            (numel, reduction_numel),
+            (numel, reduction_numel, sympy.Integer(1)),
+            (numel * reduction_numel, sympy.Integer(1)),
+        ]
 
     def flush(self):
         pass
+
+
+@dataclasses.dataclass
+class CandidateTiling:
+    tiling: List[sympy.Expr]
+    score: int  # higher is better
+    name: str = None
+
+    @staticmethod
+    def is_good_size(s):
+        """Somewhat arbitrary heuristic used to boost scores for some sizes"""
+        s = V.graph.sizevars.size_hint(s)
+        return s >= 32 and (s % 32 == 0)
+
+
+class DisableReduction:
+    """
+    Marker to invoke `kernel.disable_reduction()`.  This closes a
+    reduction loop and allows for pointwise ops to occur on the output
+    of a reduction.
+    """
+
+
+class EnableReduction:
+    """
+    Marker to end a DisableReduction block.
+    """
+
+    @staticmethod
+    def filter(node_schedule):
+        """
+        Get the nodes from node_schedule skipping those in a
+        DisableReduction block.
+        """
+        disabled = False
+        for node in node_schedule:
+            if node in (EnableReduction, DisableReduction):
+                # Don't tile stuff outside the main reduction loop
+                disabled = node is DisableReduction
+            elif disabled:
+                pass
+            else:
+                yield node
 
 
 class CantSplit(Exception):

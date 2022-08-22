@@ -6,6 +6,7 @@ from itertools import chain
 import torch
 from torch.fx import GraphModule
 from torch.fx import Node
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.nn.utils import _stateless
 
 from ..allowed_functions import torch_get_name
@@ -96,6 +97,9 @@ def python_key_normalize(
     params_len = len(params_flat)
     nargs = params_len + len(example_inputs)
 
+    tracer = None
+    proxy_mode = None
+
     class PatchingInterpreter(torch.fx.Interpreter):
         def run_node(self, n: torch.fx.Node):
             try:
@@ -108,6 +112,9 @@ def python_key_normalize(
                         # Tensor creation ops won't be captured because none
                         # of their inputs are PythonTensor proxies.
                         # Explicitly add them to the output graph.
+                        if n.target.__module__ == "torch":
+                            return result
+
                         result = python_tensor_cls(
                             result,
                             tracer.create_proxy(n.op, n.target, n.args, n.kwargs),
@@ -129,16 +136,17 @@ def python_key_normalize(
 
     def fn_for_tracing(*proxy_args):
         assert len(proxy_args) == nargs
-        args = [
-            python_tensor_cls(elem, proxy)
-            for elem, proxy in zip(chain(params_flat, example_inputs), proxy_args)
-        ]
-        with _stateless.reparametrize_module(
-            gm, pytree.tree_unflatten(args[:params_len], params_spec)
-        ):
-            out = PatchingInterpreter(gm).run(*args[params_len:])
+        with proxy_mode:
+            args = [
+                python_tensor_cls(elem, proxy, proxy_mode=proxy_mode)
+                for elem, proxy in zip(chain(params_flat, example_inputs), proxy_args)
+            ]
+            with _stateless.reparametrize_module(
+                gm, pytree.tree_unflatten(args[:params_len], params_spec)
+            ):
+                out = PatchingInterpreter(gm).run(*args[params_len:])
 
-        assert isinstance(out, (tuple, list)), "graph must output tuple()"
+            assert isinstance(out, (tuple, list)), "graph must output tuple()"
 
         def unpack(x):
             if hasattr(x, "proxy"):
@@ -149,6 +157,7 @@ def python_key_normalize(
 
     with pythonkey_decompose({**aot_autograd_decompositions, **decompositions}):
         tracer: torch.fx.Tracer = PythonKeyTracer()
+        proxy_mode = ProxyTorchDispatchMode(tracer)
         graph = tracer.trace(fake_signature(fn_for_tracing, nargs))
         traced = GraphModule(tracer.root, graph, "python_key_traced")
         # https://github.com/pytorch/pytorch/pull/80013 switched over

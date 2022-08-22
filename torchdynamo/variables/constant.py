@@ -2,6 +2,8 @@ import operator
 from typing import Dict
 from typing import List
 
+import torch
+
 from .. import variables
 from ..exc import unimplemented
 from ..utils import istype
@@ -12,6 +14,7 @@ from .base import typestr
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(ConstantVariable, self).__init__(**kwargs)
+        assert not isinstance(value, torch.Tensor)
         self.value = value
 
     def as_proxy(self):
@@ -86,7 +89,6 @@ class ConstantVariable(VariableTracker):
         def has_arith_binop(num_ty):
             return (
                 isinstance(self.value, num_ty)
-                and name in num_ty.__dict__.keys()
                 and hasattr(operator, name)
                 and len(args) == 1
                 and args[0].is_python_constant()

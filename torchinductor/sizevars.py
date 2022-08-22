@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import logging
 from typing import Dict
 from typing import List
 
@@ -9,7 +10,10 @@ from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from .utils import freeze_inputs
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -57,6 +61,8 @@ class SizeVarAllocator(object):
     def simplify(self, expr):
         return sympy.expand(expr).subs(self.replacements)
 
+    @freeze_inputs
+    @functools.lru_cache(256)
     def simplify_with_ranges(self, expr, var_ranges):
         """
         Simplify indexing expression with knowledge of the ranges of
@@ -83,13 +89,12 @@ class SizeVarAllocator(object):
         def visit_indexing_div(base, divisor):
             return IndexingDiv(remove_zero_terms(base, divisor), divisor)
 
-        def visit_moduler_indexing(base, divisor, modulus):
+        def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            if (
-                isinstance(base, sympy.Symbol)
-                and base in var_ranges
-                and self.maybe_guard_leq(var_ranges[base], modulus * divisor)
-            ):
+            # actual iteration range is to size-1
+            iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
+            base_s = base.subs(iter_ranges)
+            if self.maybe_guard_lt(base_s, modulus * divisor):
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -99,7 +104,7 @@ class SizeVarAllocator(object):
                 sympy.Wild("divisor"),
                 sympy.Wild("modulus"),
             ),
-            visit_moduler_indexing,
+            visit_modular_indexing,
         )
         expr = expr.replace(
             IndexingDiv(
@@ -171,6 +176,15 @@ class SizeVarAllocator(object):
         self.guard_leq(left, right)
         return True
 
+    def maybe_guard_lt(self, left: sympy.Expr, right: sympy.Expr):
+        try:
+            if self.size_hint(left) >= self.size_hint(right):
+                return False
+        except TypeError:
+            return False
+        self.guard_lt(left, right)
+        return True
+
     def guard_leq(self, left: sympy.Expr, right: sympy.Expr):
         return self.guard_lt(left, right + 1)
 
@@ -206,9 +220,8 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            from .ir import ModularIndexing
-
-            self.guard_equals(ModularIndexing(numerator, 1, denominator), 0)
+            multiple = self.size_hint(numerator) // self.size_hint(denominator)
+            self.guard_equals(multiple * denominator, numerator)
             return True
         return False
 
@@ -268,7 +281,13 @@ class SizeVarAllocator(object):
         for v in index.free_symbols:
             if str(v).startswith("indirect"):
                 index = index.subs({v: 0})
-        return [self.size_hint(s) for s in self.stride_vars(index, vars)]
+        result = []
+        for s in self.stride_vars(index, vars):
+            try:
+                result.append(self.size_hint(s))
+            except TypeError:
+                result.append(0)
+        return result
 
     def stride_order(self, index: sympy.Expr, vars: List[sympy.Symbol]):
         strides = tuple(map(abs, self.stride_hints(index, vars)))
@@ -329,14 +348,19 @@ class SizeVarAllocator(object):
         return f"({', '.join(parts)})"
 
 
+@functools.lru_cache(256)
 def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
     """
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
     becomes
     ModularIndexing(i0, 1, 128)
+    ModularIndexing(i0, 1, 32) + 32 * IndexingDiv(i0, 32)
+    becomes i0
+
 
     This type of pattern can come from view operations
     """
+    from .ir import IndexingDiv
     from .ir import ModularIndexing
 
     if not isinstance(expr, sympy.Add):
@@ -352,7 +376,9 @@ def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
         if m1:
             for term2 in expr.args:
                 m2 = term2.match(
-                    m1[scale] * m1[mod1] * ModularIndexing(m1[base], m1[mod1], mod2)
+                    m1[scale]
+                    * m1[mod1]
+                    * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
                 )
                 if m2 and term1 != term2:
                     expr = join_dimensions(
@@ -363,6 +389,22 @@ def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
                         * ModularIndexing(m1[base], m1[divisor], m1[mod1] * m2[mod2])
                     )
                     return expr
+    for term1 in expr.args:
+        m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
+        if m1:
+            for term2 in expr.args:
+                m2 = term2.match(
+                    m1[scale] * m1[mod1] * IndexingDiv(m1[base], m1[divisor] * m1[mod1])
+                )
+                if m2 is not None:  # in case of success we get an empty dict here
+                    expr = join_dimensions(
+                        expr
+                        - term1
+                        - term2
+                        + m1[scale] * IndexingDiv(m1[base], m1[divisor])
+                    )
+                    return expr
+
     return expr
 
 
@@ -384,9 +426,11 @@ class SimplifyIndexing(V.WrapperHandler):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
         return self._inner.store(name, index, value, mode=mode)
 
-    def reduction(self, name, dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.reduction(name, dtype, reduction_type, index, value)
+        return self._inner.reduction(
+            name, dtype, src_dtype, reduction_type, index, value
+        )
 
     def index_expr(self, index, dtype):
         index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
