@@ -2087,6 +2087,15 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertRaises(torchdynamo.exc.ResetRequired, fn3)
         fn2()
 
+    def test_dynamo_min_operator_with_shape(self):
+        with torchdynamo.optimize("eager", nopython=True):
+
+            def f(x, a):
+                return min(x.shape[0], a)
+
+            result = f(torch.ones(6), 3)
+            self.assertEqual(result, 3)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
