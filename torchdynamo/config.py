@@ -20,6 +20,9 @@ except ImportError:
 # ERROR print exceptions (and what user code was being processed when it occurred)
 log_level = logging.WARNING
 
+# Verbose will print full stack traces on warnings and errors
+verbose = False
+
 # verify the correctness of optimized backend
 verify_correctness = False
 
