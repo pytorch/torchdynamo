@@ -60,7 +60,7 @@ cnt: 12, ((T([128, 196, 384], f16), T([128, 196, 384], f16)), {})
 cnt: 12, ((T([128, 196, 384], f16, stride=(75264, 1, 196)), T([128, 196, 384], f16, stride=(75264, 1, 196))), {})
 cnt: 12, ((T([128, 196, 384], f16, stride=(75264, 1, 196)), T([1, 1, 384], f16)), {})
 Operator: aten.new_empty_strided.default
-cnt: 12, ((T([1536, 384], f16, stride=(1, 1536)), [1536, 384], [384, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 12, ((T([1536, 384], f16, stride=(1, 1536)), [1536, 384], [384, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([128, 1000], f16), T([128], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

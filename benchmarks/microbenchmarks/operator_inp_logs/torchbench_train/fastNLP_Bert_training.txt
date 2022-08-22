@@ -6,7 +6,7 @@ Operator: aten._softmax_backward_data.default
 cnt: 12, ((T([6, 12, 476, 476], f16), T([6, 12, 476, 476], f16), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([6, 474], i64),), {'dtype': i64, 'layout': torch.strided, 'device': "torch.device('cpu')"})
-cnt: 1, ((T([6], i64),), {'dtype': i64, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([6], i64),), {'dtype': i64, 'device': 'cuda'})
 cnt: 1, ((T([6, 476], b8),), {'dtype': i64})
 cnt: 1, ((T([6, 1, 1, 476], i64),), {'dtype': f16})
 Operator: aten._unsafe_view.default
@@ -123,11 +123,11 @@ cnt: 12, ((T([6, 476, 3072], f16),), {})
 Operator: aten.new_empty_strided.default
 cnt: 1, ((T([1, 6, 474, 768], f16), [1, 6, 474, 768], [2184192, 364032, 768, 1]), {})
 Operator: aten.new_full.default
-cnt: 1, ((T([6, 474], i64), [6, 476], 2457), {'dtype': i64, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 1, ((T([6, 474], i64), [6, 476], 2457), {'dtype': i64, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
 Operator: aten.new_zeros.default
-cnt: 1, ((T([6, 476, 768], f16), [1, 6, 474, 768]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 1, ((T([6, 474], i64), [6, 475]), {'dtype': i64, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 1, ((T([6, 474, 768], f16), [6, 474, 768]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([6, 476, 768], f16), [1, 6, 474, 768]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
+cnt: 1, ((T([6, 474], i64), [6, 475]), {'dtype': i64, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
+cnt: 1, ((T([6, 474, 768], f16), [6, 474, 768]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.pow.Tensor_Scalar
 cnt: 12, ((T([6, 476, 3072], f16), 2), {})
 Operator: aten.rsub.Scalar

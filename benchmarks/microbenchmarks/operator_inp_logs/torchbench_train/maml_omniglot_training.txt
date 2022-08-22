@@ -34,7 +34,7 @@ cnt: 1, ((T([5, 64, 3, 3], f16, stride=(576, 1, 192, 64)), T([5, 64, 3, 3], f16,
 cnt: 1, ((T([5, 64, 11, 11], f16, stride=(7744, 1, 704, 64)), T([5, 64, 11, 11], f16, stride=(7744, 1, 704, 64)), T([64], f16), T([64], f16), T([64], f16), T([64], f32), T([64], f32), False, 1e-05, [True, True, True]), {})
 cnt: 1, ((T([5, 64, 26, 26], f16, stride=(43264, 1, 1664, 64)), T([5, 64, 26, 26], f16, stride=(43264, 1, 1664, 64)), T([64], f16), T([64], f16), T([64], f16), T([64], f32), T([64], f32), False, 1e-05, [True, True, True]), {})
 Operator: aten.new_empty_strided.default
-cnt: 2, ((T([64, 64, 3, 3], f16, stride=(576, 1, 192, 64)), [64, 64, 3, 3], [576, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 2, ((T([64, 64, 3, 3], f16, stride=(576, 1, 192, 64)), [64, 64, 3, 3], [576, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.relu_.default
 cnt: 1, ((T([5, 64, 26, 26], f16, stride=(43264, 1, 1664, 64)),), {})
 cnt: 1, ((T([5, 64, 11, 11], f16, stride=(7744, 1, 704, 64)),), {})

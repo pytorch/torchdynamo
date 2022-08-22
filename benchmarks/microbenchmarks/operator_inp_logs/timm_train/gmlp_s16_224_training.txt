@@ -55,7 +55,7 @@ Operator: aten.native_layer_norm_backward.default
 cnt: 31, ((T([64, 196, 256], f16), T([64, 196, 256], f16, stride=(50176, 1, 196)), [256], T([64, 196, 1], f32), T([64, 196, 1], f32), T([256], f16), T([256], f16), [True, True, True]), {})
 cnt: 30, ((T([64, 196, 768], f16, stride=(150528, 1, 196)), T([64, 196, 768], f16, stride=(301056, 1536, 1)), [768], T([64, 196, 1], f32), T([64, 196, 1], f32), T([768], f16), T([768], f16), [True, True, True]), {})
 Operator: aten.new_empty_strided.default
-cnt: 30, ((T([196, 196], f16, stride=(1, 196)), [196, 196], [196, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 30, ((T([196, 196], f16, stride=(1, 196)), [196, 196], [196, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([64, 1000], f16), T([64], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

@@ -9,11 +9,11 @@ cnt: 12, ((T([48, 128, 128], f32), T([48, 128, 128], f32), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([4, 128], b8),), {'dtype': i64})
 cnt: 1, ((T([128, 128], f32),), {'dtype': f16})
-cnt: 1, ((T([4, 1, 128, 128], f16, stride=(0, 16384, 128, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([4, 1, 128, 128], f16, stride=(0, 16384, 128, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 cnt: 1, ((T([4, 1, 128, 128], b8, stride=(128, 128, 0, 1)),), {'dtype': f16})
 cnt: 1, ((T([4, 1, 128, 128], f16),), {'dtype': torch.bool})
 cnt: 12, ((T([48, 128, 128], f32),), {'dtype': f16})
-cnt: 12, ((T([48, 128, 128], f16),), {'dtype': f32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 12, ((T([48, 128, 128], f16),), {'dtype': f32, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten._unsafe_view.default
 cnt: 36, ((T([4, 128, 12, 64], f16), [4, 128, 768]), {})
 cnt: 1, ((T([512, 50272], f16), [4, 128, 50272]), {})

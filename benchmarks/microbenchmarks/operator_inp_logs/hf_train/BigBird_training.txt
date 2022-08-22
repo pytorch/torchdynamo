@@ -14,7 +14,7 @@ Operator: aten._to_copy.default
 cnt: 12, ((T([1, 1, 12, 64, 192], f32),), {'dtype': f16})
 cnt: 12, ((T([1, 1, 1024, 1], f32),), {'dtype': f16})
 cnt: 12, ((T([1, 1, 1, 1024], f32),), {'dtype': f16})
-cnt: 12, ((T([12, 14, 3], i32),), {'dtype': i64, 'device': "torch.device('cuda')"})
+cnt: 12, ((T([12, 14, 3], i32),), {'dtype': i64, 'device': 'cuda'})
 Operator: aten._unsafe_view.default
 cnt: 24, ((T([1, 12, 16, 64, 64], f16), [192, 64, 64]), {})
 cnt: 24, ((T([1, 12, 12, 64, 64], f16), [144, 64, 64]), {})
@@ -149,11 +149,11 @@ cnt: 26, ((T([1, 1024, 768], f16), T([1, 1024, 768], f16), [768], T([1, 1024, 1]
 Operator: aten.new_empty_strided.default
 cnt: 36, ((T([144, 64, 64], f16), [144, 64, 64], [4096, 64, 1]), {})
 Operator: aten.new_ones.default
-cnt: 24, ((T([1, 1, 1, 1024], f16), [1, 1, 1, 192]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 24, ((T([1, 12, 14, 64, 192], f32), [1, 12, 64, 256]), {'dtype': f32, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 24, ((T([1, 1, 1, 1024], f16), [1, 1, 1, 192]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
+cnt: 24, ((T([1, 12, 14, 64, 192], f32), [1, 12, 64, 256]), {'dtype': f32, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
 Operator: aten.new_zeros.default
 cnt: 12, ((T([12, 12, 64, 64], f16, stride=(64, 49152, 768, 1)), [589824]), {})
-cnt: 24, ((T([504, 64, 64], f16), [192, 64, 64]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 24, ((T([504, 64, 64], f16), [192, 64, 64]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([1024, 50358], f16), T([1024], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

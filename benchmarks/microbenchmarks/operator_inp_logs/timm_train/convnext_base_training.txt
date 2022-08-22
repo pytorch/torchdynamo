@@ -162,9 +162,9 @@ cnt: 1, ((T([32, 512, 14, 14], f16, stride=(100352, 1, 7168, 512)),), {})
 cnt: 1, ((T([32, 256, 28, 28], f16, stride=(200704, 1, 7168, 256)),), {})
 cnt: 1, ((T([32, 128, 56, 56], f16, stride=(401408, 1, 7168, 128)),), {})
 Operator: aten.new_empty_strided.default
-cnt: 1, ((T([1024, 512, 2, 2], f16, stride=(2048, 1, 1024, 512)), [1024, 512, 2, 2], [2048, 4, 2, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 1, ((T([512, 256, 2, 2], f16, stride=(1024, 1, 512, 256)), [512, 256, 2, 2], [1024, 4, 2, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 1, ((T([256, 128, 2, 2], f16, stride=(512, 1, 256, 128)), [256, 128, 2, 2], [512, 4, 2, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([1024, 512, 2, 2], f16, stride=(2048, 1, 1024, 512)), [1024, 512, 2, 2], [2048, 4, 2, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
+cnt: 1, ((T([512, 256, 2, 2], f16, stride=(1024, 1, 512, 256)), [512, 256, 2, 2], [1024, 4, 2, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
+cnt: 1, ((T([256, 128, 2, 2], f16, stride=(512, 1, 256, 128)), [256, 128, 2, 2], [512, 4, 2, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.new_zeros.default
 cnt: 1, ((T([32, 1024], f16), [32768]), {})
 Operator: aten.nll_loss_backward.default

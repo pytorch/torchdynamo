@@ -8,9 +8,9 @@ Operator: aten._softmax_backward_data.default
 cnt: 24, ((T([32, 128, 128], f16), T([32, 128, 128], f16), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([128, 128], f32),), {'dtype': f16})
-cnt: 1, ((T([2, 1, 128, 128], f16, stride=(0, 16384, 128, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([2, 1, 128, 128], f16, stride=(0, 16384, 128, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 cnt: 1, ((T([2, 128], b8),), {'dtype': i32})
-cnt: 1, ((T([2, 128], i64),), {'dtype': i32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([2, 128], i64),), {'dtype': i32, 'layout': torch.strided, 'device': 'cuda'})
 cnt: 1, ((T([2, 128], i32),), {'dtype': i64})
 Operator: aten._unsafe_view.default
 cnt: 72, ((T([2, 128, 16, 64], f16), [2, 128, 1024]), {})
@@ -78,7 +78,7 @@ cnt: 49, ((T([2, 128, 1024], f16), T([2, 128, 1024], f16), [1024], T([2, 128, 1]
 Operator: aten.ne.Scalar
 cnt: 1, ((T([2, 128], i64), 1), {})
 Operator: aten.new_zeros.default
-cnt: 1, ((T([2, 128], i64), [2, 128]), {'dtype': i64, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 1, ((T([2, 128], i64), [2, 128]), {'dtype': i64, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([256, 256008], f16), T([256], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

@@ -7,8 +7,8 @@ cnt: 24, ((T([4, 16, 512, 512], f16), 3, False), {})
 Operator: aten._softmax_backward_data.default
 cnt: 24, ((T([4, 16, 512, 512], f16), T([4, 16, 512, 512], f16), 3, f16), {})
 Operator: aten._to_copy.default
-cnt: 1, ((T([1024, 4, 1024], f32, stride=(1024, 0, 1)),), {'dtype': f32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 24, ((T([1024, 4, 1024], f32),), {'dtype': f16, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([1024, 4, 1024], f32, stride=(1024, 0, 1)),), {'dtype': f32, 'layout': torch.strided, 'device': 'cuda'})
+cnt: 24, ((T([1024, 4, 1024], f32),), {'dtype': f16, 'device': 'cuda'})
 Operator: aten._unsafe_view.default
 cnt: 24, ((T([512, 4, 64, 16, 1], f16), [1, 2048, 1024]), {})
 cnt: 24, ((T([64, 16, 1024, 1, 1], f16), [1, 1024, 1024]), {})
@@ -80,9 +80,9 @@ Operator: aten.native_layer_norm_backward.default
 cnt: 1, ((T([512, 4, 1024], f16, stride=(1024, 524288, 1)), T([512, 4, 1024], f16), [1024], T([512, 4, 1], f32), T([512, 4, 1], f32), T([1024], f16), T([1024], f16), [True, True, True]), {})
 cnt: 47, ((T([512, 4, 1024], f16), T([512, 4, 1024], f16), [1024], T([512, 4, 1], f32), T([512, 4, 1], f32), T([1024], f16), T([1024], f16), [True, True, True]), {})
 Operator: aten.new_empty_strided.default
-cnt: 24, ((T([1024, 16, 64], f16, stride=(1, 1024, 16384)), [1024, 16, 64], [1024, 64, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 24, ((T([1024, 16, 64], f16, stride=(1, 1024, 16384)), [1024, 16, 64], [1024, 64, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.new_zeros.default
-cnt: 24, ((T([4, 16, 512, 512], f16), [4, 16, 512, 1023]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 24, ((T([4, 16, 512, 512], f16), [4, 16, 512, 1023]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([2048, 32000], f16), T([2048], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

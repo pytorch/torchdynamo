@@ -8,7 +8,7 @@ Operator: aten._softmax_backward_data.default
 cnt: 36, ((T([32, 1024, 1024], f16), T([32, 1024, 1024], f16), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([1024, 1024], f32),), {'dtype': f16})
-cnt: 1, ((T([2, 1, 1024, 1024], f16, stride=(0, 1048576, 1024, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([2, 1, 1024, 1024], f16, stride=(0, 1048576, 1024, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten._unsafe_view.default
 cnt: 108, ((T([2, 1024, 16, 64], f16), [2, 1024, 1024]), {})
 cnt: 1, ((T([2048, 50265], f16), [2, 1024, 50265]), {})
@@ -79,7 +79,7 @@ cnt: 62, ((T([2, 1024, 1024], f16), [1024], T([1024], f16), T([1024], f16), 1e-0
 Operator: aten.native_layer_norm_backward.default
 cnt: 62, ((T([2, 1024, 1024], f16), T([2, 1024, 1024], f16), [1024], T([2, 1024, 1], f32), T([2, 1024, 1], f32), T([1024], f16), T([1024], f16), [True, True, True]), {})
 Operator: aten.new_zeros.default
-cnt: 1, ((T([2, 1024], i64), [2, 1024]), {'dtype': i64, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 1, ((T([2, 1024], i64), [2, 1024]), {'dtype': i64, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
 Operator: aten.nll_loss_backward.default
 cnt: 1, ((T([], f16), T([2048, 50265], f16), T([2048], i64), None, 1, -100, T([], f16)), {})
 Operator: aten.nll_loss_forward.default

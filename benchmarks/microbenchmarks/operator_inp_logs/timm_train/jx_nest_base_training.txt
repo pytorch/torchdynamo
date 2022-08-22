@@ -233,12 +233,12 @@ cnt: 4, ((T([64, 4, 196, 256], f16), T([64, 4, 196, 256], f16), [256], T([64, 4,
 cnt: 1, ((T([64, 56, 56, 256], f16), T([64, 56, 56, 256], f16), [256], T([64, 56, 56, 1], f32), T([64, 56, 56, 1], f32), T([256], f16), T([256], f16), [True, True, True]), {})
 cnt: 4, ((T([64, 16, 196, 128], f16), T([64, 16, 196, 128], f16), [128], T([64, 16, 196, 1], f32), T([64, 16, 196, 1], f32), T([128], f16), T([128], f16), [True, True, True]), {})
 Operator: aten.new_empty.default
-cnt: 2, ((T([64, 16, 196, 128], f16), [64, 1, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 4, ((T([64, 4, 196, 256], f16), [64, 1, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 40, ((T([64, 1, 196, 512], f16), [64, 1, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 2, ((T([64, 16, 196, 128], f16), [64, 1, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
+cnt: 4, ((T([64, 4, 196, 256], f16), [64, 1, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
+cnt: 40, ((T([64, 1, 196, 512], f16), [64, 1, 1, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
 Operator: aten.new_empty_strided.default
-cnt: 1, ((T([512, 256, 3, 3], f16, stride=(2304, 1, 768, 256)), [512, 256, 3, 3], [2304, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
-cnt: 1, ((T([256, 128, 3, 3], f16, stride=(1152, 1, 384, 128)), [256, 128, 3, 3], [1152, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([512, 256, 3, 3], f16, stride=(2304, 1, 768, 256)), [512, 256, 3, 3], [2304, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
+cnt: 1, ((T([256, 128, 3, 3], f16, stride=(1152, 1, 384, 128)), [256, 128, 3, 3], [1152, 9, 3, 1]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten.new_zeros.default
 cnt: 1, ((T([64, 512], f16), [32768]), {})
 Operator: aten.nll_loss_backward.default

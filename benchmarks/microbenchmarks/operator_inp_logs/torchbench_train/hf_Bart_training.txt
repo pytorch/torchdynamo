@@ -4,7 +4,7 @@ Operator: aten._softmax_backward_data.default
 cnt: 18, ((T([48, 512, 512], f16), T([48, 512, 512], f16), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([512, 512], f32),), {'dtype': f16})
-cnt: 1, ((T([4, 1, 512, 512], f16, stride=(0, 262144, 512, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([4, 1, 512, 512], f16, stride=(0, 262144, 512, 1)),), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda'})
 Operator: aten._unsafe_view.default
 cnt: 54, ((T([4, 512, 12, 64], f16), [4, 512, 768]), {})
 cnt: 1, ((T([2048, 50265], f16), [4, 512, 50265]), {})

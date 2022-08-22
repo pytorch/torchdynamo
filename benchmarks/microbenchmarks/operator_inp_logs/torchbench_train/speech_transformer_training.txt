@@ -152,8 +152,8 @@ Operator: aten.ne.Scalar
 cnt: 10, ((T([21], i64), -1), {})
 cnt: 1, ((T([10, 22], i64), 2), {})
 Operator: aten.new_ones.default
-cnt: 2, ((T([10, 204, 320], f16), [10, 204]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
-cnt: 1, ((T([10, 204, 512], f16), [10, 204]), {'dtype': f16, 'layout': torch.strided, 'device': "torch.device('cuda')", 'pin_memory': False})
+cnt: 2, ((T([10, 204, 320], f16), [10, 204]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
+cnt: 1, ((T([10, 204, 512], f16), [10, 204]), {'dtype': f16, 'layout': torch.strided, 'device': 'cuda', 'pin_memory': False})
 Operator: aten.relu.default
 cnt: 6, ((T([10, 204, 2048], f16),), {})
 cnt: 6, ((T([10, 22, 2048], f16),), {})

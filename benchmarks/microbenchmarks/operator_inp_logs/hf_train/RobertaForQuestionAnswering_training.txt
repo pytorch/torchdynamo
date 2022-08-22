@@ -9,7 +9,7 @@ cnt: 12, ((T([64, 12, 128, 128], f16), T([64, 12, 128, 128], f16), -1, f16), {})
 Operator: aten._to_copy.default
 cnt: 1, ((T([64, 1, 1, 128], f32),), {'dtype': f16})
 cnt: 1, ((T([64, 128], b8),), {'dtype': i32})
-cnt: 1, ((T([64, 128], i64),), {'dtype': i32, 'layout': torch.strided, 'device': "torch.device('cuda')"})
+cnt: 1, ((T([64, 128], i64),), {'dtype': i32, 'layout': torch.strided, 'device': 'cuda'})
 cnt: 1, ((T([64, 128], i32),), {'dtype': i64})
 Operator: aten._unsafe_view.default
 cnt: 36, ((T([64, 12, 128, 64], f16), [768, 128, 64]), {})
