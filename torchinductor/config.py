@@ -47,7 +47,7 @@ implicit_fallbacks = True
 prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
-tune_layout = False
+tune_layout = True
 
 # Inductor compilation debug info
 # 0: Nothing printed out when compilation fails
