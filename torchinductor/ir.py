@@ -2820,7 +2820,12 @@ class Convolution(ExternKernelAlloc):
             output_layout = "torch.channels_last"
         # diable tuned_conv_layout for training because aot_autograd will transform
         # all inputs to be contigous, resulting extra memory transfomation
-        elif config.tune_layout and get_aot_compilation_context()[0] == ["inference"]:
+        # And required rank 4 tensor to use channels_last format
+        elif (
+            config.tune_layout
+            and get_aot_compilation_context()[0] == ["inference"]
+            and len(kernel_size) == 2
+        ):
             from .codegen.autotuner import tuned_conv_layout
 
             output_layout = tuned_conv_layout(
