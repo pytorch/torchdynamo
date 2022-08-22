@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from os.path import abspath
 from os.path import dirname
 
@@ -18,7 +19,7 @@ except ImportError:
 # INFO print compiled functions + graphs
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
-log_level = logging.WARNING
+log_level = logging.ERROR
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -95,3 +96,33 @@ allowed_functions_module_string_ignorelist = {
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
+
+
+class AccessLimitingConfig:
+    @staticmethod
+    def config_has_attr(name):
+        return hasattr(sys.modules[f"{__name__}.real"], name)
+
+    @staticmethod
+    def config_set_attr(name, value):
+        assert AccessLimitingConfig.config_has_attr(
+            name
+        ), f"Trying to set {name} - this value does not exist in torchdynamo.config"
+        setattr(sys.modules[f"{__name__}.real"], name, value)
+
+    @staticmethod
+    def config_get_attr(name):
+        assert AccessLimitingConfig.config_has_attr(
+            name
+        ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
+        return getattr(sys.modules[f"{__name__}.real"], name)
+
+    def __getattr__(self, name):
+        return self.config_get_attr(name)
+
+    def __setattr__(self, name, value):
+        self.config_set_attr(name, value)
+
+
+sys.modules[f"{__name__}.real"] = sys.modules[__name__]
+sys.modules[__name__] = AccessLimitingConfig()
