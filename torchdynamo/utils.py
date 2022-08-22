@@ -2,6 +2,7 @@ import collections
 import contextlib
 import copy
 import dataclasses
+import dis
 import functools
 import gc
 import inspect
@@ -95,6 +96,11 @@ def format_graph_tabular(graph):
 
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+
+
+def format_bytecode(prefix, frame, code):
+    return f"{prefix} {frame.f_code.co_name} {frame.f_code.co_filename}\
+ line {frame.f_code.co_firstlineno} \n{dis.Bytecode(code).dis()}\n "
 
 
 def count_calls(g: fx.Graph):
