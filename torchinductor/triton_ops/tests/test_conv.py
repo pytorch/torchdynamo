@@ -5,11 +5,6 @@ import triton
 import pytest
 
 import torchinductor.triton_ops
-
-# The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
-torch.backends.cuda.matmul.allow_tf32 = False
-# The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
-torch.backends.cudnn.allow_tf32 = False
 from torchdynamo.testing import same
 
 
@@ -61,7 +56,7 @@ def test_conv(
     assert(same(y, y_correct, cos_similarity=True))
     print("passed")
 
-for layer in ((model.resnet50_layers + model.alexnet_layers)[:1]):
+for layer in range(1): #((model.resnet50_layers + model.alexnet_layers)[:1]):
     provider = "conv3x3_unroll"
     dilation = (1, 1)
     groups = 1
