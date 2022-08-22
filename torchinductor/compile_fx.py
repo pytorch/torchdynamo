@@ -130,10 +130,10 @@ def compile_fx_inner(
                 # Disable cudagraphs in the backwards pass too:
                 cudagraphs.value = False
 
-            if set(graph.device_types) == {"cuda"}:
-                log.warning("skipping cudagraphs due to input mutation")
-            elif set(graph.device_types) != {"cpu"}:
+            if len(set(graph.device_types)) > 1:
                 log.warning("skipping cudagraphs due to multiple devices")
+            elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
+                log.warning("skipping cudagraphs due to input mutation")
 
         if config.repro_level > 0:
             compiled_fn(*example_inputs)

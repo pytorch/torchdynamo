@@ -622,17 +622,9 @@ class Reduction(Loops):
     @staticmethod
     def default_value(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
-            return (
-                torch.finfo(dtype).min
-                if is_float_dtype(dtype)
-                else torch.iinfo(dtype).min
-            )
+            return float("-inf") if is_float_dtype(dtype) else torch.iinfo(dtype).min
         if reduction_type in {"min", "argmin"}:
-            return (
-                torch.finfo(dtype).max
-                if is_float_dtype(dtype)
-                else torch.iinfo(dtype).max
-            )
+            return float("inf") if is_float_dtype(dtype) else torch.iinfo(dtype).max
         return {
             "sum": 0,
             "any": 0,
@@ -1814,7 +1806,9 @@ class ComputedBuffer(Buffer):
         # the reordering_reindex in reads' simplify_reorder_and_tile
         reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
         for i, reads_buf in enumerate(reads_bufs):
-            if isinstance(reads_buf, ComputedBuffer):
+            if isinstance(reads_buf, ComputedBuffer) and hasattr(
+                reads_buf, "iter_reordering_reindex"
+            ):
                 reordering_reindex[i] = reads_buf.iter_reordering_reindex
 
         def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
@@ -2533,6 +2527,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args,
         nontensor_args,
         unflatten_args,
+        kwargs=None,
     ):
         super(FallbackKernel, self).__init__(
             layout,
@@ -2546,6 +2541,7 @@ class FallbackKernel(ExternKernelAlloc):
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
         self.unflatten_args = unflatten_args
+        self.kwargs = {} if kwargs is None else kwargs
         if self.kernel not in ("aten.convolution_backward",):
             log.warning(f"Using FallbackKernel: {self.kernel}")
 
@@ -2559,10 +2555,16 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(repr(x)) for x in self.constant_args]
-        return list(map(repr, self.unflatten_args(tensor_args, constant_args)))
+
+        def gen_kwarg(k, v):
+            return f"{k}={repr(v)}"
+
+        kwargs = list(gen_kwarg(k, v) for k, v in self.kwargs.items())
+
+        return list(map(repr, self.unflatten_args(tensor_args, constant_args))) + kwargs
 
     @classmethod
-    def create(cls, kernel, *args):
+    def create(cls, kernel, *args, **kwargs):
         args_flat, args_spec = pytree.tree_flatten(args)
 
         is_arg_tensor = []
@@ -2640,6 +2642,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                kwargs,
             )
 
     def apply_constraint(self):

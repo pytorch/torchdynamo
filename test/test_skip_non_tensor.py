@@ -11,11 +11,10 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
             return a + b
 
         counter = CompileCounter()
-        with torchdynamo.optimize_assert(counter):
-
-            x = torch.randn(4)
-            y = 5
-            fn(x, y)
+        x = torch.randn(4)
+        y = 5
+        opt_fn = torchdynamo.optimize_assert(counter)(fn)
+        opt_fn(x, y)
 
         assert counter.op_count == 1
 
@@ -24,11 +23,11 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
             return torch.add(a, b)
 
         counter = CompileCounter()
-        with torchdynamo.optimize_assert(counter):
 
-            x = torch.randn(4)
-            y = 5
-            fn(x, y)
+        x = torch.randn(4)
+        y = 5
+        opt_fn = torchdynamo.optimize_assert(counter)(fn)
+        opt_fn(x, y)
 
         assert counter.op_count == 1
 
@@ -37,10 +36,10 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
             return lst[0] + lst[1]
 
         counter = CompileCounter()
-        with torchdynamo.optimize_assert(counter):
-            x = torch.randn(4)
-            y = 5
-            fn([x, y])
+        x = torch.randn(4)
+        y = 5
+        opt_fn = torchdynamo.optimize_assert(counter)(fn)
+        opt_fn([x, y])
 
         assert counter.op_count == 1
 
@@ -49,10 +48,10 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
             return dt["a"] + dt["b"]
 
         counter = CompileCounter()
-        with torchdynamo.optimize_assert(counter):
-            x = torch.randn(4)
-            y = 5
-            fn({"a": x, "b": y})
+        x = torch.randn(4)
+        y = 5
+        opt_fn = torchdynamo.optimize_assert(counter)(fn)
+        opt_fn({"a": x, "b": y})
 
         assert counter.op_count == 1
 
@@ -61,10 +60,10 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
             return a + b
 
         counter = CompileCounter()
-        with torchdynamo.optimize_assert(counter):
-            x = 4
-            y = 5
-            fn(x, y)
+        opt_fn = torchdynamo.optimize_assert(counter)(fn)
+        x = 4
+        y = 5
+        opt_fn(x, y)
 
         assert counter.op_count == 0
 

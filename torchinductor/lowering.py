@@ -704,8 +704,8 @@ def make_fallback(kernel):
     add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
-    def handler(*args):
-        result = ir.FallbackKernel.create(kernel, *args)
+    def handler(*args, **kwargs):
+        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):
             return list(map(TensorBox.create, result))
         else:
@@ -1187,11 +1187,22 @@ def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
-    assert isinstance(value, (int, float)), "Expected int or float"
+    if isinstance(value, (int, float)):
+
+        def inner_fn(index):
+            return ops.constant(value, dtype)
+
+    else:
+        assert len(value.get_size()) == 0
+        value_loader = value.make_loader()
+
+        def inner_fn(index):
+            return value_loader([])
+
     return Pointwise.create(
         device=device,
         dtype=dtype,
-        inner_fn=lambda index: ops.constant(value, dtype),
+        inner_fn=inner_fn,
         ranges=list(size),
     )
 
@@ -1260,7 +1271,8 @@ def constant_like(fill_value):
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
 ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
-rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+if not config.fallback_random:
+    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
 
 def new_constant(fill_value):
@@ -1629,106 +1641,6 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
         dtype=x.get_dtype(),
         inner_fn=fn,
         ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
-    )
-
-
-@register_lowering(aten.upsample_bilinear2d)
-def upsample_bilinear2d_vec(
-    input,
-    output_size,
-    align_corners,
-    scale_factors=None,
-):
-    """
-    Based on https://github.com/pytorch/pytorch/pull/80964
-    The decomp version has worse perf because indexing doesn't get traced.
-    """
-
-    *size_prefix, in_h, in_w = input.get_size()
-    in_h = V.graph.sizevars.guard_static_shape(in_h)
-    in_w = V.graph.sizevars.guard_static_shape(in_w)
-
-    if output_size is not None:
-        out_h = float(output_size[0])
-        out_w = float(output_size[1])
-    elif scale_factors is not None:
-        out_h = in_h * scale_factors[0]
-        out_w = in_w * scale_factors[1]
-    else:
-        raise TypeError("requires output_size or scale_factors")
-
-    # Calculate horizontal and vertical scaling factor
-    if out_h > 1:
-        if align_corners:
-            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
-        else:
-            h_scale_factor = in_h / out_h
-    else:
-        h_scale_factor = 0.0
-
-    if out_w > 1:
-        if align_corners:
-            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
-        else:
-            w_scale_factor = in_w / out_w
-    else:
-        w_scale_factor = 0.0
-
-    input.realize_hint()  # read many times
-    input_loader = input.make_loader()
-
-    def fn(index):
-        *prefix, i, j = index
-        i = ops.index_expr(i, torch.float32)
-        j = ops.index_expr(j, torch.float32)
-
-        c_h_scale_factor = ops.constant(h_scale_factor, torch.float32)
-        c_w_scale_factor = ops.constant(w_scale_factor, torch.float32)
-        if align_corners:
-            x = ops.mul(i, c_h_scale_factor)
-            y = ops.mul(j, c_w_scale_factor)
-        else:
-            c05 = ops.constant(0.5, torch.float32)
-            c00 = ops.constant(0.0, torch.float32)
-            x = ops.maximum(
-                ops.sub(ops.mul(ops.add(i, c05), c_h_scale_factor), c05), c00
-            )
-            y = ops.maximum(
-                ops.sub(ops.mul(ops.add(j, c05), c_w_scale_factor), c05), c00
-            )
-
-        x_floor = ops.floor(x)
-        y_floor = ops.floor(y)
-        x_ceil = ops.minimum(ops.ceil(x), ops.constant(in_h - 1, torch.float32))
-        y_ceil = ops.minimum(ops.ceil(y), ops.constant(in_w - 1, torch.float32))
-
-        idx_x_floor = ops.indirect_indexing(ops.to_dtype(x_floor, torch.int64))
-        idx_y_floor = ops.indirect_indexing(ops.to_dtype(y_floor, torch.int64))
-        idx_x_ceil = ops.indirect_indexing(ops.to_dtype(x_ceil, torch.int64))
-        idx_y_ceil = ops.indirect_indexing(ops.to_dtype(y_ceil, torch.int64))
-
-        v1 = input_loader([*prefix, idx_x_floor, idx_y_floor])
-        v2 = input_loader([*prefix, idx_x_ceil, idx_y_floor])
-        v3 = input_loader([*prefix, idx_x_floor, idx_y_ceil])
-        v4 = input_loader([*prefix, idx_x_ceil, idx_y_ceil])
-
-        xscale2 = ops.sub(x, x_floor)
-        yscale2 = ops.sub(y, y_floor)
-
-        c1 = ops.constant(1.0, torch.float32)
-        xscale1 = ops.sub(c1, xscale2)
-        yscale1 = ops.sub(c1, yscale2)
-
-        q1 = ops.add(ops.mul(v1, xscale1), ops.mul(v2, xscale2))
-        q2 = ops.add(ops.mul(v3, xscale1), ops.mul(v4, xscale2))
-        result = ops.add(ops.mul(q1, yscale1), ops.mul(q2, yscale2))
-        return result
-
-    return Pointwise.create(
-        device=input.get_device(),
-        dtype=input.get_dtype(),
-        inner_fn=fn,
-        ranges=[*size_prefix, sympy.Integer(int(out_h)), sympy.Integer(int(out_w))],
     )
 
 

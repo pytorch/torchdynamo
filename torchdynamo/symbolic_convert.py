@@ -51,7 +51,6 @@ from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
-from .utils import filter_stack
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
@@ -121,7 +120,7 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            self.output.compile_subgraph(self)
+            self.output.compile_subgraph(self, msg="generic_jump")
             self.pop()
 
             if_next = self.create_call_resume_at(self.next_instruction)
@@ -145,11 +144,15 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     return inner
 
 
+explain = False
+
+
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
+            msg = None
             try:
                 return inner_fn(self, inst)
             except Unsupported as exc:
@@ -157,18 +160,20 @@ def break_graph_if_unsupported(*, push):
                     raise
                 user_stack = "".join(
                     traceback.format_list(
-                        filter_stack(traceback.extract_stack())
-                        + [self.frame_summary()]
-                        + list(reversed(exc.real_stack))
+                        [([self.frame_summary()] + list(reversed(exc.real_stack)))[-1]]
                     )
-                )
+                ).strip()
 
-                log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
+                # torchdynamo.explain() formats this a little nicer, and presents a slightly
+                # more actionable user code pointer
+                if not explain:
+                    log.warning(f"Graph break: {exc} from user code at {user_stack}")
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
+                msg = exc.msg
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self)
+            self.output.compile_subgraph(self, msg=msg)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
@@ -746,7 +751,7 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(prior)
 
         # break the graph
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(self, "store_attr")
         self.output.add_output_instructions([inst])
         self.popn(2)
         self.output.add_output_instructions(

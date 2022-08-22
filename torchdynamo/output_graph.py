@@ -222,12 +222,17 @@ class OutputGraph(fx.Tracer):
 
         assert False
 
-    def compile_subgraph(self, tx, partial_convert=False):
+    def compile_subgraph(self, tx, partial_convert=False, msg=None):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
         self.partial_convert = partial_convert
+        if msg is not None:
+            stack = tx.frame_summary()
+            msgs = reversed(traceback.StackSummary.from_list([stack]).format())
+            msg = f"{msg} \n {''.join(msgs)}"
+        self.compile_subgraph_reason = msg
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -349,6 +354,7 @@ class OutputGraph(fx.Tracer):
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
+        gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = torchdynamo.disable(compiled_fn)
@@ -471,7 +477,6 @@ class OutputGraph(fx.Tracer):
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
-        msgs = reversed(traceback.StackSummary.from_list(frame_summaries).format())
+        msgs = traceback.StackSummary.from_list(frame_summaries).format()
         rv.node.stack_trace = "".join(msgs)
-
         return rv

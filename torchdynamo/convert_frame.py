@@ -1,4 +1,3 @@
-import dis
 import functools
 import itertools
 import logging
@@ -35,6 +34,7 @@ from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
 from .utils import filter_stack
+from .utils import format_bytecode
 from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
@@ -183,25 +183,39 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def format_exception(exc, frame=None):
+def format_error_msg(exc, code, frame=None):
     msg = os.linesep * 2
-    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-    msg += traceback.format_exc()
-    if hasattr(exc, "real_stack"):
-        msg += (
-            "\n"
-            + "=" * 10
-            + " The above exception occurred while processing the following code "
-            + "=" * 10
-            + "\n\n"
+    if config.verbose:
+        msg = format_bytecode(
+            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
         )
-        stack_above_dynamo = []
-        if frame is not None:
-            stack_above_dynamo = filter_stack(traceback.extract_stack(frame))
-        msg += "".join(
-            traceback.format_list(stack_above_dynamo + list(reversed(exc.real_stack)))
-        )
+        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+        msg += traceback.format_exc()
+        if hasattr(exc, "real_stack"):
+            msg += (
+                "\n"
+                + "=" * 10
+                + " The above exception occurred while processing the following code "
+                + "=" * 10
+                + "\n\n"
+            )
+            stack_above_dynamo = []
+            if frame is not None:
+                stack_above_dynamo = filter_stack(traceback.extract_stack(frame))
 
+            msg += "".join(
+                traceback.format_list(
+                    stack_above_dynamo + list(reversed(exc.real_stack))
+                )
+            )
+    else:
+        msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
+ line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
+
+        if hasattr(exc, "real_stack"):
+            msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+
+        msg += "\nSet torchdynamo.config.verbose=True for more information\n"
     msg += "=" * 10
     return msg
 
@@ -299,6 +313,8 @@ def _compile(
 ):
     output = None
 
+    # from .utils import print_once;  print_once(code.co_filename)
+
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -320,15 +336,11 @@ def _compile(
         if config.dead_code_elimination:
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    def format_bytecode(prefix, bytecode):
-        return f"{prefix} {code.co_name} {code.co_filename} \
-            {code.co_firstlineno} \n{dis.Bytecode(bytecode).dis()}\n "
-
     try:
         for attempt in itertools.count():
             try:
                 out_code = transform_code_object(code, transform)
-                orig_code_map[out_code] = out_code
+                orig_code_map[out_code] = code
                 break
             except exc.RestartAnalysis:
                 log.debug("Restarting analysis ...")
@@ -342,11 +354,26 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
+        output_codes.add(out_code)
 
-        output_codes.add(code)
-
-        log.info(format_bytecode("ORIGINAL BYTECODE", code))
-        log.info(format_bytecode("MODIFIED BYTECODE", out_code))
+        log.info(
+            format_bytecode(
+                "ORIGINAL BYTECODE",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            )
+        )
+        log.info(
+            format_bytecode(
+                "MODIFIED BYTECODE",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                out_code,
+            )
+        )
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
@@ -368,10 +395,10 @@ def _compile(
         BackendCompilerFailed,
         AssertionError,
     ) as e:
-        log.error(format_bytecode("WONT CONVERT", code) + format_exception(e, frame))
+        log.error(format_error_msg(e, code, frame))
         raise
     except Exception as e:
-        log.error(format_bytecode("WONT CONVERT", code) + format_exception(e, frame))
+        log.error(format_error_msg(e, code, frame))
         raise InternalTorchDynamoError()
 
 

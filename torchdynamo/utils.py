@@ -2,6 +2,7 @@ import collections
 import contextlib
 import copy
 import dataclasses
+import dis
 import functools
 import gc
 import inspect
@@ -95,6 +96,11 @@ def format_graph_tabular(graph):
 
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+
+
+def format_bytecode(prefix, name, filename, line_no, code):
+    return f"{prefix} {name} {filename}\
+ line {line_no} \n{dis.Bytecode(code).dis()}\n "
 
 
 def count_calls(g: fx.Graph):
@@ -615,7 +621,10 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                return res_error <= (1.1 * ref_error + 1e-5)
+                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                if not passes_test:
+                    print(f"RMSE (res-fp64): {res_error}, (ref-fp64): {ref_error}")
+                return passes_test
 
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
