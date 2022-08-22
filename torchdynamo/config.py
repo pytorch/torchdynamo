@@ -99,35 +99,36 @@ capture_scalar_outputs = False
 
 
 class AccessLimitingConfig:
-    @staticmethod
-    def config_has_attr(name):
+    set_vals = dict()
+
+    def config_has_attr(self, name):
         return hasattr(sys.modules[f"{__name__}.real"], name)
 
-    @staticmethod
-    def config_set_attr(name, value):
-        assert AccessLimitingConfig.config_has_attr(
+    def config_set_attr(self, name, value):
+        assert self.config_has_attr(
             name
         ), f"Trying to set {name} - this value does not exist in torchdynamo.config"
+
+        if name not in self.set_vals:
+            self.set_vals[name] = []
+        self.set_vals[name].append((name, value))
+
         setattr(sys.modules[f"{__name__}.real"], name, value)
 
-    @staticmethod
-    def config_get_attr(name):
-        assert AccessLimitingConfig.config_has_attr(
+    def config_get_attr(self, name):
+        assert self.config_has_attr(
             name
         ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
         return getattr(sys.modules[f"{__name__}.real"], name)
 
-    @staticmethod
-    def config_del_attr(name):
-        assert AccessLimitingConfig.config_has_attr(
+    def config_del_attr(self, name):
+        assert self.config_has_attr(
             name
         ), f"Trying to delete {name} - this value does not exist in torchdynamo.config"
-        # Hack for unit testing - we don't delete, rather, we set None.
-        # We do this because @patch calls __delattr__ and then ruins the next
-        # get which would otherwise be valid on a fresh config
-        # TODO(voz): support set and del not by direct access, but by a list of patches
-        # that we can push/add on set and rm on delete
-        return setattr(sys.modules[f"{__name__}.real"], name, None)
+        assert name in self.set_vals, "Deleting value without setting"
+        vals = self.set_vals[name]
+        last_val = vals.pop()
+        return setattr(sys.modules[f"{__name__}.real"], name, last_val[1])
 
     def __getattr__(self, name):
         return self.config_get_attr(name)
