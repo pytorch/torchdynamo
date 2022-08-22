@@ -450,7 +450,12 @@ class InstructionTranslatorBase(object):
             fromlist=fromlist.as_python_constant(),
             level=level.as_python_constant(),
         )
-        source = self.import_source(module_name)
+        # __import__ returns the top level package name, so the source has to be
+        # set correctly.
+        if fromlist.as_python_constant() is None and hasattr(value, "__name__"):
+            source = self.import_source(getattr(value, "__name__"))
+        else:
+            source = self.import_source(module_name)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
