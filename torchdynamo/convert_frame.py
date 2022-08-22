@@ -1,4 +1,3 @@
-import dis
 import functools
 import itertools
 import logging
