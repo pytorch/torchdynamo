@@ -458,8 +458,9 @@ class InstructionTranslatorBase(object):
         # returned, not the module named by module_name. However, when a
         # non-empty fromlist argument is given, the module named by name is
         # returned. Therefore, we set the source correctly here.
-        if fromlist is None and hasattr(value, "__name__"):
-            source = self.import_source(getattr(value, "__name__"))
+        if not fromlist:
+            top_level_module_name = module_name.partition(".")[0]
+            source = self.import_source(top_level_module_name)
         else:
             source = self.import_source(module_name)
 

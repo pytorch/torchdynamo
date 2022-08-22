@@ -45,15 +45,6 @@ def has_detectron2():
         return False
 
 
-def has_scipy():
-    try:
-        import scipy.sparse
-
-        return scipy.sparse.coo_matrix is not None
-    except ImportError:
-        return False
-
-
 def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True):
     # from detectron2 mask_ops.py
 
@@ -1499,12 +1490,11 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())
 
-    @unittest.skipIf(not has_scipy(), "requires scipy")
-    def test_scipy_import(self):
+    def test_two_level_import(self):
         def fn():
-            import scipy.sparse
+            import torch.fx
 
-            print(scipy.sparse.coo_matrix)
+            print(torch.fx.symbolic_trace)
 
         opt_fn = torchdynamo.optimize("eager")(fn)
         opt_fn()
