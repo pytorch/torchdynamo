@@ -704,7 +704,12 @@ class TritonKernel(Kernel):
         if upcast:
             line += ".to(tl.float32)"
 
-        if self.inside_reduction and "rmask" not in mask and not indirect_indexing:
+        if (
+            self.inside_reduction
+            and "rmask" not in mask
+            and "tmp" not in mask
+            and not indirect_indexing
+        ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
             tmp = self.cse.generate(self.body, line)
