@@ -47,9 +47,9 @@ def has_detectron2():
 
 def has_scipy():
     try:
-        import scipy
+        import scipy.sparse
 
-        return True
+        return scipy.sparse.coo_matrix is not None
     except ImportError:
         return False
 
