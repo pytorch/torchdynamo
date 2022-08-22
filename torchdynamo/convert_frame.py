@@ -185,6 +185,13 @@ def has_tensor_in_frame(frame):
 
 def format_error_msg(exc, code, frame=None):
     msg = os.linesep * 2
+
+    def replay_record_msg():
+        if config.replay_record_enabled and hasattr(exc, "rec_file_name"):
+            return f"\nLast frame execution written to {exc.rec_file_name}. To run only this frame while debugging, run torchdynamo.replay('{exc.rec_file_name}').\n"
+        else:
+            return ""
+
     if config.verbose:
         msg = format_bytecode(
             "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
@@ -208,12 +215,17 @@ def format_error_msg(exc, code, frame=None):
                     stack_above_dynamo + list(reversed(exc.real_stack))
                 )
             )
+
+        msg += replay_record_msg()
+
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
 
         if hasattr(exc, "real_stack"):
             msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+
+        msg += replay_record_msg()
 
         msg += "\nSet torchdynamo.config.verbose=True for more information\n"
     msg += "=" * 10

@@ -7,6 +7,7 @@ import inspect
 import itertools
 import logging
 import operator
+import os
 import sys
 import traceback
 import types
@@ -17,6 +18,7 @@ from typing import Dict
 from typing import Iterable
 from typing import List
 from unittest.mock import patch
+from uuid import uuid1
 
 import torch
 
@@ -283,8 +285,11 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(state)
             raise
 
+    def gen_record_name(self, e):
+        return f"{type(e).__name__}_{uuid1()}.rec"
+
     def write_record_to_file(self, filename):
-        with open(f"{filename}.record", "wb") as f:
+        with open(f"{filename}", "wb") as f:
             self.exec_recorder.get_record().dump(f)
 
     def step(self):
@@ -341,7 +346,15 @@ class InstructionTranslatorBase(object):
                 pass
         except Exception as e:
             if config.replay_record_enabled:
-                self.write_record_to_file(str(type(e).__name__))
+                rec_file_name = self.gen_record_name(e)
+                if not os.path.exists(rec_file_name):
+                    self.write_record_to_file(rec_file_name)
+                    e.rec_file_name = rec_file_name
+                else:
+                    log.warning(
+                        f"Unable to write execution record {rec_file_name}; file already exists."
+                    )
+
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the

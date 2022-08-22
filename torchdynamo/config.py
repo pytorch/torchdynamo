@@ -99,4 +99,4 @@ allowed_functions_module_string_ignorelist = {
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
 
-replay_record_enabled = True
+replay_record_enabled = False
