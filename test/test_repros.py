@@ -1475,6 +1475,15 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_specialized_stride(self):
+        def f():
+            e = torch.empty(4)
+            x = e[::2]
+            return x.stride()
+
+        self.assertEqual(f(), torchdynamo.optimize("eager")(f)())
+
     @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
         @torchdynamo.optimize("eager", nopython=True)
