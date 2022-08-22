@@ -208,7 +208,7 @@ def format_error_msg(exc, frame):
  line {frame.f_code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
 
         if hasattr(exc, "real_stack"):
-            msg += f"from user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+            msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
 
         msg += "\nSet torchdynamo.config.verbose=True for more information\n"
     msg += "=" * 10
