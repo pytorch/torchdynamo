@@ -717,7 +717,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value)
+        index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + {index}, {value}, {mask})"
         elif mode == "atomic_add":
