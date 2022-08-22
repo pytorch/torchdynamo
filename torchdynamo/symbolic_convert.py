@@ -48,7 +48,6 @@ from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
-from .utils import filter_stack
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
@@ -158,16 +157,14 @@ def break_graph_if_unsupported(*, push):
                     raise
                 user_stack = "".join(
                     traceback.format_list(
-                        filter_stack(traceback.extract_stack())
-                        + [self.frame_summary()]
-                        + list(reversed(exc.real_stack))
+                        [([self.frame_summary()] + list(reversed(exc.real_stack)))[-1]]
                     )
-                )
+                ).strip()
 
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if not explain:
-                    log.warning(f"Graph break: {exc} from user code at:\n {user_stack}")
+                    log.warning(f"Graph break: {exc} from user code at {user_stack}")
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
