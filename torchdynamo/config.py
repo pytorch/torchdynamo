@@ -117,11 +117,26 @@ class AccessLimitingConfig:
         ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
         return getattr(sys.modules[f"{__name__}.real"], name)
 
+    @staticmethod
+    def config_del_attr(name):
+        assert AccessLimitingConfig.config_has_attr(
+            name
+        ), f"Trying to delete {name} - this value does not exist in torchdynamo.config"
+        # Hack for unit testing - we don't delete, rather, we set None.
+        # We do this because @patch calls __delattr__ and then ruins the next
+        # get which would otherwise be valid on a fresh config
+        # TODO(voz): support set and del not by direct access, but by a list of patches
+        # that we can push/add on set and rm on delete
+        return setattr(sys.modules[f"{__name__}.real"], name, None)
+
     def __getattr__(self, name):
         return self.config_get_attr(name)
 
     def __setattr__(self, name, value):
         self.config_set_attr(name, value)
+
+    def __delattr__(self, name):
+        self.config_del_attr(name)
 
 
 sys.modules[f"{__name__}.real"] = sys.modules[__name__]
