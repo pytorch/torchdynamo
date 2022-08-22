@@ -6,7 +6,6 @@ import logging
 import textwrap
 from collections import OrderedDict
 from functools import partial
-from functorch.compile import get_aot_compilation_context
 from typing import Any
 from typing import Callable
 from typing import ClassVar
@@ -20,6 +19,7 @@ import numpy
 import sympy
 import torch.fx
 import torch.utils._pytree as pytree
+from functorch.compile import get_aot_compilation_context
 from sympy import Expr
 from sympy import Integer
 from torch._prims_common import is_float_dtype
