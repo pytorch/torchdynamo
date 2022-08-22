@@ -444,15 +444,21 @@ class InstructionTranslatorBase(object):
 
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
+        level = level.as_python_constant()
+        fromlist = fromlist.as_python_constant()
         module_name = inst.argval
         value = __import__(
             module_name,
-            fromlist=fromlist.as_python_constant(),
-            level=level.as_python_constant(),
+            fromlist=fromlist,
+            level=level,
         )
-        # __import__ returns the top level package name, so the source has to be
-        # set correctly.
-        if fromlist.as_python_constant() is None and hasattr(value, "__name__"):
+
+        # For __import__, when the name variable is of the form package.module,
+        # normally, the top-level package (the name up till the first dot) is
+        # returned, not the module named by module_name. However, when a
+        # non-empty fromlist argument is given, the module named by name is
+        # returned. Therefore, we set the source correctly here.
+        if fromlist is None and hasattr(value, "__name__"):
             source = self.import_source(getattr(value, "__name__"))
         else:
             source = self.import_source(module_name)
