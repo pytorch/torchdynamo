@@ -128,6 +128,7 @@ class AccessLimitingConfig:
         assert name in self.set_vals, "Deleting value without setting"
         vals = self.set_vals[name]
         last_val = vals.pop()
+        self.set_vals[name] = vals
         return setattr(sys.modules[f"{__name__}.real"], name, last_val[1])
 
     def __getattr__(self, name):
