@@ -1501,19 +1501,10 @@ class ReproTests(torchdynamo.testing.TestCase):
 
     @unittest.skipIf(not has_scipy(), "requires scipy")
     def test_scipy_import(self):
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
-
         def fn():
             import scipy.sparse
 
-            m = 500
-
-            A = random_sparse_pd_matrix(
-                m, density=2.0 / m, device="cpu", dtype=torch.float64
-            )
-            values = A.coalesce().values().cpu().numpy().copy()
-            indices = A.coalesce().indices().cpu().numpy().copy()
-            return scipy.sparse.coo_matrix((values, (indices[0], indices[1])), A.shape)
+            print(scipy.sparse.coo_matrix)
 
         opt_fn = torchdynamo.optimize("eager")(fn)
         opt_fn()
