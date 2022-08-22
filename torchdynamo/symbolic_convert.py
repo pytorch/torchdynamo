@@ -48,7 +48,6 @@ from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
-from .utils import filter_stack
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
