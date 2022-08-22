@@ -1491,13 +1491,40 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())
 
     def test_two_level_import(self):
-        def fn():
+        import logging
+
+        def fn1(x):
+            return torch.sin(x)
+
+        def fn(x):
             import torch.fx
 
-            print(torch.fx.symbolic_trace)
+            _ = torch.fx.symbolic_trace(fn1)
+            return x * 2
 
-        opt_fn = torchdynamo.optimize("eager")(fn)
-        opt_fn()
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    # TODO - This test fails
+    # def test_two_level_relative_import(self):
+    #     import logging
+    #     def fn1(x):
+    #         return torch.sin(x)
+
+    #     def fn(x):
+    #         from . import test_functions
+    #         return x * 2
+
+    #     x = torch.randn(10)
+    #     fn(x)
+    #     cnt = torchdynamo.testing.CompileCounter()
+    #     opt_fn = torchdynamo.optimize(cnt)(fn)
+    #     opt_fn(x)
+    #     self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
