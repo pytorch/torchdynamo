@@ -1062,9 +1062,11 @@ class BenchmarkRunner:
                     copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
                 if not same(correct_result, correct_rerun_result, fp64_outputs):
-                    print("INCORRECT - Variation in Eager runs itself")
                     if not self.args.skip_accuracy_check:
+                        print("INCORRECT - Variation in Eager runs itself")
                         return sys.exit(-1)
+                    else:
+                        raise RuntimeError("INCORRECT - Variation in Eager runs itself")
 
             t0 = time.perf_counter()
             torch.manual_seed(1337)
@@ -1089,9 +1091,11 @@ class BenchmarkRunner:
                 cos_similarity=cos_similarity,
                 tol=tolerance,
             ):
-                print("INCORRECT")
                 if not self.args.skip_accuracy_check:
+                    print("INCORRECT")
                     return sys.exit(-1)
+                else:
+                    raise RuntimeError("INCORRECT")
             ok, total = Stats.reset_counters()
             results = []
             # run with torchdynamo few times to populate the cache
