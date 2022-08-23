@@ -949,7 +949,7 @@ class Scheduler:
             abs(node2.min_order - node1.max_order),
         )
         return (
-            not node1.is_reduction() and not node2.is_reduction() and memory_score > 0,
+            node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
             proximity_score,
         )
