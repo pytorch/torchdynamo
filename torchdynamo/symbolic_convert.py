@@ -1468,7 +1468,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins = f_builtins.__dict__
         super(InliningInstructionTranslator, self).__init__(
             output=parent.output,
-            f_locals={},  # This is probably not correct, needs to be populated by args?
             f_globals=f_globals,
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,

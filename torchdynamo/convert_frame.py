@@ -323,8 +323,6 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             frame,
         )
 
-        # from .utils import print_once;  print_once(code.co_filename)
-
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
     return wrap_convert_context(_convert_frame_assert)
 
@@ -342,7 +340,6 @@ def _compile(
     output = None
 
     # from .utils import print_once;  print_once(code.co_filename)
-
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -407,7 +404,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(output.guards, locals, globals)
 
-        guarded_code = GuardedCode(code, check_fn.check_fn)
+        guarded_code = GuardedCode(out_code, check_fn.check_fn)
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
