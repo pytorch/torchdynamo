@@ -107,7 +107,9 @@ USE_SMALL_BATCH_SIZE = {
     "AlbertForMaskedLM": 2,
     "AlbertForPreTraining": 4,
     "AlbertForQuestionAnswering": 2,
-    "BartForCausalLM": 4,
+    "BartForCausalLM": 2,
+    "BartForConditionalGeneration": 1,
+    "BlenderbotSmallForConditionalGeneration": 32,
     "DebertaForMaskedLM": 4,
     "DebertaForQuestionAnswering": 4,
     "DebertaV2ForMaskedLM": 1,
@@ -124,7 +126,7 @@ USE_SMALL_BATCH_SIZE = {
     "PegasusForConditionalGeneration": 4,
     "RobertaForCausalLM": 4,
     "TrOCRForCausalLM": 8,
-    "XGLMForCausalLM": 2,
+    "XGLMForCausalLM": 1,
     "XLNetLMHeadModel": 4,
 }
 

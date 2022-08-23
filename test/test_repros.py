@@ -1490,6 +1490,49 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())
 
+    def test_multi_dot_import(self):
+        def fn1(x):
+            return torch.sin(x)
+
+        def fn(x):
+            import torch.fx
+
+            _ = torch.fx.symbolic_trace(fn1)
+            return x * 2
+
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_relative_import(self):
+        def fn(x):
+            from .test_functions import tensor_for_import_testing
+
+            return x * 2 * tensor_for_import_testing
+
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_relative_import_no_modulename(self):
+        def fn(x):
+            from . import test_functions
+
+            return x * 2 * test_functions.tensor_for_import_testing
+
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
