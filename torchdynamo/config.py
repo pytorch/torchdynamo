@@ -109,22 +109,24 @@ class AccessLimitingConfig:
     capture_scalar_outputs = False
 
     def __getattr__(self, name):
-        assert hasattr(
-            self, name
-        ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
+        if sys.version_info > (3, 8):
+            assert hasattr(
+                self, name
+            ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
         return object.__getattr__(self, name)
 
     def __setattr__(self, name, value):
-        assert hasattr(
-            self, name
-        ), f"Trying to set {name} - this value does not exist in torchdynamo.config"
+        if sys.version_info > (3, 8):
+            assert hasattr(
+                self, name
+            ), f"Trying to set {name} - this value does not exist in torchdynamo.config"
         object.__setattr__(self, name, value)
 
     def __delattr__(self, name):
-        assert hasattr(
-            self, name
-        ), f"Trying to del {name} - this value does not exist in torchdynamo.config"
-
+        if sys.version_info > (3, 8):
+            assert hasattr(
+                self, name
+            ), f"Trying to del {name} - this value does not exist in torchdynamo.config"
         object.__delattr__(self, name)
 
 
