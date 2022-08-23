@@ -1,10 +1,8 @@
 import dataclasses
 from dataclasses import field
-from dis import Instruction
 from types import CodeType
 from types import ModuleType
 from typing import Any
-from typing import List
 
 import dill
 
@@ -23,7 +21,6 @@ class DummyModule:
 @dataclasses.dataclass
 class ExecutionRecord:
     code: CodeType
-    instrs: List[Instruction] = field(default_factory=list)
     globals: dict[str, Any] = field(default_factory=dict)
     locals: dict[str, Any] = field(default_factory=dict)
     builtins: dict[str, Any] = field(default_factory=dict)
@@ -43,7 +40,6 @@ class ExecutionRecorder:
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
-    instrs: List[Instruction] = field(default_factory=list)
     globals: dict[str, Any] = field(default_factory=dict)
     locals: dict[str, Any] = field(default_factory=dict)
     builtins: dict[str, Any] = field(default_factory=dict)
@@ -58,7 +54,6 @@ class ExecutionRecorder:
             self.name_to_modrec[var.__name__] = mod_rec
             self.globals[name] = mod_rec
         else:
-
             self.globals[name] = var
 
     def add_local_mod(self, name, mod):
@@ -81,7 +76,6 @@ class ExecutionRecorder:
     def get_record(self):
         return ExecutionRecord(
             self.code,
-            self.instrs.copy(),
             ExecutionRecorder._resolve_modules(self.globals),
             ExecutionRecorder._resolve_modules(self.locals),
             self.builtins.copy(),

@@ -7,7 +7,6 @@ import inspect
 import itertools
 import logging
 import operator
-import os
 import sys
 import traceback
 import types
@@ -18,7 +17,6 @@ from typing import Dict
 from typing import Iterable
 from typing import List
 from unittest.mock import patch
-from uuid import uuid1
 
 import torch
 
@@ -285,18 +283,10 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(state)
             raise
 
-    def gen_record_name(self, e):
-        return f"{type(e).__name__}_{uuid1()}.rec"
-
-    def write_record_to_file(self, filename):
-        with open(f"{filename}", "wb") as f:
-            self.exec_recorder.get_record().dump(f)
-
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         inst = self.instructions[self.instruction_pointer]
         self.current_instruction = inst
-        self.exec_recorder.instrs.append(inst)
         self.instruction_pointer += 1
         if self.instruction_pointer < len(self.instructions):
             self.next_instruction = self.instructions[self.instruction_pointer]
@@ -346,14 +336,7 @@ class InstructionTranslatorBase(object):
                 pass
         except Exception as e:
             if config.replay_record_enabled:
-                rec_file_name = self.gen_record_name(e)
-                if not os.path.exists(rec_file_name):
-                    self.write_record_to_file(rec_file_name)
-                    e.rec_file_name = rec_file_name
-                else:
-                    log.warning(
-                        f"Unable to write execution record {rec_file_name}; file already exists."
-                    )
+                e.exec_record = self.exec_recorder.get_record()
 
             raise
         finally:
@@ -1214,7 +1197,6 @@ class InstructionTranslatorBase(object):
         self,
         output: OutputGraph,
         instructions: List[Instruction],
-        f_locals: Dict[str, Any],
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
@@ -1238,7 +1220,6 @@ class InstructionTranslatorBase(object):
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[int, int] = {id(i): n for n, i in enumerate(instructions)}
-        self.f_locals: Dict[str, Any] = f_locals  # Note: only needed for record/replay
         self.f_globals: Dict[str, Any] = f_globals
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
@@ -1282,7 +1263,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
-            f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
             code_options=code_options,

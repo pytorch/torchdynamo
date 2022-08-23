@@ -35,12 +35,14 @@ from .utils import CleanupManager
 from .utils import counters
 from .utils import filter_stack
 from .utils import format_bytecode
+from .utils import gen_record_filename
 from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
 from .utils import istype
 from .utils import orig_code_map
 from .utils import troubleshooting_url
+from .utils import write_record_to_file
 
 log = logging.getLogger(__name__)
 
@@ -183,12 +185,17 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def format_error_msg(exc, code, frame=None):
+def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     def replay_record_msg():
-        if config.replay_record_enabled and hasattr(exc, "rec_file_name"):
-            return f"\nLast frame execution written to {exc.rec_file_name}. To run only this frame while debugging, run torchdynamo.replay('{exc.rec_file_name}').\n"
+        if (
+            config.replay_record_enabled
+            and hasattr(exc, "exec_record")
+            and record_filename is not None
+        ):
+            return f"\nLast frame execution written to {record_filename}. To run only this frame while debugging, run\
+torchdynamo.replay('{exc.rec_file_name}').\n"
         else:
             return ""
 
@@ -230,6 +237,15 @@ def format_error_msg(exc, code, frame=None):
         msg += "\nSet torchdynamo.config.verbose=True for more information\n"
     msg += "=" * 10
     return msg
+
+
+def exception_handler(e, code, frame=None):
+    record_filename = None
+    if hasattr(e, "exec_record"):
+        record_filename = gen_record_filename(e)
+        write_record_to_file(record_filename, e.exec_record)
+
+    log.error(format_error_msg(e, code, record_filename, frame))
 
 
 def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
@@ -407,10 +423,10 @@ def _compile(
         BackendCompilerFailed,
         AssertionError,
     ) as e:
-        log.error(format_error_msg(e, code, frame))
+        exception_handler(e, code, frame)
         raise
     except Exception as e:
-        log.error(format_error_msg(e, code, frame))
+        exception_handler(e, code, frame)
         raise InternalTorchDynamoError()
 
 

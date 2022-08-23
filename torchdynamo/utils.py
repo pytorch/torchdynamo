@@ -15,6 +15,7 @@ import re
 import sys
 import time
 import types
+import uuid
 import weakref
 from functools import lru_cache
 from typing import Any
@@ -101,6 +102,20 @@ def format_graph_tabular(graph):
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename}\
  line {line_no} \n{dis.Bytecode(code).dis()}\n "
+
+
+def gen_record_filename(exc):
+    return f"{type(exc).__name__}_{uuid()}"
+
+
+def write_record_to_file(filename, exec_record):
+    if os.path.exists(filename):
+        log.warning(
+            f"Unable to write execution record {filename}; file already exists."
+        )
+    else:
+        with open(filename, "wb") as f:
+            exec_record.dump(f)
 
 
 def count_calls(g: fx.Graph):
