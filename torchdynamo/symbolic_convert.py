@@ -446,6 +446,7 @@ class InstructionTranslatorBase(object):
         """
         Copied from the Cpython implementation of __import__
         Resolve a relative module name to an absolute one.
+        https://github.com/python/cpython/blob/5a094f0255eea1db58fb2cf14c200971e64ec36e/Lib/importlib/_bootstrap.py#L902
         """
         bits = package.rsplit(".", level - 1)
         if len(bits) < level:
@@ -456,6 +457,7 @@ class InstructionTranslatorBase(object):
     def calc_package(self):
         """
         Copied from the Cpython implementation of __import__
+        https://github.com/python/cpython/blob/5a094f0255eea1db58fb2cf14c200971e64ec36e/Lib/importlib/_bootstrap.py#L1090
         """
         package = self.f_globals.get("__package__")
         spec = self.f_globals.get("__spec__")
