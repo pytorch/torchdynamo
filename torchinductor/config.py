@@ -59,8 +59,8 @@ repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
 # fuse even in cases without common reads
 aggressive_fusion = True
 
-# maximum iterations of fusions to do
-fusion_passes = 3
+# how many nodes to allow into a single fusion
+max_fusion_size = 64
 
 
 # config specific to codegen/cpp.pp

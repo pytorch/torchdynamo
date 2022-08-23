@@ -805,7 +805,7 @@ class Scheduler:
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
         """
-        for _ in range(config.fusion_passes):
+        for _ in range(10):
             old_len = len(self.nodes)
             self.fuse_nodes_once()
             if len(self.nodes) == old_len:
@@ -895,6 +895,9 @@ class Scheduler:
         ):
             return False  # heuristic not needed for correctness
 
+        if len(node1.get_nodes()) + len(node2.get_nodes()) >= config.max_fusion_size:
+            return False  # heuristic not needed for correctness
+
         if node1.get_names() & node2.recursive_predecessors:
             # node2 depends on node1 outputs
             if not self.can_fuse_vertical(node1, node2):
@@ -920,7 +923,11 @@ class Scheduler:
             dep.name for dep in node2.unmet_dependencies - node1.read_writes.writes
         }
         if remaining_deps & node1_names:
-            return False  # MemoryDeps didn't match
+            # MemoryDeps didn't match and read different locations of the same buffer.
+            # Examples here include:
+            #   - MemoryDep("foo", x) != MemoryDep("foo", x + 1)
+            #   - MemoryDep("foo", x) != StarDep("foo")
+            return False
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].recursive_predecessors:
                 return False
@@ -951,10 +958,10 @@ class Scheduler:
         """
         The first term in our fusion score that estimates number of saved memory operations.
         """
-        common_reads = node1.read_writes.reads & (
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
-        return sum(dep.numel_hint() for dep in common_reads)
+        return sum(dep.numel_hint() for dep in common_memory_deps)
 
     def score_fusion_key(self, nodes):
         """
