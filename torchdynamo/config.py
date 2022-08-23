@@ -98,3 +98,10 @@ allowed_functions_module_string_ignorelist = {
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
+
+# Compiler compilation debug info
+# 0: Nothing printed out when compilation fails
+# 1: Dump the graph out to repro.py if compilation fails
+# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
+# 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
+repro_level = int(os.environ.get("COMPILER_REPRO_LEVEL", 0))
