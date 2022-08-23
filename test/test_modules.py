@@ -668,9 +668,10 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         i = torch.randn(10)
         out2 = [m2(i), m2(i), m2(i)]
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize_assert(cnt):
-            out3 = [m3(i), m3(i), m3(i)]
-            out4 = [m4(i), m4(i), m4(i)]
+        opt_m3 = torchdynamo.optimize_assert(cnt)(m3)
+        opt_m4 = torchdynamo.optimize_assert(cnt)(m4)
+        out3 = [opt_m3(i), opt_m3(i), opt_m3(i)]
+        out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
         self.assertTrue(torchdynamo.testing.same(out2, out3))
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
