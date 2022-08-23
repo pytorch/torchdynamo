@@ -82,6 +82,7 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.tril.default,
         aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
     ]
@@ -123,11 +124,6 @@ def addmm(input, mat1, mat2):
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
-
-
-@register_decomposition([aten.rsqrt])
-def rsqrt(x):
-    return torch.reciprocal(torch.sqrt(x))
 
 
 @register_decomposition([aten.log2])

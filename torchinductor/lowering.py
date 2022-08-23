@@ -1858,6 +1858,28 @@ def reflection_pad2d_backward(grad_output, x, padding):
     )
 
 
+@register_lowering(prims.rev.default)
+def rev(x, dims):
+    # note - dims pre-canoncalized
+    x_loader = x.make_loader()
+    sizes = x.get_size()
+
+    def loader(idx):
+        idx = list(idx)
+        assert len(idx) == len(sizes)
+        for dim in dims:
+            idx[dim] = (sizes[dim] - 1) - idx[dim]
+
+        return x_loader(idx)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=loader,
+        ranges=sizes,
+    )
+
+
 @register_lowering(aten.constant_pad_nd, type_promote=False)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
@@ -2748,6 +2770,7 @@ register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.round)
+register_pointwise(aten.rsqrt)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)
