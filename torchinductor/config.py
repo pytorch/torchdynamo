@@ -1,5 +1,3 @@
-import os
-
 # add some debug printouts
 debug = False
 
@@ -48,13 +46,6 @@ prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
-
-# Inductor compilation debug info
-# 0: Nothing printed out when compilation fails
-# 1: Dump the graph out to repro.py if compilation fails
-# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
-# 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
-repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
 
 # fuse even in cases without common reads
 aggressive_fusion = True

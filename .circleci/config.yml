@@ -1,24 +1,22 @@
 version: 2.1
 
-jobs:
-  coverage:
-    machine:
-      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
-      image: ubuntu-2004-cuda-11.4:202110-01
-    resource_class: gpu.nvidia.large
+commands:
+  install_deps:
+    description: "Steps for installing deps with caching enabled"
     steps:
-      - checkout
-      - restore_cache:
-          keys:
-            - env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
       - run:
-          name: Setup
+          name: Generate date for cache key
+          command: date +%F > .circleci-date
+      - restore_cache:
+          key: env-v3-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+      - run:
+          name: Install libs
           command: |
             source .circleci/setup_env.sh
       - run:
-          name: TorchBench install
+          name: Install TorchBenchmark
           command: |
-            FILE=torchbenchmark/env-v2.key
+            FILE=torchbenchmark/env-v3.key
             if test -f "$FILE"; then
               # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
               echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
@@ -30,14 +28,24 @@ jobs:
               # above doesn't work due to git-lfs auth issues, workaround with a tarball:
               wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
               tar jxvf torchbenchmark.tar.bz2
-              (cd torchbenchmark && python install.py && touch env-v2.key)
+              (cd torchbenchmark && python install.py && touch env-v3.key)
             fi
       - save_cache:
-          key: env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
+          key: env-v3-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
           paths:
             - conda
             - env
             - torchbenchmark
+
+jobs:
+  coverage:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
       - run:
           name: Tests
           command: |
@@ -66,36 +74,7 @@ jobs:
     resource_class: gpu.nvidia.large
     steps:
       - checkout
-      - restore_cache:
-          keys:
-            - env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
-      - run:
-          name: Setup
-          command: |
-            source .circleci/setup_env.sh
-      - run:
-          name: TorchBench install
-          command: |
-            FILE=torchbenchmark/env-v2.key
-            if test -f "$FILE"; then
-              # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
-              echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
-            else
-              source .circleci/setup_env.sh
-              conda install -y -c conda-forge git-lfs
-              git lfs install --skip-repo
-              # git clone --recursive --depth=1 --shallow-submodules git@github.com:jansel/benchmark.git torchbenchmark
-              # above doesn't work due to git-lfs auth issues, workaround with a tarball:
-              wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
-              tar jxvf torchbenchmark.tar.bz2
-              (cd torchbenchmark && python install.py && touch env-v2.key)
-            fi
-      - save_cache:
-          key: env-v2-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}
-          paths:
-            - conda
-            - env
-            - torchbenchmark
+      - install_deps
       - run:
           name: TorchBench AotAutograd Eager run
           command: |
@@ -108,9 +87,63 @@ jobs:
           name: TorchBench AotAutograd Eager compiler accuracy
           command: |
             source .circleci/setup_env.sh
-            python .circleci/check_aot.py
+            python .circleci/check_csv.py -f aot_eager.csv
+  inductor_torchbench_inference:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TorchBench inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/torchbench.py --ci --quiet -d cuda --inductor --float32 \
+              --raise-on-assertion-error --raise-on-backend-error \
+              -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
+              -x pyhpc_ -x yolov3 \
+              --output=inductor_torchbench_inference.csv
+      - store_artifacts:
+          path: inductor_torchbench_inference.csv
+      - run:
+          name: TorchBench inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_torchbench_inference.csv
+
+  inductor_torchbench_training:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TorchBench training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/torchbench.py --ci -d cuda --inductor --training --use-eval-mode --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --quiet \
+              -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
+              -x attention_is_all_you_need_pytorch -x hf_ -x mobilenet_ -x pytorch_struct -x timm_ -x vgg16 -x yolov3 \
+              --output=inductor_torchbench_training.csv
+      - store_artifacts:
+          path: inductor_torchbench_training.csv
+      - run:
+          name: TorchBench training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_torchbench_training.csv
+
 workflows:
   gpu:
     jobs:
       - coverage
       - aot_eager
+      - inductor_torchbench_inference
+      - inductor_torchbench_training

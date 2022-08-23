@@ -12,6 +12,7 @@ from torch.nn import functional as F
 import torchdynamo.testing
 from torchdynamo.testing import requires_static_shapes
 
+tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True

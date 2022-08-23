@@ -8,6 +8,7 @@ from typing import List
 
 import sympy
 import torch
+from torch._prims_common import is_float_dtype
 
 from .. import codecache
 from .. import config
@@ -38,11 +39,18 @@ INDEX_TYPE = "long"
 def reduction_init(reduction_type, dtype):
     if reduction_type in ("sum", "any"):
         return 0
-    # TODO(jansel): infinity for floats?
     if reduction_type in {"max", "argmax"}:
-        return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
+        return (
+            f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            if is_float_dtype(dtype)
+            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
+        )
     if reduction_type in {"min", "argmin"}:
-        return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
+        return (
+            f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            if is_float_dtype(dtype)
+            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
+        )
     assert False, reduction_type
 
 

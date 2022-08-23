@@ -8,6 +8,7 @@ from typing import List
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
+from torchdynamo.debug_utils import wrap_debug
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.python_key import python_key_normalize
@@ -17,8 +18,6 @@ from torchdynamo.utils import init_logging
 
 from . import config
 from . import overrides
-from .debug_utils import dump_to_minify
-from .debug_utils import dump_to_repro
 from .decomposition import decompositions
 from .graph import GraphLowering
 from .virtualized import V
@@ -101,6 +100,7 @@ def compile_fx_python_key(
     return compile_fx_inner(gm, example_inputs, wrap=wrap, cudagraphs=cudagraphs)
 
 
+@functools.partial(wrap_debug, compiler_name="inductor")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -113,42 +113,24 @@ def compile_fx_inner(
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
-    if config.repro_level == 3:
-        dump_to_minify(gm, example_inputs)
-    try:
-        graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
-        with V.set_graph_handler(graph):
-            wrap(graph.run)(*example_inputs)
-            compiled_fn = wrap(graph.compile_to_fn())
+    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+    with V.set_graph_handler(graph):
+        wrap(graph.run)(*example_inputs)
+        compiled_fn = wrap(graph.compile_to_fn())
 
-        if (
-            cudagraphs
-            and set(graph.device_types) == {"cuda"}
-            and not graph.mutated_inputs
-        ):
-            compiled_fn = cudagraphify(
-                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
-            )
-        elif cudagraphs:
-            BoxedBool.disable(cudagraphs)
+    if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
+        compiled_fn = cudagraphify(
+            compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+        )
+    elif cudagraphs:
+        BoxedBool.disable(cudagraphs)
 
-            if len(set(graph.device_types)) > 1:
-                log.warning("skipping cudagraphs due to multiple devices")
-            elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
-                log.warning("skipping cudagraphs due to input mutation")
+        if len(set(graph.device_types)) > 1:
+            log.warning("skipping cudagraphs due to multiple devices")
+        elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
+            log.warning("skipping cudagraphs due to input mutation")
 
-        if config.repro_level > 0:
-            # force errors to happen at compile time not runtime
-            compiled_fn(*example_inputs)
-
-        return compiled_fn
-    except Exception:
-        if config.repro_level == 1:
-            dump_to_repro(gm, example_inputs)
-        elif config.repro_level == 2:
-            dump_to_minify(gm, example_inputs)
-
-        raise
+    return compiled_fn
 
 
 def cudagraphify(model, inputs, static_input_idxs=()):
