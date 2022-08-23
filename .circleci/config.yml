@@ -8,7 +8,7 @@ commands:
           name: Generate date for cache key
           command: date +%F > .circleci-date
       - restore_cache:
-          key: env-v3-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
       - run:
           name: Install libs
           command: |
@@ -16,7 +16,7 @@ commands:
       - run:
           name: Install TorchBenchmark
           command: |
-            FILE=torchbenchmark/env-v3.key
+            FILE=torchbenchmark/env-v4.key
             if test -f "$FILE"; then
               # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
               echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
@@ -28,10 +28,20 @@ commands:
               # above doesn't work due to git-lfs auth issues, workaround with a tarball:
               wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
               tar jxvf torchbenchmark.tar.bz2
-              (cd torchbenchmark && python install.py && touch env-v3.key)
+              (cd torchbenchmark && python install.py && touch env-v4.key)
             fi
+      - run:
+          name: Install HuggingFace
+          command: |
+            source .circleci/setup_env.sh
+            python -m pip install git+https://github.com/huggingface/transformers.git#egg=transformers
+      - run:
+          name: Install TIMM
+          command: |
+            source .circleci/setup_env.sh
+            python -m pip install git+https://github.com/rwightman/pytorch-image-models
       - save_cache:
-          key: env-v3-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
           paths:
             - conda
             - env
@@ -59,7 +69,7 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --ci --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
+            python benchmarks/torchbench.py --ci --repeat 2 --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
       - store_artifacts:
           path: coverage.csv
       - run:
@@ -80,7 +90,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 -x yolov3 --use-eval-mode --output=aot_eager.csv
+            python benchmarks/torchbench.py --ci --repeat 2 --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 -x yolov3 --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
       - run:
@@ -102,7 +112,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --quiet -d cuda --inductor --float32 \
+            python benchmarks/torchbench.py --ci --repeat 2 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error \
               -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
               -x pyhpc_ -x yolov3 \
@@ -127,7 +137,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --quiet -d cuda --inductor --training --use-eval-mode --float32 \
+            python benchmarks/torchbench.py --ci --repeat 2 --quiet -d cuda --inductor --training --use-eval-mode --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 0\
               -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
               -x attention_is_all_you_need_pytorch -x mobilenet_ -x pytorch_struct -x vgg16 -x yolov3 \
@@ -153,7 +163,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --quiet -d cuda --inductor --training --use-eval-mode --float32 \
+            python benchmarks/torchbench.py --ci --repeat 2 --quiet -d cuda --inductor --training --use-eval-mode --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 1\
               -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
               -x attention_is_all_you_need_pytorch -x mobilenet_ -x pytorch_struct -x vgg16 -x yolov3 \
@@ -175,3 +185,8 @@ workflows:
       - inductor_torchbench_inference
       - inductor_torchbench_training_0
       - inductor_torchbench_training_1
+      - inductor_torchbench_training
+      - inductor_huggingface_inference
+      - inductor_huggingface_training
+      - inductor_timm_inference
+      - inductor_timm_training
