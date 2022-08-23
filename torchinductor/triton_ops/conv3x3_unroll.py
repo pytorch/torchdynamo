@@ -5,11 +5,7 @@ import triton.language as tl
 from .autotune import conv_heuristics
 
 
-def init_to_zero(name):
-    return lambda nargs: nargs[name].zero_()
-
-
-@conv_heuristics(pre_hook=init_to_zero("y"), MAX_BLOCK_K=32)
+@conv_heuristics()
 @triton.jit
 def _kernel(
     x,

@@ -110,7 +110,7 @@ def _kernel(
     off_w_k = off_y_k
     w_ptrs = w + off_x_crs[:, None] + off_w_k[None, :] * stride_wn
     # tell triton not to vectorize, otherwise misaligned address error
-    w_ptrs = tl.multiple_of(w_ptrs, 1)
+    w_ptrs = tl.multiple_of(w_ptrs, [1, 1])
     mask_w = (
         (off_x_crs < CRS)[:, None]
         & (off_x_crs < BLOCK_K_mul_of_KERNEL)[:, None]

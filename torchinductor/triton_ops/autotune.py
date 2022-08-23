@@ -248,58 +248,106 @@ def reduction_heuristics(size_hints):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def conv_heuristics():
+def conv_heuristics(pre_hook=None):
     configs = [
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
+            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
+            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32},
+            num_stages=4,
+            num_warps=2,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32},
+            num_stages=4,
+            num_warps=8,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=3, num_warps=8
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128},
+            num_stages=3,
+            num_warps=8,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=3, num_warps=8
+            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128},
+            num_stages=3,
+            num_warps=8,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=4, num_warps=4
+            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 128},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=4, num_warps=4
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 128},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=4, num_warps=4
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128},
+            num_stages=4,
+            num_warps=4,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=2
+            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64},
+            num_stages=4,
+            num_warps=2,
+            pre_hook=pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=4, num_warps=2
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64},
+            num_stages=4,
+            num_warps=2,
+            pre_hook=pre_hook,
         ),
         # triton.Config(
-        #     {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
+        #     {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2,
         # ),
     ]
     key = [
