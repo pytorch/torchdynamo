@@ -4,7 +4,7 @@ import torchdynamo
 import torchinductor.config
 from torchdynamo.testing import same
 
-# torchinductor.config.debug = True
+torchinductor.config.debug = True
 torchinductor.config.triton.dense_indexing = True
 torchinductor.config.triton.convolution = "triton"
 torch.manual_seed(0)
