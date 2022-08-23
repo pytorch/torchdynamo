@@ -69,6 +69,7 @@ decompositions = get_decompositions(
         aten.nll_loss_backward,
         aten.norm,
         aten.reflection_pad2d_backward,
+        aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
         aten.sigmoid_backward,
@@ -81,7 +82,9 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.tril.default,
         aten.upsample_nearest2d_backward,
+        aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
@@ -121,11 +124,6 @@ def addmm(input, mat1, mat2):
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
-
-
-@register_decomposition([aten.rsqrt])
-def rsqrt(x):
-    return torch.reciprocal(torch.sqrt(x))
 
 
 @register_decomposition([aten.log2])
@@ -278,11 +276,6 @@ def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
     return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
 
 
-@register_decomposition([aten.narrow])
-def narrow(self, dim, start, length):
-    return aten.slice(self, dim, start, start + length)
-
-
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
@@ -297,11 +290,6 @@ def lift(self):
 @register_decomposition([aten.sgn])
 def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
-
-
-@register_decomposition([aten.type_as])
-def type_as(self, other):
-    return self.type(other.type())
 
 
 if not config.fallback_random:

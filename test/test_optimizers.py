@@ -30,8 +30,8 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
         else:
             fn = opt.step
 
-        with torchdynamo.optimize(counter):
-            fn()
+        opt_fn = torchdynamo.optimize(counter)(fn)
+        opt_fn()
 
         self.assertEqual(counter.frame_count, exp_frame_cnt)
 

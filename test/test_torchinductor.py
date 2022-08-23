@@ -516,6 +516,26 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 17, 8, 9),))
 
+    def test_reduction1(self):
+        def fn(a):
+            return (a.sum(), a.max(), a.min(), a.argmax(), a.argmin())
+
+        self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
+
+    def test_reduction2(self):
+        def fn(a):
+            # FIXME: a.argmax
+            return (a.sum(), a.max(), a.min(), a.argmin())
+
+        self.common(fn, (torch.full((4,), float("inf")),))
+
+    def test_reduction3(self):
+        def fn(a):
+            # FIXME: a.argmin
+            return (a.sum(), a.max(), a.min(), a.argmax())
+
+        self.common(fn, (torch.full((4,), float("-inf")),))
+
     def test_multilayer_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
@@ -1176,6 +1196,18 @@ class CommonTemplate:
             (torch.randn(2, 4, 16, 16),),
         )
 
+        # lowering to avg_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
+        )
+
     def test_max_pool2d1(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
@@ -1633,6 +1665,15 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([64]),),
+        )
+
+    def test_flip(self):
+        def fn(x):
+            return torch.flip(x, (-1,)), torch.flip(x, (0, 2)) - 2
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
         )
 
     def test_log2(self):
@@ -2851,7 +2892,7 @@ class CommonTemplate:
             ],
         )
 
-    def test_tmp_not_defined_issue(self):
+    def test_tmp_not_defined_issue1(self):
         def forward(
             primals_3,
             primals_4,
@@ -2899,6 +2940,22 @@ class CommonTemplate:
         ]
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
         self.common(forward, inps)
+
+    def test_tmp_not_defined_issue2(self):
+        def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
+            div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
+            mul_tensor_24 = torch.ops.aten.mul.Tensor(div_tensor_7, arg38_1)
+            sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
+            return (new_zeros_default_4, sum_default_7)
+
+        args = [
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
+            ((), (), torch.float32),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
+            ((3,), (1,), torch.float32),
+        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
 
 
 if HAS_CPU:

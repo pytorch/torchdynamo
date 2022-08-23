@@ -160,6 +160,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
+    def rsqrt(x):
+        return f"tl.libdevice.rsqrt({x})"
+
+    @staticmethod
     def pow(a, b):
         return f"tl.libdevice.pow({a}, {b})"
 
@@ -616,7 +620,12 @@ class TritonKernel(Kernel):
         new_index = index.subs(dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
-    def indexing(self, index: sympy.Expr, copy_shape=None, dense_indexing=False):
+    def indexing(
+        self,
+        index: sympy.Expr,
+        copy_shape=None,
+        dense_indexing=False,
+    ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
@@ -632,6 +641,7 @@ class TritonKernel(Kernel):
             or indirect_indexing
             or self._load_mask is not None
         ) and index != 0
+
         have_dense = True
         have_loop_vars = False
         mask = []
@@ -646,7 +656,7 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if need_dense and not have_dense:
+        if (need_dense and not have_dense) or index == 0:
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
         elif not have_loop_vars and copy_shape:
@@ -704,7 +714,12 @@ class TritonKernel(Kernel):
         if upcast:
             line += ".to(tl.float32)"
 
-        if self.inside_reduction and "rmask" not in mask and not indirect_indexing:
+        if (
+            self.inside_reduction
+            and "rmask" not in mask
+            and "tmp" not in mask
+            and not indirect_indexing
+        ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
             tmp = self.cse.generate(self.body, line)
@@ -717,7 +732,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value)
+        index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + {index}, {value}, {mask})"
         elif mode == "atomic_add":

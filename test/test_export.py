@@ -40,8 +40,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             )
             return pre_attention_state_ops(i, mems, state)
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func()
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func()
 
         torchdynamo.reset()
 
@@ -56,8 +56,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + 1
             return ([x, x], (y, y))
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(torch.tensor([[[1.3737, 0.1]]]))
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torchdynamo.reset()
 
@@ -80,8 +80,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             second = x[2]
             return first * second
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(inp)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(inp)
 
         torchdynamo.reset()
 
@@ -105,8 +105,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             second = x[2]
             return x[0], first * second, x[1], x[2]
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(inp)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(inp)
 
         torchdynamo.reset()
 
@@ -123,8 +123,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + 1
             return ([x, x], (y, y))
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(torch.tensor([[[1.3737, 0.1]]]))
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torchdynamo.reset()
 
@@ -148,8 +148,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             second = x[2]
             return first * second, x
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(inp)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(inp)
 
         torchdynamo.reset()
 
@@ -175,8 +175,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             third = x[2]
             return third, first, second, first * second, first * third
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(inp)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(inp)
 
         torchdynamo.reset()
 
@@ -195,8 +195,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + 1
             return y, y
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(inp)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(inp)
 
         torchdynamo.reset()
 
@@ -215,8 +215,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + 1
             return y, y
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(inp)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(inp)
 
         torchdynamo.reset()
 
@@ -237,8 +237,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + 1
             return y, y, z
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
 
         torchdynamo.reset()
 
@@ -260,8 +260,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + k
             return y, y, z
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
 
         torchdynamo.reset()
 
@@ -283,8 +283,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + k
             return z, y, y
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
 
         torchdynamo.reset()
 
@@ -307,8 +307,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             y = x + k
             return y[0].item(), y, z
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
 
         torchdynamo.reset()
 
@@ -331,8 +331,8 @@ class ExportTests(torchdynamo.testing.TestCase):
         def func(a, b, c):
             return [[a], [b, c], [a + b], [[c + c]]]
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps_rand)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps_rand)
 
         torchdynamo.reset()
 
@@ -356,8 +356,8 @@ class ExportTests(torchdynamo.testing.TestCase):
         def func(a, b, c):
             return a[0].item() + b[0].item() + c[0].item()
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps_rand)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps_rand)
 
         torchdynamo.reset()
 
@@ -381,8 +381,8 @@ class ExportTests(torchdynamo.testing.TestCase):
         def func(a, b, c):
             return b[0].item() + c[0].item() + a[0].item() + a[0].item()
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps_rand)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps_rand)
 
         torchdynamo.reset()
 
@@ -406,8 +406,8 @@ class ExportTests(torchdynamo.testing.TestCase):
         def func(a, b, c):
             return a, b[0].item() + c[0].item() + a[0].item() + a[0].item(), a
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps_rand)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps_rand)
 
         torchdynamo.reset()
 
@@ -435,8 +435,8 @@ class ExportTests(torchdynamo.testing.TestCase):
 
             return func2(x)
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps_rand)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps_rand)
 
         torchdynamo.reset()
 
@@ -460,8 +460,8 @@ class ExportTests(torchdynamo.testing.TestCase):
             x = a + b + c
             return {"a": x}
 
-        with torchdynamo.optimize("eager", nopython=True):
-            real_result = func(*inps_rand)
+        opt_func = torchdynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps_rand)
 
         torchdynamo.reset()
 
