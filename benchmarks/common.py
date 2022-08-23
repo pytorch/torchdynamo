@@ -274,8 +274,8 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
     prof = torchdynamo.utils.CompileProfiler()
-    with torchdynamo.optimize(prof, nopython=args.nopython):
-        model_iter_fn(model, example_inputs)
+    opt_model_iter_fn = torchdynamo.optimize(prof, nopython=args.nopython)(model_iter_fn)
+    opt_model_iter_fn(model, example_inputs)
     output_csv(
         output_filename, ["model", "profiler report"], [current_name, prof.report()]
     )
