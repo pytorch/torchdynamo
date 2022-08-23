@@ -2169,8 +2169,7 @@ def _adaptive_avg_pool2d(x, output_size):
 
     # no-op if the same input and output
     if h_in == h_out and w_in == w_out:
-        # TODO: do I need to copy ? _to_copy does not
-        return x
+        return clone(x)
 
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
