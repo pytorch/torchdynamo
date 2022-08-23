@@ -24,7 +24,31 @@ class TritonTemplateKernel(TritonKernel):
             lstrip_blocks=True,
             undefined=StrictUndefined,
         )
-        self.template = env.get_template(template_name + ".j2")
+        pid_cache = {}
+        if isinstance(node, ir.Convolution):
+            pid_cache = {
+                "tl.program_id(0)": "pid_nhw",
+                "tl.program_id(1)": "pid_k",
+            }
+            self.map_args()
+            KERNEL_H = self.args_dict["KERNEL_H"]
+            KERNEL_W = self.args_dict["KERNEL_W"]
+            padding_h = self.args_dict["padding_h"]
+            padding_w = self.args_dict["padding_w"]
+            if ((KERNEL_H == "1" and KERNEL_W == "1")) or (
+                (padding_h == "0") and (padding_w == "0")
+            ):
+                self.template_name += "_delta_x"
+            else:
+                self.template_name += "_delta_x_hwc"
+        elif isinstance(node, ir.MatrixMultiply):
+            pid_cache = {
+                "tl.program_id(0)": "pid_m",
+                "tl.program_id(1)": "pid_n",
+            }
+
+        self.template = env.get_template(self.template_name + ".j2")
+        super(TritonTemplateKernel, self).__init__(*groups, pid_cache=pid_cache)
 
     def rename_vars(self):
         for k, v in self.inout_dict.items():
