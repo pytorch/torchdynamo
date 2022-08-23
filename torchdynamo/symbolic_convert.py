@@ -442,15 +442,75 @@ class InstructionTranslatorBase(object):
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
+    def resolve_name(self, name, package, level):
+        """
+        Copied from the Cpython implementation of __import__
+        Resolve a relative module name to an absolute one.
+        https://github.com/python/cpython/blob/5a094f0255eea1db58fb2cf14c200971e64ec36e/Lib/importlib/_bootstrap.py#L902
+        """
+        bits = package.rsplit(".", level - 1)
+        if len(bits) < level:
+            raise ImportError("attempted relative import beyond top-level package")
+        base = bits[0]
+        return "{}.{}".format(base, name) if name else base
+
+    def calc_package(self):
+        """
+        Copied from the Cpython implementation of __import__
+        https://github.com/python/cpython/blob/5a094f0255eea1db58fb2cf14c200971e64ec36e/Lib/importlib/_bootstrap.py#L1090
+        """
+        package = self.f_globals.get("__package__")
+        spec = self.f_globals.get("__spec__")
+        if package is not None:
+            if spec is not None and package != spec.parent:
+                log.warn(
+                    "__package__ != __spec__.parent "
+                    f"({package!r} != {spec.parent!r})",
+                    ImportWarning,
+                    stacklevel=3,
+                )
+            return package
+        elif spec is not None:
+            return spec.parent
+        else:
+            log.warn(
+                "can't resolve package from __spec__ or __package__, "
+                "falling back on __name__ and __path__",
+                ImportWarning,
+                stacklevel=3,
+            )
+            package = self.f_globals["__name__"]
+            if "__path__" not in self.f_globals:
+                package = package.rpartition(".")[0]
+        return package
+
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
+        level = level.as_python_constant()
+        fromlist = fromlist.as_python_constant()
         module_name = inst.argval
+
         value = __import__(
             module_name,
-            fromlist=fromlist.as_python_constant(),
-            level=level.as_python_constant(),
+            fromlist=fromlist,
+            level=level,
+            globals=self.f_globals,
         )
-        source = self.import_source(module_name)
+
+        if level != 0:
+            pkg = self.calc_package()
+            module_name = self.resolve_name(module_name, pkg, level)
+
+        # For __import__, when the name variable is of the form package.module,
+        # normally, the top-level package (the name up till the first dot) is
+        # returned, not the module named by module_name. However, when a
+        # non-empty fromlist argument is given, the module named by name is
+        # returned. Therefore, we set the source correctly here.
+        if not fromlist:
+            top_level_module_name = module_name.partition(".")[0]
+            source = self.import_source(top_level_module_name)
+        else:
+            source = self.import_source(module_name)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
