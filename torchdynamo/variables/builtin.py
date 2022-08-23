@@ -362,9 +362,9 @@ class BuiltinVariable(VariableTracker):
                 a, b = b, a
             assert isinstance(a, variables.TensorVariable)
 
-            # result of an item call is a scalar
-            # convert to a tensor
-            if isinstance(a, FakeItemVariable):
+            # 1. result of an item call is a scalar convert to a tensor
+            # 2. dynamic shape should be resolved to tensor
+            if isinstance(a, (FakeItemVariable, DynamicShapeVariable)):
                 a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
 
             # convert min/max to torch ops

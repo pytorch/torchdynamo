@@ -2,6 +2,7 @@ import collections
 import contextlib
 import copy
 import dataclasses
+import dis
 import functools
 import gc
 import inspect
@@ -97,6 +98,11 @@ def format_graph_tabular(graph):
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
 
 
+def format_bytecode(prefix, frame, code):
+    return f"{prefix} {frame.f_code.co_name} {frame.f_code.co_filename}\
+ line {frame.f_code.co_firstlineno} \n{dis.Bytecode(code).dis()}\n "
+
+
 def count_calls(g: fx.Graph):
     c = 0
     for n in g.nodes:
@@ -182,9 +188,14 @@ def is_numpy_float_type(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    return istype(
-        obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
+    tensor_list = (
+        torch.Tensor,
+        torch.nn.Parameter,
+        *config.traceable_tensor_subclasses,
     )
+    if fake_tensors_available:
+        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    return istype(obj, tensor_list)
 
 
 def is_lazy_module(mod):
@@ -615,7 +626,10 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                return res_error <= (1.1 * ref_error + 1e-5)
+                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                if not passes_test:
+                    print(f"RMSE (res-fp64): {res_error}, (ref-fp64): {ref_error}")
+                return passes_test
 
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):

@@ -1,15 +1,16 @@
+import argparse
 import sys
 import textwrap
 
 import pandas as pd
 
 
-def check_aot_nop():
+def check_csv(filename):
     """
     Basic accuracy checking. If a model fails, the speedup will be 0.
     """
 
-    actual = pd.read_csv("aot_eager.csv")
+    actual = pd.read_csv(filename)
 
     failed = []
     for model_name in actual["name"]:
@@ -25,7 +26,7 @@ def check_aot_nop():
         print(
             textwrap.dedent(
                 f"""
-                Error {len(failed)} models fail to compile with aot_nop
+                Error {len(failed)} models failed
                     {' '.join(failed)}
                 """
             )
@@ -34,4 +35,7 @@ def check_aot_nop():
 
 
 if __name__ == "__main__":
-    check_aot_nop()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--file", "-f", type=str, help="csv file name")
+    args = parser.parse_args()
+    check_csv(args.file)
