@@ -39,6 +39,7 @@ class ExecutionRecord:
 
 @dataclasses.dataclass
 class ExecutionRecorder:
+    MOD_EXCLUDES = ["torch"]
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
@@ -51,16 +52,25 @@ class ExecutionRecorder:
 
     def add_global_var(self, name, var):
         if isinstance(var, ModuleType):
-            var = ModuleRecord(var)
-            self.name_to_modrec[name] = var
+            if self._is_excl(var):
+                return
+            mod_rec = ModuleRecord(var)
+            self.name_to_modrec[var.__name__] = mod_rec
+            self.globals[name] = mod_rec
+        else:
 
-        self.globals[name] = var
+            self.globals[name] = var
 
     def add_local_mod(self, name, mod):
         assert isinstance(mod, ModuleType)
+        if self._is_excl(mod):
+            return
+
         self.add_global_var(self.LOCAL_MOD_PREFIX + name, mod)
 
     def record_module_access(self, mod, name, val):
+        if self._is_excl(mod):
+            return
         # check local mods first
         local_mod_name = self.LOCAL_MOD_PREFIX + mod.__name__
         if local_mod_name in self.name_to_modrec:
@@ -77,6 +87,10 @@ class ExecutionRecorder:
             self.builtins.copy(),
             self.code_options.copy(),
         )
+
+    @classmethod
+    def _is_excl(cls, mod):
+        return any([mod.__name__ == excl for excl in cls.MOD_EXCLUDES])
 
     # Convert ModuleRecords -> DummyModule tree
     @classmethod
