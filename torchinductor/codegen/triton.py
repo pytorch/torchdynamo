@@ -160,10 +160,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
-    def rsqrt(x):
-        return f"tl.libdevice.rsqrt({x})"
-
-    @staticmethod
     def pow(a, b):
         return f"tl.libdevice.pow({a}, {b})"
 
