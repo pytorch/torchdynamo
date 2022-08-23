@@ -621,7 +621,6 @@ class TritonKernel(Kernel):
         index: sympy.Expr,
         copy_shape=None,
         dense_indexing=False,
-        load_index0=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -653,7 +652,7 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or load_index0:
+        if (need_dense and not have_dense) or index == 0:
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
         elif not have_loop_vars and copy_shape:
@@ -699,7 +698,7 @@ class TritonKernel(Kernel):
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
-        index, mask = self.indexing(index, load_index0=(index == 0))
+        index, mask = self.indexing(index)
         if "rmask" in mask:
             # This eviction policy heuristic is untested.
             # ptillet suggested we should try only doing this for
