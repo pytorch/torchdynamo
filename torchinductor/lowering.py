@@ -1867,7 +1867,7 @@ def rev(x, dims):
         idx = list(idx)
         assert len(idx) == len(sizes)
         for dim in dims:
-            idx[dim] = sizes[dim] - idx[dim]
+            idx[dim] = (sizes[dim] - 1) - idx[dim]
 
         return x_loader(idx)
 
