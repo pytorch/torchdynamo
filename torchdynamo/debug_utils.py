@@ -9,6 +9,7 @@ import uuid
 from collections import Counter
 
 import torch
+import torch.fx as fx
 
 import torchdynamo
 from torchdynamo import config
@@ -225,9 +226,11 @@ def dump_to_minify(gm, args, compiler_name: str):
 def wrap_debug(compiler, compiler_name: str):
     @functools.wraps(compiler)
     def debug_wrapper(gm, example_inputs, **kwargs):
-        orig_gm = copy.deepcopy(gm)
+        orig_graph = copy.deepcopy(gm.graph)
         if config.repro_level == 3:
-            dump_to_minify(orig_gm, example_inputs, compiler_name)
+            dump_to_minify(
+                fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+            )
 
         try:
             compiled_fn = compiler(gm, example_inputs, **kwargs)
@@ -235,9 +238,13 @@ def wrap_debug(compiler, compiler_name: str):
                 compiled_fn(*example_inputs)
         except Exception as e:
             if config.repro_level == 1:
-                dump_state(orig_gm, example_inputs, compiler_name)
+                dump_state(
+                    fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                )
             elif config.repro_level == 2:
-                dump_to_minify(orig_gm, example_inputs, compiler_name)
+                dump_to_minify(
+                    fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                )
             raise e
 
         return compiled_fn
