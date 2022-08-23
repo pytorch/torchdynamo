@@ -37,12 +37,12 @@ def cmp(a, b):
 
 
 def should_use_template(node: ir.ExternKernel):
-    return (
-        type(node) in template_kernels
-        and ir.is_triton(node.get_device())
-        # TODO(jansel): extend this to other kernels
-        and config.triton.convolution != "aten"
-    )
+    if type(node) in template_kernels and ir.is_triton(node.get_device()):
+        if isinstance(node, ir.Convolution):
+            return node.kernel != "aten.convolution"
+        elif isinstance(node, ir.MatrixMultiply):
+            return node.kernel != "aten.mm.out"
+    return False
 
 
 class OutputNode:
