@@ -944,6 +944,15 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
+    def get_benchmark_indices(self, length):
+        start = self._args.partition_id * (length // self._args.total_partitions)
+        end = (
+            (self._args.partition_id + 1) * (length // self._args.total_partitions)
+            if self._args.partition_id < self._args.total_partitions - 1
+            else length
+        )
+        return start, end
+
     def run_one_model(
         self,
         name,
@@ -1132,6 +1141,19 @@ def parse_args():
     )
     parser.add_argument(
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
+    )
+    parser.add_argument(
+        "--total-partitions",
+        type=int,
+        default=1,
+        choices=range(1, 10),
+        help="Total number of partitions we want to divide the benchmark suite into",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        default=0,
+        help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
@@ -1403,6 +1425,10 @@ def main(runner, original_dir=None):
     # defaults
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+
+    if args.partition_id > args.total_partitions or args.partition_id < 0:
+        print("Invalid partition id")
+        return sys.exit(-1)
 
     if not args.devices:
         if torch.cuda.is_available():

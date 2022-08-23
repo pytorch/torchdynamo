@@ -303,7 +303,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def iter_model_names(self, args):
         from torchbenchmark import _list_model_paths
 
-        for model_path in _list_model_paths():
+        models = _list_model_paths()
+        start, end = self.get_benchmark_indices(len(models))
+        for index, model_path in enumerate(models):
+            if index < start or index >= end:
+                continue
+
             model_name = os.path.basename(model_path)
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
