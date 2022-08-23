@@ -48,9 +48,10 @@ TABLE = {
     "training": {
         "ts_nnc": "--training --speedup-ts --use-eval-mode ",
         "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode ",
+        "eager": "--training --accuracy-aot-nop --backend=eager --use-eval-mode ",
         "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode ",
         "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode ",
-        "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode ",
+        "aot_ts_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode ",
         "inductor_cudagraphs": "--training --inductor --use-eval-mode",
     },
     "inference": {
@@ -67,7 +68,7 @@ TABLE = {
         "eager": "--training --profile-backend=eager",
         "ts_nvfuser": "--training --profile-backend=nvfuser",
         "aot_eager": "--training --profile-backend=aot_nop",
-        "aot_nvfuser": "--training --profile-backend=aot_nvfuser",
+        "aot_ts_nvfuser": "--training --profile-backend=aot_nvfuser",
         "inductor_cudagraphs": "--training --profile-backend=inductor",
     },
 }
@@ -76,13 +77,13 @@ INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
 TRAINING_COMPILERS = tuple(TABLE["training"].keys())
 
 DEFAULTS = {
-    "training": ["ts_nvfuser", "aot_eager", "aot_nvfuser", "inductor_cudagraphs"],
+    "training": ["eager", "ts_nvfuser", "aot_eager", "aot_ts_nvfuser", "inductor_cudagraphs"],
     "inference": ["ts_nvfuser_cudagraphs", "inductor_cudagraphs"],
     "profile_compiler": [
         "pytorch",
         "eager",
         "aot_eager",
-        "aot_nvfuser",
+        "aot_ts_nvfuser",
         "inductor_cudagraphs",
     ],
     "dtypes": [
@@ -261,7 +262,7 @@ def build_summary():
         f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
     )
 
-    title = "## Build Summary"
+    title = "## Build Summary ##"
     comment = generate_dropdown_comment(title, out_io.getvalue())
     with open(f"{output_dir}/gh_build_summary.txt", "w") as gh_fh:
         gh_fh.write(comment)
