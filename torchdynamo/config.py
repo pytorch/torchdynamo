@@ -112,7 +112,7 @@ class AccessLimitingConfig:
         assert hasattr(
             self, name
         ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
-        return self.__getattribute__(self, name)
+        return object.__getattr__(self, name)
 
     def __setattr__(self, name, value):
         assert hasattr(
