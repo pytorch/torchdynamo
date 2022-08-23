@@ -277,7 +277,10 @@ def clone_input(x):
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
-        buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+        if x.is_quantized:
+            buffer = torch.empty_quantized((needed_size + 32,), x)
+        else:
+            buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
         cache_line_offset = (
             (x.data_ptr() - buffer.data_ptr()) % 32
         ) // x.element_size()

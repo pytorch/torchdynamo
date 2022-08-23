@@ -30,7 +30,7 @@ from .. import variables
 from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
-from ..utils import clone_tensor
+from ..utils import clone_input
 from ..utils import is_lazy_module
 from ..utils import istype
 from ..utils import product
@@ -154,7 +154,8 @@ class TensorVariable(VariableTracker):
 
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(example_value, FakeTensor):
-                example_value = clone_tensor(example_value)
+                # NB: ensure strides are preserved
+                example_value = clone_input(example_value)
             proxy.node.meta["example_value"] = example_value
             specialized_props = cls.specialize(example_value)
             if use_fake_tensors and isinstance(example_value, FakeTensor):
