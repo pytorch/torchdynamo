@@ -196,6 +196,18 @@ cpu-inductor-seq: develop
 	taskset 1 python benchmarks/torchbench.py --inductor-settings --fast --backend=ts --threads=1
 	paste -d, inductor.csv speedup_ts.csv > cpu_1t_inductor.csv
 
+gpu-inductor-bw-fp16: develop
+	rm -f inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --backend=aot_nvfuser --nvfuser
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --backend=aot_cudagraphs
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --inductor
+	paste -d, inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv > inductor_bw_fp16.csv
 
+gpu-inductor-bw-fp32: develop
+	rm -f inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --backend=aot_nvfuser --nvfuser
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --backend=aot_cudagraphs
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --inductor
+	paste -d, inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv > inductor_bw_fp32.csv
 
 
