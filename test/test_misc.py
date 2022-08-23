@@ -2071,8 +2071,8 @@ class MiscTests(torchdynamo.testing.TestCase):
         a = torch.tensor([2.0, 3.0], requires_grad=True)
         b = torch.tensor([6.0, 4.0], requires_grad=True)
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
-            _, b_grad = fn(a, b)
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
         self.assertEqual(cnts.frame_count, 2)
 
@@ -2118,13 +2118,12 @@ class MiscTests(torchdynamo.testing.TestCase):
         fn2()
 
     def test_dynamo_min_operator_with_shape(self):
-        with torchdynamo.optimize("eager", nopython=True):
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x, a):
+            return min(x.shape[0], a)
 
-            def f(x, a):
-                return min(x.shape[0], a)
-
-            result = f(torch.ones(6), 3)
-            self.assertEqual(result, 3)
+        result = f(torch.ones(6), 3)
+        self.assertEqual(result, 3)
 
     def test_cond(self):
         from functorch.experimental.cond import cond
