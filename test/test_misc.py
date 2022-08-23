@@ -332,19 +332,12 @@ class MiscTests(torchdynamo.testing.TestCase):
         v1 = torch.Tensor([100])
         v2 = torch.Tensor([200])
         cnts = torchdynamo.testing.CompileCounter()
-<<<<<<< HEAD
-        with torchdynamo.optimize(cnts):
-            self.assertEqual(fn1({"a": v1, "b": v2})[0], 300)
-            self.assertEqual(fn2({"a": v1, "b": v2})[0], 300)
-            self.assertEqual(fn3({"a": v1, "b": v2})[0], 300)
-=======
         opt_fn1 = torchdynamo.optimize(cnts)(fn1)
         opt_fn2 = torchdynamo.optimize(cnts)(fn2)
         opt_fn3 = torchdynamo.optimize(cnts)(fn3)
         self.assertEqual(opt_fn1({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn2({"a": v1, "b": v2})[0], 300)
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
->>>>>>> ea455b727f080a109ae5e5650bbb95f154063c46
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 9)
 
