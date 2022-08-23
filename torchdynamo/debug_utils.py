@@ -153,7 +153,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
     return False
 
 
-def inductor_fails(fx_g, args, check_str="CompilationError"):
+def inductor_fails(fx_g, args, check_str=None):
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx_inner
 
