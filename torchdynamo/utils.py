@@ -601,7 +601,7 @@ def same(
                 return True
             res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if res < 0.99:
-                log.info(f"Similarity score={res.cpu().detach().item()}")
+                log.warning(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             if not exact_dtype:
@@ -617,7 +617,9 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 passes_test = res_error <= (1.1 * ref_error + 1e-5)
                 if not passes_test:
-                    print(f"RMSE (res-fp64): {res_error}, (ref-fp64): {ref_error}")
+                    log.warning(
+                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                    )
                 return passes_test
 
             return False

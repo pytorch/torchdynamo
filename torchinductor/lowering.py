@@ -30,6 +30,7 @@ from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
+log = logging.getLogger(__name__)
 lowerings = {}
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -708,7 +709,7 @@ def make_fallback(kernel):
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
     if get_decompositions([kernel]):
-        logging.warning(
+        log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
 
@@ -758,7 +759,7 @@ else:
             pin_memory=False,
             memory_format=None,
         ):
-            logging.warning("using triton random, expect difference from eager")
+            log.warning("using triton random, expect difference from eager")
             assert not pin_memory
             assert layout in (0, torch.strided)
             assert memory_format in (None, torch.contiguous_format)
@@ -805,7 +806,7 @@ else:
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    logging.warning("using triton random, expect difference from eager")
+    log.warning("using triton random, expect difference from eager")
     return V.graph.random_seed_buffer(x.get_device())
 
 

@@ -895,7 +895,7 @@ class Scheduler:
         ):
             return False  # heuristic not needed for correctness
 
-        if len(node1.get_nodes()) + len(node2.get_nodes()) >= config.max_fusion_size:
+        if len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size:
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.recursive_predecessors:
