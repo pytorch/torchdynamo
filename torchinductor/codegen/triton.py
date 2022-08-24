@@ -652,7 +652,7 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or index == 0:
+        if need_dense and not have_dense:
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
         elif not have_loop_vars and copy_shape:
@@ -704,7 +704,12 @@ class TritonKernel(Kernel):
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
-        index, mask = self.indexing(index)
+        if index == 0:
+            # No need to use mask when loading a single element from index 0
+            index, mask = "0", "None"
+        else:
+            index, mask = self.indexing(index)
+
         if "rmask" in mask:
             # This eviction policy heuristic is untested.
             # ptillet suggested we should try only doing this for
