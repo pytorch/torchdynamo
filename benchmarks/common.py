@@ -12,7 +12,6 @@ import signal
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 
 import numpy as np
@@ -105,8 +104,7 @@ def print_summary(filename):
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
                 )
         except Exception:
-            traceback.print_exc(file=sys.stderr)
-            logging.warning("ignoring failed summary and continuing...")
+            logging.warning("ignoring failed summary and continuing...", exc_info=True)
 
 
 def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
