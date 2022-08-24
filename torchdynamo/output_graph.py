@@ -92,6 +92,7 @@ class OutputGraph(fx.Tracer):
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
+        self.initial_random_state = ()
         self.unspec_variable_map = {}
 
     @property
@@ -267,6 +268,14 @@ class OutputGraph(fx.Tracer):
             rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
+            random_calls_instructions.extend(
+                [
+                    codegen.create_load_global("random", add=True),
+                    codegen.create_load_attr("setstate"),
+                    codegen.create_load_const(tx.output.initial_random_state),
+                    create_instruction("CALL_FUNCTION", 1),
+                ]
+            )
             random_calls_instructions.extend(codegen.load_function_name(rand_fn_name))
             random_calls_instructions.extend(
                 [
