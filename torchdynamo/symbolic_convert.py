@@ -1257,6 +1257,9 @@ class InstructionTranslatorBase(object):
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
+        # Stack of module being parsed, current nn.module is at the end of ordered dict
+        self.nn_module_stack: Dict[str, str] = {}
+
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode() as fake_mode:
                 pass
@@ -1508,6 +1511,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
+        self.nn_module_stack = parent.nn_module_stack.copy()
 
     @property
     def fake_mode(self):
