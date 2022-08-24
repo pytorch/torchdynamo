@@ -20,7 +20,7 @@ import torch
 from scipy.stats import gmean  # type: ignore
 from scipy.stats import ttest_ind  # type: ignore
 from torch.utils._pytree import tree_map
-from typing import Counter, DefaultDict, Sequence, Union, Any
+from typing import Counter, DefaultDict, Sequence, Union, Any, TypeVar, Callable, Tuple, overload
 
 import torchdynamo
 import torchdynamo.utils
@@ -57,7 +57,7 @@ current_batch_size = None
 output_filename = None
 
 
-def output_csv(filename: str, headers: Sequence[str], row: Sequence[Union[float, Any]]):
+def output_csv(filename: str, headers: Sequence[str], row: Sequence[Union[float, Any]]) -> None:
     assert filename
     existed = os.path.exists(filename)
     output = csv.writer(
@@ -74,10 +74,10 @@ def output_csv(filename: str, headers: Sequence[str], row: Sequence[Union[float,
 
 
 class NullContext:
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         pass
 
 
@@ -108,7 +108,7 @@ def print_summary(filename: str) -> None:
             pass
 
 
-def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
+def timed(model: Any, model_iter_fn: Callable, example_inputs: Any, times: int=1, return_result: bool=False) -> Union[float, Tuple[float, Any]]:
     synchronize()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
