@@ -25,6 +25,7 @@ jobs:
       with:
         repository: pytorch/benchmark
         path: torchbenchmark
+        lfs: true
     - name: Install torchbench
       run: cd torchbenchmark && python install.py
     - name: Run torchbench inference
