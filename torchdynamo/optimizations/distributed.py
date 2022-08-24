@@ -32,6 +32,7 @@ def args_str(args):
 class DDPOptimizer:
     def __init__(
         self,
+        ddp_module,
         bucket_bytes_cap: int,
         parameters_to_ignore: List[str],
         backend_compile_fn,
@@ -40,6 +41,7 @@ class DDPOptimizer:
         self.bucket_bytes_cap = bucket_bytes_cap
         self.parameters_to_ignore = parameters_to_ignore
         self.backend_compile_fn = backend_compile_fn
+        self.ddp_module = ddp_module
         self.debug = debug
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
@@ -80,6 +82,7 @@ class DDPOptimizer:
 
             node_splits[0].append(node)
 
+        self.ddp_module.ddp_optimizer_num_splits = len(node_splits)
         if len(node_splits) == 1:
             if self.debug:
                 print(
@@ -129,7 +132,7 @@ class DDPOptimizer:
                 which is required by AotAutograd based compilers
                 """
                 assert len(kwargs) == 0, "We assume only args for these modules"
-
+                import pdb; pdb.set_trace()
                 class WrapperModule(torch.nn.Module):
                     def __init__(self, compiled_submod, unwrap_singleton_tuple):
                         super().__init__()
@@ -184,6 +187,7 @@ class DDPOptimizer:
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, self.debug)
         submod_compiler.run(*example_inputs)
+        split_gm.recompile()
 
         if self.debug:
             with open(f"debug_ddp_optimizer.log", "a") as dump_file:

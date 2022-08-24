@@ -35,23 +35,61 @@ def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     return gm.forward
 
 
+# class ToyModel(nn.Module):
+#     def __init__(self):
+#         super(ToyModel, self).__init__()
+#         self.net1 = nn.Linear(10, 10000)
+#         self.net2 = nn.Linear(10000, 10000)
+#         self.net3 = nn.Linear(10000, 10000)
+#         self.relu = nn.ReLU()
+#         self.net4 = nn.Linear(10000, 5)
+
+#     @torchdynamo.optimize("aot_print")
+#     def forward(self, x):
+#         return self.net4(
+#             self.relu(self.net3(self.relu(self.net2(self.relu(self.net1(x))))))
+#         )
+
 class ToyModel(nn.Module):
     def __init__(self):
         super(ToyModel, self).__init__()
-        self.net1 = nn.Linear(10, 10000)
-        self.net2 = nn.Linear(10000, 10000)
-        self.net3 = nn.Linear(10000, 10000)
-        self.relu = nn.ReLU()
-        self.net4 = nn.Linear(10000, 5)
-
-    @torchdynamo.optimize("aot_print")
-    def forward(self, x):
-        return self.net4(
-            self.relu(self.net3(self.relu(self.net2(self.relu(self.net1(x))))))
+        self.net = nn.Sequential(
+            nn.Linear(10, 10000),
+            nn.ReLU(),
+            nn.Linear(10000, 10000),
+            nn.ReLU(),
+            nn.Linear(10000, 10000),
+            nn.ReLU(),
+            nn.Linear(10000, 10000),
+            nn.ReLU(),
+            nn.Linear(10000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 1000),
+            nn.ReLU(),
+            nn.Linear(1000, 5)
         )
 
+    @torchdynamo.optimize("aot_nvfuser", nopython=True)
+    def forward(self, x):
+        return self.net(x)
 
 def demo_basic(rank, world_size):
+    torchdynamo.config.optimize_ddp = True
+    torchdynamo.config.debug_optimize_ddp = True
     print(f"Running basic DDP example on rank {rank}.")
     setup(rank, world_size)
 
@@ -122,19 +160,14 @@ def hf_bert(rank, world_size):
     cleanup()
 
 
-# torchdynamo.config.trace = True
-torchdynamo.config.debug = False
-torchdynamo.config.optimize_ddp = True
-# torchdynamo.config.debug_optimize_ddp = True
-
 
 def run_demo(demo_fn, world_size):
     mp.spawn(demo_fn, args=(world_size,), nprocs=world_size, join=True)
 
 
 if __name__ == "__main__":
-    # run_demo(demo_basic, 1)
-    run_demo(hf_bert, 1)
-    # demo_basic(0, 1)
+    # run_demo(demo_basic, 2)
+    # run_demo(hf_bert, 1)
+    demo_basic(0, 1)
     # torchdynamo.reset()
     # hf_bert(0, 1)
