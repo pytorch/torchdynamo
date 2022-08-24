@@ -67,12 +67,6 @@ setup_nightly_gpu:
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
 
-setup_torchbench:
-	conda install -y -c conda-forge git-lfs
-	git lfs install --skip-repo
-	git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git torchbenchmark
-	(cd torchbenchmark && python install.py)
-
 clean:
 	python setup.py clean
 	rm -rf build torchdynamo.egg-info torchdynamo/*.so __pycache__ .pytest_cache .benchmarks *.csv dist
