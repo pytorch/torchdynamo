@@ -26,6 +26,7 @@ from .common import OpOverrides
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
+    torch.float16: "half",
     torch.int64: "long",
     torch.int32: "int",
     torch.int16: "short",
@@ -108,6 +109,9 @@ def cpp_prefix():
             #include <omp.h>
 
             #include <ATen/core/PhiloxRNGEngine.h>
+            #include <c10/util/Half.h>
+
+            typedef at::Half half;
 
             template<typename T>
             inline T mod(T a, T b) { return a % b; }
