@@ -18,7 +18,7 @@ from torchdynamo.utils import init_logging
 
 from . import config
 from . import overrides
-from .decomposition import decompositions
+from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .virtualized import V
 
@@ -86,7 +86,7 @@ def compile_fx_python_key(
     with overrides.patch_functions():
         model = overrides.replace_fx(model)
         gm, wrap = python_key_normalize(
-            model, example_inputs, decompositions=decompositions
+            model, example_inputs, decompositions=select_decomp_table()
         )
 
     if config.dce:
@@ -238,7 +238,7 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
             example_inputs_,
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            decompositions=decompositions,
+            decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
