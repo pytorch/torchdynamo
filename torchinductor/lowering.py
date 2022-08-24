@@ -17,6 +17,8 @@ from torch._prims_common import is_integer_dtype
 from . import config
 from . import ir
 from . import overrides
+from .decomposition import decompositions
+from .decomposition import get_decompositions
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -29,6 +31,7 @@ from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
+log = logging.getLogger(__name__)
 lowerings = {}
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -284,7 +287,8 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_dtype=dtype)(x)
 
 
-def to_device(x: TensorBox, device=torch.device):
+def to_device(x: TensorBox, device: torch.device):
+    device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
@@ -701,10 +705,7 @@ def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
-def make_fallback(kernel):
-    add_needs_realized_inputs(kernel)
-
-    @register_lowering(kernel, type_promote=False)
+def fallback_handler(kernel):
     def handler(*args, **kwargs):
         result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):
@@ -712,90 +713,124 @@ def make_fallback(kernel):
         else:
             return TensorBox.create(result)
 
+    return handler
 
-if config.fallback_random:
 
-    @register_lowering(aten.native_dropout, type_promote=False)
-    def native_dropout(x, p, train):
-        # There is a decomp in core for this, but it produces different answers than eager
-        if train:
-            return list(
-                map(
-                    TensorBox.create,
-                    ir.FallbackKernel.create(aten.native_dropout, x, p, train),
-                )
+def make_fallback(kernel):
+    assert (
+        kernel not in decompositions
+    ), f"both a fallback and a decomp for same kernel: {kernel}"
+    if get_decompositions([kernel]):
+        log.warning(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+        )
+
+    add_needs_realized_inputs(kernel)
+    return register_lowering(kernel, type_promote=False)(fallback_handler(kernel))
+
+
+@register_lowering(aten.native_dropout, type_promote=False)
+def native_dropout(x, p, train):
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    if train:
+        return list(
+            map(
+                TensorBox.create,
+                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
             )
-        return x, ones_like(x, dtype=torch.bool)
+        )
+    return x, ones_like(x, dtype=torch.bool)
 
-    @register_lowering(aten.bernoulli_, type_promote=False)
-    def bernoulli_(x, *args):
-        x.realize()
-        V.graph.realize_users_of(x.get_name())
-        ir.InplaceBernoulliFallback(x, *args)
-        return x
 
-    make_fallback(aten.rand)
-else:
-    # native_dropout handled in decomps
-    # bernoulli_ handled in decomps
+@register_lowering(aten.bernoulli_, type_promote=False)
+def bernoulli_(x, *args):
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    x.realize()
+    V.graph.realize_users_of(x.get_name())
+    ir.InplaceBernoulliFallback(x, *args)
+    return x
 
-    def make_rand(fn_name):
-        def rand_or_randn(
-            *size,
-            dtype=None,
-            layout=0,
-            device=None,
-            pin_memory=False,
-            memory_format=None,
-        ):
-            logging.warning("using triton random, expect difference from eager")
-            assert not pin_memory
-            assert layout in (0, torch.strided)
-            assert memory_format in (None, torch.contiguous_format)
-            device = decode_device(device)
-            dtype = dtype or torch.get_default_dtype()
-            if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
-                size = tuple(size[0])
-            size = [sympy.expand(s) for s in size]
-            offset = V.graph.increment_randomness_offset(sympy_product(size))
 
-            random_pos = ir.FixedLayout(
-                device,
+def make_rand(fn_name):
+    def rand_or_randn(
+        *size,
+        dtype=None,
+        layout=0,
+        device=None,
+        pin_memory=False,
+        memory_format=None,
+    ):
+        log.warning("using triton random, expect difference from eager")
+        assert not pin_memory
+        assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
+        device = decode_device(device)
+        dtype = dtype or torch.get_default_dtype()
+        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+            size = tuple(size[0])
+        size = [sympy.expand(s) for s in size]
+        offset = V.graph.increment_randomness_offset(sympy_product(size))
+
+        random_pos = ir.FixedLayout(
+            device,
+            dtype,
+            size,
+            ir.FlexibleLayout.contiguous_strides(size),
+            offset=offset,
+        ).make_indexer()
+
+        seed_buffer = V.graph.random_seed_buffer(device).make_loader()
+
+        def inner_fn(index):
+            seed = seed_buffer([])
+            # change seed so that we don't collide with philox_rand_like()
+            # TODO(jansel): migrate everything to philox_rand_like()
+            seed = ops.bitwise_xor(seed, ops.constant(0xFFFF, torch.int32))
+            return getattr(ops, fn_name)(
+                seed,
+                ops.index_expr(random_pos(index), torch.int32),
                 dtype,
-                size,
-                ir.FlexibleLayout.contiguous_strides(size),
-                offset=offset,
-            ).make_indexer()
-
-            seed_buffer = V.graph.random_seed_buffer(device).make_loader()
-
-            def inner_fn(index):
-                seed = seed_buffer([])
-                # change seed so that we don't collide with philox_rand_like()
-                # TODO(jansel): migrate everything to philox_rand_like()
-                seed = ops.bitwise_xor(seed, ops.constant(0xFFFF, torch.int32))
-                return getattr(ops, fn_name)(
-                    seed,
-                    ops.index_expr(random_pos(index), torch.int32),
-                    dtype,
-                )
-
-            return Pointwise.create(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn,
-                ranges=list(size),
             )
 
-        return rand_or_randn
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=list(size),
+        )
 
-    rand = register_lowering([aten.rand, torch.rand])(make_rand("rand"))
-    randn = register_lowering([aten.randn, torch.randn])(make_rand("randn"))
+    return rand_or_randn
+
+
+fallback_rand = fallback_handler(aten.rand)
+fallback_randn = fallback_handler(aten.randn)
+fast_rand = make_rand("rand")
+fast_randn = make_rand("randn")
+
+
+@register_lowering([aten.rand, torch.rand])
+def rand(*args, **kwargs):
+    if config.fallback_random:
+        return fallback_rand(*args, **kwargs)
+    else:
+        return fast_rand(*args, **kwargs)
+
+
+@register_lowering([aten.randn, torch.randn])
+def randn(*args, **kwargs):
+    if config.fallback_random:
+        return fallback_randn(*args, **kwargs)
+    else:
+        return fast_randn(*args, **kwargs)
 
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    logging.warning("using triton random, expect difference from eager")
+    log.warning("using triton random, expect difference from eager")
     return V.graph.random_seed_buffer(x.get_device())
 
 
@@ -844,8 +879,6 @@ make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.im2col)
-make_fallback(aten.im2col_backward)
-make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
@@ -1858,28 +1891,6 @@ def reflection_pad2d_backward(grad_output, x, padding):
     )
 
 
-@register_lowering(prims.rev.default)
-def rev(x, dims):
-    # note - dims pre-canoncalized
-    x_loader = x.make_loader()
-    sizes = x.get_size()
-
-    def loader(idx):
-        idx = list(idx)
-        assert len(idx) == len(sizes)
-        for dim in dims:
-            idx[dim] = (sizes[dim] - 1) - idx[dim]
-
-        return x_loader(idx)
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=loader,
-        ranges=sizes,
-    )
-
-
 @register_lowering(aten.constant_pad_nd, type_promote=False)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
@@ -2770,7 +2781,6 @@ register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.round)
-register_pointwise(aten.rsqrt)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)
