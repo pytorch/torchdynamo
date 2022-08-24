@@ -400,6 +400,7 @@ def swap_node(graph, old_node, new_node):
     graph.erase_node(old_node)
     new_node.meta = old_node.meta
 
+
 def normalize(gm: torch.fx.GraphModule):
     # gm.graph.print_tabular()
     graph: torch.fx.Graph = gm.graph
