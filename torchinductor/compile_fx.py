@@ -8,6 +8,7 @@ from typing import List
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
+import torchdynamo
 from torchdynamo.debug_utils import wrap_debug
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
@@ -129,6 +130,10 @@ def compile_fx_inner(
             log.warning("skipping cudagraphs due to multiple devices")
         elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
+
+    if torchdynamo.config.repro_level > 1:
+        # shake out runtime errors at compile time
+        compiled_fn(*example_inputs)
 
     return compiled_fn
 

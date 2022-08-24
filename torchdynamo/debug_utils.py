@@ -194,6 +194,7 @@ def nvfuser_fails(fx_g, args, check_str=None):
 
 
 def dump_to_minify(gm, args, compiler_name: str):
+    favored_device = 1 if torch.cuda.device_count() >= 2 else 0
     with open(
         os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py"), "w"
     ) as fd:
@@ -209,7 +210,7 @@ def dump_to_minify(gm, args, compiler_name: str):
                 )
                 from functorch.compile import minifier
 
-                env_variables = {{"CUDA_VISIBLE_DEVICES": "1"}}
+                env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
 
                 minifier(
                     mod,

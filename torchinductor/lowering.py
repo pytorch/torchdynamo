@@ -308,10 +308,10 @@ def _to_copy(
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
     assert not memory_format, "TODO"
-    if dtype is not None:
-        x = to_dtype(x, decode_dtype(dtype))
     if device is not None and device != x.get_device():
         x = to_device(x, device)
+    if dtype is not None:
+        x = to_dtype(x, decode_dtype(dtype))
     return x
 
 
