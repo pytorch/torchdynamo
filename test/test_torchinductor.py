@@ -536,6 +536,32 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    def test_unroll_small_reduction(self):
+        def fn(x):
+            val1, index1 = x.min(-1)
+            val2, index2 = x.max(-1)
+            return (
+                val1,
+                index1,
+                val2,
+                index2,
+                x.sum(-1),
+                (x > 1).any(-1),
+                (x > 0).all(-1),
+                x.argmin(-1),
+                x.argmax(-1),
+                x.amin(-1),
+                x.amax(-1),
+            )
+
+        with patch.object(config, "unroll_reductions_threshold", 8):
+            # small sized reductions will get unrolled
+            self.common(fn, (torch.randn(8, 3),))
+        torchdynamo.reset()
+        with patch.object(config, "unroll_reductions_threshold", 1):
+            # make sure things also work if they aren't unrolled
+            self.common(fn, (torch.randn(8, 3),))
+
     def test_multilayer_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":

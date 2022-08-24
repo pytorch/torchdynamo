@@ -562,6 +562,81 @@ class Reduction(Loops):
         else:  # outer reduction
             return outer_reduction_splits(reduction_numel_hint, numel_hint)
 
+    @staticmethod
+    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
+        """Convert inner_fn from a reduction to an pointwise"""
+        reduction_ranges = [
+            V.graph.sizevars.guard_static_shape(x) for x in reduction_ranges
+        ]
+
+        if reduction_type == "sum":
+
+            def combine_fn(a, b):
+                return ops.add(a, b)
+
+        elif reduction_type == "min":
+
+            def combine_fn(a, b):
+                return ops.minimum(a, b)
+
+        elif reduction_type == "max":
+
+            def combine_fn(a, b):
+                return ops.maximum(a, b)
+
+        elif reduction_type == "any":
+
+            def combine_fn(a, b):
+                return ops.logical_or(a, b)
+
+        elif reduction_type == "argmin":
+
+            def combine_fn(a, b):
+                return ops.minimum(a[0], b[0]), ops.where(
+                    ops.lt(b[0], a[0]), b[1], a[1]
+                )
+
+        elif reduction_type == "argmax":
+
+            def combine_fn(a, b):
+                return ops.maximum(a[0], b[0]), ops.where(
+                    ops.gt(b[0], a[0]), b[1], a[1]
+                )
+
+        else:
+            raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+
+        def fn(index):
+            return functools.reduce(
+                combine_fn,
+                (
+                    value_fn(index, rindex)
+                    for rindex in itertools.product(
+                        *[range(x) for x in reduction_ranges]
+                    )
+                ),
+            )
+
+        if reduction_type in ("argmin", "argmax"):
+            flatten_index = FixedLayout(
+                None,
+                None,
+                reduction_ranges,
+                FlexibleLayout.contiguous_strides(reduction_ranges),
+            ).make_indexer()
+
+            def value_fn(index, rindex):
+                rindex = [sympy.expand(i) for i in rindex]
+                return (
+                    inner_fn(index, rindex),
+                    ops.index_expr(flatten_index(rindex), torch.int64),
+                )
+
+            return lambda index: fn(index)[1]
+        else:
+            value_fn = inner_fn
+            return fn
+
     @classmethod
     def create(
         cls,
@@ -581,6 +656,18 @@ class Reduction(Loops):
                 return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dst_dtype, fn, ranges)
+
+        if (
+            V.graph.sizevars.size_hint(reduction_numel)
+            < config.unroll_reductions_threshold
+            and sympy_product(ranges) != 1
+        ):
+            return Pointwise.create(
+                device,
+                dst_dtype,
+                cls._unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type),
+                ranges,
+            )
 
         if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
             # triton doesn't support reduce to single element well, so break it up
