@@ -47,6 +47,12 @@ prefuse_nodes = True
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
 
+# fuse even in cases without common reads
+aggressive_fusion = True
+
+# how many nodes to allow into a single fusion
+max_fusion_size = 64
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -97,3 +103,7 @@ class triton:
     autotune = True
 
     use_bmm = False
+
+    # should we stop a fusion to allow better tiling?
+    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_reduction_fusion = True

@@ -47,10 +47,10 @@ decompositions = get_decompositions(
         aten.leaky_relu,
         aten.leaky_relu_backward,
         aten.linalg_vector_norm,
-        aten._log_softmax,
-        aten._log_softmax_backward_data,
         aten.logit,
         aten.logit_backward,
+        aten._log_softmax,
+        aten._log_softmax_backward_data,
         aten.logsumexp.default,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
@@ -65,8 +65,8 @@ decompositions = get_decompositions(
         aten.new_empty,
         aten.new_full,
         aten.new_ones,
-        aten.nll_loss_forward,
         aten.nll_loss_backward,
+        aten.nll_loss_forward,
         aten.norm,
         aten.reflection_pad2d_backward,
         aten._reshape_alias,
@@ -82,7 +82,6 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
-        aten.tril.default,
         aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
     ]
@@ -124,6 +123,11 @@ def addmm(input, mat1, mat2):
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
+@register_decomposition([aten.rsqrt])
+def rsqrt(x):
+    return torch.reciprocal(torch.sqrt(x))
 
 
 @register_decomposition([aten.log2])

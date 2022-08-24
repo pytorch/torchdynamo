@@ -17,6 +17,8 @@ from torch._prims_common import is_integer_dtype
 from . import config
 from . import ir
 from . import overrides
+from .decomposition import decompositions
+from .decomposition import get_decompositions
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -29,6 +31,7 @@ from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
+log = logging.getLogger(__name__)
 lowerings = {}
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -284,7 +287,8 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_dtype=dtype)(x)
 
 
-def to_device(x: TensorBox, device=torch.device):
+def to_device(x: TensorBox, device: torch.device):
+    device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
@@ -702,6 +706,14 @@ def bmm(a: TensorBox, b: TensorBox):
 
 
 def make_fallback(kernel):
+    assert (
+        kernel not in decompositions
+    ), f"both a fallback and a decomp for same kernel: {kernel}"
+    if get_decompositions([kernel]):
+        log.warning(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+        )
+
     add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
@@ -748,7 +760,7 @@ else:
             pin_memory=False,
             memory_format=None,
         ):
-            logging.warning("using triton random, expect difference from eager")
+            log.warning("using triton random, expect difference from eager")
             assert not pin_memory
             assert layout in (0, torch.strided)
             assert memory_format in (None, torch.contiguous_format)
@@ -795,7 +807,7 @@ else:
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    logging.warning("using triton random, expect difference from eager")
+    log.warning("using triton random, expect difference from eager")
     return V.graph.random_seed_buffer(x.get_device())
 
 
@@ -844,8 +856,6 @@ make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.im2col)
-make_fallback(aten.im2col_backward)
-make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
@@ -1858,28 +1868,6 @@ def reflection_pad2d_backward(grad_output, x, padding):
     )
 
 
-@register_lowering(prims.rev.default)
-def rev(x, dims):
-    # note - dims pre-canoncalized
-    x_loader = x.make_loader()
-    sizes = x.get_size()
-
-    def loader(idx):
-        idx = list(idx)
-        assert len(idx) == len(sizes)
-        for dim in dims:
-            idx[dim] = (sizes[dim] - 1) - idx[dim]
-
-        return x_loader(idx)
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=loader,
-        ranges=sizes,
-    )
-
-
 @register_lowering(aten.constant_pad_nd, type_promote=False)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
@@ -2770,7 +2758,6 @@ register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.round)
-register_pointwise(aten.rsqrt)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)

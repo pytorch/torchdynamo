@@ -529,6 +529,7 @@ class Kernel(CodeGen):
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.current_node = None
+        self.store_buffer_names = set()
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -604,6 +605,7 @@ class Kernel(CodeGen):
 
             @staticmethod
             def store(name, index, value, mode=None):
+                self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
                     for other_name in self.current_node.get_mutations():
@@ -613,6 +615,7 @@ class Kernel(CodeGen):
 
             @staticmethod
             def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                self.store_buffer_names.add(name)
                 return self.reduction(
                     name, dtype, src_dtype, reduction_type, index, value
                 )
