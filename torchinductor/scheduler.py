@@ -273,10 +273,14 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
-        with V.set_ops_handler(
-            SimplifyIndexing(V.get_ops_handler(), var_ranges)
-        ), V.kernel.set_current_node(self):
-            self._body(*index_vars)
+        try:
+            with V.set_ops_handler(
+                SimplifyIndexing(V.get_ops_handler(), var_ranges)
+            ), V.kernel.set_current_node(self):
+                self._body(*index_vars)
+        except Exception:
+            log.fatal("Error in codegen for %s", self.node)
+            raise
 
     def pointwise_read_writes(self):
         """
