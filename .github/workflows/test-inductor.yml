@@ -11,6 +11,7 @@ jobs:
     runs-on: linux.4xlarge.nvidia.gpu
     steps:
     - uses: actions/checkout@v2
+    - run: cat /etc/lsb-release
     - uses: actions/setup-python@v4
       with:
         python-version: '3.8.13'
