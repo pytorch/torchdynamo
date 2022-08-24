@@ -2427,7 +2427,7 @@ class CommonTemplate:
 
     def test_scatter2(self):
         def fn(a, dim, index, b):
-            return aten.scatter(a, dim, index, b, reduce="add")
+            return aten.scatter.reduce(a, dim, index, b, reduce="add")
 
         self.common(
             fn,
