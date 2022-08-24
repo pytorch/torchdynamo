@@ -41,12 +41,6 @@ nightly builds.
 
 [PyTorch from source]: https://github.com/pytorch/pytorch#from-source
 
-For reproducing the experiments in the posts above, use the TorchBenchmark
-[fork found here].  This fork contains a few minor fixes that have not
-yet been merged upstream.
-
-[fork found here]: https://github.com/jansel/benchmark
-
 Other development requirements can be installed with:
 ```shell
 pip install -r requirements.txt
@@ -278,7 +272,7 @@ def toy_example(a, b):
 ```
 
 [optimize_for_inference]: https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html
-[backends.py]: https://github.com/jansel/torchdynamo/blob/main/torchdynamo/optimizations/backends.py
+[backends.py]: https://github.com/pytorch/torchdynamo/blob/main/torchdynamo/optimizations/backends.py
 
 ## Guards
 
@@ -484,7 +478,7 @@ testing:
 cd ..  # if still in torchdynamo/
 
 # download everything
-git clone git@github.com:jansel/benchmark.git torchbenchmark
+git clone git@github.com:pytorch/benchmark.git torchbenchmark
 cd torchbenchmark
 python install.py
 

@@ -2611,7 +2611,9 @@ class FallbackKernel(ExternKernelAlloc):
             )
             for x in tensor_args
         ]
-        example_output = kernel(*unflatten_args(example_args, non_tensor_args))
+        example_output = kernel(
+            *unflatten_args(example_args, non_tensor_args), **kwargs
+        )
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(

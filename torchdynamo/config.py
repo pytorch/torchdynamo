@@ -3,6 +3,7 @@ import os
 import sys
 from os.path import abspath
 from os.path import dirname
+from types import ModuleType
 
 import torch
 
@@ -15,7 +16,7 @@ except ImportError:
     HAS_REFS_PRIMS = False
 
 
-class AccessLimitingConfig:
+class AccessLimitingConfig(ModuleType):
     # log level (levels print what it says + all levels listed below it)
     # DEBUG print full traces <-- lowest level + print tracing of every instruction
     # INFO print compiled functions + graphs
@@ -108,13 +109,6 @@ class AccessLimitingConfig:
     # When this flag is set to False, we introduce a graph break instead of capturing.
     capture_scalar_outputs = False
 
-    def __getattr__(self, name):
-        if sys.version_info > (3, 8):
-            assert hasattr(
-                self, name
-            ), f"Trying to get {name} - this value does not exist in torchdynamo.config"
-        return object.__getattr__(self, name)
-
     def __setattr__(self, name, value):
         if sys.version_info > (3, 8):
             assert hasattr(
@@ -130,4 +124,4 @@ class AccessLimitingConfig:
         object.__delattr__(self, name)
 
 
-sys.modules[__name__] = AccessLimitingConfig()
+sys.modules[__name__] = AccessLimitingConfig("config")

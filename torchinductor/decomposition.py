@@ -1,3 +1,4 @@
+import functools
 import logging
 import math
 import numbers
@@ -87,16 +88,6 @@ decompositions = get_decompositions(
     ]
 )
 decompositions.update(aot_autograd_decompositions)
-
-if not config.fallback_random:
-    # these decomps have different results than eager mode
-    decompositions.update(
-        get_decompositions(
-            [
-                aten.native_dropout,
-            ]
-        )
-    )
 
 
 def register_decomposition(ops):
@@ -296,8 +287,29 @@ def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
 
 
-if not config.fallback_random:
+"""
+Some decomps result in differences from eager related to randomness.
+We put these decomps in a separate table `extra_random_decomps` to allow
+turning them on and off via `config.fallback_random`.
+"""
+extra_random_decomps = get_decompositions([aten.native_dropout])
+register_extra_random_decomp = functools.partial(
+    decomp.register_decomposition, registry=extra_random_decomps, disable_meta=True
+)
 
-    @register_decomposition([aten.bernoulli_])
-    def bernoulli_(self, p=0.5):
-        return self.copy_(torch.rand_like(self) < p)
+
+@register_extra_random_decomp([aten.bernoulli_])
+def bernoulli_(self, p=0.5):
+    return self.copy_(torch.rand_like(self) < p)
+
+
+@functools.lru_cache(None)
+def fast_random_decomps():
+    return {**decompositions, **extra_random_decomps}
+
+
+def select_decomp_table():
+    """decomps can change based on config"""
+    if config.fallback_random:
+        return decompositions
+    return fast_random_decomps()
