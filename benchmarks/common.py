@@ -15,11 +15,12 @@ import time
 import warnings
 
 import numpy as np
-import pandas as pd
+import pandas as pd  # type: ignore
 import torch
-from scipy.stats import gmean
-from scipy.stats import ttest_ind
+from scipy.stats import gmean  # type: ignore
+from scipy.stats import ttest_ind  # type: ignore
 from torch.utils._pytree import tree_map
+from typing import Counter, DefaultDict, Sequence, Union, Any
 
 import torchdynamo
 import torchdynamo.utils
@@ -38,7 +39,7 @@ from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 
 try:
-    from functorch._src.aot_autograd import set_model_name
+    from functorch._src.aot_autograd import set_model_name  # type: ignore
 except ImportError:
 
     def set_model_name(name):
@@ -56,7 +57,7 @@ current_batch_size = None
 output_filename = None
 
 
-def output_csv(filename, headers, row):
+def output_csv(filename: str, headers: Sequence[str], row: Sequence[Union[float, Any]]):
     assert filename
     existed = os.path.exists(filename)
     output = csv.writer(
@@ -80,11 +81,11 @@ class NullContext:
         pass
 
 
-def synchronize():
+def synchronize() -> None:
     pass
 
 
-def print_summary(filename):
+def print_summary(filename: str) -> None:
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
@@ -120,7 +121,7 @@ def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
 
 
 class Stats:
-    totals = collections.defaultdict(collections.Counter)
+    totals: DefaultDict[str, Counter[int]] = collections.defaultdict(collections.Counter)
 
     @classmethod
     def reset_counters(cls):
@@ -464,7 +465,7 @@ def print_fx(gm, example_inputs):
 
 
 def print_aten_ops(gm, example_inputs):
-    from functorch.compile import aot_module
+    from functorch.compile import aot_module  # type: ignore
 
     def trace_printer(gm, _):
         print(gm.graph)
@@ -855,7 +856,6 @@ class BenchmarkRunner:
     def failing_dynamic_shape_models(self):
         return set()
 
-    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -1762,9 +1762,3 @@ def main(runner, original_dir=None):
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
         print_summary(output_filename)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.WARNING)
-    warnings.filterwarnings("ignore")
-    main()
