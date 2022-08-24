@@ -46,6 +46,9 @@ class ExecutionRecorder:
     code_options: dict[str, Any] = field(default_factory=dict)
     name_to_modrec: dict[str, Any] = field(default_factory=dict)
 
+    def add_local_var(self, name, var):
+        self.locals[name] = var
+
     def add_global_var(self, name, var):
         if isinstance(var, ModuleType):
             if self._is_excl(var):

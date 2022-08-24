@@ -15,11 +15,11 @@ import re
 import sys
 import time
 import types
-import uuid
 import weakref
 from functools import lru_cache
 from typing import Any
 from typing import Dict
+from uuid import uuid1
 
 import numpy as np
 import tabulate
@@ -105,7 +105,7 @@ def format_bytecode(prefix, name, filename, line_no, code):
 
 
 def gen_record_filename(exc):
-    return f"{type(exc).__name__}_{uuid()}"
+    return f"{type(exc).__name__}_{uuid1()}.rec"
 
 
 def write_record_to_file(filename, exec_record):

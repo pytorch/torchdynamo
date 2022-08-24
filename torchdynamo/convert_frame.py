@@ -195,7 +195,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
             and record_filename is not None
         ):
             return f"\nLast frame execution written to {record_filename}. To run only this frame while debugging, run\
-torchdynamo.replay('{exc.rec_file_name}').\n"
+ torchdynamo.replay('{record_filename}').\n"
         else:
             return ""
 
@@ -459,9 +459,7 @@ def replay(filename):
     init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
-    record.globals = (
-        record.globals | globals()
-    )  # TODO: add tracing of modules, so we don't need to replicate the environment
+    record.globals = record.globals | globals()
 
     try:
         _compile(
@@ -474,5 +472,7 @@ def replay(filename):
             None,  # export_fn
             None,  # frame
         )
+    except Exception:
+        pass
     finally:
         config.replay_record_enabled = original_replay_val

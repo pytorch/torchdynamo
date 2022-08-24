@@ -368,8 +368,8 @@ class InstructionTranslatorBase(object):
     def LOAD_FAST(self, inst):
         name = inst.argval
 
-        if config.replay_record_enabled and name in self.f_locals:
-            self.exec_recorder.locals[name] = self.f_locals[name]
+        if name in self.f_locals and config.replay_record_enabled:
+            self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         if name.startswith(".") and name not in self.symbolic_locals:
             # This happens in dict/list comprehensions
@@ -512,6 +512,7 @@ class InstructionTranslatorBase(object):
         recorded_name = ExecutionRecorder.LOCAL_MOD_PREFIX + module_name
         if recorded_name in self.f_globals:
             value = self.f_globals[recorded_name]
+            source = GlobalSource(recorded_name)
         else:
             value = __import__(
                 module_name,
@@ -1255,6 +1256,7 @@ class InstructionTranslatorBase(object):
         self,
         output: OutputGraph,
         instructions: List[Instruction],
+        f_locals: Dict[str, Any],
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
@@ -1278,6 +1280,9 @@ class InstructionTranslatorBase(object):
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[int, int] = {id(i): n for n, i in enumerate(instructions)}
+        self.f_locals: Dict[
+            str, Any
+        ] = f_locals  # needed for recording accessed locals for replay
         self.f_globals: Dict[str, Any] = f_globals
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
@@ -1321,6 +1326,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
+            f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
             code_options=code_options,
@@ -1526,6 +1532,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins = f_builtins.__dict__
         super(InliningInstructionTranslator, self).__init__(
             output=parent.output,
+            f_locals={},
             f_globals=f_globals,
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
