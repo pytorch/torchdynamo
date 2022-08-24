@@ -133,6 +133,39 @@ class UnspecTests(torchdynamo.testing.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_multiple_consecutive_random_calls_before_graph(self):
+        def fn(x):
+            dim1 = random.randrange(start=0, stop=5)
+            dim2 = random.randrange(start=0, stop=5)
+            dim3 = random.randrange(start=0, stop=5)
+            y = torch.rand(dim1, dim2, dim3)
+            return x + 2, y
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        random.seed(1)
+        res1 = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        random.seed(1)
+        res2 = opt_fn(x)
+        self.assertTrue(same(res1, res2))
+
+    def test_random_call_with_while_loop(self):
+        def fn(x):
+            dim1 = random.randrange(start=0, stop=3)
+            dim2 = dim1
+            while dim1 == dim2:
+                dim2 = random.randrange(start=0, stop=3)
+            return x * 2
+
+        x = torch.randn(4)
+        random.seed(1)
+        res1 = fn(x)
+        opt_fn = torchdynamo.optimize("eager")(fn)
+        random.seed(1)
+        res2 = opt_fn(x)
+        self.assertTrue(same(res1, res2))
+
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):

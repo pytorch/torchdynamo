@@ -145,12 +145,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():
-        # func : example value
         fns = {
-            random.random: 0.5,
-            random.randint: 10,
-            random.randrange: 20,
-            random.uniform: 1.5,
+            random.random,
+            random.randint,
+            random.randrange,
+            random.uniform,
         }
         return fns
 
@@ -239,15 +238,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            example_value = self._supported_random_functions()[self.value]
-            source = RandomValueSource(random_call_index=len(tx.random_calls))
-            tx.random_calls.append(
-                (
-                    self.value,
-                    [x.as_python_constant() for x in args],
-                    {k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            )
+            args = [x.as_python_constant() for x in args]
+            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            random_call_index = len(tx.random_calls)
+            if random_call_index == 0:
+                tx.output.initial_random_state = random.getstate()
+            example_value = self.value(*args, **kwargs)
+            source = RandomValueSource(random_call_index)
+            tx.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
