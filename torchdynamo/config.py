@@ -3,6 +3,7 @@ import os
 import sys
 from os.path import abspath
 from os.path import dirname
+from types import ModuleType
 
 import torch
 
@@ -15,7 +16,7 @@ except ImportError:
     HAS_REFS_PRIMS = False
 
 
-class AccessLimitingConfig:
+class AccessLimitingConfig(ModuleType):
     # log level (levels print what it says + all levels listed below it)
     # DEBUG print full traces <-- lowest level + print tracing of every instruction
     # INFO print compiled functions + graphs
@@ -123,4 +124,4 @@ class AccessLimitingConfig:
         object.__delattr__(self, name)
 
 
-sys.modules[__name__] = AccessLimitingConfig()
+sys.modules[__name__] = AccessLimitingConfig("config")
