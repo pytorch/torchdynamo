@@ -1257,139 +1257,6 @@ def parse_args():
         "--quiet", "-q", action="store_true", help="suppress debug printouts"
     )
 
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
-    )
-    group.add_argument(
-        "--online-autotune", action="store_true", help=help(speedup_experiment)
-    )
-    group.add_argument(
-        "--offline-autotune", action="store_true", help=help(speedup_experiment)
-    )
-    group.add_argument(
-        "--speedup-fixed1",
-        action="store_true",
-        help="speedup using experimental fixed_strategy backend",
-    )
-    group.add_argument(
-        "--speedup-fixed2",
-        action="store_true",
-        help="speedup using experimental fixed_strategy backend",
-    )
-    group.add_argument(
-        "--speedup-ltc",
-        action="store_true",
-        help="speedup using the ltc backend",
-    )
-    group.add_argument(
-        "--speedup-ltc-trivial",
-        action="store_true",
-        help="speedup using the ltc backend without reusing compiled graph",
-    )
-    group.add_argument(
-        "--cold-start", action="store_true", help=help(cold_start_experiment)
-    )
-    group.add_argument(
-        "--overhead", action="store_true", help=help(overhead_experiment)
-    )
-    group.add_argument(
-        "--speedup-ts", action="store_true", help=help(speedup_experiment_ts)
-    )
-    group.add_argument(
-        "--speedup-sr", action="store_true", help=help(speedup_experiment_sr)
-    )
-    group.add_argument(
-        "--speedup-onnx", action="store_true", help=help(speedup_experiment_onnx)
-    )
-    group.add_argument(
-        "--speedup-trt", action="store_true", help=help(speedup_experiment_trt)
-    )
-    group.add_argument(
-        "--speedup-dynamo-ts",
-        action="store_true",
-        help="TorchDynamo frontend with torchscript backend",
-    )
-    group.add_argument("--python-key", action="store_true")
-    group.add_argument(
-        "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
-    )
-    group.add_argument(
-        "--speedup-fx2trt-fp16",
-        action="store_true",
-        help=help(speedup_experiment_fx2trt),
-    )
-    group.add_argument(
-        "--accuracy-aot-nop",
-        action="store_true",
-        help="Accuracy testing and speedup for AOT vs Eager",
-    )
-    group.add_argument(
-        "--accuracy-aot-ts",
-        action="store_true",
-        help="Accuracy testing and speedup for AOT with Torchscript(NNC/NVFuser) vs Eager",
-    )
-    group.add_argument(
-        "--accuracy-aot-ts-mincut",
-        action="store_true",
-        help="Accuracy testing and speedup for AOT with Torchscript(NNC/NVFuser) with mincut vs Eager",
-    )
-    group.add_argument(
-        "--print-fx",
-        action="store_true",
-        help="Print fx traces captured from model",
-    )
-    group.add_argument(
-        "--print-aten-ops",
-        action="store_true",
-        help="Print traces of aten ops captured by AOT autograd",
-    )
-    group.add_argument(
-        "--accuracy-ts",
-        action="store_true",
-        help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
-    )
-    group.add_argument(
-        "--inductor",
-        action="store_true",
-        help="Measure speedup with TorchInductor",
-    )
-    group.add_argument(
-        "--inductor-dynamic",
-        action="store_true",
-        help="Measure speedup with TorchInductor",
-    )
-    group.add_argument(
-        "--backend",
-        choices=torchdynamo.list_backends(),
-        help="measure speedup with a given backend",
-    )
-    group.add_argument("--nothing", action="store_true", help=help(null_experiment))
-    group.add_argument(
-        "--nops",
-        action="store_true",
-        help="Test that bytecode rewriting works properly.",
-    )
-    group.add_argument(
-        "--log-conv-args",
-        action="store_true",
-        help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
-    )
-    group.add_argument(
-        "--recompile_profiler",
-        action="store_true",
-        help="Run the dynamo recompilation profiler on each model.",
-    )
-    group.add_argument(
-        "--find-batch-sizes",
-        action="store_true",
-        help="finds the largest batch size that could fit on GPUs",
-    )
-    group.add_argument(
-        "--profile-backend",
-        type=str,
-        help="reports the peak memory and compilation latency for a backend",
-    )
     args = parser.parse_args()
     return args
 
@@ -1404,6 +1271,9 @@ def main(runner, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    # What devices to run?
+    # ~~~~~~~~~~~~~~~~~~~~
+
     if not args.devices:
         if torch.cuda.is_available():
             args.devices = ["cuda"]
@@ -1414,6 +1284,9 @@ def main(runner, original_dir=None):
     if args.devices != ["cpu"] and torch.cuda.is_available():
         global synchronize
         synchronize = torch.cuda.synchronize
+
+    # What models to skip?
+    # ~~~~~~~~~~~~~~~~~~~~
 
     if (
         args.devices == ["cuda"]
@@ -1443,6 +1316,35 @@ def main(runner, original_dir=None):
         # TODO(jansel): fix bugs in these
         runner.skip_models.update(runner.failing_dynamic_shape_models)
 
+    if args.training:
+        runner.skip_models.update(runner.skip_not_suitable_for_training_models)
+
+    if args.fast:
+        runner.skip_models.update(runner.slow_models)
+
+    if args.devices == ["cpu"]:
+        runner.skip_models.update(runner.very_slow_models)
+
+    if args.inductor or args.inductor_dynamic or args.inductor_settings:
+        runner.skip_models.update(runner.failing_torchinductor_models)
+        if args.float16:
+            # TODO(jansel): check if correctness issue is real
+            runner.skip_models.add("yolov3")
+        if args.training:
+            # dropout,etc makes results not match
+            args.skip_accuracy_check = True
+
+    if args.backend == "python_key":
+        runner.skip_models.update(runner.failing_python_key_models)
+    elif args.backend == "fx2trt":
+        runner.skip_models.update(runner.failing_fx2trt_models)
+
+    if args.no_skip:
+        runner.skip_models.clear()
+
+    # PyTorch global configuration knobs
+    # ~~~~~~~~~~~~~~~~~~~~
+
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
@@ -1461,27 +1363,6 @@ def main(runner, original_dir=None):
     torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
 
-    if args.training:
-        model_iter_fn = runner.forward_and_backward_pass
-        runner.skip_models.update(runner.skip_not_suitable_for_training_models)
-    else:
-        model_iter_fn = runner.forward_pass
-
-    if args.fast:
-        runner.skip_models.update(runner.slow_models)
-
-    if args.devices == ["cpu"]:
-        runner.skip_models.update(runner.very_slow_models)
-
-    if args.inductor or args.inductor_dynamic or args.inductor_settings:
-        runner.skip_models.update(runner.failing_torchinductor_models)
-        if args.float16:
-            # TODO(jansel): check if correctness issue is real
-            runner.skip_models.add("yolov3")
-        if args.training:
-            # dropout,etc makes results not match
-            args.skip_accuracy_check = True
-
     if args.float16:
         # these give `INCORRECT - Variation in Eager runs itself` sometimes
         runner.non_deterministic_models.update(
@@ -1495,28 +1376,12 @@ def main(runner, original_dir=None):
             }
         )
 
-    if args.no_skip:
-        runner.skip_models.clear()
-
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
     optimize_ctx = NullContext()
 
-    if args.overhead:
-        optimize_ctx = torchdynamo.optimize(dummy_fx_compile, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "overheads.csv"
-    elif args.cold_start:
-        optimize_ctx = torchdynamo.optimize("aot_nvfuser", nopython=args.nopython)
-        experiment = cold_start_experiment
-        assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
-        backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = f"cold_start_{backend_str}.csv"
-        # TODO(whc) should we move this to a more general part of the script?
-        torch.backends.cuda.matmul.allow_tf32 = True
-    elif args.inductor or args.inductor_dynamic:
+    if args.backend == "inductor":
         import torchinductor.config
-
         torchinductor.config.debug = args.verbose
         if args.threads:
             torchinductor.config.cpp.threads = args.threads
@@ -1530,144 +1395,72 @@ def main(runner, original_dir=None):
                 print("Profiling requested, setting cudagraphs to False")
                 torchinductor.config.triton.cudagraphs = False
 
-        optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "inductor.csv"
-    elif args.online_autotune:
-        optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups.csv"
-    elif args.offline_autotune:
-        optimize_ctx = torchdynamo.optimize(offline_autotuner, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups.csv"
-    elif args.python_key:
-        optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "pythonkey.csv"
-        if not args.no_skip:
-            runner.skip_models.update(runner.failing_python_key_models)
-    elif args.speedup_ltc:
-        optimize_ctx = torchdynamo.optimize(
-            backends.ltc_reuse_graph, nopython=args.nopython
-        )
-        experiment = speedup_experiment
-        output_filename = "speedups_ltc.csv"
-    elif args.speedup_ltc_trivial:
-        optimize_ctx = torchdynamo.optimize(
-            backends.ltc_trivial, nopython=args.nopython
-        )
-        experiment = speedup_experiment
-        output_filename = "speedups_ltc_trivial.csv"
-    elif args.speedup_fixed1:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups_fixed1.csv"
-    elif args.speedup_fixed2:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy2, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups_fixed2.csv"
-    elif args.speedup_ts:
-        experiment = speedup_experiment_ts
-        output_filename = "baseline_ts.csv"
-    elif args.speedup_sr:
-        experiment = speedup_experiment_sr
-        output_filename = "baseline_sr.csv"
-    elif args.speedup_onnx:
-        experiment = speedup_experiment_onnx
-        output_filename = "baseline_onnx.csv"
-    elif args.speedup_trt:
-        experiment = speedup_experiment_trt
-        output_filename = "baseline_trt.csv"
-    elif args.speedup_dynamo_ts:
-        optimize_ctx = torchdynamo.optimize(backends.ts, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedup_dynamo_ts.csv"
-    elif args.speedup_fx2trt:
-        optimize_ctx = torchdynamo.optimize(
-            backends.fx2trt_compiler, nopython=args.nopython
-        )
-        experiment = speedup_experiment_fx2trt
-        output_filename = "speedups_fx2trt.csv"
-        runner.skip_models.update(runner.failing_fx2trt_models)
+    if args.backend == "fx2trt":
+        # TODO: warn if we override these settings
         args.float32 = True
         args.float16 = False
         args.cosine = True
-    elif args.speedup_fx2trt_fp16:
-        optimize_ctx = torchdynamo.optimize(
-            backends.fx2trt_compiler_fp16, nopython=args.nopython
-        )
-        experiment = speedup_experiment_fx2trt
-        output_filename = "speedups_fx2trt_fp16.csv"
+    elif args.backend == "fx2trt_fp16":
         args.float32 = False
         args.float16 = True
         args.cosine = True
-    elif args.accuracy_aot_nop:
-        optimize_ctx = torchdynamo.optimize("aot_nop", nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "accuracy_aot_nop.csv"
-    elif args.accuracy_aot_ts:
-        optimize_ctx = torchdynamo.optimize("aot_ts", nopython=args.nopython)
-        experiment = speedup_experiment
-        backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = f"accuracy_aot_{backend_str}.csv"
-    elif args.accuracy_aot_ts_mincut:
-        optimize_ctx = torchdynamo.optimize("aot_nvfuser", nopython=args.nopython)
-        # accuracy_ctx = torchdynamo.optimize(
-        #     "aot_nvfuser_nodecomps", nopython=args.nopython
-        # )
-        experiment = speedup_experiment
-        assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
-        backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = f"accuracy_aot_{backend_str}_mincut.csv"
-    elif args.prims_nvfuser:
-        optimize_ctx = torchdynamo.optimize("prims_nvfuser", nopython=args.nopython)
-        experiment = speedup_experiment
-        backend_str = "prims_nvfuser"
-        output_filename = f"accuracy_aot_{backend_str}.csv"
-    elif args.print_fx:
-        optimize_ctx = torchdynamo.optimize(
-            print_fx,
-            nopython=args.nopython,
-        )
-    elif args.print_aten_ops:
-        optimize_ctx = torchdynamo.optimize(
-            print_aten_ops,
-            nopython=args.nopython,
-        )
-    elif args.accuracy_ts:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
-        experiment = speedup_experiment
-        backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = f"accuracy_{backend_str}.csv"
-    elif args.nothing:
-        pass
-    elif args.nops:
-        optimize_ctx = torchdynamo.eval_frame._optimize_catch_errors(
-            torchdynamo.testing.debug_insert_nops, nopython=args.nopython
-        )
-    elif args.backend:
-        optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = f"speedup_{args.backend}.csv"
-    elif args.log_conv_args:
-        optimize_ctx = torchdynamo.optimize(conv_args_analysis, nopython=args.nopython)
-        output_filename = "log_conv_args.csv"
-    elif args.recompile_profiler:
-        output_filename = "recompile_profiler_log.csv"
-        experiment = recompile_profiler_experiment
-    else:
-        optimize_ctx = torchdynamo.optimize(fx_insert_profiling, nopython=args.nopython)
-        experiment = coverage_experiment
-        output_filename = "coverage.csv"
+
+    # these names are based on the historical command line flag values
+    backends = {
+        "overhead": dummy_fx_compile,
+        "online_autotune": online_autotuner,
+        "offline_autotune": offline_autotuner,
+        "python_key": python_key,
+        "ltc": backends.ltc_reuse_graph,
+        "ltc_trivial": backends.ltc_trivial,
+        "fixed1": fixed_strategy1,
+        "fixed2": fixed_strategy2,
+        "ts": backends.ts,
+        "fx2trt": backends.fx2trt_compiler,
+        "fx2trt_fp16": backends.fx2trt_compiler_fp16,
+        "print_fx": print_fx,
+        "print_aten_ops": print_aten_ops,
+        "nops": torchdynamo.testing.debug_insert_nops,
+        "log_conv_args": conv_args_analysis,
+        "fx_insert_profiling": fx_insert_profiling,
+    }
+
+    experiments = {
+        "speedup": speedup_experiment,
+        "cold_start": cold_start_experiment,
+        "speedup_ts": speedup_experiment_ts,
+        "speedup_sr": speedup_experiment_sr,
+        "speedup_onnx": speedup_experiment_onnx,
+        "speedup_trt": speedup_experiment_trt,
+        "speedup_fx2trt": speedup_experiment_fx2trt,
+        "recompile_profiler": recompile_profiler_experiment,
+        "coverage": coverage_experiment,
+    }
+
+    frontends = {
+        "optimize": torchdynamo.optimize,
+        "optimize_catch_errors": torchdynamo.eval_frame._optimize_catch_errors,
+    }
+
+    optimize_ctx = frontends[args.frontend](backends.get(args.backend, args.backend), nopython=args.nopython)
+    experiment = experiments[args.experiment]
+
+    backend_str = "nvfuser" if args.nvfuser else "nnc"
 
     runner.setup_amp()
 
     if args.output:
         output_filename = args.output
+    else:
+        output_filename = f"{args.experiment}_{args.backend}.csv"
 
     if output_filename:
         output_filename = os.path.join(torchdynamo.config.base_dir, output_filename)
+
+    if args.training:
+        model_iter_fn = runner.forward_and_backward_pass
+    else:
+        model_iter_fn = runner.forward_pass
 
     if args.find_batch_sizes and args.only:
         for device in args.devices:
