@@ -8,6 +8,9 @@ on:
 
 jobs:
   test-inductor:
+    defaults:
+      run:
+        shell: bash -l {0}
     runs-on: linux.4xlarge.nvidia.gpu
     steps:
     - uses: actions/checkout@v2
