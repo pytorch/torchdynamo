@@ -53,7 +53,11 @@ class GraphLowering(torch.fx.Interpreter):
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = sorted(
-                    [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+                    [
+                        (ex.stride()[i], i)
+                        for i in range(len(stride))
+                        if stride[i] is None
+                    ]
                 )[0]
                 stride[i] = self.sizevars[val]
         return size, stride

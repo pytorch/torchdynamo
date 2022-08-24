@@ -73,6 +73,7 @@ class CheckEachNode(torch.fx.Interpreter):
 
         return expected
 
+
 @functools.partial(wrap_debug, compiler_name="inductor")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
