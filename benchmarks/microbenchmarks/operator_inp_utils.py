@@ -232,14 +232,16 @@ class OperatorInputsLoader:
             op_line = lines[i].strip("\n")
             assert "Operator: " in op_line, op_line
             operator = op_line[len("Operator: ") :]
-            operator = operator if operator != "aten.sum.SymInt" else "aten.sum.dim_IntList"
+            operator = (
+                operator if operator != "aten.sum.SymInt" else "aten.sum.dim_IntList"
+            )
             op_inps = Counter()
             i += 1
             while i < len(lines) and "Operator: " not in lines[i]:
                 line = lines[i]
                 cnt = eval(line[len("cnt: ") : line.find(",")])
                 inps = line[line.find(",") + 2 :].strip("'")
-                op_inps[inps] +=cnt
+                op_inps[inps] += cnt
                 i += 1
             self.operator_db[operator] = op_inps
 

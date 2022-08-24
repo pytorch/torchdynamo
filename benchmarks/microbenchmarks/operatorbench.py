@@ -198,5 +198,4 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
 
 
 if __name__ == "__main__":
-    torchinductor.config.aot_autograd = False
     benchmark()
