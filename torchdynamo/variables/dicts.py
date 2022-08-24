@@ -8,6 +8,7 @@ from typing import List
 import torch
 
 from torchdynamo.variables.constant import ConstantVariable
+from torchdynamo.variables.lists import ListVariable
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -118,7 +119,7 @@ class ConstDictVariable(VariableTracker):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
-            return tx.replace_all(self, self.modifed(newval, **options))
+            return tx.replace_all(self, self.modifed(newval, self.user_cls, **options))
         elif (
             name in ("pop", "get")
             and args
@@ -136,7 +137,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, **options))
+            tx.replace_all(self, self.modifed(newval, self.user_cls, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -146,7 +147,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            result = self.modifed(newval, **options)
+            result = self.modifed(newval, self.user_cls, **options)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -165,9 +166,9 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, **options):
+    def modifed(self, items, user_cls, **options):
         """a copy of self with different items"""
-        return self.clone(items=items, **options)
+        return self.clone(items=items, user_cls=user_cls, **options)
 
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
@@ -199,6 +200,49 @@ class ConstDictVariable(VariableTracker):
         else:
             assert ConstantVariable.is_literal(key)
             return ConstantVariable(key, **options)
+
+
+class DefaultDictVariable(ConstDictVariable):
+    def __init__(self, items, user_cls, default_factory=None, **kwargs):
+        super(DefaultDictVariable, self).__init__(items, user_cls, **kwargs)
+        assert user_cls is collections.defaultdict
+        self.default_factory = default_factory
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if name == "__getitem__":
+            k = ConstDictVariable.get_key(args[0])
+
+            if k in self.items:
+                return self.getitem_const(args[0])
+            else:
+                if self.default_factory is None:
+                    raise KeyError(f"{k}")
+                else:
+                    if isinstance(k, torch.nn.Parameter):
+                        tx.store_dict_key(global_key_name(k), k)
+                    new_val = collections.OrderedDict(self.items)
+                    if self.default_factory is list:
+                        default_var = ListVariable([])
+                    elif self.default_factory is dict:
+                        default_var = ConstDictVariable({}, dict)
+                    else:
+                        assert False
+                    new_val[k] = default_var
+                    tx.replace_all(
+                        self, self.modifed(new_val, self.user_cls, **options)
+                    )
+                    return default_var
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
 
 class DataClassVariable(ConstDictVariable):

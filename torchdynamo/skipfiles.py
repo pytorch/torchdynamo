@@ -159,6 +159,11 @@ def check(filename, allow_torch=False):
     return bool(SKIP_DIRS_RE.match(filename))
 
 
+# if a class in skipfiles, but we want to allow trace this class only
+def is_allowed_class(cls):
+    return cls in {collections.defaultdict}
+
+
 # skip common third party libs
 for _name in (
     "functorch",

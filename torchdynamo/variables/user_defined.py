@@ -108,6 +108,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif self.value is collections.defaultdict and (
+            len(args) == 0
+            or len(args) == 1
+            and args[0].is_python_constant()
+            and args[0].as_python_constant() in (list, dict)
+        ):
+            options["mutable_local"] = MutableLocal()
+            if len(args) == 0:
+                default_factory = None
+            else:
+                default_factory = args[0].as_python_constant()
+            return variables.DefaultDictVariable(
+                collections.defaultdict(default_factory),
+                collections.defaultdict,
+                default_factory,
+                **options,
+            )
 
         return super().call_function(tx, args, kwargs)
 
