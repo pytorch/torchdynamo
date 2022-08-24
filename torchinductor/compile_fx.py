@@ -131,10 +131,6 @@ def compile_fx_inner(
         elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
 
-    if torchdynamo.config.repro_level > 1:
-        # shake out runtime errors at compile time
-        compiled_fn(*example_inputs)
-
     return compiled_fn
 
 
