@@ -425,10 +425,6 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def zero_vars(it):
-    return {k: 0 for k in it}
-
-
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
@@ -668,8 +664,7 @@ class TritonKernel(Kernel):
 
         if mask == ["xmask"] and index == 0 and self.range_trees[0].numel == 1:
             # This causes a triton error:
-            # https://gist.github.com/jansel/70c4b1c8041f0f27f96ee95e2edca04a
-            # TODO(jansel): submit a bug report
+            # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
         return index_str, " & ".join(mask)
