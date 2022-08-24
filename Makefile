@@ -63,7 +63,8 @@ setup_nightly_gpu:
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja
-	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
+	git clone --depth 1 -b `python -c "import torch.version; print(torch.version.git_version)"` https://github.com/pytorch/pytorch.git
+	(cd pytorch/functorch && python setup.py install)
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
 
