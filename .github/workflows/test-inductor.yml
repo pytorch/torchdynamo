@@ -11,6 +11,10 @@ jobs:
     runs-on: linux.4xlarge.nvidia.gpu
     steps:
     - uses: actions/checkout@v2
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+        cache: 'pip'
     - run: make setup_nightly_gpu
     - run: make develop
     - run: pytest ./test/test_torchinductor.py
