@@ -2,6 +2,7 @@ import collections
 import contextlib
 import copy
 import dataclasses
+import dis
 import functools
 import gc
 import inspect
@@ -39,7 +40,7 @@ log = logging.getLogger(__name__)
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "Torchdynamo: [%(levelname)s] %(message)s"},
+        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
@@ -95,6 +96,11 @@ def format_graph_tabular(graph):
 
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+
+
+def format_bytecode(prefix, frame, code):
+    return f"{prefix} {frame.f_code.co_name} {frame.f_code.co_filename}\
+ line {frame.f_code.co_firstlineno} \n{dis.Bytecode(code).dis()}\n "
 
 
 def count_calls(g: fx.Graph):
@@ -182,9 +188,14 @@ def is_numpy_float_type(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    return istype(
-        obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
+    tensor_list = (
+        torch.Tensor,
+        torch.nn.Parameter,
+        *config.traceable_tensor_subclasses,
     )
+    if fake_tensors_available:
+        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    return istype(obj, tensor_list)
 
 
 def is_lazy_module(mod):
@@ -266,7 +277,10 @@ def clone_input(x):
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
-        buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+        if x.is_quantized:
+            buffer = torch.empty_quantized((needed_size + 32,), x)
+        else:
+            buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
         cache_line_offset = (
             (x.data_ptr() - buffer.data_ptr()) % 32
         ) // x.element_size()
@@ -601,7 +615,7 @@ def same(
                 return True
             res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if res < 0.99:
-                log.info(f"Similarity score={res.cpu().detach().item()}")
+                log.warning(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             if not exact_dtype:
@@ -615,7 +629,12 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                return res_error <= (1.1 * ref_error + 1e-5)
+                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                if not passes_test:
+                    log.warning(
+                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                    )
+                return passes_test
 
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):

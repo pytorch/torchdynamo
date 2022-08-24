@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import math
 from collections.abc import Iterable
 from typing import List
 
@@ -16,6 +17,8 @@ from torch._prims_common import is_integer_dtype
 from . import config
 from . import ir
 from . import overrides
+from .decomposition import decompositions
+from .decomposition import get_decompositions
 from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
@@ -28,6 +31,7 @@ from .utils import sympy_product
 from .virtualized import V
 from .virtualized import ops
 
+log = logging.getLogger(__name__)
 lowerings = {}
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -283,7 +287,8 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_dtype=dtype)(x)
 
 
-def to_device(x: TensorBox, device=torch.device):
+def to_device(x: TensorBox, device: torch.device):
+    device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
@@ -701,11 +706,19 @@ def bmm(a: TensorBox, b: TensorBox):
 
 
 def make_fallback(kernel):
+    assert (
+        kernel not in decompositions
+    ), f"both a fallback and a decomp for same kernel: {kernel}"
+    if get_decompositions([kernel]):
+        log.warning(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+        )
+
     add_needs_realized_inputs(kernel)
 
     @register_lowering(kernel, type_promote=False)
-    def handler(*args):
-        result = ir.FallbackKernel.create(kernel, *args)
+    def handler(*args, **kwargs):
+        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):
             return list(map(TensorBox.create, result))
         else:
@@ -747,7 +760,7 @@ else:
             pin_memory=False,
             memory_format=None,
         ):
-            logging.warning("using triton random, expect difference from eager")
+            log.warning("using triton random, expect difference from eager")
             assert not pin_memory
             assert layout in (0, torch.strided)
             assert memory_format in (None, torch.contiguous_format)
@@ -794,7 +807,7 @@ else:
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    logging.warning("using triton random, expect difference from eager")
+    log.warning("using triton random, expect difference from eager")
     return V.graph.random_seed_buffer(x.get_device())
 
 
@@ -843,8 +856,6 @@ make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.im2col)
-make_fallback(aten.im2col_backward)
-make_fallback(aten.native_batch_norm_backward)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
@@ -1271,7 +1282,8 @@ def constant_like(fill_value):
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
 ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
-rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+if not config.fallback_random:
+    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
 
 def new_constant(fill_value):
@@ -1643,106 +1655,6 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
     )
 
 
-@register_lowering(aten.upsample_bilinear2d)
-def upsample_bilinear2d_vec(
-    input,
-    output_size,
-    align_corners,
-    scale_factors=None,
-):
-    """
-    Based on https://github.com/pytorch/pytorch/pull/80964
-    The decomp version has worse perf because indexing doesn't get traced.
-    """
-
-    *size_prefix, in_h, in_w = input.get_size()
-    in_h = V.graph.sizevars.guard_static_shape(in_h)
-    in_w = V.graph.sizevars.guard_static_shape(in_w)
-
-    if output_size is not None:
-        out_h = float(output_size[0])
-        out_w = float(output_size[1])
-    elif scale_factors is not None:
-        out_h = in_h * scale_factors[0]
-        out_w = in_w * scale_factors[1]
-    else:
-        raise TypeError("requires output_size or scale_factors")
-
-    # Calculate horizontal and vertical scaling factor
-    if out_h > 1:
-        if align_corners:
-            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
-        else:
-            h_scale_factor = in_h / out_h
-    else:
-        h_scale_factor = 0.0
-
-    if out_w > 1:
-        if align_corners:
-            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
-        else:
-            w_scale_factor = in_w / out_w
-    else:
-        w_scale_factor = 0.0
-
-    input.realize_hint()  # read many times
-    input_loader = input.make_loader()
-
-    def fn(index):
-        *prefix, i, j = index
-        i = ops.index_expr(i, torch.float32)
-        j = ops.index_expr(j, torch.float32)
-
-        c_h_scale_factor = ops.constant(h_scale_factor, torch.float32)
-        c_w_scale_factor = ops.constant(w_scale_factor, torch.float32)
-        if align_corners:
-            x = ops.mul(i, c_h_scale_factor)
-            y = ops.mul(j, c_w_scale_factor)
-        else:
-            c05 = ops.constant(0.5, torch.float32)
-            c00 = ops.constant(0.0, torch.float32)
-            x = ops.maximum(
-                ops.sub(ops.mul(ops.add(i, c05), c_h_scale_factor), c05), c00
-            )
-            y = ops.maximum(
-                ops.sub(ops.mul(ops.add(j, c05), c_w_scale_factor), c05), c00
-            )
-
-        x_floor = ops.floor(x)
-        y_floor = ops.floor(y)
-        x_ceil = ops.minimum(ops.ceil(x), ops.constant(in_h - 1, torch.float32))
-        y_ceil = ops.minimum(ops.ceil(y), ops.constant(in_w - 1, torch.float32))
-
-        idx_x_floor = ops.indirect_indexing(ops.to_dtype(x_floor, torch.int64))
-        idx_y_floor = ops.indirect_indexing(ops.to_dtype(y_floor, torch.int64))
-        idx_x_ceil = ops.indirect_indexing(ops.to_dtype(x_ceil, torch.int64))
-        idx_y_ceil = ops.indirect_indexing(ops.to_dtype(y_ceil, torch.int64))
-
-        v1 = input_loader([*prefix, idx_x_floor, idx_y_floor])
-        v2 = input_loader([*prefix, idx_x_ceil, idx_y_floor])
-        v3 = input_loader([*prefix, idx_x_floor, idx_y_ceil])
-        v4 = input_loader([*prefix, idx_x_ceil, idx_y_ceil])
-
-        xscale2 = ops.sub(x, x_floor)
-        yscale2 = ops.sub(y, y_floor)
-
-        c1 = ops.constant(1.0, torch.float32)
-        xscale1 = ops.sub(c1, xscale2)
-        yscale1 = ops.sub(c1, yscale2)
-
-        q1 = ops.add(ops.mul(v1, xscale1), ops.mul(v2, xscale2))
-        q2 = ops.add(ops.mul(v3, xscale1), ops.mul(v4, xscale2))
-        result = ops.add(ops.mul(q1, yscale1), ops.mul(q2, yscale2))
-        return result
-
-    return Pointwise.create(
-        device=input.get_device(),
-        dtype=input.get_dtype(),
-        inner_fn=fn,
-        ranges=[*size_prefix, sympy.Integer(int(out_h)), sympy.Integer(int(out_w))],
-    )
-
-
 @register_lowering([aten.grid_sampler_2d])
 def grid_sampler_2d(
     image, optical, interpolation_mode=0, padding_mode=0, align_corners=False
@@ -2028,6 +1940,7 @@ def constant_boundary_condition_2d(x, fill_value, padding):
 
     def load(index):
         *prefix, ih, iw = index
+
         mask = ops.and_(
             range_mask(ih, h),
             range_mask(iw, w),
@@ -2220,6 +2133,106 @@ def max_pool2d_with_indices_backward(
         inner_fn=fn,
         ranges=new_size,
     )
+
+
+def pad_adaptive_loader(x):
+    *_, h, w = x.get_size()
+    x_loader = x.make_loader()
+
+    def load(prefix, increments, start_indices, end_indices):
+        ih, iw = increments
+        h_start_index, w_start_index = start_indices
+        h_end_index, w_end_index = end_indices
+
+        mask = ops.and_(
+            ops.lt(
+                ops.index_expr(h_start_index + ih, torch.int64),
+                ops.index_expr(h_end_index, torch.int64),
+            ),
+            ops.lt(
+                ops.index_expr(w_start_index + iw, torch.int64),
+                ops.index_expr(w_end_index, torch.int64),
+            ),
+        )
+
+        return ops.masked(
+            mask,
+            lambda: x_loader([*prefix, h_start_index + ih, w_start_index + iw]),
+            0.0,
+        )
+
+    return load
+
+
+@register_lowering(aten._adaptive_avg_pool2d)
+def _adaptive_avg_pool2d(x, output_size):
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 2
+    x.realize_hint()
+
+    *batch, h_in, w_in = x.get_size()
+
+    h_in = V.graph.sizevars.guard_static_shape(h_in)
+    w_in = V.graph.sizevars.guard_static_shape(w_in)
+
+    h_out, w_out = output_size
+
+    # no-op if the same input and output
+    if h_in == h_out and w_in == w_out:
+        return clone(x)
+
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return avg_pool2d(x, kernel_size)
+
+    h_kernel_max = math.ceil((h_in + h_out - 1) / h_out)
+    w_kernel_max = math.ceil((w_in + h_out - 1) / w_out)
+
+    new_size = list(batch) + [h_out, w_out]
+    dtype = x.get_dtype()
+
+    def fn_sum(idx, loader):
+        *prefix, bh, bw = idx
+
+        def start_index(index, out_dim, inp_dim):
+            return ir.IndexingDiv((index * inp_dim), out_dim)
+
+        def end_index(index, out_dim, inp_dim):
+            return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+        h_start_index = start_index(bh, h_out, h_in)
+        h_end_index = end_index(bh, h_out, h_in)
+
+        w_start_index = start_index(bw, w_out, w_in)
+        w_end_index = end_index(bw, w_out, w_in)
+
+        total = None
+        for ih, iw in itertools.product(range(h_kernel_max), range(w_kernel_max)):
+            val = loader(
+                prefix,
+                [ih, iw],
+                [h_start_index, w_start_index],
+                [h_end_index, w_end_index],
+            )
+            if total is None:
+                total = val
+            else:
+                total = ops.add(val, total)
+        return total
+
+    ones_loader = pad_adaptive_loader(ones_like(x))
+
+    def fn(idx):
+        return ops.div(fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader))
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
+    # TODO: should we force these to be realized?
+    return rv
 
 
 @register_lowering(aten.avg_pool2d, type_promote=False)
@@ -2443,13 +2456,6 @@ def avg_pool2d_backward(
         ranges=new_size,
     )
     return rv
-
-
-@register_lowering(aten._adaptive_avg_pool2d, type_promote=False)
-def _adaptive_avg_pool2d(x, output_size):
-    assert isinstance(x, TensorBox)
-    assert len(output_size) == 2
-    return TensorBox.create(ir.AdaptiveAvgPool2d.create(x, output_size))
 
 
 def _validate_reduction_axis(x, axis):

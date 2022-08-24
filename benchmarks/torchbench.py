@@ -172,9 +172,6 @@ INDUCTOR_INFERENCE_NOT_YET_WORKING = {
 
 INDUCTOR_TRAINING_NOT_YET_WORKING = {
     *INDUCTOR_INFERENCE_NOT_YET_WORKING,
-    # Invalid address
-    # https://github.com/pytorch/torchdynamo/issues/741
-    "hf_GPT2",
     # load_mask nesting needed
     "Super_SloMo",
     # float16 issue or CUDA error: operation not permitted when stream is capturing

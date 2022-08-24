@@ -1,4 +1,3 @@
-import dis
 import functools
 import itertools
 import logging
@@ -34,6 +33,7 @@ from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
 from .utils import filter_stack
+from .utils import format_bytecode
 from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
@@ -182,25 +182,34 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def format_exception(exc, frame):
+def format_error_msg(exc, frame):
     msg = os.linesep * 2
-    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-    msg += traceback.format_exc()
-    if hasattr(exc, "real_stack"):
-        msg += (
-            "\n"
-            + "=" * 10
-            + " The above exception occurred while processing the following code "
-            + "=" * 10
-            + "\n\n"
-        )
-        msg += "".join(
-            traceback.format_list(
-                filter_stack(traceback.extract_stack(frame))
-                + list(reversed(exc.real_stack))
+    if config.verbose:
+        msg = format_bytecode("WON'T CONVERT", frame, frame.f_code)
+        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+        msg += traceback.format_exc()
+        if hasattr(exc, "real_stack"):
+            msg += (
+                "\n"
+                + "=" * 10
+                + " The above exception occurred while processing the following code "
+                + "=" * 10
+                + "\n\n"
             )
-        )
+            msg += "".join(
+                traceback.format_list(
+                    filter_stack(traceback.extract_stack(frame))
+                    + list(reversed(exc.real_stack))
+                )
+            )
+    else:
+        msg = f"WON'T CONVERT {frame.f_code.co_name} {frame.f_code.co_filename}\
+ line {frame.f_code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
 
+        if hasattr(exc, "real_stack"):
+            msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+
+        msg += "\nSet torchdynamo.config.verbose=True for more information\n"
     msg += "=" * 10
     return msg
 
@@ -293,10 +302,6 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        def format_bytecode(prefix, bytecode):
-            return f"{prefix} {code.co_name} {code.co_filename} \
-                {code.co_firstlineno} \n{dis.Bytecode(bytecode).dis()}\n "
-
         try:
             for attempt in itertools.count():
                 try:
@@ -317,8 +322,8 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     return None
             output_codes.add(code)
 
-            log.info(format_bytecode("ORIGINAL BYTECODE", frame.f_code))
-            log.info(format_bytecode("MODIFIED BYTECODE", code))
+            log.info(format_bytecode("ORIGINAL BYTECODE", frame, frame.f_code))
+            log.info(format_bytecode("MODIFIED BYTECODE", frame, code))
 
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
@@ -344,16 +349,10 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             BackendCompilerFailed,
             AssertionError,
         ) as e:
-            log.error(
-                format_bytecode("WONT CONVERT", frame.f_code)
-                + format_exception(e, frame)
-            )
+            log.error(format_error_msg(e, frame))
             raise
         except Exception as e:
-            log.error(
-                format_bytecode("WONT CONVERT", frame.f_code)
-                + format_exception(e, frame)
-            )
+            log.error(format_error_msg(e, frame))
             raise InternalTorchDynamoError()
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn

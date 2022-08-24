@@ -47,10 +47,10 @@ decompositions = get_decompositions(
         aten.leaky_relu,
         aten.leaky_relu_backward,
         aten.linalg_vector_norm,
-        aten._log_softmax,
-        aten._log_softmax_backward_data,
         aten.logit,
         aten.logit_backward,
+        aten._log_softmax,
+        aten._log_softmax_backward_data,
         aten.logsumexp.default,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
@@ -65,8 +65,8 @@ decompositions = get_decompositions(
         aten.new_empty,
         aten.new_full,
         aten.new_ones,
-        aten.nll_loss_forward,
         aten.nll_loss_backward,
+        aten.nll_loss_forward,
         aten.norm,
         aten.reflection_pad2d_backward,
         aten._reshape_alias,
@@ -83,6 +83,7 @@ decompositions = get_decompositions(
         aten.threshold_backward,
         aten.transpose.int,
         aten.upsample_nearest2d_backward,
+        aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
@@ -279,11 +280,6 @@ def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
     return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
 
 
-@register_decomposition([aten.narrow])
-def narrow(self, dim, start, length):
-    return aten.slice(self, dim, start, start + length)
-
-
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
@@ -298,11 +294,6 @@ def lift(self):
 @register_decomposition([aten.sgn])
 def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
-
-
-@register_decomposition([aten.type_as])
-def type_as(self, other):
-    return self.type(other.type())
 
 
 if not config.fallback_random:

@@ -666,8 +666,10 @@ def read_batch_size_from_file(args, filename, model_name):
             if model_name == cur_name:
                 batch_size = int(b)
     if batch_size is None:
+        warnings.warn("Could not find batch size for {}".format(model_name))
+    elif batch_size == -1:
         raise RuntimeError(
-            f"Batch size could not be found for {model_name} in {args.batch_size_file}"
+            f"Batch size is unset for {model_name} in {args.batch_size_file}"
         )
     print(f"batch size: {batch_size}")
     return batch_size
@@ -1065,9 +1067,10 @@ class BenchmarkRunner:
             try:
                 optimized_model_iter_fn = optimize_ctx(model_iter_fn)
                 new_result = optimized_model_iter_fn(model, example_inputs)
-            except Exception:
+            except Exception as e:
                 logging.exception("unhandled error")
                 print("ERROR")
+                print(e)
                 return sys.exit(-1)
             if current_name in self.non_deterministic_models:
                 # This model has non-deterministic output so we cant
@@ -1467,7 +1470,6 @@ def main(runner, original_dir=None):
 
     if args.inductor or args.inductor_dynamic or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
-        args.cosine = True
         if args.float16:
             # TODO(jansel): check if correctness issue is real
             runner.skip_models.add("yolov3")
