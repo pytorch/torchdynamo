@@ -1291,6 +1291,15 @@ class CommonTemplate:
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
+    def test_avg_pool2d6(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1], divisor_override=3)
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+        )
+
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -1946,6 +1955,30 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_nearest2d_backward(self):
+        func = torch.ops.aten.upsample_nearest2d_backward.vec
+
+        def fn(a):
+            return (
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 3, 6], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 4, 5], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 4, 7], scale_factors=None
+                ),
+            )
+
+        self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
     def test_upsample_bilinear2d_a(self):
         def fn(a):
