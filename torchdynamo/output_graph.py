@@ -475,7 +475,7 @@ class OutputGraph(fx.Tracer):
 
         nn_module_stack = getattr(tx, "nn_module_stack")
         if nn_module_stack:
-           rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
@@ -483,5 +483,9 @@ class OutputGraph(fx.Tracer):
             tx = getattr(tx, "parent", None)
 
         msgs = traceback.StackSummary.from_list(frame_summaries).format()
-        rv.node.stack_trace = "".join(msgs)
+
+        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
+        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
+        rv.node.stack_trace = nn_module_stack_str + "".join(msgs)
+
         return rv
