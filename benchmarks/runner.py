@@ -24,9 +24,11 @@ If you want to test float16
 """
 
 import argparse
+import importlib
 import io
 import itertools
 import os
+from os.path import abspath
 from os.path import exists
 
 import matplotlib.pyplot as plt
@@ -48,7 +50,9 @@ TABLE = {
     "training": {
         "ts_nnc": "--training --speedup-ts --use-eval-mode ",
         "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode ",
+        "eager": "--training --backend=eager --use-eval-mode",
         "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode ",
+        "aot_cudagraphs": "--training --backend=aot_cudagraphs --use-eval-mode ",
         "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode ",
         "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode ",
         "inductor_cudagraphs": "--training --inductor --use-eval-mode",
@@ -57,8 +61,6 @@ TABLE = {
         "ts_nnc": "--speedup-ts",
         "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
         "trt": "-n100 --speedup-trt",
-        "eager_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs",
-        "nnc_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts --nvfuser",
         "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
         "inductor_cudagraphs": "--inductor-settings --float32 -n50 --inductor",
     },
@@ -76,7 +78,14 @@ INFERENCE_COMPILERS = tuple(TABLE["inference"].keys())
 TRAINING_COMPILERS = tuple(TABLE["training"].keys())
 
 DEFAULTS = {
-    "training": ["ts_nvfuser", "aot_eager", "aot_nvfuser", "inductor_cudagraphs"],
+    "training": [
+        "eager",
+        "ts_nvfuser",
+        "aot_eager",
+        "aot_cudagraphs",
+        "aot_nvfuser",
+        "inductor_cudagraphs",
+    ],
     "inference": ["ts_nvfuser_cudagraphs", "inductor_cudagraphs"],
     "profile_compiler": [
         "pytorch",
@@ -163,6 +172,25 @@ def get_mode(args):
         return "profile_compiler"
 
 
+def get_skip_tests(suite):
+    """
+    Generate -x seperated string to skip the unusual setup training tests
+    """
+    skip_tests = set()
+    original_dir = abspath(os.getcwd())
+    module = importlib.import_module(suite)
+    os.chdir(original_dir)
+
+    if hasattr(module, "SKIP"):
+        skip_tests.update(module.SKIP)
+    if hasattr(module, "SKIP_TRAIN"):
+        skip_tests.update(module.SKIP_TRAIN)
+
+    skip_tests = map(lambda name: f"-x {name}", skip_tests)
+    skip_str = " ".join(skip_tests)
+    return skip_str
+
+
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     mode = get_mode(args)
     with open("run.sh", "w") as runfile:
@@ -184,10 +212,14 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 output_filename = (
                     f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
                 )
-                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename}"
+                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename} --quiet"
                 cmd = f"{cmd} {base_cmd}"
                 if args.profile_compiler:
                     cmd = f"{cmd} --raise-on-assertion-error --raise-on-backend-error"
+
+                skip_tests_str = get_skip_tests(suite)
+                cmd = f"{cmd} {skip_tests_str}"
+
                 if args.quick:
                     if suite == "torchbench":
                         cmd = f"{cmd} --only=resnet18"
