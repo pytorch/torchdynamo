@@ -258,6 +258,7 @@ jobs:
               -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
               -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
               -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
+              -x PegasusForConditionalGeneration -x T5ForConditionalGeneration -x T5Small -x XGLMForCausalLM -x XLNetLMHeadModel \
               --output=inductor_hf_training_0.csv
       - store_artifacts:
           path: inductor_hf_training_0.csv
@@ -290,6 +291,7 @@ jobs:
               -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
               -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
               -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
+              -x PegasusForConditionalGeneration -x T5ForConditionalGeneration -x T5Small -x XGLMForCausalLM -x XLNetLMHeadModel \
               --output=inductor_hf_training_1.csv
       - store_artifacts:
           path: inductor_hf_training_1.csv
@@ -322,6 +324,7 @@ jobs:
               -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
               -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
               -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
+              -x PegasusForConditionalGeneration -x T5ForConditionalGeneration -x T5Small -x XGLMForCausalLM -x XLNetLMHeadModel \
               --output=inductor_hf_training_2.csv
       - store_artifacts:
           path: inductor_hf_training_2.csv
