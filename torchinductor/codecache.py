@@ -142,6 +142,9 @@ class CppCodeCache:
 
             cls.cache[key] = cdll.LoadLibrary(output_path)
             cls.cache[key].key = key
+
+        print("LOADING")
+        print(cls.cache[key], input_path)
         return cls.cache[key]
 
 

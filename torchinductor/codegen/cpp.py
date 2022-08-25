@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import multiprocessing
 import textwrap
+from pathlib import Path
 from typing import Dict
 from typing import List
 
@@ -98,44 +99,12 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
 
 @functools.lru_cache()
 def cpp_prefix():
-    _, filename = codecache.write(
-        textwrap.dedent(
-            """
-            #include <algorithm>
-            #include <atomic>
-            #include <cmath>
-            #include <cstdlib>
-            #include <limits>
-            #include <omp.h>
-
-            #include <ATen/core/PhiloxRNGEngine.h>
-            #include <ATen/native/cpu/AtomicAddFloat.h>
-
-            template<typename T>
-            inline T mod(T a, T b) { return a % b; }
-            template<>
-            inline float mod(float a, float b) { return std::fmod(a, b); }
-            template<>
-            inline double mod(double a, double b) { return std::fmod(a, b); }
-
-            constexpr float uint32_to_uniform_float(uint32_t value) {
-                // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
-                constexpr float scale = 4.6566127342e-10;
-                return static_cast<float>(value & 0x7FFFFFFF) * scale;
-            }
-
-            float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
-                return uint32_to_uniform_float(at::Philox4_32(seed, 0, offset)());
-            }
-
-            float randn_cpu(uint32_t seed, uint32_t offset) {
-                at::Philox4_32 engine(seed, 0, offset);
-                return engine.randn(10);
-            }
-            """
-        ),
-        "h",
-    )
+    path = Path(__file__).parent / "cpp_prefix.h"
+    with path.open() as f:
+        _, filename = codecache.write(
+            f.read(),
+            "h",
+        )
     return f'#include "{filename}"'
 
 
@@ -334,7 +303,7 @@ class CppKernel(Kernel):
                 # TODO(voz): Add a templatized version that then calls into the correct
                 # method. This has hard assumptions around floats. This passes today for CI.
                 # However, it may not hold in the future.
-                line = f"cpu_atomic_add_float(&{var}[{cexpr(index)}], {value});"
+                line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
