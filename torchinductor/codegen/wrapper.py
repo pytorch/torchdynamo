@@ -328,9 +328,7 @@ class WrapperCodeGen(CodeGen):
                 else:
                     result.writeline(line)
 
-            print("Outs:", V.graph.graph_outputs)
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
-            print("Output refs are", output_refs)
             if output_refs:
                 result.writeline("return (" + ", ".join(output_refs) + ", )")
             else:
