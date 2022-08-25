@@ -1188,7 +1188,7 @@ class CommonTemplate:
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
-                x + 1, (4, 5)
+                x + 1, (2, 5)
             )
 
         self.common(

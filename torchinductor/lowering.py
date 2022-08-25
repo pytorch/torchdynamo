@@ -1,7 +1,6 @@
 import functools
 import itertools
 import logging
-import math
 from collections.abc import Iterable
 from typing import List
 
@@ -26,6 +25,7 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
+from .utils import ceildiv
 from .utils import has_torchvision_roi_align
 from .utils import sympy_product
 from .virtualized import V
@@ -2237,8 +2237,8 @@ def _adaptive_avg_pool2d(x, output_size):
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)
 
-    h_kernel_max = math.ceil((h_in + h_out - 1) / h_out)
-    w_kernel_max = math.ceil((w_in + h_out - 1) / w_out)
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
 
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
@@ -2291,15 +2291,11 @@ def upsample_nearest2d_backward(
     if inp_h % out_h == 0 and inp_w % out_w == 0:
         return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
 
-    h_kernel_max = math.ceil(inp_h / out_h)
-    w_kernel_max = math.ceil(inp_w / out_w)
+    h_kernel_max = ceildiv(inp_h, out_h)
+    w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        if inp_dim % out_dim == 0:
-            return ir.CleanDiv(index * inp_dim, out_dim)
-        else:
-            # adding (out_dim -1) to numerator equivalent to taking ceil
-            return ir.IndexingDiv((index * inp_dim + (out_dim - 1)), out_dim)
+        return ir.CeilDiv(index * inp_dim, out_dim)
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)

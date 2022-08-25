@@ -61,6 +61,11 @@ def unique(it):
     return {id(x): x for x in it}.values()
 
 
+def ceildiv(numer: int, denom: int):
+    assert isinstance(numer, int) and isinstance(denom, int)
+    return (numer + (denom - 1)) // denom
+
+
 def timed(model, example_inputs, times=1):
     synchronize()
     torch.manual_seed(1337)
