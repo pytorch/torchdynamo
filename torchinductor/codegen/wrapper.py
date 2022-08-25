@@ -299,8 +299,8 @@ class WrapperCodeGen(CodeGen):
 
         def extract_name(out):
             o = out
-            while hasattr(o, 'data'):
-                if hasattr(o, 'name'):
+            while hasattr(o, "data"):
+                if hasattr(o, "name"):
                     return o.name
                 else:
                     o = o.data
