@@ -2026,7 +2026,7 @@ class ExternKernel(InputsKernel):
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
-        self.freeze_layout()
+            self.freeze_layout()
 
     def codegen(self, wrapper):
         raise NotImplementedError
