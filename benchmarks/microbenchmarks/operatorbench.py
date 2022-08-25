@@ -5,7 +5,6 @@ import torch
 import triton
 from operator_inp_utils import OperatorInputsLoader
 
-import torchinductor
 from torchdynamo.optimizations.backends import cudagraphs_inner
 from torchdynamo.testing import same
 from torchinductor import config as inductor_config
