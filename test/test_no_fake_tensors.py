@@ -1,8 +1,5 @@
 #!/usr/bin/env pytest
-import functools
-from unittest.mock import patch
-
-import torchdynamo
+from torchdynamo.testing import make_test_cls_with_patches
 
 from . import test_functions
 from . import test_misc
@@ -11,33 +8,10 @@ from . import test_repros
 from . import test_unspec
 
 
-def make_no_fake_fn(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
-            return fn(*args, **kwargs)
-
-    return _fn
-
-
 def make_no_fake_cls(cls):
-    class NoFakeTensorsTest(cls):
-        pass
-
-    NoFakeTensorsTest.__name__ = f"NoFakeTensors{cls.__name__}"
-
-    for name in dir(cls):
-        if name.startswith("test_"):
-            fn = getattr(cls, name)
-            if not callable(fn):
-                continue
-            new_name = f"{name}_no_fake_tensors"
-            fn = make_no_fake_fn(fn)
-            fn.__name__ = new_name
-            setattr(NoFakeTensorsTest, name, None)
-            setattr(NoFakeTensorsTest, new_name, fn)
-
-    return NoFakeTensorsTest
+    return make_test_cls_with_patches(
+        cls, "NoFakeTensors", "_no_fake_tensors", ("fake_tensor_propagation", False)
+    )
 
 
 NoFakeTensorsFunctionTests = make_no_fake_cls(test_functions.FunctionTests)
