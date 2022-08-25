@@ -61,6 +61,11 @@ def unique(it):
     return {id(x): x for x in it}.values()
 
 
+def ceildiv(numer: int, denom: int):
+    assert isinstance(numer, int) and isinstance(denom, int)
+    return (numer + (denom - 1)) // denom
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []

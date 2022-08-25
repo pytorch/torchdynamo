@@ -16,7 +16,6 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
-from torchinductor.compile_fx import compile_fx_inner
 
 try:
     import sympy
@@ -36,6 +35,8 @@ try:
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
+    # Requires functorch
+    from torchinductor.compile_fx import compile_fx_inner
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires sympy/functorch")
 
@@ -1186,7 +1187,7 @@ class CommonTemplate:
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
-                x + 1, (4, 5)
+                x + 1, (2, 5)
             )
 
         self.common(
@@ -1283,6 +1284,15 @@ class CommonTemplate:
     def test_avg_pool2d5(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1], count_include_pad=False)
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+        )
+
+    def test_avg_pool2d6(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1], divisor_override=3)
 
         self.common(
             fn,
@@ -1619,6 +1629,25 @@ class CommonTemplate:
             (torch.randn([8, 16]),),
         )
 
+    def test_cat_extern_kernel(self):
+        def fn(x1, x2, x3, x4):
+            x = torch.mm(x2, x3)
+            s = torch.narrow(x, 1, 0, 100)
+            x = torch.mm(s, x4)
+            c = torch.cat((x, x1), 1)
+            return (c,)
+
+        self.common(
+            fn,
+            (
+                torch.randn(256, 256),
+                torch.randn(256, 1024),
+                torch.randn(1024, 1600),
+                torch.randn(100, 256),
+            ),
+            check_lowp=False,  # accuracy issues with relatively large matmuls
+        )
+
     def test_stack(self):
         def fn(a, b):
             return torch.stack(
@@ -1942,6 +1971,30 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_nearest2d_backward(self):
+        func = torch.ops.aten.upsample_nearest2d_backward.vec
+
+        def fn(a):
+            return (
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 3, 6], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 4, 5], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 4, 7], scale_factors=None
+                ),
+            )
+
+        self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
     def test_upsample_bilinear2d_a(self):
         def fn(a):
@@ -2936,6 +2989,20 @@ class CommonTemplate:
             ((), (), torch.float32),
             ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
             ((3,), (1,), torch.float32),
+        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
+
+    def test_misaligned_address_issue1(self):
+        def forward(sub_tensor_1, unsqueeze_default):
+            gather_default = torch.ops.aten.gather.default(
+                sub_tensor_1, 1, unsqueeze_default
+            )
+            return gather_default
+
+        args = [
+            ((1, 1000), (1000, 1), torch.float32),
+            ((1, 1), (1, 1), torch.int64),
         ]
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
