@@ -258,7 +258,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
-
+        print("OUTPUT?", self.graph_outputs)
         for name, value in self.graph_inputs.items():
             value.realize()
             assert isinstance(value, TensorBox)
@@ -294,6 +294,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code = WrapperCodeGen()
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
+        print("Codegening", self.wrapper_code)
         return self.wrapper_code.generate()
 
     def compile_to_fn(self):

@@ -598,6 +598,7 @@ class Scheduler:
 
         # make sure outputs aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
+            print("Node in out:", node)
             if not isinstance(node, ir.NoneAsConstantBuffer):
                 name = node.get_name()
                 add_user(node.get_name(), OutputNode(StarDep(name)))
@@ -627,7 +628,7 @@ class Scheduler:
                 updated_nodes.append(node)
             else:
                 # dead code
-                log.debug("removed dead node: %s", node.get_name())
+                print("removed dead node: %s", node.get_name())
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 

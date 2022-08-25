@@ -296,16 +296,31 @@ class WrapperCodeGen(CodeGen):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
+
+        def extract_name(out):
+            o = out
+            while hasattr(o, 'data'):
+                if hasattr(o, 'name'):
+                    return o.name
+                else:
+                    o = o.data
+            return ""
+
+        out_names = [extract_name(out) for out in V.graph.graph_outputs]
         with result.indent():
             while self.lines and isinstance(self.lines[-1], MemoryPlanningLine):
                 # these lines will be pointless
-                self.lines.pop()
+                if self.lines[-1].node.name not in out_names:
+                    self.lines.pop()
+                else:
+                    break
 
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
             for i in range(len(self.lines)):
                 if isinstance(self.lines[i], MemoryPlanningLine):
-                    self.lines[i] = self.lines[i].plan(planning_state)
+                    plan_result = self.lines[i].plan(planning_state)
+                    self.lines[i] = plan_result
 
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
@@ -313,7 +328,9 @@ class WrapperCodeGen(CodeGen):
                 else:
                     result.writeline(line)
 
+            print("Outs:", V.graph.graph_outputs)
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
+            print("Output refs are", output_refs)
             if output_refs:
                 result.writeline("return (" + ", ".join(output_refs) + ", )")
             else:
