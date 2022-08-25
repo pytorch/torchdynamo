@@ -627,7 +627,7 @@ class Scheduler:
                 updated_nodes.append(node)
             else:
                 # dead code
-                print("removed dead node: %s", node.get_name())
+                log.debug("removed dead node: %s", node.get_name())
                 V.graph.removed_buffers.add(node.get_name())
         self.nodes = updated_nodes
 

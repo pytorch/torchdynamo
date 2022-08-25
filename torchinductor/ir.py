@@ -1203,7 +1203,6 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        print("Codegen reference on:", self)
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
