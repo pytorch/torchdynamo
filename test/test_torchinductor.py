@@ -2940,6 +2940,20 @@ class CommonTemplate:
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
+    def test_misaligned_address_issue1(self):
+        def forward(sub_tensor_1, unsqueeze_default):
+            gather_default = torch.ops.aten.gather.default(
+                sub_tensor_1, 1, unsqueeze_default
+            )
+            return gather_default
+
+        args = [
+            ((1, 1000), (1000, 1), torch.float32),
+            ((1, 1), (1, 1), torch.int64),
+        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
+
 
 if HAS_CPU:
 
