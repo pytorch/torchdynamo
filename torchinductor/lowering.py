@@ -33,6 +33,7 @@ from .virtualized import ops
 
 log = logging.getLogger(__name__)
 lowerings = {}
+fallbacks = set()
 aten = torch.ops.aten
 prims = torch.ops.prims
 needs_realized_inputs = set()
@@ -720,6 +721,8 @@ def bmm(a: TensorBox, b: TensorBox):
 
 
 def fallback_handler(kernel):
+    fallbacks.add(kernel)
+
     def handler(*args, **kwargs):
         result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):

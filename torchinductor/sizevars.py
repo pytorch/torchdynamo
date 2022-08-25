@@ -2,14 +2,19 @@ import collections
 import dataclasses
 import functools
 import logging
+from typing import Callable
 from typing import Dict
 from typing import List
+from typing import Tuple
 
 import sympy
 from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
 
+from . import ir
+from .codegen.common import IndentedBuffer
+from .utils import VarRanges
 from .utils import freeze_inputs
 from .utils import immutable_dict
 from .virtualized import V
@@ -24,7 +29,7 @@ class ZeroGuard:
     Guards are currently not checked.  Plan to add this later.
     """
 
-    expr: sympy.Expr
+    expr: Expr
 
 
 @dataclasses.dataclass
@@ -34,7 +39,7 @@ class PositiveGuard:
     Guards are currently not checked.  Plan to add this later.
     """
 
-    expr: sympy.Expr
+    expr: Expr
 
 
 class SizeVarAllocator(object):
@@ -44,7 +49,7 @@ class SizeVarAllocator(object):
         self.val_to_var: Dict[int, Expr] = {0: Integer(0), 1: Integer(1)}
         self.var_to_val: Dict[Expr, int] = collections.OrderedDict()
         self.guards = []
-        self.replacements = {}
+        self.replacements: Dict[sympy.Symbol, Expr] = {}
         self.need_seed = False
         if not zero_one_const:
             self.val_to_var.clear()
@@ -59,12 +64,12 @@ class SizeVarAllocator(object):
         self.need_seed = True
         return sympy.Symbol("seed")
 
-    def simplify(self, expr):
+    def simplify(self, expr: Expr):
         return sympy.expand(expr).subs(self.replacements)
 
     @freeze_inputs
     @functools.lru_cache(256)
-    def simplify_with_ranges(self, expr, var_ranges):
+    def simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
         """
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
@@ -119,7 +124,7 @@ class SizeVarAllocator(object):
             return self.simplify_with_ranges(expr, var_ranges)
         return expr
 
-    def guard_equals(self, left: sympy.Symbol, right: sympy.Symbol):
+    def guard_equals(self, left: Expr, right: Expr) -> Expr:
         left = sympy.expand(left)
         right = sympy.expand(right)
         if left == right:
@@ -151,14 +156,14 @@ class SizeVarAllocator(object):
         else:
             return left
 
-    def maybe_guard_equals(self, left: sympy.Expr, right: sympy.Expr):
+    def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
         if self.size_hint(left - right) == 0:
             self.guard_equals(left, right)
             return True
         return False
 
-    def maybe_guard_list_equals(self, left: List[sympy.Expr], right: List[sympy.Expr]):
+    def maybe_guard_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         """if left==right, guard on that fact and return true"""
         if len(left) != len(right):
             return False
@@ -168,7 +173,7 @@ class SizeVarAllocator(object):
             return True
         return False
 
-    def maybe_guard_leq(self, left: sympy.Expr, right: sympy.Expr):
+    def maybe_guard_leq(self, left: Expr, right: Expr) -> bool:
         try:
             if self.size_hint(left) > self.size_hint(right):
                 return False
@@ -177,7 +182,7 @@ class SizeVarAllocator(object):
         self.guard_leq(left, right)
         return True
 
-    def maybe_guard_lt(self, left: sympy.Expr, right: sympy.Expr):
+    def maybe_guard_lt(self, left: Expr, right: Expr) -> bool:
         try:
             if self.size_hint(left) >= self.size_hint(right):
                 return False
@@ -186,10 +191,10 @@ class SizeVarAllocator(object):
         self.guard_lt(left, right)
         return True
 
-    def guard_leq(self, left: sympy.Expr, right: sympy.Expr):
+    def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 
-    def guard_lt(self, left: sympy.Expr, right: sympy.Expr):
+    def guard_lt(self, left: Expr, right: Expr) -> None:
         expr = self.simplify(right - left)
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
@@ -198,7 +203,7 @@ class SizeVarAllocator(object):
             # all vars are positive, so needs a minus sign to get negative values
             self.guards.append(PositiveGuard(expr))
 
-    def guard_min(self, left: sympy.Expr, right: sympy.Expr):
+    def guard_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
@@ -211,11 +216,11 @@ class SizeVarAllocator(object):
             self.guard_lt(right, left)
             return right
 
-    def guard_max(self, left: sympy.Expr, right: sympy.Expr):
+    def guard_max(self, left: Expr, right: Expr) -> Expr:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
 
-    def maybe_guard_multiple_of(self, numerator, denominator):
+    def maybe_guard_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
         """if denominator divides numerator, return True and guard on that fact"""
         if sympy.gcd(numerator, denominator) == denominator:
             # can prove it symbolically
@@ -226,12 +231,12 @@ class SizeVarAllocator(object):
             return True
         return False
 
-    def guard_static_shape(self, left):
+    def guard_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
-    def __getitem__(self, val):
+    def __getitem__(self, val: int) -> Expr:
         if val < 0:
             # all variables are positive
             return -self[-val]
@@ -244,10 +249,10 @@ class SizeVarAllocator(object):
         self.var_to_val[var] = val
         return var
 
-    def size_hint(self, expr: Expr):
+    def size_hint(self, expr: Expr) -> int:
         return int(sympy.expand(expr).subs(self.var_to_val))
 
-    def stride_vars(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+    def stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
         """Convert an indexing expression back into strides"""
         strides = []
         index = index.subs(self.replacements)
@@ -273,12 +278,12 @@ class SizeVarAllocator(object):
                 )
         return strides
 
-    def offset_var(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+    def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = index.subs(self.replacements)
         return index.subs({v: sympy.Integer(0) for v in vars if v != 0})
 
-    def stride_hints(self, index: sympy.Expr, vars: List[sympy.Symbol]):
+    def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         for v in index.free_symbols:
             if str(v).startswith("indirect"):
                 index = index.subs({v: 0})
@@ -290,15 +295,16 @@ class SizeVarAllocator(object):
                 result.append(0)
         return result
 
-    def stride_order(self, index: sympy.Expr, vars: List[sympy.Symbol]):
-        strides = tuple(map(abs, self.stride_hints(index, vars)))
+    def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
+        strides = tuple(
+            map(lambda x: abs(x), self.stride_hints(index, vars))
+        )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
-    def codegen(self, code, graph_inputs):
+    def codegen(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
-
         if self.need_seed:
             code.writeline(
                 "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
@@ -314,7 +320,11 @@ class SizeVarAllocator(object):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
-        needed = set(map(str, self.var_to_val.keys())) - set(self.replacements.keys())
+        # TODO: This should be the below, but causes test/test_torchinductor.py::GpuTests::test_triton_conv_cuda to fail
+        # needed_vars = set(self.var_to_val.keys()) - set(self.replacements.keys())
+
+        needed_vars = set(self.var_to_val.keys())
+        needed = set(map(str, needed_vars))
 
         for name, value in graph_inputs.items():
             shapes = value.get_size()
@@ -334,13 +344,13 @@ class SizeVarAllocator(object):
 
         assert not needed
 
-    def codegen_sizevar(self, x):
+    def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr
 
         x = sympy.expand(x)
         return pexpr(x.subs(self.replacements))
 
-    def codegen_shape_tuple(self, shape):
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
         if len(parts) == 0:
             return "()"
@@ -350,7 +360,7 @@ class SizeVarAllocator(object):
 
 
 @functools.lru_cache(256)
-def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
+def join_dimensions(expr: Expr) -> Expr:
     """
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
     becomes
@@ -409,18 +419,18 @@ def join_dimensions(expr: sympy.Expr) -> sympy.Expr:
     return expr
 
 
-class SimplifyIndexing(V.WrapperHandler):
+class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
     simplify ir.ModularIndexing/ir.IndexingDiv.
     """
 
-    def __init__(self, inner, var_ranges):
+    def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
         var_ranges = immutable_dict(var_ranges)
-        self._simplify = lambda index: V.graph.sizevars.simplify_with_ranges(
-            index, var_ranges
-        )
+        self._simplify: Callable[
+            [Expr], Expr
+        ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
         return self._inner.load(name, self._simplify(index), upcast)
