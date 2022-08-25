@@ -992,12 +992,13 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, 5)
 
     def test_batch_norm_act(self):
-        a = torch.randn(5, 1, 28, 28)
-        model = BatchNormAct2d(1).eval()
-        correct = model(a)
-        cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize_assert(cnt):
-            self.assertTrue(same(model(a), correct))
+        with torch.no_grad():
+            a = torch.randn(5, 1, 28, 28)
+            model = BatchNormAct2d(1).eval()
+            correct = model(a)
+            cnt = torchdynamo.testing.CompileCounter()
+            with torchdynamo.optimize_assert(cnt):
+                self.assertTrue(same(model(a), correct))
 
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
