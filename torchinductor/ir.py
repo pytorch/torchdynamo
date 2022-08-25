@@ -203,6 +203,18 @@ class CleanDiv(IndexingDiv):
     pass
 
 
+class CeilDiv(sympy.Function):
+    """
+    Div used in indexing that rounds up.
+    """
+
+    def __new__(cls, base, divisor):
+        if sympy.gcd(base, divisor) == divisor:
+            return CleanDiv(base, divisor)
+        else:
+            return IndexingDiv(base + (divisor - 1), divisor)
+
+
 def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
     if getattr(x, "get_device", None):
@@ -2027,7 +2039,7 @@ class ExternKernel(InputsKernel):
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
-        self.freeze_layout()
+            self.freeze_layout()
 
     def codegen(self, wrapper):
         raise NotImplementedError
@@ -2335,6 +2347,14 @@ class MatrixMultiply(ExternKernelOut):
             kernel=kernel,
         )
 
+    def get_template_tiling(self):
+        tile1, tile2 = self.get_size()
+        return (
+            tile1,
+            tile2,
+            sympy.Integer(1),
+        )
+
     def map_args(self):
         # a, b
         in_args = [x.codegen_reference() for x in self.inputs]
@@ -2604,11 +2624,13 @@ class FallbackKernel(ExternKernelAlloc):
             )
             for x in tensor_args
         ]
-        example_output = kernel(*unflatten_args(example_args, non_tensor_args))
+        example_output = kernel(
+            *unflatten_args(example_args, non_tensor_args), **kwargs
+        )
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
-                MultiOutputLayout(),
+                MultiOutputLayout(tensor_args[0].get_device()),
                 kernel,
                 tensor_args,
                 non_tensor_args,
@@ -2650,8 +2672,9 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
+@dataclasses.dataclass
 class MultiOutputLayout(IRNode):
-    pass
+    device: torch.device
 
 
 class MultiOutput(ExternKernel):
@@ -2973,6 +2996,14 @@ class Convolution(ExternKernelAlloc):
         )
 
         return inout_dict, args_dict, const_dict, other_dict
+
+    def get_template_tiling(self):
+        n, c, h, w = self.get_size()
+        return (
+            n * h * w,
+            c,
+            sympy.Integer(1),
+        )
 
 
 @dataclasses.dataclass

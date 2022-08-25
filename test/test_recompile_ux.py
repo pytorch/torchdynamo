@@ -21,9 +21,6 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
                 torchdynamo.config, "cache_size_limit", cls.cache_limit
             )
         )
-        # cls._exit_stack.enter_context(
-        #     unittest.mock.patch.object(torchdynamo.config, "debug", False)
-        # )
 
     def test_drop_cache_on_skip(self):
         def model(x, i):

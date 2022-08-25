@@ -11,6 +11,7 @@ from sympy import Integer
 from sympy import Symbol
 
 from .utils import freeze_inputs
+from .utils import immutable_dict
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -416,22 +417,21 @@ class SimplifyIndexing(V.WrapperHandler):
 
     def __init__(self, inner, var_ranges):
         super().__init__(inner)
-        self._var_ranges = var_ranges
+        var_ranges = immutable_dict(var_ranges)
+        self._simplify = lambda index: V.graph.sizevars.simplify_with_ranges(
+            index, var_ranges
+        )
 
     def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.load(name, index, upcast)
+        return self._inner.load(name, self._simplify(index), upcast)
 
     def store(self, name, index, value, mode=None):
-        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.store(name, index, value, mode=mode)
+        return self._inner.store(name, self._simplify(index), value, mode=mode)
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
         return self._inner.reduction(
-            name, dtype, src_dtype, reduction_type, index, value
+            name, dtype, src_dtype, reduction_type, self._simplify(index), value
         )
 
     def index_expr(self, index, dtype):
-        index = V.graph.sizevars.simplify_with_ranges(index, self._var_ranges)
-        return self._inner.index_expr(index, dtype)
+        return self._inner.index_expr(self._simplify(index), dtype)

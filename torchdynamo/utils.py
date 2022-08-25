@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "Torchdynamo: [%(levelname)s] %(message)s"},
+        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
@@ -277,19 +277,28 @@ def clone_input(x):
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
-        buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+        if x.is_quantized:
+            result = torch.empty_quantized((needed_size + 32,), x)
+        else:
+            result = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
         cache_line_offset = (
-            (x.data_ptr() - buffer.data_ptr()) % 32
+            (x.data_ptr() - result.data_ptr()) % 32
         ) // x.element_size()
-        result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+        result.as_strided_(x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
             result.requires_grad_(x.requires_grad)
+            if x.grad is not None:
+                result.grad = clone_input(x.grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            return torch.clone(x)
+            y = torch.clone(x)
+            y.requires_grad_(x.requires_grad)
+            if x.grad is not None:
+                y.grad = clone_input(x.grad)
+            return y
         return result
 
 
@@ -612,7 +621,7 @@ def same(
                 return True
             res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if res < 0.99:
-                log.info(f"Similarity score={res.cpu().detach().item()}")
+                log.warning(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             if not exact_dtype:
@@ -628,7 +637,9 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 passes_test = res_error <= (1.1 * ref_error + 1e-5)
                 if not passes_test:
-                    print(f"RMSE (res-fp64): {res_error}, (ref-fp64): {ref_error}")
+                    log.warning(
+                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                    )
                 return passes_test
 
             return False

@@ -2,7 +2,6 @@ import dataclasses
 import functools
 import logging
 import operator
-import os
 from typing import List
 
 import torch.fx
@@ -11,14 +10,13 @@ from functorch.compile import min_cut_rematerialization_partition
 from torchdynamo.debug_utils import wrap_debug
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
-from torchdynamo.optimizations.python_key import python_key_normalize
 from torchdynamo.testing import same
 from torchdynamo.utils import identity
 from torchdynamo.utils import init_logging
 
 from . import config
 from . import overrides
-from .decomposition import decompositions
+from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .virtualized import V
 
@@ -31,6 +29,13 @@ class BoxedBool:
 
     def __bool__(self):
         return self.value
+
+    @staticmethod
+    def disable(obj):
+        if isinstance(obj, BoxedBool):
+            obj.value = False
+            return obj
+        return False
 
 
 class CheckEachNode(torch.fx.Interpreter):
@@ -69,30 +74,6 @@ class CheckEachNode(torch.fx.Interpreter):
         return expected
 
 
-def compile_fx_python_key(
-    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
-):
-    """Alternate version for inference only"""
-    assert isinstance(model, torch.fx.GraphModule)
-    assert all(isinstance(x, torch.Tensor) for x in example_inputs)
-
-    with overrides.patch_functions():
-        model = overrides.replace_fx(model)
-        gm, wrap = python_key_normalize(
-            model, example_inputs, decompositions=decompositions
-        )
-
-    if config.dce:
-        gm.graph.eliminate_dead_code()
-    if config.debug:
-        gm.graph.print_tabular()
-
-    if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
-        wrap(CheckEachNode(gm).run)(*example_inputs)
-
-    return compile_fx_inner(gm, example_inputs, wrap=wrap, cudagraphs=cudagraphs)
-
-
 @functools.partial(wrap_debug, compiler_name="inductor")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -111,17 +92,12 @@ def compile_fx_inner(
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
-    # make sure it works, causes issues for mutation
-    # compiled_fn(*example_inputs)
-
     if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
         compiled_fn = cudagraphify(
             compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
         )
     elif cudagraphs:
-        if isinstance(cudagraphs, BoxedBool):
-            # Disable cudagraphs in the backwards pass too:
-            cudagraphs.value = False
+        BoxedBool.disable(cudagraphs)
 
         if len(set(graph.device_types)) > 1:
             log.warning("skipping cudagraphs due to multiple devices")
@@ -204,8 +180,12 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
+    logging.getLogger("torchinductor").setLevel(
+        logging.DEBUG if config.debug else logging.WARNING
+    )
+
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
@@ -236,19 +216,8 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
             example_inputs_,
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            decompositions=decompositions,
+            decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
         )
-
-
-def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
-    """Main entrypoint to a compile given FX graph"""
-    logging.getLogger("torchinductor").setLevel(
-        logging.DEBUG if config.debug else logging.WARNING
-    )
-    if config.aot_autograd:
-        return compile_fx_aot(model_, example_inputs_)
-    else:
-        return compile_fx_python_key(model_, example_inputs_)
