@@ -275,6 +275,121 @@ jobs:
             source .circleci/setup_env.sh
             python .circleci/check_csv.py -f inductor_hf_training_2.csv
 
+inductor_timm_inference_0:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 0 \
+              --output=inductor_timm_inference_0.csv
+      - store_artifacts:
+          path: inductor_timm_inference_0.csv
+      - run:
+          name: TIMM inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_inference_0.csv
+
+  inductor_timm_inference_1:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 1 \
+              --output=inductor_timm_inference_1.csv
+      - store_artifacts:
+          path: inductor_timm_inference_1.csv
+      - run:
+          name: TIMM inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_inference_1.csv
+
+  inductor_timm_training_0:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 0 \
+              --output=inductor_timm_training_0.csv
+      - store_artifacts:
+          path: inductor_timm_training_0.csv
+      - run:
+          name: TIMM training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_training_0.csv
+
+  inductor_timm_training_1:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 1 \
+              --output=inductor_timm_training_1.csv
+      - store_artifacts:
+          path: inductor_timm_training_1.csv
+      - run:
+          name: TIMM training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_training_1.csv
+
+  inductor_timm_training_2:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 2 \
+              --output=inductor_timm_training_2.csv
+      - store_artifacts:
+          path: inductor_timm_training_2.csv
+      - run:
+          name: TIMM training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_training_2.csv
+
 workflows:
   gpu:
     jobs:
@@ -288,4 +403,8 @@ workflows:
       - inductor_hf_training_0
       - inductor_hf_training_1
       - inductor_hf_training_2
-
+      - inductor_timm_inference_0
+      - inductor_timm_inference_1
+      - inductor_timm_training_0
+      - inductor_timm_training_1
+      - inductor_timm_training_2
