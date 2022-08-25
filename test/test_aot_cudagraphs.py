@@ -139,7 +139,6 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
                     loss = model(y).sum()
                     loss.backward()
 
-
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all()
     def test_mutated_metadata(self):
