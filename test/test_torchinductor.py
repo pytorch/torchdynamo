@@ -17,28 +17,28 @@ import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 
-try:
-    import sympy
+# try:
+import sympy
 
-    importlib.import_module("functorch")
+importlib.import_module("functorch")
 
-    from functorch.compile import config as functorch_config
-    from torch._decomp import get_decompositions
+from functorch.compile import config as functorch_config
+from torch._decomp import get_decompositions
 
-    import torchinductor.config
-    from torchinductor import config
-    from torchinductor.compile_fx import compile_fx
-    from torchinductor.ir import IndexingDiv
-    from torchinductor.ir import ModularIndexing
-    from torchinductor.sizevars import SizeVarAllocator
-    from torchinductor.utils import has_torchvision_roi_align
+import torchinductor.config
+from torchinductor import config
+from torchinductor.compile_fx import compile_fx
+from torchinductor.ir import IndexingDiv
+from torchinductor.ir import ModularIndexing
+from torchinductor.sizevars import SizeVarAllocator
+from torchinductor.utils import has_torchvision_roi_align
 
-    # This will only pass on pytorch builds newer than roughly 5/15/2022
-    assert get_decompositions([torch.ops.aten.trace])
-    # Requires functorch
-    from torchinductor.compile_fx import compile_fx_inner
-except (ImportError, ModuleNotFoundError, AssertionError):
-    raise unittest.SkipTest("requires sympy/functorch")
+# This will only pass on pytorch builds newer than roughly 5/15/2022
+assert get_decompositions([torch.ops.aten.trace])
+# Requires functorch
+from torchinductor.compile_fx import compile_fx_inner
+# except (ImportError, ModuleNotFoundError, AssertionError):
+#     raise unittest.SkipTest("requires sympy/functorch")
 
 
 HAS_CPU = False
