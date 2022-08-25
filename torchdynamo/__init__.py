@@ -3,6 +3,7 @@ from . import convert_frame
 from . import eval_frame
 from . import resume_execution
 from .eval_frame import disable
+from .eval_frame import explain
 from .eval_frame import export
 from .eval_frame import optimize
 from .eval_frame import optimize_assert
@@ -16,6 +17,7 @@ __all__ = [
     "optimize",
     "optimize_assert",
     "export",
+    "explain",
     "run",
     "disable",
     "reset",

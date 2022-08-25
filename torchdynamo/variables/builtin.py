@@ -1,6 +1,7 @@
 import functools
 import inspect
 import itertools
+import logging
 import math
 import operator
 import types
@@ -29,6 +30,8 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
+
+log = logging.getLogger(__name__)
 
 
 class BuiltinVariable(VariableTracker):
@@ -326,8 +329,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                if config.debug:
-                    print("WARN: incorrect arg count", handler, exc)
+                log.warning(f"incorrect arg count {handler} {exc}")
                 handler = None
 
         if handler:
@@ -360,9 +362,9 @@ class BuiltinVariable(VariableTracker):
                 a, b = b, a
             assert isinstance(a, variables.TensorVariable)
 
-            # result of an item call is a scalar
-            # convert to a tensor
-            if isinstance(a, FakeItemVariable):
+            # 1. result of an item call is a scalar convert to a tensor
+            # 2. dynamic shape should be resolved to tensor
+            if isinstance(a, (FakeItemVariable, DynamicShapeVariable)):
                 a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
 
             # convert min/max to torch ops

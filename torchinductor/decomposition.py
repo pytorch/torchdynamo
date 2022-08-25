@@ -1,14 +1,12 @@
+import functools
 import logging
 import math
 import numbers
 from enum import Enum
-from typing import Optional
-from typing import Tuple
 
 import torch
 import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
-from torch import Tensor
 from torch._decomp import get_decompositions
 
 from torchinductor import config
@@ -24,15 +22,18 @@ decompositions = get_decompositions(
         aten.avg_pool2d_backward,
         aten.clamp_max,
         aten.clamp_min,
+        aten.col2im_backward,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
         aten.detach,
+        aten.elu,
         aten.elu_backward,
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
+        aten.gelu,
         aten.gelu_backward,
         aten.glu_backward,
         aten.grid_sampler_2d,
@@ -42,10 +43,13 @@ decompositions = get_decompositions(
         aten.hardswish_backward,
         aten.hardtanh,
         aten.hardtanh_backward,
+        aten.im2col_backward,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
         aten.linalg_vector_norm,
+        aten.logit,
+        aten.logit_backward,
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
@@ -63,8 +67,10 @@ decompositions = get_decompositions(
         aten.new_full,
         aten.new_ones,
         aten.nll_loss_backward,
+        aten.nll_loss_forward,
         aten.norm,
         aten.reflection_pad2d_backward,
+        aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
         aten.sigmoid_backward,
@@ -73,23 +79,15 @@ decompositions = get_decompositions(
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
+        aten.t,
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
         aten.upsample_nearest2d_backward,
+        aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
-
-if not config.fallback_random:
-    # these decomps have different results than eager mode
-    decompositions.update(
-        get_decompositions(
-            [
-                aten.native_dropout,
-            ]
-        )
-    )
 
 
 def register_decomposition(ops):
@@ -97,11 +95,6 @@ def register_decomposition(ops):
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
     return decomp.register_decomposition(ops, decompositions, disable_meta=True)
-
-
-@register_decomposition([aten.detach_])
-def detach_(x):
-    return x
 
 
 @register_decomposition([aten.clamp])
@@ -113,26 +106,9 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten.t])
-def t(x):
-    ndim = x.ndimension()
-    if x.ndim in (0, 1):
-        return x
-    assert ndim == 2
-    return torch.transpose(x, 0, 1)
-
-
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2):
     return torch.mm(mat1, mat2) + input
-
-
-@register_decomposition([aten.elu])
-def elu(self, alpha=1, scale=1, input_scale=1):
-    negcoef = alpha * scale
-    return torch.where(
-        self <= 0, (torch.exp(self * input_scale) - 1) * negcoef, self * scale
-    )
 
 
 @register_decomposition([aten.tanh])
@@ -154,19 +130,6 @@ def log2(x):
 def round_dec(x, decimals=0):
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
-
-
-@register_decomposition([aten.gelu])
-def gelu(x, approximate="none"):
-    if config.approximations or approximate != "none":
-        # tanh approximation is much faster
-        return (
-            0.5
-            * x
-            * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * x * x * x)))
-        )
-    else:
-        return x * 0.5 * (1.0 + torch.special.erf(x * math.sqrt(0.5)))
 
 
 @register_decomposition([aten.special_erf, aten.erf])
@@ -283,76 +246,6 @@ class Reduction(Enum):
     SUM = 2
 
 
-@register_decomposition(aten.nll_loss_forward)
-def nll_loss_forward(
-    self: Tensor,
-    target: Tensor,
-    weight: Optional[Tensor],
-    reduction: int,
-    ignore_index: int,
-) -> Tuple[Tensor, Tensor]:
-    """
-    This is copied from:
-    https://github.com/pytorch/pytorch/pull/78491
-
-    We should remove it when that PR lands.
-    """
-
-    # self can be [N, C] or [C]
-    # target can be [N] or []
-
-    n_dims = self.dim()
-    channel_dim = 1
-    if n_dims < 2:
-        channel_dim = 0
-
-    if weight is not None:
-        # Here is a specific case with reduction mean and non-batched tensors
-        # https://github.com/pytorch/pytorch/issues/61309
-        # In this case weight is cancelled: w * x[t] / w -> x[t]
-        if not (reduction == Reduction.MEAN.value and n_dims < 2):
-            w = weight.unsqueeze(0) if n_dims > 1 else weight
-            self = self * w
-
-    target_ = target.unsqueeze(channel_dim)
-    # target can be [N, 1] or [1]
-
-    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
-
-    ignore_index_mask = None
-    if ignore_index >= 0:
-        ignore_index_mask = target != ignore_index
-        result = result * ignore_index_mask
-
-    if reduction == Reduction.NONE.value and n_dims > 1:
-        total_weight = self.new_full((), 0.0)
-        return result, total_weight
-
-    if weight is not None:
-        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
-        if ignore_index_mask is not None:
-            wsum = wsum * ignore_index_mask
-        total_weight = wsum.sum()
-    elif ignore_index_mask is not None:
-        total_weight = ignore_index_mask.sum().to(self)
-    else:
-        total_weight = self.new_full((), 1.0 * result.numel())
-
-    if result.dim() > 0:
-        if reduction == Reduction.SUM.value:
-            result = result.sum()
-        elif reduction == Reduction.MEAN.value:
-            if weight is None:
-                result = (
-                    result.sum() / total_weight if ignore_index >= 0 else result.mean()
-                )
-            else:
-                result = result.sum() / total_weight
-
-    return result, total_weight
-
-
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
     return torch.index_put_(self.clone(), indices, values, accumulate)
@@ -378,18 +271,13 @@ def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
     return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
 
 
-@register_decomposition([aten.narrow])
-def narrow(self, dim, start, length):
-    return aten.slice(self, dim, start, start + length)
-
-
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
     return self
 
 
-@register_decomposition([aten.lift])
+@register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
 
@@ -399,13 +287,29 @@ def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
 
 
-@register_decomposition([aten.type_as])
-def type_as(self, other):
-    return self.type(other.type())
+"""
+Some decomps result in differences from eager related to randomness.
+We put these decomps in a separate table `extra_random_decomps` to allow
+turning them on and off via `config.fallback_random`.
+"""
+extra_random_decomps = get_decompositions([aten.native_dropout])
+register_extra_random_decomp = functools.partial(
+    decomp.register_decomposition, registry=extra_random_decomps, disable_meta=True
+)
 
 
-if not config.fallback_random:
+@register_extra_random_decomp([aten.bernoulli_])
+def bernoulli_(self, p=0.5):
+    return self.copy_(torch.rand_like(self) < p)
 
-    @register_decomposition([aten.bernoulli_])
-    def bernoulli_(self, p=0.5):
-        return self.copy_(torch.rand_like(self) < p)
+
+@functools.lru_cache(None)
+def fast_random_decomps():
+    return {**decompositions, **extra_random_decomps}
+
+
+def select_decomp_table():
+    """decomps can change based on config"""
+    if config.fallback_random:
+        return decompositions
+    return fast_random_decomps()

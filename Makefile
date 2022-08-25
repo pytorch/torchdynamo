@@ -9,7 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220807
+PYTORCH_VERSION ?= dev20220820
 TRITON_VERSION ?= 5b04331dd2efdd23f4475823761fa975de60a514
 
 
@@ -36,12 +36,13 @@ lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
+	mypy
 	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
 		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
 		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
-	grep -E '(black|flake8|isort|click|torch)' requirements.txt | xargs $(PIP) install
+	grep -E '(black|flake8|isort|click|torch|mypy)' requirements.txt | xargs $(PIP) install
 
 setup_lint: lint-deps
 
@@ -53,20 +54,18 @@ setup_nightly:
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -r requirements.txt
-	python setup.py develop
 
 setup_nightly_gpu:
-	conda install -y -c pytorch magma-cuda113 cudatoolkit=11.3
+	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
                       torchvision==0.14.0.$(PYTORCH_VERSION) \
                       torchaudio==0.13.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
-                      --extra-index-url https://download.pytorch.org/whl/nightly/cu113
+                      --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja
 	$(PIP) install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
-	python setup.py develop
 
 clean:
 	python setup.py clean
@@ -79,7 +78,7 @@ clone-deps:
 		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
 		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
-		&& (test -e torchbenchmark || git clone --recursive https://github.com/jansel/benchmark torchbenchmark) \
+		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
 		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \
 	)
 
@@ -197,6 +196,18 @@ cpu-inductor-seq: develop
 	taskset 1 python benchmarks/torchbench.py --inductor-settings --fast --backend=ts --threads=1
 	paste -d, inductor.csv speedup_ts.csv > cpu_1t_inductor.csv
 
+gpu-inductor-bw-fp16: develop
+	rm -f inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --backend=aot_nvfuser --nvfuser
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --backend=aot_cudagraphs
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --inductor
+	paste -d, inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv > inductor_bw_fp16.csv
 
+gpu-inductor-bw-fp32: develop
+	rm -f inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --backend=aot_nvfuser --nvfuser
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --backend=aot_cudagraphs
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --inductor
+	paste -d, inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv > inductor_bw_fp32.csv
 
 

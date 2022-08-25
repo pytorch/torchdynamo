@@ -58,7 +58,8 @@ BATCH_SIZE_DIVISORS = {
     "gluon_xception65": 2,
     "gmixer_24_224": 2,
     "gmlp_s16_224": 2,
-    "jx_nest_base": 2,
+    "hrnet_w18": 64,
+    "jx_nest_base": 1,
     "legacy_senet154": 2,
     "mixer_b16_224": 2,
     "mixnet_l": 2,
@@ -68,10 +69,12 @@ BATCH_SIZE_DIVISORS = {
     "pnasnet5large": 2,
     "poolformer_m36": 2,
     "res2net101_26w_4s": 2,
+    "res2net50_14w_8s": 64,
+    "res2next50": 64,
     "resnest101e": 4,
     "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
-    "swsl_resnext101_32x16d": 2,
+    "swsl_resnext101_32x16d": 1,
     "tf_mixnet_l": 2,
     "tnt_s_patch16_224": 2,
     "twins_pcpvt_base": 4,
@@ -80,14 +83,7 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-# https://github.com/pytorch/torchdynamo/issues/611
-REQUIRE_HIGHER_TOLERANCE = {
-    "adv_inception_v3",
-    "convmixer_768_32",
-    "convnext_base",
-    "gluon_inception_v3",
-    "inception_v3",
-}
+REQUIRE_HIGHER_TOLERANCE = set()
 
 
 def refresh_model_names():
@@ -245,6 +241,11 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
+        if is_training and not use_eval_mode:
+            model.train()
+        else:
+            model.eval()
+
         return device, model_name, model, example_inputs, batch_size
 
     def iter_models(self, args):

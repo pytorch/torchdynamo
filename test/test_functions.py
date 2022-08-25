@@ -12,6 +12,7 @@ from torch.nn import functional as F
 import torchdynamo.testing
 from torchdynamo.testing import requires_static_shapes
 
+tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
@@ -150,6 +151,20 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_tuple2(a, b):
         args = [a, b]
         return sub(*args)
+
+    @make_test
+    def test_is_in_onnx_export(x, y):
+        if torch.onnx.is_in_onnx_export():
+            return x - 1
+        else:
+            return y + 1
+
+    @make_test
+    def test_is_fx_tracing(x, y):
+        if torch.fx._symbolic_trace.is_fx_tracing():
+            return x - 1
+        else:
+            return y + 1
 
     @make_test
     def test_listarg1(a, b):

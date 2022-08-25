@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 import torch.utils._pytree as pytree
 
+import torchdynamo
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import same
@@ -208,8 +209,7 @@ def catch_errors_wrapper(callback):
     def catch_errors(frame, cache_size):
         try:
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                if config.debug:
-                    print(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+                log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
                 return None
             if (
                 frame.f_code.co_filename == "<string>"
@@ -289,7 +289,7 @@ def get_compiler_fn(compiler_fn):
     return compiler_fn
 
 
-def optimize(backend, nopython=False):
+def optimize(backend, nopython=False, guard_export_fn=None):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -323,10 +323,66 @@ def optimize(backend, nopython=False):
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(backend, guard_export_fn=None)
+        return optimize_assert(backend, guard_export_fn=guard_export_fn)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
+        backend_ctx_ctor,
     )
+
+
+@patch("torchdynamo.symbolic_convert.explain", True)
+def explain(f, *args, **kwargs):
+    # TODO(voz): Do we want a decorator for this?
+    torchdynamo.reset()
+
+    out_guards = []
+    graphs = []
+    ops_per_graph = []
+    op_count = 0
+    break_reasons = []
+
+    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+        nonlocal graphs
+        nonlocal op_count
+        nonlocal ops_per_graph
+
+        graphs.append(gm)
+        ops = []
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+
+        op_count += len(ops)
+        ops_per_graph.append(ops)
+        if gm.compile_subgraph_reason is not None:
+            break_reasons.append(gm.compile_subgraph_reason)
+        return gm.forward
+
+    def guard_export_print(guards):
+        nonlocal out_guards
+        out_guards.append(guards)
+
+    with patch(f"{__name__}.most_recent_backend", None), optimize(
+        dynamo_graph_accumulating_compiler,
+        nopython=False,
+        guard_export_fn=guard_export_print,
+    ):
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        f(*args, **kwargs)
+
+    graph_count = len(graphs)
+
+    formatted_list = ""
+    for idx in range(0, len(break_reasons)):
+        formatted_list += f"{idx + 1}. {break_reasons[idx]} \n"
+
+    explanation = f"Dynamo produced {graph_count} graphs"
+    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
+    explanation += f"\n Break reasons: \n\n{formatted_list}"
+
+    # TODO(voz): Do we want a decorator for this?
+    torchdynamo.reset()
+    return explanation, out_guards, graphs, ops_per_graph
 
 
 def export(f, *args, **kwargs):
