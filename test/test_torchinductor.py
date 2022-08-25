@@ -16,7 +16,6 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
-from torchinductor.compile_fx import compile_fx_inner
 
 try:
     import sympy
@@ -36,6 +35,8 @@ try:
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
+    # Requires functorch
+    from torchinductor.compile_fx import compile_fx_inner
 except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires sympy/functorch")
 
