@@ -658,7 +658,8 @@ class Reduction(Loops):
             return Pointwise.create(device, dst_dtype, fn, ranges)
 
         if (
-            V.graph.sizevars.size_hint(reduction_numel)
+            isinstance(reduction_numel, sympy.Integer)
+            and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
             and sympy_product(ranges) != 1
         ):
