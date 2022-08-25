@@ -319,8 +319,7 @@ class WrapperCodeGen(CodeGen):
             planning_state = MemoryPlanningState()
             for i in range(len(self.lines)):
                 if isinstance(self.lines[i], MemoryPlanningLine):
-                    plan_result = self.lines[i].plan(planning_state)
-                    self.lines[i] = plan_result
+                    self.lines[i] = self.lines[i].plan(planning_state)
 
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
