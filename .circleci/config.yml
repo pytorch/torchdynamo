@@ -275,7 +275,7 @@ jobs:
             source .circleci/setup_env.sh
             python .circleci/check_csv.py -f inductor_hf_training_2.csv
 
-inductor_timm_inference_0:
+  inductor_timm_inference_0:
     machine:
       image: ubuntu-2004-cuda-11.4:202110-01
     resource_class: gpu.nvidia.large
