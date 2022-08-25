@@ -311,7 +311,10 @@ class TensorVariable(VariableTracker):
 
         def check_type(ty):
             if ty not in tensortype_to_dtype:
-                return self.python_type() is ty
+                if self.python_type() is torch.nn.Parameter and ty is torch.Tensor:
+                    return True
+                else:
+                    return self.python_type() is ty
 
             dtypes = tensortype_to_dtype[ty]
             return self.dtype in dtypes
