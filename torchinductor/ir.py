@@ -202,6 +202,18 @@ class CleanDiv(IndexingDiv):
     pass
 
 
+class CeilDiv(sympy.Function):
+    """
+    Div used in indexing that rounds up.
+    """
+
+    def __new__(cls, base, divisor):
+        if sympy.gcd(base, divisor) == divisor:
+            return CleanDiv(base, divisor)
+        else:
+            return IndexingDiv(base + (divisor - 1), divisor)
+
+
 def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
     if getattr(x, "get_device", None):
@@ -2026,7 +2038,7 @@ class ExternKernel(InputsKernel):
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
-        self.freeze_layout()
+            self.freeze_layout()
 
     def codegen(self, wrapper):
         raise NotImplementedError

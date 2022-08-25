@@ -139,8 +139,6 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
                     loss = model(y).sum()
                     loss.backward()
 
-    # Internal resize_ inside models appear to be broken right now
-    @unittest.expectedFailure
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all()
     def test_mutated_metadata(self):
