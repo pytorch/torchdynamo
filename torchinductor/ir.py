@@ -19,6 +19,8 @@ import numpy
 import sympy
 import torch.fx
 import torch.utils._pytree as pytree
+import functorch
+import functorch.compile
 from functorch.compile import get_aot_compilation_context
 from sympy import Expr
 from sympy import Integer
