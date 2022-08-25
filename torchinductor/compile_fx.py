@@ -18,6 +18,7 @@ from . import config
 from . import overrides
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import gen_gm_and_inputs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -44,26 +45,11 @@ class CheckEachNode(torch.fx.Interpreter):
         if target in (operator.getitem,):
             return expected
 
-        g = torch.fx.Graph()
-        g_args = []
-        a_args = []
-        for n, arg in enumerate(args):
-            if isinstance(arg, torch.Tensor):
-                g_args.append(g.placeholder(f"arg{n}"))
-                a_args.append(arg)
-            else:
-                g_args.append(arg)
-        assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-        node = g.call_function(target, tuple(g_args), kwargs)
-        if isinstance(expected, torch.Tensor):
-            node = (node,)
-        g.output(node)
-
-        gm = torch.fx.GraphModule({}, g)
+        gm, gm_inps = gen_gm_and_inputs(target, args, kwargs)
         graph = GraphLowering(gm)
         with V.set_graph_handler(graph):
             graph.run(*args, **kwargs)
-            actual = graph.compile_to_fn()(*a_args)
+            actual = graph.compile_to_fn()(*gm_inps)
 
         if isinstance(expected, torch.Tensor):
             actual = actual[0]

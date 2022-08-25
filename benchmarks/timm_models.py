@@ -10,6 +10,7 @@ import warnings
 import torch
 from common import BenchmarkRunner
 from common import main
+from torch._subclasses import FakeTensor
 
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
@@ -301,7 +302,10 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        return self.loss(pred, self.target)
+        if isinstance(pred, FakeTensor) and not isinstance(self.target, FakeTensor):
+            return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
+        else:
+            return self.loss(pred, self.target)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
