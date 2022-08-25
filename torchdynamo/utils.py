@@ -288,12 +288,16 @@ def clone_input(x):
         try:
             result.copy_(x.clone())
             result.requires_grad_(x.requires_grad)
+            if x.grad is not None:
+                result.grad = clone_input(x.grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             y = torch.clone(x)
             y.requires_grad_(x.requires_grad)
+            if x.grad is not None:
+                y.grad = clone_input(x.grad)
             return y
         return result
 
