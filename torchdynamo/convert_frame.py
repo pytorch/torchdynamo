@@ -182,7 +182,12 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
+def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True, user_constraints=None, gradual_typing=False):
+
+    # print('?????')
+    # print(gradual_typing)
+    # print(user_constraints)
+
     """Fully convert a frame into an FX graph"""
     init_logging()
 
@@ -260,6 +265,8 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 code_options,
                 compiler_fn,
                 one_graph,
+                gradual_typing=gradual_typing,
+                user_constraints=user_constraints
             )
             tracer.run()
             output = tracer.output
@@ -337,9 +344,10 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
     return wrap_convert_context(_convert_frame_assert)
 
 
-def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
+def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None, user_constraints=None, gradual_typing=False):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
+
+    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False, user_constraints=user_constraints, gradual_typing=gradual_typing)
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1

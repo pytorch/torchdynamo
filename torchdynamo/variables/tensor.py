@@ -329,7 +329,9 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-
+        # print("#########")
+        # print("User constraints", tx.user_constraints)
+        # print("Grad type", tx.gradual_typing)
         try:
             if HAS_Z3:
                 if maybe_condition(proxy.node):
@@ -339,14 +341,13 @@ class TensorVariable(VariableTracker):
                     COUNT = COUNT+1
 
                     print("*************************")
-                    print(GraphModule(FakeRootModule(tx.output.nn_modules), proxy.node.graph))
+                    # print(GraphModule(FakeRootModule(tx.output.nn_modules), proxy.node.graph))
                     # print("Source code line number = ", tx.lineno, tx.inline_user_function_return)
-
                     positive, negative = evaluate_conditional_with_constraints(
                         FakeRootModule(tx.output.nn_modules),
                         proxy.node.graph,
                         proxy.node,
-                        user_constraints=user_constraints_M2M100Model[COUNT]
+                        user_constraints=tx.user_constraints[COUNT]
                     )
 
                     print(positive)
@@ -372,7 +373,7 @@ class TensorVariable(VariableTracker):
 
                     else:
                         pass
-        # #
+
         except Exception as e:
             print(e)
 

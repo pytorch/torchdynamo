@@ -11,11 +11,15 @@ from enum import Enum
 from torch.fx.tensor_type import Dyn
 from transformers import *
 
+
+
+
+
 try:
     import z3  # noqa
     from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (  # noqa
-        evaluate_conditional_with_constraints,
-    )
+        evaluate_conditional_with_constraints,)
+    from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D
 
     HAS_Z3 = True
 except ImportError:
@@ -27,6 +31,211 @@ skipIfNoZ3 = unittest.skipIf(not HAS_Z3, "no z3")
 bs = 4
 num_choices = 3
 seq_length = 32
+
+s1, s2, s3, s4, s5, s6 = z3.Ints('x1 x2 x3 x4 x5 x6')
+input = z3.Const(1, tensor_type)
+input_embeds = z3.Const(3, tensor_type)
+self_weights = z3.Const(3, tensor_type)
+stack_0 = z3.Const(1, tensor_type)
+attention_mask = z3.Const(2, tensor_type)
+input_embeds_2 = z3.Const(2, tensor_type)
+
+dimension_var2 = z3.Int(2)
+
+# try repeating a condition multiple times
+heuristic = [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                     s1 > 0,
+                     s2 > 1,
+                     s2 < 2000])] * 20
+
+
+
+heuristic2 = [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                      s1 > 0,
+                      s2 > 1,
+                      s2 < 2000])] * 10
+
+false_constraints = [False] * 20
+
+
+user_constraints_M2M100Model = [z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2)), s1 > 0,  s2 > 1, s2 < 1024,
+                                        self_weights == tensor_type.tensor2(D(1, 2050), D(1, 1024))])] + \
+                               [z3.And([input_embeds_2 == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                        s1 > 0,
+                                        s2 > 1,
+                                        s2 < 2000,
+                                        input_embeds_2 == stack_0])] * 8 + [False] * 100 + [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                                                                              s1 > 0,
+                                                                                              s2 > 1,
+                                                                                              s2 < 2000])] * 9 + [False] +  [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                                                                                                                     s1 > 0,
+                                                                                                                                     s2 > 1,
+                                                                                                                                     s2 < 2000])] * 9 + [False] * 60
+
+
+
+
+user_constraints_blenderbot = [False, False] \
+                              + \
+                              [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, s3)),
+                                       s1 > 0,
+                                       s2 > 1,
+                                       s2 < 2000])] * 9 + [False] + [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, s3)),
+                                                                             s1 > 0,
+                                                                             s2 > 1,
+                                                                             s2 < 2000])] * 12 + [False] * 40
+
+
+bert_user_constraints = [True,
+                         True,
+                         True,
+                         z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                         z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                         z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))])]
+
+
+user_constraint_mt5model = [True,
+                            True,
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            # True,
+                            z3.And([dimension_var2 == 2]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                            z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+
+                            ]
+
+
+T5_model_constraints = [True,
+                        True,
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                        ]
+
+
+bert_user_constraints_2 = [z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                           z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                           z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                           z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                           z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))]),
+                           z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2))])]
+
+
+
+
+user_constraints_XGLM = [z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2)), s1 > 0,  s2 > 1, s2 < 2000]),
+
+                         False,
+
+                         z3.And([input == tensor_type.tensor2(D(1, s1), D(1, s2)), s1 > 0,  s2 > 1, s2 < 2000,
+                                 self_weights == tensor_type.tensor2(D(1, 2050), D(1, 1024))]),
+
+
+                         z3.And([input_embeds == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                 s1 > 0,
+                                 s2 > 1,
+                                 s2 < 2000,
+                                 input_embeds == stack_0]),
+
+                         z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                 s1 > 0,
+                                 s2 > 1,
+                                 s2 < 2000,
+                                 input_embeds == stack_0, input_embeds == attention_mask]),
+
+                         z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                 s1 > 0,
+                                 s2 > 1,
+                                 s2 < 2000]),
+                         True,
+                         True,
+                         True,
+                         True,
+                         True,
+                         True,
+                         True]
+
+
+
+
+user_constraints_marian_mt = [z3.And([input_embeds_2 == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                      s1 > 0,
+                                      s2 > 1,
+                                      s2 < 2000,
+                                      input_embeds_2 == stack_0])] * 7 + [False] * 100 + [z3.And([input == tensor_type.tensor3(D(1,s1), D(1, s2), D(1, s3)),
+                                                                                            input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                                                                            s1 > 0,
+                                                                                            s2 > 1,
+                                                                                            s2 < 2000])] * 6 + [False] + \
+                             [z3.And([input == tensor_type.tensor3(D(1,s1), D(1, s2), D(1, s3)),
+                                      input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                      s1 > 0,
+                                      s2 > 1,
+                                      s2 < 2000])] * 8 + [False] * 40
+
 
 
 class MultiUseParameterConfig(Enum):
@@ -197,8 +406,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         cnts = torchdynamo.testing.CompileCounter()
 
 
-
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, user_constraints=user_constraints_XGLM):
             m = generate_hf_model(XGLMModel, hidden_layers=1)
             m.forward(torch.ones([4, 32], dtype=torch.long))
 
@@ -213,7 +421,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
 
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, user_constraints=user_constraints_M2M100Model):
             m = generate_hf_model(M2M100Model, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
 
@@ -276,7 +484,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         # torchdynamo.config.debug = True
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, user_constraints=bert_user_constraints):
             m = generate_hf_model(BertModel, hidden_layers=1)
             m.forward(torch.ones([4, 32], dtype=torch.int))
 
@@ -315,7 +523,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         # torchdynamo.config.debug = True
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, user_constraints=user_constraints_marian_mt):
             m = generate_hf_model(MarianModel, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
         self.assertEqual(cnts.frame_count, 30)
@@ -325,7 +533,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         # torchdynamo.config.debug = True
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, user_constraints=user_constraints_blenderbot):
             m = generate_hf_model(BlenderbotSmallModel, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
             print(cnts.frame_count)
@@ -341,7 +549,7 @@ class TorchDynamoUseCases(unittest.TestCase):
         # torchdynamo.config.debug = True
         torchdynamo.config.dynamic_shapes = True
         cnts = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnts):
+        with torchdynamo.optimize(cnts, user_constraints=user_constraints_marian_mt):
             m = generate_hf_model(MarianMTModel, hidden_layers=0)
             m.forward(torch.ones([4, 32], dtype=torch.int), decoder_input_ids=torch.ones([4, 32], dtype=torch.int))
             # print(cnts.frame_count)

@@ -215,7 +215,7 @@ def get_compiler_fn(compiler_fn):
         return compiler_fn
 
 
-def optimize(backend, nopython=False):
+def optimize(backend, nopython=False, user_constraints=None, gradual_typing=False):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -251,7 +251,7 @@ def optimize(backend, nopython=False):
     if nopython:
         return optimize_assert(backend, guard_export_fn=None)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, guard_export_fn=None), backend_ctx_ctor
+        convert_frame.convert_frame(backend, guard_export_fn=None, user_constraints=user_constraints, gradual_typing=gradual_typing), backend_ctx_ctor
     )
 
 

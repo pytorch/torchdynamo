@@ -1213,6 +1213,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         code_options,
         compiler_fn,
         one_graph,
+        user_constraints = None,
+        gradual_typing = False
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1227,6 +1229,9 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
         self.new_annotations = {}
+        self.user_constraints = user_constraints
+        self.gradual_typing = gradual_typing
+
 
         if "self" in f_locals:
             if hasattr(f_locals["self"].__class__, "forward"):
@@ -1396,7 +1401,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func,
             )
 
         tracer.run()
@@ -1429,6 +1434,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ):
+        self.new_annotations = {}
+        self.user_constraints = parent.user_constraints
+        self.gradual_typing = parent.gradual_typing
+
+
+
         f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
