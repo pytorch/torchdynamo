@@ -2458,7 +2458,6 @@ class CommonTemplate:
                 torch.ones(64, 512),
             ],
         )
-        self.assertTrue(False)
 
     def test_scatter3(self):
         def fn(a, dim, index, b):
