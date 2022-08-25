@@ -2960,6 +2960,23 @@ if HAS_CPU:
 
     CommonTemplate.install(CpuTests, "cpu")
 
+    class CPUReproTests(TestCase):
+        def test_inplace_squeeze_needed(self):
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(10, 10),
+                torch.nn.LayerNorm(10),
+                torch.nn.ReLU(),
+            ).eval()
+
+            @torchdynamo.optimize("inductor")
+            def fn(x):
+                return mod(x)
+
+            v = torch.randn(10)
+            result = fn(v)
+            assert same(result, mod(v))
+
+
 if HAS_CUDA:
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):

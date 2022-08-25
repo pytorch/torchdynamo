@@ -440,6 +440,15 @@ def squeeze(x, dim=None):
     return view(x, new_shape)
 
 
+@register_lowering([aten.squeeze_])
+def squeeze_(x, dim=None):
+    val = squeeze(x, dim)
+    assert isinstance(x, TensorBox)
+    assert isinstance(val, TensorBox)
+    x.data = val.data
+    return x
+
+
 @register_lowering(aten.expand, type_promote=False)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
