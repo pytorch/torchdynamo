@@ -46,6 +46,8 @@ class AccessLimitingConfig(ModuleType):
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch.fx._symbolic_trace.is_fx_tracing: False,
+        torch.onnx.is_in_onnx_export: False,
     }
 
     # root folder of the project
