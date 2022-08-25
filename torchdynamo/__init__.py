@@ -13,6 +13,10 @@ from .eval_frame import skip
 from .utils import guard_failures
 from .utils import orig_code_map
 
+# TODO: remove this config entirely
+import functorch.compile
+functorch.compile.config.use_functionalize = True
+
 __all__ = [
     "optimize",
     "optimize_assert",
