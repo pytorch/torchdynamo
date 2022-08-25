@@ -723,6 +723,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.op_count, 4)
         self.assertTrue(torchdynamo.testing.same(out1, out2))
 
+        torchdynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+
     def test_torch_function_with_closure(self):
         def run():
 
@@ -757,6 +759,8 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
             self.assertEqual(cnt.op_count, 4)
             self.assertTrue(torchdynamo.testing.same(out1, out2))
+
+            torchdynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
         run()
 

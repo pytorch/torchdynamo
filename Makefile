@@ -9,7 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220807
+PYTORCH_VERSION ?= dev20220820
 TRITON_VERSION ?= 5b04331dd2efdd23f4475823761fa975de60a514
 
 
@@ -78,7 +78,7 @@ clone-deps:
 		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
 		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
-		&& (test -e torchbenchmark || git clone --recursive https://github.com/jansel/benchmark torchbenchmark) \
+		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
 		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \
 	)
 
@@ -196,6 +196,18 @@ cpu-inductor-seq: develop
 	taskset 1 python benchmarks/torchbench.py --inductor-settings --fast --backend=ts --threads=1
 	paste -d, inductor.csv speedup_ts.csv > cpu_1t_inductor.csv
 
+gpu-inductor-bw-fp16: develop
+	rm -f inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --backend=aot_nvfuser --nvfuser
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --backend=aot_cudagraphs
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float16 -n100 --inductor
+	paste -d, inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv > inductor_bw_fp16.csv
 
+gpu-inductor-bw-fp32: develop
+	rm -f inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --backend=aot_nvfuser --nvfuser
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --backend=aot_cudagraphs
+	python benchmarks/torchbench.py --training -dcuda --inductor-settings --float32 -n100 --inductor
+	paste -d, inductor.csv speedup_aot_nvfuser.csv speedup_aot_cudagraphs.csv > inductor_bw_fp32.csv
 
 

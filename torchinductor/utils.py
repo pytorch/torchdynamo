@@ -1,6 +1,8 @@
 import functools
 import operator
 import time
+from typing import Any
+from typing import List
 
 import numpy as np
 import sympy
@@ -112,6 +114,8 @@ def freeze_inputs(f):
     """
 
     def freeze_value(x):
+        if isinstance(x, (immutable_dict, immutable_list)):
+            return x
         if isinstance(x, list):
             return immutable_list(x)
         if isinstance(x, dict):
@@ -125,3 +129,19 @@ def freeze_inputs(f):
 
     wrapped.cache_info = f.cache_info
     return wrapped
+
+
+def precompute_method(obj: Any, method: str):
+    """Replace obj.method() with a new method that returns a precomputed constant."""
+    result = getattr(obj, method)()
+    setattr(obj, method, lambda: result)
+
+
+def precompute_methods(obj: Any, methods: List[str]):
+    """Replace methods with new methods that returns a precomputed constants."""
+    for method in methods:
+        precompute_method(obj, method)
+
+
+def cmp(a, b):
+    return int(a > b) - int(a < b)

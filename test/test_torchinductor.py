@@ -23,6 +23,7 @@ try:
 
     importlib.import_module("functorch")
 
+    from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
 
     import torchinductor.config
@@ -918,7 +919,6 @@ class CommonTemplate:
             ),
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_unsqueeze_inplace(self):
         def fn(a):
             tmp1 = a + 1
@@ -951,7 +951,6 @@ class CommonTemplate:
             ),
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -960,7 +959,6 @@ class CommonTemplate:
         )
         self.common(mod, (torch.randn(2, 8),))
 
-    @patch.object(config, "aot_autograd", False)
     def test_linear2(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 8),
@@ -1194,6 +1192,18 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
+        )
+
+        # lowering to avg_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
         )
 
     def test_max_pool2d1(self):
@@ -1461,14 +1471,17 @@ class CommonTemplate:
     def test_triton_mm2(self):
         @torchdynamo.optimize("inductor", nopython=True)
         def fn(x, y):
-            return torch.mm(x, y)
+            return torch.relu(torch.mm(x, y))
 
         N = 1024
         a = torch.randn([N, N], device=self.device, dtype=torch.float32)
         b = torch.randn([N, N], device=self.device, dtype=torch.float32)
-        c1 = torch.mm(a, b)
+        c1 = torch.relu(torch.mm(a, b))
+        torchinductor.metrics.reset()
         c = fn(a, b)
         assert torch.allclose(c1, c, atol=1e-3, rtol=1e-3)
+        if self.device == "cuda":
+            assert torchinductor.metrics.generated_kernel_count == 1
 
     def test_std(self):
         def fn(x):
@@ -1510,7 +1523,6 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -1756,7 +1768,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8),))
 
-    @patch.object(config, "aot_autograd", False)
     def test_new_ones(self):
         def fn(a):
             return (
@@ -2075,8 +2086,8 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 1, 1]),))
 
-    @patch.object(config, "aot_autograd", False)
     @patch.object(config.triton, "cudagraphs", True)
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -2093,13 +2104,12 @@ class CommonTemplate:
         with torchdynamo.optimize_assert(compile_fx):
             actual1 = fn(arg2)
             actual2 = fn(arg4)
-
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(actual2, correct2))
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
-    @patch.object(config, "aot_autograd", False)
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -2116,7 +2126,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(config, "aot_autograd", False)
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -2137,9 +2147,7 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    # TODO(voz): Figure out why, re-enable
-    @unittest.skip("Disabled during functorch bump")
-    @patch.object(config, "aot_autograd", False)
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -2152,7 +2160,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
-    @patch.object(config, "aot_autograd", False)
+    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -2235,7 +2243,6 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
-    @patch.object(config, "aot_autograd", False)
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)
@@ -2333,7 +2340,7 @@ class CommonTemplate:
             ],
         )
 
-    @unittest.skipIf(not config.fallback_random, "requires config.fallback_random")
+    @patch.object(config, "fallback_random", True)
     def test_bernoulli(self):
         def fn(a):
             b = torch.empty_like(a)
@@ -2420,7 +2427,7 @@ class CommonTemplate:
 
     def test_scatter2(self):
         def fn(a, dim, index, b):
-            return aten.scatter(a, dim, index, b, reduce="add")
+            return aten.scatter.reduce(a, dim, index, b, reduce="add")
 
         self.common(
             fn,
@@ -2537,7 +2544,6 @@ class CommonTemplate:
         self.assertTrue(400 < result.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result.mean().item() < 1.1)
 
-    @patch.object(config, "aot_autograd", False)
     def test_dropout_deterministic(self):
         @torchdynamo.optimize("inductor")
         def fn(a):
@@ -2568,7 +2574,6 @@ class CommonTemplate:
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
 
-    @patch.object(config, "aot_autograd", False)
     def test_rand_like_deterministic(self):
         @torchdynamo.optimize("inductor")
         def fn(a):
@@ -2694,7 +2699,6 @@ class CommonTemplate:
             ],
         )
 
-    @patch.object(config, "aot_autograd", False)
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
@@ -2871,7 +2875,7 @@ class CommonTemplate:
             ],
         )
 
-    def test_tmp_not_defined_issue(self):
+    def test_tmp_not_defined_issue1(self):
         def forward(
             primals_3,
             primals_4,
@@ -2920,6 +2924,22 @@ class CommonTemplate:
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
         self.common(forward, inps)
 
+    def test_tmp_not_defined_issue2(self):
+        def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
+            div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
+            mul_tensor_24 = torch.ops.aten.mul.Tensor(div_tensor_7, arg38_1)
+            sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
+            return (new_zeros_default_4, sum_default_7)
+
+        args = [
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
+            ((), (), torch.float32),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
+            ((3,), (1,), torch.float32),
+        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
+
 
 if HAS_CPU:
 
@@ -2928,6 +2948,23 @@ if HAS_CPU:
         device = "cpu"
 
     CommonTemplate.install(CpuTests, "cpu")
+
+    class CPUReproTests(TestCase):
+        def test_inplace_squeeze_needed(self):
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(10, 10),
+                torch.nn.LayerNorm(10),
+                torch.nn.ReLU(),
+            ).eval()
+
+            @torchdynamo.optimize("inductor")
+            def fn(x):
+                return mod(x)
+
+            v = torch.randn(10)
+            result = fn(v)
+            assert same(result, mod(v))
+
 
 if HAS_CUDA:
 
@@ -2960,9 +2997,7 @@ if HAS_CUDA:
                 _to_copy_default_67,
                 zeros,
             ):
-                sum_sym_int_19 = torch.ops.aten.sum.SymInt(
-                    _to_copy_default_67, [0], True
-                )
+                sum_sym_int_19 = torch.ops.aten.sum(_to_copy_default_67, [0], True)
                 view_default_57 = torch.ops.aten.view.default(
                     sum_sym_int_19, [512, 768]
                 )
@@ -2988,3 +3023,19 @@ if HAS_CUDA:
             mod = make_fx(forward)(*inps)
             compiled = compile_fx_inner(mod, inps)
             compiled(*inps)
+
+        @patch.object(config, "fallback_random", True)
+        def test_dtype_factory_issue(self):
+            def forward():
+                randn = torch.ops.aten.randn.default(
+                    [12, 64, 1, 64],
+                    dtype=torch.float32,
+                    device=torch.device(type="cuda", index=0),
+                    pin_memory=False,
+                )
+                unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(randn, -1)
+                return (unsqueeze_default_2,)
+
+            mod = make_fx(forward)()
+            compiled = compile_fx_inner(mod, ())
+            assert compiled()[0].device.type == "cuda"

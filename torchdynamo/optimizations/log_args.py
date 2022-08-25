@@ -2,8 +2,7 @@ import json
 import os
 
 import torch
-
-from torchdynamo.optimizations.python_key import python_key_normalize
+from torch.fx.experimental.proxy_tensor import make_fx
 
 aten = torch.ops.aten
 
@@ -37,7 +36,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         result = super().run_node(n)
 
         if n.op == "call_function":
-            if n.target == aten.convolution:
+            if n.target == aten.convolution.default:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 assert len(args) == len(
                     self.conv_arg_names
@@ -69,7 +68,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
 
 def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs):
     # lowering graph
-    gm, wrap = python_key_normalize(gm, example_inputs)
+    gm = make_fx(gm)(*example_inputs)
     # use Interpreter to logs the args of conv
-    wrap(ConvArgsAnalysis(gm).run)(*example_inputs)
-    return wrap(gm.forward)
+    ConvArgsAnalysis(gm).run(*example_inputs)
+    return gm

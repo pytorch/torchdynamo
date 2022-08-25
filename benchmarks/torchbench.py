@@ -172,9 +172,6 @@ INDUCTOR_INFERENCE_NOT_YET_WORKING = {
 
 INDUCTOR_TRAINING_NOT_YET_WORKING = {
     *INDUCTOR_INFERENCE_NOT_YET_WORKING,
-    # Invalid address
-    # https://github.com/pytorch/torchdynamo/issues/741
-    "hf_GPT2",
     # load_mask nesting needed
     "Super_SloMo",
     # float16 issue or CUDA error: operation not permitted when stream is capturing
@@ -224,10 +221,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_not_suitable_for_training_models(self):
         return SKIP_TRAIN
-
-    @property
-    def failing_python_key_models(self):
-        return AOT_AUTOGRAD_NOT_YET_WORKING | {"maml_omniglot", "moco"}
 
     @property
     def failing_torchinductor_models(self):
@@ -306,7 +299,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def iter_model_names(self, args):
         from torchbenchmark import _list_model_paths
 
-        for model_path in _list_model_paths():
+        models = _list_model_paths()
+        start, end = self.get_benchmark_indices(len(models))
+        for index, model_path in enumerate(models):
+            if index < start or index >= end:
+                continue
+
             model_name = os.path.basename(model_path)
             if (
                 not re.search("|".join(args.filter), model_name, re.I)

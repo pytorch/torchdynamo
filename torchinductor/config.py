@@ -1,5 +1,3 @@
-import os
-
 # add some debug printouts
 debug = False
 
@@ -37,9 +35,6 @@ realize_bytes_threshold = 2000
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
-# python_key_normalize versus aot_autograd
-aot_autograd = True
-
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
@@ -49,12 +44,11 @@ prefuse_nodes = True
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
 
-# Inductor compilation debug info
-# 0: Nothing printed out when compilation fails
-# 1: Dump the graph out to repro.py if compilation fails
-# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
-# 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
-repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
+# fuse even in cases without common reads
+aggressive_fusion = True
+
+# how many nodes to allow into a single fusion
+max_fusion_size = 64
 
 
 # config specific to codegen/cpp.pp
@@ -106,3 +100,7 @@ class triton:
     autotune = True
 
     use_bmm = False
+
+    # should we stop a fusion to allow better tiling?
+    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_reduction_fusion = True
