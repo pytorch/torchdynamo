@@ -255,6 +255,9 @@ jobs:
               -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
+              -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
+              -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
               --output=inductor_hf_training_0.csv
       - store_artifacts:
           path: inductor_hf_training_0.csv
@@ -284,6 +287,9 @@ jobs:
               -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
+              -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
+              -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
               --output=inductor_hf_training_1.csv
       - store_artifacts:
           path: inductor_hf_training_1.csv
@@ -313,6 +319,9 @@ jobs:
               -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
+              -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
+              -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
               --output=inductor_hf_training_2.csv
       - store_artifacts:
           path: inductor_hf_training_2.csv
