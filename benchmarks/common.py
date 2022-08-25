@@ -1482,6 +1482,10 @@ def main(runner, original_dir=None):
     torchdynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
 
+    if args.ci:
+        # repeat less for faster CI
+        args.repeat = 2
+
     if args.training:
         model_iter_fn = runner.forward_and_backward_pass
         runner.skip_models.update(runner.skip_not_suitable_for_training_models)
