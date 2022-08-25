@@ -45,6 +45,7 @@ from .constant import ConstantVariable
 from .constant import EnumVariable
 from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
+from .dicts import DefaultDictVariable
 from .dicts import HFPretrainedConfigVariable
 from .functions import UserFunctionVariable
 from .lists import ListIteratorVariable
@@ -198,7 +199,9 @@ class VariableBuilder:
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)
-        elif istype(value, (dict, collections.OrderedDict)) and all(
+        elif istype(
+            value, (dict, collections.defaultdict, collections.OrderedDict)
+        ) and all(
             map(
                 lambda k: ConstantVariable.is_literal(k)
                 or isinstance(k, torch.nn.Parameter),
@@ -230,9 +233,14 @@ class VariableBuilder:
                 ]
             )
 
-            result = ConstDictVariable(result, type(value), guards=guards)
+            if istype(value, collections.defaultdict):
+                result = DefaultDictVariable(
+                    result, type(value), value.default_factory, guards=guards
+                )
+            else:
+                result = ConstDictVariable(result, type(value), guards=guards)
 
-            if istype(value, dict):
+            if istype(value, (dict, collections.defaultdict)):
                 return self.tx.output.side_effects.track_dict(
                     self.source, value, result
                 )
