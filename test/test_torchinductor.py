@@ -2140,6 +2140,19 @@ class CommonTemplate:
         self.common(fn, (torch.randn([8, 1, 1]),))
 
     @patch.object(config.triton, "cudagraphs", True)
+    def test_strided_inputs(self):
+        @torchdynamo.optimize("inductor")
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((8, 16), (32, 2), device=self.device),
+            rand_strided((8, 16), (16, 1), device=self.device),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        print(fn(*inputs))
+
+    @patch.object(config.triton, "cudagraphs", True)
     @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
