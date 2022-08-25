@@ -354,6 +354,10 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model = model_cls(config).to(device, dtype=dtype)
 
+        if self.args.ci:
+            # Use batch size 1 for faster CI
+            batch_size = 1
+
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:

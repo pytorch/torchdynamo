@@ -255,6 +255,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 
+        if self.args.ci:
+            # Use batch size 1 for faster CI
+            batch_size = 1
+
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 

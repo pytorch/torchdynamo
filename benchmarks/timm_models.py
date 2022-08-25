@@ -214,6 +214,10 @@ class TimmRunnner(BenchmarkRunner):
         data_config = resolve_data_config(
             self._args, model=model, use_test_size=not is_training
         )
+
+        if self.args.ci:
+            # Use batch size 1 for faster CI
+            batch_size = 1
         input_size = data_config["input_size"]
         recorded_batch_size = TIMM_MODELS[model_name]
         recorded_batch_size = max(

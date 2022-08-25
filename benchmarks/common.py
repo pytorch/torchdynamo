@@ -945,10 +945,10 @@ class BenchmarkRunner:
         return 1
 
     def get_benchmark_indices(self, length):
-        start = self._args.partition_id * (length // self._args.total_partitions)
+        start = self.args.partition_id * (length // self.args.total_partitions)
         end = (
-            (self._args.partition_id + 1) * (length // self._args.total_partitions)
-            if self._args.partition_id < self._args.total_partitions - 1
+            (self.args.partition_id + 1) * (length // self.args.total_partitions)
+            if self.args.partition_id < self.args.total_partitions - 1
             else length
         )
         return start, end
