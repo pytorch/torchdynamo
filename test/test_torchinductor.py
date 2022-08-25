@@ -1622,6 +1622,25 @@ class CommonTemplate:
             (torch.randn([8, 16]),),
         )
 
+    def test_cat_extern_kernel(self):
+        def fn(x1, x2, x3, x4):
+            x = torch.mm(x2, x3)
+            s = torch.narrow(x, 1, 0, 100)
+            x = torch.mm(s, x4)
+            c = torch.cat((x, x1), 1)
+            return (c,)
+
+        self.common(
+            fn,
+            (
+                torch.randn(256, 256),
+                torch.randn(256, 1024),
+                torch.randn(1024, 1600),
+                torch.randn(100, 256),
+            ),
+            check_lowp=False,  # accuracy issues with relatively large matmuls
+        )
+
     def test_stack(self):
         def fn(a, b):
             return torch.stack(
