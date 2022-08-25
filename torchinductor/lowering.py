@@ -2772,6 +2772,7 @@ def div(a, b):
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
 
+
 @register_lowering(aten.rsqrt)
 def rsqrt(x):
     dtype = x.get_dtype()
@@ -2782,6 +2783,7 @@ def rsqrt(x):
         return ops.rsqrt(x)
 
     return make_pointwise(_rsqrt)(x)
+
 
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
