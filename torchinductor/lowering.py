@@ -2772,6 +2772,16 @@ def div(a, b):
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
 
+@register_lowering(aten.rsqrt)
+def rsqrt(x):
+    dtype = x.get_dtype()
+    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        x = to_dtype(x, torch.get_default_dtype())
+
+    def _rsqrt(x):
+        return ops.rsqrt(x)
+
+    return make_pointwise(_rsqrt)(x)
 
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
@@ -2817,7 +2827,6 @@ register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.round)
-register_pointwise(aten.rsqrt)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)

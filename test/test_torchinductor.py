@@ -1686,6 +1686,10 @@ class CommonTemplate:
             fn,
             (torch.randn([64]),),
         )
+        self.common(
+            fn,
+            (torch.ones([64], dtype=torch.int),),
+        )
 
     def test_flip(self):
         def fn(x):
