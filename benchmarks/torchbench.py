@@ -172,8 +172,6 @@ INDUCTOR_INFERENCE_NOT_YET_WORKING = {
 
 INDUCTOR_TRAINING_NOT_YET_WORKING = {
     *INDUCTOR_INFERENCE_NOT_YET_WORKING,
-    # load_mask nesting needed
-    "Super_SloMo",
     # float16 issue or CUDA error: operation not permitted when stream is capturing
     "resnet50_quantized_qat",
     "mobilenet_v2_quantized_qat",
