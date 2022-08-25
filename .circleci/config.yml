@@ -287,7 +287,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 0 \
               --output=inductor_timm_inference_0.csv
       - store_artifacts:
@@ -310,7 +310,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 1 \
               --output=inductor_timm_inference_1.csv
       - store_artifacts:
@@ -333,7 +333,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 0 \
               --output=inductor_timm_training_0.csv
       - store_artifacts:
@@ -356,7 +356,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 1 \
               --output=inductor_timm_training_1.csv
       - store_artifacts:
@@ -379,7 +379,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 2 \
               --output=inductor_timm_training_2.csv
       - store_artifacts:
