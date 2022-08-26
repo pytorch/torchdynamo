@@ -9,7 +9,6 @@ import torch
 import torchdynamo
 import torchdynamo.config as config
 from torchdynamo.optimizations import backends
-from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.testing import same
 
 
@@ -102,15 +101,6 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         self.assertIsNotNone(r1)
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
-
-    @patch.object(config, "verify_correctness", True)
-    def test_fixed_strategy1(self):
-        s = Seq()
-        i = torch.randn(10)
-        r1 = s(i)
-        opt_s = torchdynamo.optimize(fixed_strategy1)(s)
-        r2 = opt_s(i)
-        self.assertTrue(same(r1, r2))
 
     @patch.object(config, "verify_correctness", True)
     def test_nnc(self):
