@@ -111,6 +111,14 @@ def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
+@register_decomposition([aten.addmm])
+def addmm(input, mat1, mat2):
+    if config.triton.mm != "aten":
+        return torch.mm(mat1, mat2) + input
+    else:
+        return NotImplemented  # go directly to lowering
+
+
 @register_decomposition([aten.rsqrt])
 def rsqrt(x):
     return torch.reciprocal(torch.sqrt(x))
