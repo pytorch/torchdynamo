@@ -124,12 +124,6 @@ offline-autotune-gpu: develop
 	python autotune.py --nvfuser
 	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n100
 
-online-autotune-cpu: develop
-	python benchmarks/torchbench.py --online-autotune -n50
-
-online-autotune-gpu: develop
-	python benchmarks/torchbench.py --nvfuser -d cuda --online-autotune -n100
-
 fixed1-gpu: develop
 	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
 
