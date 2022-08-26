@@ -84,6 +84,11 @@ CI_SKIP_INFERENCE = [
     "MobileBertForQuestionAnswering",
     "PLBartForConditionalGeneration",
     "RobertaForQuestionAnswering",
+    # TIMM
+    "cait_m36_384",
+    "ghostnet_100",
+    "visformer_small",
+    "volo_d1_224",
 ]
 
 CI_SKIP_TRAINING = [
@@ -117,6 +122,12 @@ CI_SKIP_TRAINING = [
     "XGLMForCausalLM",
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
+    # TIMM
+    "coat_lite_mini",
+    "convnext_base",
+    "mobilevit_s",
+    "swin_base_patch4_window7_224",
+    "twins_pcpvt_base",
 ]
 
 

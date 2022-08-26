@@ -69,7 +69,7 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --skip-fp64-check --coverage -d cuda
+            python benchmarks/torchbench.py --skip-fp64-check --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
       - store_artifacts:
           path: coverage.csv
       - run:
@@ -287,10 +287,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 0 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              --output=inductor_timm_inference_0.csv
+            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+              --total-partitions 4 --partition-id 0 --output=inductor_timm_inference_0.csv
       - store_artifacts:
           path: inductor_timm_inference_0.csv
       - run:
@@ -311,10 +309,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 1 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              --output=inductor_timm_inference_1.csv
+            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+              --total-partitions 4 --partition-id 1 --output=inductor_timm_inference_1.csv
       - store_artifacts:
           path: inductor_timm_inference_1.csv
       - run:
@@ -335,10 +331,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 2 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              --output=inductor_timm_inference_2.csv
+            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+              --total-partitions 4 --partition-id 2 --output=inductor_timm_inference_2.csv
       - store_artifacts:
           path: inductor_timm_inference_2.csv
       - run:
@@ -359,10 +353,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 3 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              --output=inductor_timm_inference_3.csv
+            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+              --total-partitions 4 --partition-id 3 --output=inductor_timm_inference_3.csv
       - store_artifacts:
           path: inductor_timm_inference_3.csv
       - run:
@@ -383,11 +375,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 0 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
-              --output=inductor_timm_training_0.csv
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 --training --use-eval-mode \
+              --total-partitions 6 --partition-id 0 --output=inductor_timm_training_0.csv
       - store_artifacts:
           path: inductor_timm_training_0.csv
       - run:
@@ -408,11 +397,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 1 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
-              --output=inductor_timm_training_1.csv
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 --training --use-eval-mode \
+              --total-partitions 6 --partition-id 1 --output=inductor_timm_training_1.csv
       - store_artifacts:
           path: inductor_timm_training_1.csv
       - run:
@@ -433,11 +419,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 2 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
-              --output=inductor_timm_training_2.csv
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 --training --use-eval-mode \
+              --total-partitions 6 --partition-id 2 --output=inductor_timm_training_2.csv
       - store_artifacts:
           path: inductor_timm_training_2.csv
       - run:
@@ -458,11 +441,8 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
-              --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 3 \
-              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
-              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
-              --output=inductor_timm_training_3.csv
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 --training --use-eval-mode \
+              --total-partitions 6 --partition-id 3 --output=inductor_timm_training_3.csv
       - store_artifacts:
           path: inductor_timm_training_3.csv
       - run:
@@ -470,6 +450,51 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             python .circleci/check_csv.py -f inductor_timm_training_3.csv
+
+
+  inductor_timm_training_4:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 --training --use-eval-mode \
+              --total-partitions 6 --partition-id 4 --output=inductor_timm_training_4.csv
+      - store_artifacts:
+          path: inductor_timm_training_4.csv
+      - run:
+          name: TIMM training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_training_4.csv
+
+  inductor_timm_training_5:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 --training --use-eval-mode \
+              --total-partitions 6 --partition-id 5 --output=inductor_timm_training_5.csv
+      - store_artifacts:
+          path: inductor_timm_training_5.csv
+      - run:
+          name: TIMM training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_timm_training_5.csv
 
 workflows:
   gpu:
@@ -492,3 +517,5 @@ workflows:
       - inductor_timm_training_1
       - inductor_timm_training_2
       - inductor_timm_training_3
+      - inductor_timm_training_4
+      - inductor_timm_training_5
