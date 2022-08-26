@@ -9,7 +9,6 @@ import shutil
 import time
 from collections import defaultdict
 
-import numpy as np
 import torch
 
 from .. import config
@@ -19,7 +18,6 @@ from ..utils import checkpoint_params
 from ..utils import clone_inputs
 from ..utils import count_calls
 from ..utils import counters
-from ..utils import timed
 from .backends import BACKENDS
 from .normalize import long_name
 from .normalize import normalize_ir
@@ -257,55 +255,3 @@ def argmin(perf):
                 # small bias torwards using eager since it is more robust
                 best_sec *= 0.99
     return best
-
-
-class OnlineAutotuner(TorchScriptStrategy):
-    repeat = 15
-
-    def candidate(self):
-        if check_requires_grad(self.gm, self.original_example_inputs):
-            warning("not optimizing requires_grad=True")
-            return None
-        self.scripted = self.scripted.eval()
-        example_inputs_copy = self.example_inputs
-        models = [("eager", self.gm.forward)]
-        for name in self.select_backends():
-            try:
-                compiled_model = BACKENDS[name](self.scripted, example_inputs_copy)
-                if compiled_model is None:
-                    continue
-                self.restore()
-                result = compiled_model(*self.example_inputs)
-                assert same(result, self.correct)
-                models.append((name, compiled_model))
-            except AssertionError:
-                logging.exception(f"incorrect while running {name}")
-            except Exception:
-                logging.exception(f"error while running {name}")
-
-        timings = np.zeros((self.repeat, len(models)), np.float64)
-        for rep in range(timings.shape[0]):
-            # interleave the runs to handle frequency scaling and load changes
-            for i, (n, m) in enumerate(models):
-                result, timings[rep, i] = timed(m, example_inputs_copy)
-        median = np.median(timings, axis=0)
-        median[0] *= 0.99  # a bias towards eager
-        best = int(np.argmin(median))
-        counters["backend"][models[best][0]] += 1
-        return models[best][1]
-
-    def select_backends(self):
-        if check_is_cuda(self.gm, self.original_example_inputs):
-            backend_names = [
-                "ts",
-                "cudagraphs_ts_ofi",
-                "nnc_ofi",
-                "tensorrt",
-            ]
-        else:
-            backend_names = ["ofi", "onnxrt_cpu"]
-        return backend_names
-
-
-online_autotuner = OnlineAutotuner.compile_fn
-BACKENDS["autotune"] = online_autotuner
