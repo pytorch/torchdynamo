@@ -203,7 +203,7 @@ class WrapperCodeGen(CodeGen):
                     """
                     from torchinductor.triton_ops.conv_perf_model import early_config_prune
                     from torchinductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torchinductor.triton_ops.autotune import conv_heuristics
+                    from torchinductor.triton_ops.autotune import conv_autotune
                     """
                 )
 

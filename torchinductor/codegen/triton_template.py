@@ -36,8 +36,8 @@ class TritonTemplateKernel(TritonKernel):
             KERNEL_W = self.args_dict["KERNEL_W"]
             padding_h = self.args_dict["padding_h"]
             padding_w = self.args_dict["padding_w"]
-            if ((KERNEL_H == "1" and KERNEL_W == "1")) or (
-                (padding_h == "0") and (padding_w == "0")
+            if ((KERNEL_H == 1 and KERNEL_W == 1)) or (
+                (padding_h == 0) and (padding_w == 0)
             ):
                 self.template_name += "_delta_x"
             else:
@@ -53,11 +53,11 @@ class TritonTemplateKernel(TritonKernel):
 
     def rename_vars(self):
         for k, v in self.inout_dict.items():
-            self.args.output_buffers[v] = k
+            self.args.output_buffers[str(v)] = k
         if isinstance(self.node, ir.Convolution):
-            self.cse.store_cache[self.inout_dict["y"]] = "acc"
+            self.cse.store_cache[str(self.inout_dict["y"])] = "acc"
         elif isinstance(self.node, ir.MatrixMultiply):
-            self.cse.store_cache[self.inout_dict["C"]] = "acc"
+            self.cse.store_cache[str(self.inout_dict["C"])] = "acc"
 
     def assign_block_numel(self):
         code = IndentedBuffer()
@@ -142,6 +142,28 @@ class TritonTemplateKernel(TritonKernel):
     ):
 
         code = IndentedBuffer()
+
+        if isinstance(self.node, ir.Convolution):
+            autotune = "conv_autotune"
+            code.splice(
+                f"""
+                    @{autotune}()
+                    @triton.jit
+                """
+            )
+        elif isinstance(self.node, ir.MatrixMultiply):
+            heuristics = "mm_heuristics"
+            autotune = "mm_autotune"
+            # if no fuse, we could use SPLIT_K>1 configs
+            get_io_bound_configs = not fuse
+
+            code.splice(
+                f"""
+                    @{heuristics}()
+                    @{autotune}(get_io_bound_configs={get_io_bound_configs})
+                    @triton.jit
+                """
+            )
 
         self.codegen_body(name, fuse, could_remove_kernel_buf, kernel_buf_replace_name)
         code.splice(self.body)
@@ -265,7 +287,7 @@ class TritonTemplateKernel(TritonKernel):
         #     return (...)
         # kernel1[grid](arg0, arg1, ...)
         extra_args = ", ".join(self.extra_call_args)
-        self_args = ", ".join({**self.inout_dict, **self.args_dict}.values())
+        self_args = ", ".join(map(str, {**self.inout_dict, **self.args_dict}.values()))
         self_const_kwargs = ", ".join(f"{k}={v}" for k, v in self.const_dict.items())
         args = self_args + (
             ", " + extra_args if extra_args and len(extra_args) > 0 else ""

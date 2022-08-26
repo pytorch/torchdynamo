@@ -1,5 +1,3 @@
-@conv_heuristics()
-@triton.jit
 def {{kernel_name}}(
     {% for i in template_inout_argdefs %}
     {{i}},

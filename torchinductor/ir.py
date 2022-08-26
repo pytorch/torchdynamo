@@ -2367,9 +2367,9 @@ class MatrixMultiply(ExternKernelOut):
         # const_args = self.constant_args
         inout_dict = OrderedDict(
             [
-                ("A", f"{in_args[0]}"),
-                ("B", f"{in_args[1]}"),
-                ("C", f"{self.get_name()}"),
+                ("A", in_args[0]),
+                ("B", in_args[1]),
+                ("C", self.get_name()),
             ]
         )
         # batch==1 bmm->mm
@@ -2382,15 +2382,15 @@ class MatrixMultiply(ExternKernelOut):
             stride_cn = self.get_stride()[1]
         args_dict = OrderedDict(
             [
-                ("M", f"{self.inputs[0].get_size()[0]}"),
-                ("N", f"{self.inputs[1].get_size()[1]}"),
-                ("K", f"{self.inputs[0].get_size()[1]}"),
-                ("stride_am", f"{self.inputs[0].get_stride()[0]}"),
-                ("stride_ak", f"{self.inputs[0].get_stride()[1]}"),
-                ("stride_bk", f"{self.inputs[1].get_stride()[0]}"),
-                ("stride_bn", f"{self.inputs[1].get_stride()[1]}"),
-                ("stride_cm", f"{stride_cm}"),
-                ("stride_cn", f"{stride_cn}"),
+                ("M", self.inputs[0].get_size()[0]),
+                ("N", self.inputs[1].get_size()[1]),
+                ("K", self.inputs[0].get_size()[1]),
+                ("stride_am", self.inputs[0].get_stride()[0]),
+                ("stride_ak", self.inputs[0].get_stride()[1]),
+                ("stride_bk", self.inputs[1].get_stride()[0]),
+                ("stride_bn", self.inputs[1].get_stride()[1]),
+                ("stride_cm", stride_cm),
+                ("stride_cn", stride_cn),
             ]
         )
         # accumulator types
@@ -2917,51 +2917,49 @@ class Convolution(ExternKernelAlloc):
 
         inout_dict = OrderedDict(
             [
-                ("x", f"{in_args[0]}"),
-                ("w", f"{in_args[1]}"),
-                ("y", f"{self.get_name()}"),
+                ("x", in_args[0]),
+                ("w", in_args[1]),
+                ("y", self.get_name()),
             ]
         )
         args_dict = OrderedDict(
             [
-                ("stride_xn", f"{self.inputs[0].get_stride()[0]}"),
-                ("stride_xc", f"{self.inputs[0].get_stride()[1]}"),
-                ("stride_xh", f"{self.inputs[0].get_stride()[2]}"),
-                ("stride_xw", f"{self.inputs[0].get_stride()[3]}"),
-                ("stride_wn", f"{self.inputs[1].get_stride()[0]}"),
-                ("stride_wc", f"{self.inputs[1].get_stride()[1]}"),
-                ("stride_wh", f"{self.inputs[1].get_stride()[2]}"),
-                ("stride_ww", f"{self.inputs[1].get_stride()[3]}"),
-                ("stride_yn", f"{self.get_stride()[0]}"),
-                ("stride_yc", f"{self.get_stride()[1]}"),
-                ("stride_yh", f"{self.get_stride()[2]}"),
-                ("stride_yw", f"{self.get_stride()[3]}"),
+                ("stride_xn", self.inputs[0].get_stride()[0]),
+                ("stride_xc", self.inputs[0].get_stride()[1]),
+                ("stride_xh", self.inputs[0].get_stride()[2]),
+                ("stride_xw", self.inputs[0].get_stride()[3]),
+                ("stride_wn", self.inputs[1].get_stride()[0]),
+                ("stride_wc", self.inputs[1].get_stride()[1]),
+                ("stride_wh", self.inputs[1].get_stride()[2]),
+                ("stride_ww", self.inputs[1].get_stride()[3]),
+                ("stride_yn", self.get_stride()[0]),
+                ("stride_yc", self.get_stride()[1]),
+                ("stride_yh", self.get_stride()[2]),
+                ("stride_yw", self.get_stride()[3]),
                 (
                     "stride_biasn",
-                    f"{self.inputs[0].get_stride()[0]}"
-                    if len(in_args) >= 3
-                    else "None",
+                    self.inputs[0].get_stride()[0] if len(in_args) >= 3 else "None",
                 ),
                 # ("delta_x_ptr", "None"),
-                ("BATCH", f"{self.inputs[0].get_size()[0]}"),
-                ("IN_C", f"{self.inputs[0].get_size()[1]}"),
-                ("IN_H", f"{self.inputs[0].get_size()[2]}"),
-                ("IN_W", f"{self.inputs[0].get_size()[3]}"),
-                ("KERNEL_N", f"{self.inputs[1].get_size()[0]}"),
-                ("KERNEL_H", f"{self.inputs[1].get_size()[2]}"),
-                ("KERNEL_W", f"{self.inputs[1].get_size()[3]}"),
-                ("OUT_H", f"{self.get_size()[2]}"),
-                ("OUT_W", f"{self.get_size()[3]}"),
-                ("stride_h", f"{const_args[0][0]}"),
-                ("stride_w", f"{const_args[0][1]}"),
-                ("padding_h", f"{const_args[1][0]}"),
-                ("padding_w", f"{const_args[1][1]}"),
-                ("dilation_h", f"{const_args[2][0]}"),
-                ("dilation_w", f"{const_args[2][1]}"),
-                # ("transposed", f"{const_args[3]}"),
-                ("output_padding_h", f"{const_args[4][0]}"),
-                ("output_padding_w", f"{const_args[4][1]}"),
-                ("groups", f"{const_args[5]}"),
+                ("BATCH", self.inputs[0].get_size()[0]),
+                ("IN_C", self.inputs[0].get_size()[1]),
+                ("IN_H", self.inputs[0].get_size()[2]),
+                ("IN_W", self.inputs[0].get_size()[3]),
+                ("KERNEL_N", self.inputs[1].get_size()[0]),
+                ("KERNEL_H", self.inputs[1].get_size()[2]),
+                ("KERNEL_W", self.inputs[1].get_size()[3]),
+                ("OUT_H", self.get_size()[2]),
+                ("OUT_W", self.get_size()[3]),
+                ("stride_h", const_args[0][0]),
+                ("stride_w", const_args[0][1]),
+                ("padding_h", const_args[1][0]),
+                ("padding_w", const_args[1][1]),
+                ("dilation_h", const_args[2][0]),
+                ("dilation_w", const_args[2][1]),
+                # ("transposed", const_args[3]),
+                ("output_padding_h", const_args[4][0]),
+                ("output_padding_w", const_args[4][1]),
+                ("groups", const_args[5]),
             ]
         )
 

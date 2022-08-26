@@ -4,10 +4,10 @@ import triton.language as tl
 
 from torchinductor.triton_ops.utils import _unpack
 
-from .autotune import conv_heuristics
+from .autotune import conv_autotune
 
 
-@conv_heuristics()
+@conv_autotune()
 @triton.jit
 def _kernel_delta_x_hwc(
     x,
@@ -197,7 +197,7 @@ def _kernel_delta_x_hwc(
     return
 
 
-@conv_heuristics()
+@conv_autotune()
 @triton.jit
 def _kernel_delta_x(
     x,
