@@ -1844,6 +1844,21 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    def test_slicing_dynamic_shape(self):
+        def fn(y):
+            x = torch.ones(8)
+            idx = y[0]
+            out = x[idx:]
+            return (out + 3) * 5
+
+        counter = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(counter)(fn)
+        out = opt_fn(torch.ones(10, dtype=torch.long))
+        # idx should be 1 -> slicing off [1:] of 8 elem tensor
+        self.assertEqual(list(out.shape), [7])
+        # graph break on slice
+        self.assertEqual(counter.op_count, 3)
+
     def test_cross_entropy_loss_fancy_ctor(self):
         output = None
         rand_5 = torch.randn(5)
