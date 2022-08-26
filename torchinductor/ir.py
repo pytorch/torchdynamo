@@ -202,6 +202,18 @@ class CleanDiv(IndexingDiv):
     pass
 
 
+class CeilDiv(sympy.Function):
+    """
+    Div used in indexing that rounds up.
+    """
+
+    def __new__(cls, base, divisor):
+        if sympy.gcd(base, divisor) == divisor:
+            return CleanDiv(base, divisor)
+        else:
+            return IndexingDiv(base + (divisor - 1), divisor)
+
+
 def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
     if getattr(x, "get_device", None):
@@ -1990,6 +2002,13 @@ class ConcatKernel(NopKernel):
 
     @classmethod
     def realize_into(cls, src, dst):
+        # Attempt to turn this into a ReinterpretView rather than assert.
+        # This has concessions around layout, as as_storage_and_layout
+        # can cause us to go from flexible to fixed layout.
+        if not isinstance(dst, ReinterpretView):
+            if is_storage_and_layout(dst):
+                storage, layout = as_storage_and_layout(dst)
+                dst = ReinterpretView(storage, layout)
         assert isinstance(dst, ReinterpretView), dst
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
@@ -2026,7 +2045,7 @@ class ExternKernel(InputsKernel):
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
-        self.freeze_layout()
+            self.freeze_layout()
 
     def codegen(self, wrapper):
         raise NotImplementedError

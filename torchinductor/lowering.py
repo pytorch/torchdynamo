@@ -1,7 +1,6 @@
 import functools
 import itertools
 import logging
-import math
 from collections.abc import Iterable
 from typing import List
 
@@ -26,6 +25,7 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
+from .utils import ceildiv
 from .utils import has_torchvision_roi_align
 from .utils import sympy_product
 from .virtualized import V
@@ -33,6 +33,7 @@ from .virtualized import ops
 
 log = logging.getLogger(__name__)
 lowerings = {}
+fallbacks = set()
 aten = torch.ops.aten
 prims = torch.ops.prims
 needs_realized_inputs = set()
@@ -440,6 +441,15 @@ def squeeze(x, dim=None):
     return view(x, new_shape)
 
 
+@register_lowering([aten.squeeze_])
+def squeeze_(x, dim=None):
+    val = squeeze(x, dim)
+    assert isinstance(x, TensorBox)
+    assert isinstance(val, TensorBox)
+    x.data = val.data
+    return x
+
+
 @register_lowering(aten.expand, type_promote=False)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
@@ -711,6 +721,8 @@ def bmm(a: TensorBox, b: TensorBox):
 
 
 def fallback_handler(kernel):
+    fallbacks.add(kernel)
+
     def handler(*args, **kwargs):
         result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):
@@ -893,7 +905,6 @@ make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
-make_fallback(aten.upsample_nearest2d_backward)
 
 
 @register_lowering(aten.convolution)
@@ -2192,6 +2203,36 @@ def pad_adaptive_loader(x):
     return load
 
 
+def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
+    h_start_index_fn, w_start_index_fn = start_index_fns
+    h_end_index_fn, w_end_index_fn = end_index_fns
+
+    def fn_sum(idx, loader):
+        *prefix, bh, bw = idx
+
+        h_start_index = h_start_index_fn(bh)
+        h_end_index = h_end_index_fn(bh)
+
+        w_start_index = w_start_index_fn(bw)
+        w_end_index = w_end_index_fn(bw)
+
+        total = None
+        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
+            val = loader(
+                prefix,
+                [ih, iw],
+                [h_start_index, w_start_index],
+                [h_end_index, w_end_index],
+            )
+            if total is None:
+                total = val
+            else:
+                total = ops.add(val, total)
+        return total
+
+    return fn_sum
+
+
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
     assert isinstance(x, TensorBox)
@@ -2213,40 +2254,29 @@ def _adaptive_avg_pool2d(x, output_size):
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)
 
-    h_kernel_max = math.ceil((h_in + h_out - 1) / h_out)
-    w_kernel_max = math.ceil((w_in + h_out - 1) / w_out)
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
 
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
 
-    def fn_sum(idx, loader):
-        *prefix, bh, bw = idx
+    def start_index(index, out_dim, inp_dim):
+        return ir.IndexingDiv((index * inp_dim), out_dim)
 
-        def start_index(index, out_dim, inp_dim):
-            return ir.IndexingDiv((index * inp_dim), out_dim)
+    def end_index(index, out_dim, inp_dim):
+        return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
-        def end_index(index, out_dim, inp_dim):
-            return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+    h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
+    h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
 
-        h_start_index = start_index(bh, h_out, h_in)
-        h_end_index = end_index(bh, h_out, h_in)
+    w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
+    w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
 
-        w_start_index = start_index(bw, w_out, w_in)
-        w_end_index = end_index(bw, w_out, w_in)
-
-        total = None
-        for ih, iw in itertools.product(range(h_kernel_max), range(w_kernel_max)):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
-        return total
+    fn_sum = _adaptive_pooling_idx_sum(
+        [h_kernel_max, w_kernel_max],
+        [h_start_index, w_start_index],
+        [h_end_index, w_end_index],
+    )
 
     ones_loader = pad_adaptive_loader(ones_like(x))
 
@@ -2263,6 +2293,55 @@ def _adaptive_avg_pool2d(x, output_size):
     return rv
 
 
+@register_lowering(aten.upsample_nearest2d_backward.vec)
+def upsample_nearest2d_backward(
+    x, output_size=None, input_size=None, scale_factors=None
+):
+    x.realize_hint()
+
+    *batch, inp_h, inp_w = x.get_size()
+    inp_h = V.graph.sizevars.guard_static_shape(inp_h)
+    inp_w = V.graph.sizevars.guard_static_shape(inp_w)
+
+    *batch, out_h, out_w = input_size
+
+    if inp_h % out_h == 0 and inp_w % out_w == 0:
+        return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
+
+    h_kernel_max = ceildiv(inp_h, out_h)
+    w_kernel_max = ceildiv(inp_w, out_w)
+
+    def start_index(index, out_dim, inp_dim):
+        return ir.CeilDiv(index * inp_dim, out_dim)
+
+    def end_index(index, out_dim, inp_dim):
+        return start_index((index + 1), out_dim, inp_dim)
+
+    h_start_index = functools.partial(start_index, out_dim=out_h, inp_dim=inp_h)
+    h_end_index = functools.partial(end_index, out_dim=out_h, inp_dim=inp_h)
+
+    w_start_index = functools.partial(start_index, out_dim=out_w, inp_dim=inp_w)
+    w_end_index = functools.partial(end_index, out_dim=out_w, inp_dim=inp_w)
+
+    fn_sum = _adaptive_pooling_idx_sum(
+        [h_kernel_max, w_kernel_max],
+        [h_start_index, w_start_index],
+        [h_end_index, w_end_index],
+    )
+
+    def fn(idx):
+        return fn_sum(idx, pad_adaptive_loader(x))
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=list(input_size),
+    )
+
+    return rv
+
+
 @register_lowering(aten.avg_pool2d, type_promote=False)
 def avg_pool2d(
     x,
@@ -2273,7 +2352,6 @@ def avg_pool2d(
     count_include_pad=True,
     divisor_override=None,
 ):
-    assert not divisor_override
     if not stride:
         stride = kernel_size
     if not padding:
@@ -2314,8 +2392,11 @@ def avg_pool2d(
                 total = ops.add(val, total)
         return total
 
-    if count_include_pad or not had_padding:
-        scale = 1.0 / (kernel_size[0] * kernel_size[1])
+    if count_include_pad or not had_padding or divisor_override:
+        if divisor_override:
+            scale = 1 / divisor_override
+        else:
+            scale = 1.0 / (kernel_size[0] * kernel_size[1])
 
         def fn(idx):
             return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))

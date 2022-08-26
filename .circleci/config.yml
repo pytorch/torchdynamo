@@ -8,7 +8,7 @@ commands:
           name: Generate date for cache key
           command: date +%F > .circleci-date
       - restore_cache:
-          key: env-v3-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
       - run:
           name: Install libs
           command: |
@@ -16,7 +16,7 @@ commands:
       - run:
           name: Install TorchBenchmark
           command: |
-            FILE=torchbenchmark/env-v3.key
+            FILE=torchbenchmark/env-v4.key
             if test -f "$FILE"; then
               # If torchbenchmark.tar.bz2 is updated, we need to invalidate the cache by bumping up the key version number
               echo "$FILE exists means restore_cache has succeeded, so skip installing torchbenchmark."
@@ -28,10 +28,20 @@ commands:
               # above doesn't work due to git-lfs auth issues, workaround with a tarball:
               wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
               tar jxvf torchbenchmark.tar.bz2
-              (cd torchbenchmark && python install.py && touch env-v3.key)
+              (cd torchbenchmark && python install.py && touch env-v4.key)
             fi
+      - run:
+          name: Install HuggingFace
+          command: |
+            source .circleci/setup_env.sh
+            python -m pip install git+https://github.com/huggingface/transformers.git#egg=transformers
+      - run:
+          name: Install TIMM
+          command: |
+            source .circleci/setup_env.sh
+            python -m pip install git+https://github.com/rwightman/pytorch-image-models
       - save_cache:
-          key: env-v3-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
           paths:
             - conda
             - env
@@ -59,7 +69,7 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --ci --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
+            python benchmarks/torchbench.py --ci --repeat 2 --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
       - store_artifacts:
           path: coverage.csv
       - run:
@@ -80,7 +90,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 -x yolov3 --use-eval-mode --output=aot_eager.csv
+            python benchmarks/torchbench.py --ci --repeat 2 --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 -x yolov3 --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
       - run:
@@ -88,6 +98,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             python .circleci/check_csv.py -f aot_eager.csv
+
   inductor_torchbench_inference:
     machine:
       # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
@@ -101,7 +112,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci --quiet -d cuda --inductor --float32 \
+            python benchmarks/torchbench.py --ci --repeat 2 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error \
               -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
               -x pyhpc_ -x yolov3 \
@@ -114,9 +125,8 @@ jobs:
             source .circleci/setup_env.sh
             python .circleci/check_csv.py -f inductor_torchbench_inference.csv
 
-  inductor_torchbench_training:
+  inductor_torchbench_training_0:
     machine:
-      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
       image: ubuntu-2004-cuda-11.4:202110-01
     resource_class: gpu.nvidia.large
     steps:
@@ -127,18 +137,202 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --ci -d cuda --inductor --training --use-eval-mode --float32 \
-              --raise-on-assertion-error --raise-on-backend-error --quiet \
+            python benchmarks/torchbench.py --ci --repeat 2 --quiet -d cuda --inductor --training --use-eval-mode --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 0 \
               -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
-              -x attention_is_all_you_need_pytorch -x hf_ -x mobilenet_ -x pytorch_struct -x timm_ -x vgg16 -x yolov3 \
-              --output=inductor_torchbench_training.csv
+              -x attention_is_all_you_need_pytorch -x mobilenet_ -x pytorch_struct -x vgg16 -x yolov3 \
+              -x hf_Albert -x hf_Bart -x hf_GPT2 \
+              --output=inductor_torchbench_training_0.csv
       - store_artifacts:
-          path: inductor_torchbench_training.csv
+          path: inductor_torchbench_training_0.csv
       - run:
           name: TorchBench training result check
           command: |
             source .circleci/setup_env.sh
-            python .circleci/check_csv.py -f inductor_torchbench_training.csv
+            python .circleci/check_csv.py -f inductor_torchbench_training_0.csv
+
+  inductor_torchbench_training_1:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TorchBench training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/torchbench.py --ci --quiet -d cuda --inductor --training --use-eval-mode --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 1 \
+              -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 \
+              -x attention_is_all_you_need_pytorch -x mobilenet_ -x pytorch_struct -x vgg16 -x yolov3 \
+              -x hf_Albert -x hf_Bart -x hf_GPT2 \
+              --output=inductor_torchbench_training_1.csv
+      - store_artifacts:
+          path: inductor_torchbench_training_1.csv
+      - run:
+          name: TorchBench training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_torchbench_training_1.csv
+
+  inductor_hf_inference_0:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: Huggingface inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 0 \
+              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
+              -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
+              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
+              -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              --output=inductor_hf_inference_0.csv
+      - store_artifacts:
+          path: inductor_hf_inference_0.csv
+      - run:
+          name: Huggingface inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_hf_inference_0.csv
+
+  inductor_hf_inference_1:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: Huggingface inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 1 \
+              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
+              -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
+              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
+              -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              --output=inductor_hf_inference_1.csv
+      - store_artifacts:
+          path: inductor_hf_inference_1.csv
+      - run:
+          name: Huggingface inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_hf_inference_1.csv
+
+  inductor_hf_training_0:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: Huggingface training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 0 \
+              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
+              -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
+              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
+              -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
+              -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
+              -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
+              -x PegasusForConditionalGeneration -x T5ForConditionalGeneration -x T5Small -x XGLMForCausalLM -x XLNetLMHeadModel \
+              --output=inductor_hf_training_0.csv
+      - store_artifacts:
+          path: inductor_hf_training_0.csv
+      - run:
+          name: Huggingface training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_hf_training_0.csv
+
+  inductor_hf_training_1:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: Huggingface training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 1 \
+              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
+              -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
+              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
+              -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
+              -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
+              -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
+              -x PegasusForConditionalGeneration -x T5ForConditionalGeneration -x T5Small -x XGLMForCausalLM -x XLNetLMHeadModel \
+              --output=inductor_hf_training_1.csv
+      - store_artifacts:
+          path: inductor_hf_training_1.csv
+      - run:
+          name: Huggingface training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_hf_training_1.csv
+
+  inductor_hf_training_2:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: Huggingface training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
+              --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 2 \
+              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
+              -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
+              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
+              -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
+              -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
+              -x GPTNeoForCausalLM -x M2M100ForConditionalGeneration -x MT5ForConditionalGeneration \
+              -x MegatronBertForCausalLM -x MobileBertForMaskedLM \
+              -x PegasusForConditionalGeneration -x T5ForConditionalGeneration -x T5Small -x XGLMForCausalLM -x XLNetLMHeadModel \
+              --output=inductor_hf_training_2.csv
+      - store_artifacts:
+          path: inductor_hf_training_2.csv
+      - run:
+          name: Huggingface training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f inductor_hf_training_2.csv
 
 workflows:
   gpu:
@@ -146,4 +340,11 @@ workflows:
       - coverage
       - aot_eager
       - inductor_torchbench_inference
-      - inductor_torchbench_training
+      - inductor_torchbench_training_0
+      - inductor_torchbench_training_1
+      - inductor_hf_inference_0
+      - inductor_hf_inference_1
+      - inductor_hf_training_0
+      - inductor_hf_training_1
+      - inductor_hf_training_2
+
