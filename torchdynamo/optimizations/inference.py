@@ -186,45 +186,6 @@ class FixedStrategy2(TorchScriptStrategy):
 fixed_strategy2 = FixedStrategy2.compile_fn
 
 
-class OfflineAutotuner(TorchScriptStrategy):
-    def candidate(self):
-        gm = self.gm
-        if check_requires_grad(gm, self.original_example_inputs):
-            warning("not optimizing requires_grad=True")
-            return None
-
-        path = folder_name(gm, self.original_example_inputs)
-        if not os.path.exists(path):
-            # a new graph! lets save it for offline tuning
-            try:
-                gm.to_folder(path)
-                torch.jit.save(self.scripted, os.path.join(path, "model.ts"))
-
-                open(os.path.join(path, "key"), "w").write(
-                    string_key(gm, self.original_example_inputs)
-                )
-                save_pt(path, "example_inputs.pt", self.original_example_inputs)
-                save_pt(path, "example_outputs.pt", self.correct)
-                save_pt(path, "rng_state.pt", torch.get_rng_state())
-                save_metadata(path, self.gm, self.original_example_inputs)
-                touch_timestamp(path)
-            except Exception:
-                shutil.rmtree(path)
-                raise
-        else:
-            touch_timestamp(path)
-            if os.path.exists(os.path.join(path, "perf.json")):
-                best = argmin(json.loads(open(os.path.join(path, "perf.json")).read()))
-                counters["backend"][best] += 1
-                if best != "eager":
-                    return BACKENDS[best](self.scripted, self.example_inputs)
-
-        return None
-
-
-offline_autotuner = OfflineAutotuner.compile_fn
-
-
 def save_pt(path, name, data):
     with open(os.path.join(path, name), "wb") as fd:
         torch.save(data, fd)

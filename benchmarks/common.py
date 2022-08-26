@@ -28,7 +28,6 @@ import torchdynamo.utils
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.optimizations.inference import fixed_strategy2
-from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
@@ -1284,9 +1283,6 @@ def parse_args():
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
     )
     group.add_argument(
-        "--offline-autotune", action="store_true", help=help(speedup_experiment)
-    )
-    group.add_argument(
         "--speedup-fixed1",
         action="store_true",
         help="speedup using experimental fixed_strategy backend",
@@ -1556,10 +1552,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.offline_autotune:
-        optimize_ctx = torchdynamo.optimize(offline_autotuner, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups.csv"
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython

@@ -112,18 +112,6 @@ build-deps: clone-deps
 	make setup_lint
 	python setup.py develop
 
-offline-autotune-cpu: develop
-	rm -rf subgraphs
-	python benchmarks/torchbench.py --offline-autotune -n3
-	python autotune.py
-	python benchmarks/torchbench.py --offline-autotune -n50
-
-offline-autotune-gpu: develop
-	rm -rf subgraphs
-	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n3
-	python autotune.py --nvfuser
-	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n100
-
 fixed1-gpu: develop
 	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
 
