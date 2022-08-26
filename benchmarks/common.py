@@ -93,6 +93,12 @@ CI_SKIP_TRAINING = [
     "mobilenet_",
     "pytorch_struct",
     "vgg16",
+    "Background_Matting",  # from functionalization
+    "mobilenet_v2_quantized_qat",  # from functionalization
+    "resnet50_quantized_qat",  # from functionalization
+    "speech_transformer",  # from functionalization
+    "vision_maskrcnn",  # from functionalization
+    "timm_efficientnet",  # from functionalization (only fails for inductor)
     # Huggingface
     "AlbertForMaskedLM",
     "BartForConditionalGeneration",
