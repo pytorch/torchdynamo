@@ -306,10 +306,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
 
 def speedup_experiment(args, model_iter_fn, model, example_inputs):
     """
-    Measure speedups over eager using the autotuning inference backend.  To use this:
-        1) First run once to record graphs that need autotuning
-        2) Next run ./autotune.py to select the right backend for each recorded graph
-        3) Finally, run this target again to measure speedups
+    Measure speedups over eager.
 
     Writes to ./speedups.csv
     """

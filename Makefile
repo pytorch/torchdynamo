@@ -1,4 +1,4 @@
-.PHONY: default develop test torchbench format lint setup clean autotune
+.PHONY: default develop test torchbench format lint setup clean
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
             $(wildcard test/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
