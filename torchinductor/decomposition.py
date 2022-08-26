@@ -106,11 +106,6 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2):
-    return torch.mm(mat1, mat2) + input
-
-
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
