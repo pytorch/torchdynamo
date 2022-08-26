@@ -341,7 +341,6 @@ class VariableBuilder:
         elif (
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
-            and not skipfiles.is_allowed_class(value)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
