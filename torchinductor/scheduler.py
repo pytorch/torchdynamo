@@ -746,9 +746,15 @@ class Scheduler:
         """
         if node1 is node2:
             return False
-        if isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode)):
+        if (
+            isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node1.is_template()
+        ):
             return False
-        if isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode)):
+        if (
+            isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node2.is_template()
+        ):
             return False
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
