@@ -2773,16 +2773,18 @@ def div(a, b):
     )
 
 
-@register_lowering(aten.rsqrt)
-def rsqrt(x):
-    dtype = x.get_dtype()
-    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-        x = to_dtype(x, torch.get_default_dtype())
-
-    def _rsqrt(x):
-        return ops.rsqrt(x)
-
-    return make_pointwise(_rsqrt)(x)
+# TODO - enable builtin and disable decomp to lower to ptx instruction
+# Causes compilation to not complete on timm_vision_transformers inference
+# @register_lowering(aten.rsqrt)
+# def rsqrt(x):
+#     dtype = x.get_dtype()
+#     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+#         x = to_dtype(x, torch.get_default_dtype())
+#
+#     def _rsqrt(x):
+#         return ops.rsqrt(x)
+#
+#     return make_pointwise(_rsqrt)(x)
 
 
 @register_lowering([aten.sum, prims.sum])
