@@ -60,7 +60,7 @@ The variables (like `kernel_name`, `pointwise_code`) are defined by the dictiona
 ### Update dependency type
 The default ExternKernel node's dependency type is `StarDep`. `StarDep("A")` means the node depends on A[*] (all elements of A). The entire A buffer must be fully computed before the node with that dep is scheduled. It prevents A to be fused with other nodes.
 
-But if we want to enable epilog fusion with the ExternKernel that could codegen from triton template, we need to update its dependencies from `StarDep` to `MemoryDep`. Usually if we want to add a triton template for a new ExternKernel operation, we do not need to modify this class.
+But if we want to enable epilogue fusion with the ExternKernel that could codegen from triton template, we need to update its dependencies from `StarDep` to `MemoryDep`. Usually if we want to add a triton template for a new ExternKernel operation, we do not need to modify this class.
 
 
 ## TritonTemplateKernel
