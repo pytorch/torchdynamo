@@ -311,7 +311,7 @@ class TensorVariable(VariableTracker):
 
         def check_type(ty):
             if ty not in tensortype_to_dtype:
-                return self.python_type() is ty
+                return issubclass(self.python_type(), ty)
 
             dtypes = tensortype_to_dtype[ty]
             return self.dtype in dtypes
