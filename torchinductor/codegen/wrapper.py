@@ -297,23 +297,15 @@ class WrapperCodeGen(CodeGen):
         result.splice(self.header)
         result.splice(self.prefix)
 
-        def extract_name(out):
-            o = out
-            while hasattr(o, "data"):
-                if hasattr(o, "name"):
-                    return o.name
-                else:
-                    o = o.data
-            return ""
-
-        out_names = [extract_name(out) for out in V.graph.graph_outputs]
+        out_names = V.graph.get_output_names()
         with result.indent():
-            while self.lines and isinstance(self.lines[-1], MemoryPlanningLine):
+            while (
+                self.lines
+                and isinstance(self.lines[-1], MemoryPlanningLine)
+                and self.lines[-1].node.name not in out_names
+            ):
                 # these lines will be pointless
-                if self.lines[-1].node.name not in out_names:
-                    self.lines.pop()
-                else:
-                    break
+                self.lines.pop()
 
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()

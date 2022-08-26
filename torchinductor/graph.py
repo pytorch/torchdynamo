@@ -308,3 +308,10 @@ class GraphLowering(torch.fx.Interpreter):
             setattr(mod, name, value)
 
         return mod.call
+
+    def get_output_names(self):
+        return [
+            node.get_name()
+            for node in self.graph_outputs
+            if not isinstance(node, ir.NoneAsConstantBuffer)
+        ]
