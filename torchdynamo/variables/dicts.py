@@ -119,7 +119,7 @@ class ConstDictVariable(VariableTracker):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
-            return tx.replace_all(self, self.modifed(newval, self.user_cls, **options))
+            return tx.replace_all(self, self.modifed(newval, **options))
         elif (
             name in ("pop", "get")
             and args
@@ -137,7 +137,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, self.user_cls, **options))
+            tx.replace_all(self, self.modifed(newval, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -147,7 +147,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            result = self.modifed(newval, self.user_cls, **options)
+            result = self.modifed(newval, **options)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -166,9 +166,9 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, user_cls, **options):
+    def modifed(self, items, **options):
         """a copy of self with different items"""
-        return self.clone(items=items, user_cls=user_cls, **options)
+        return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
@@ -245,9 +245,7 @@ class DefaultDictVariable(ConstDictVariable):
                             f"defaultdict with default_factory = {self.default_factory}"
                         )
                     new_val[k] = default_var
-                    tx.replace_all(
-                        self, self.modifed(new_val, self.user_cls, **options)
-                    )
+                    tx.replace_all(self, self.modifed(new_val, **options))
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
