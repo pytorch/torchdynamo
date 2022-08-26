@@ -3,7 +3,7 @@
 This tutorial assumes the reader has an overview of how Torchinductor generates Triton code and a basic understanding of the Triton languange. This tutorial is intended for developers who want to further improve the performance of some operations, like Convolution and Matrix Multiply, via manually-written triton kernel combined with automatically generated epilogue.
 
 ## Motivation
-For most of the operations, Torchinductor is able to automatically codegen corresponding Triton kernel. However,
+For most of the operations, Torchinductor is able to automatically codegen a performant Triton kernel. However,
 for `ir.ExternKernel` in torchinductor/, Torchinductor usually call extern functions like `aten.convolution` for Convolution, `aten.mm.out` for MatrixMultiply, etc. But if you have better implementation of those operations in Triton, say `triton.ops.matmul`, one way to let Torchindcutor to use it is replace the kernel and codegen function call to `triton.ops.matmul`. But still, this is an ExternKernel call where the Torchinductor optimize the whole graph unware of what's happening inside the function call. Specifically, it could not benefit from epilog fusion that could alleviate the memory-bound bottlenecks. To get additional speedup beside the customized code, user could add an Triton template for Torchinductor as a reference to cedegen the target kernel.
 
 ## Overview
