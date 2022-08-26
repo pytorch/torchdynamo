@@ -237,9 +237,13 @@ class DefaultDictVariable(ConstDictVariable):
                     elif self.default_factory is tuple:
                         default_var = TupleVariable([], mutable_local=MutableLocal())
                     elif self.default_factory is dict:
-                        default_var = ConstDictVariable({}, dict, mutable_local=MutableLocal())
+                        default_var = ConstDictVariable(
+                            {}, dict, mutable_local=MutableLocal()
+                        )
                     else:
-                        unimplemented(f"defaultdict with default_factory = {self.default_factory}")
+                        unimplemented(
+                            f"defaultdict with default_factory = {self.default_factory}"
+                        )
                     new_val[k] = default_var
                     tx.replace_all(
                         self, self.modifed(new_val, self.user_cls, **options)
