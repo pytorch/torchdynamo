@@ -4,7 +4,7 @@ This tutorial assumes the reader has an overview of how Torchinductor generates 
 
 ## Motivation
 For most of the operations, Torchinductor is able to automatically codegen a performant Triton kernel. However,
-for `ir.ExternKernel` in torchinductor/, Torchinductor usually call extern functions like `aten.convolution` for Convolution, `aten.mm.out` for MatrixMultiply, etc. But if you have better implementation of those operations in Triton, say `triton.ops.matmul`, one way to let Torchindcutor to use it is replace the kernel and codegen function call to `triton.ops.matmul`. But still, this is an ExternKernel call where the Torchinductor optimize the whole graph unware of what's happening inside the function call. Specifically, it could not benefit from epilog fusion that could alleviate the memory-bound bottlenecks. To get additional speedup beside the customized code, user could add an Triton template for Torchinductor as a reference to cedegen the target kernel.
+for ops with now lowerings, TorchInductor generate a fallback `ir.ExternKernel`, which just calls the original function.  The main examples here are `aten.convolution` for Convolution, `aten.mm.out` for MatrixMultiply, etc. TorchInductor supports alternate implementations of these ops, such as `triton.ops.matmul`, but we could get further benifiet from epilogue fusion that could alleviate the memory-bound bottleneck of pointwise ops that follow the more expensive kernel. To access this additional speedup, one can add a Triton template for Torchinductor that allows these epilogue fusion kernels to be automatically generated.
 
 ## Overview
 Codegen from custom templates is derived from codegen normal Triton kernels. So in this tutorial, we will only focus on the difference.
