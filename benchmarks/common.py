@@ -1068,7 +1068,7 @@ class BenchmarkRunner:
 
         fp64_outputs = None
         # Skip float64 checks for CI because it has smaller DRAM, leading to OOMs.
-        if not self.args.ci:
+        if not self.args.skip_fp64_check:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             try:
                 fp64_outputs = model_iter_fn(
@@ -1254,6 +1254,9 @@ def parse_args():
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--skip-fp64-check", action="store_true", help="skip accuracy check using fp64"
     )
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
@@ -1488,6 +1491,8 @@ def main(runner, original_dir=None):
         args.quiet = True
         args.raise_on_assertion_error = True
         args.raise_on_backend_error = True
+        # fp64 check cause OOM on CI
+        args.skip_fp64_check = True
         # Repeat less on CI
         args.repeat = 2
         args.exclude += CI_SKIP_INFERENCE
