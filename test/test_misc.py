@@ -2075,6 +2075,20 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_torch_nn_parameter_isinstance(self):
+        def fn(x):
+            a = torch.nn.Parameter(torch.rand(2, 3))
+            if isinstance(a, torch.Tensor):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.tensor([2.5])
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_change_backends(self):
         @torchdynamo.optimize("eager", nopython=True)
         def fn1():

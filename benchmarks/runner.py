@@ -144,6 +144,13 @@ def parse_args():
         help="Generate commands, run and parses the files",
     )
 
+    parser.add_argument(
+        "--log-operator-inputs",
+        action="store_true",
+        default=False,
+        help="Log operator inputs",
+    )
+
     # Choose either inference or training
     group_mode = parser.add_mutually_exclusive_group(required=True)
     group_mode.add_argument(
@@ -229,6 +236,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         raise NotImplementedError(
                             f"Quick not implemented for {suite}.py"
                         )
+                if args.log_operator_inputs:
+                    cmd = f"{cmd} --log-operator-inputs"
                 lines.append(cmd)
             lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -655,4 +664,5 @@ if __name__ == "__main__":
                 "Running commands failed. Please run manually (bash run.sh) and inspect the errors."
             )
             raise e
-        parse_logs(args, dtypes, suites, devices, compilers, output_dir)
+        if not args.log_operator_inputs:
+            parse_logs(args, dtypes, suites, devices, compilers, output_dir)
