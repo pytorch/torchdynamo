@@ -1990,6 +1990,13 @@ class ConcatKernel(NopKernel):
 
     @classmethod
     def realize_into(cls, src, dst):
+        # Attempt to turn this into a ReinterpretView rather than assert.
+        # This has concessions around layout, as as_storage_and_layout
+        # can cause us to go from flexible to fixed layout.
+        if not isinstance(dst, ReinterpretView):
+            if is_storage_and_layout(dst):
+                storage, layout = as_storage_and_layout(dst)
+                dst = ReinterpretView(storage, layout)
         assert isinstance(dst, ReinterpretView), dst
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
