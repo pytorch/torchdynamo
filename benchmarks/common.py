@@ -1360,11 +1360,6 @@ def parse_args():
     )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
     group.add_argument(
-        "--nops",
-        action="store_true",
-        help="Test that bytecode rewriting works properly.",
-    )
-    group.add_argument(
         "--log-conv-args",
         action="store_true",
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
@@ -1613,10 +1608,6 @@ def main(runner, original_dir=None):
         )
     elif args.nothing:
         pass
-    elif args.nops:
-        optimize_ctx = torchdynamo.eval_frame._optimize_catch_errors(
-            torchdynamo.testing.debug_insert_nops, nopython=args.nopython
-        )
     elif args.backend:
         optimize_ctx = torchdynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
