@@ -2150,7 +2150,6 @@ class CommonTemplate:
             rand_strided((8, 16), (16, 1), device=self.device),
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
-        print(fn(*inputs))
 
     @patch.object(config.triton, "cudagraphs", True)
     @patch.object(functorch_config, "use_fake_tensor", True)

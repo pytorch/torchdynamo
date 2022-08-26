@@ -18,6 +18,7 @@ from . import config
 from . import overrides
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import ceildiv
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         needed_size = (
             sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
         )
-        needed_size = (needed_size + 31) // 32 * 32
+        needed_size = ceildiv(needed_size, 32) * 32
         buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
         cache_line_offset = (
             (x.data_ptr() - buffer.data_ptr()) % 32
