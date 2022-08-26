@@ -24,9 +24,7 @@ commands:
               source .circleci/setup_env.sh
               conda install -y -c conda-forge git-lfs
               git lfs install --skip-repo --skip-smudge
-              git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git torchbenchmark
-              # Reinstate smudge
-              git lfs install --force
+              git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git -b inductor torchbenchmark
               (cd torchbenchmark && python install.py && touch env-v4.key)
               pip install gym==0.25.2  # workaround issue in 0.26.0
             fi
