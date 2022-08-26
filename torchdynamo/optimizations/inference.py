@@ -5,14 +5,12 @@ import itertools
 import json
 import logging
 import os
-import shutil
 import time
 from collections import defaultdict
 
 import torch
 
 from .. import config
-from ..exc import warning
 from ..utils import check_is_cuda
 from ..utils import checkpoint_params
 from ..utils import clone_inputs
