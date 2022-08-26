@@ -146,7 +146,6 @@ SLOW_BENCHMARKS = {
 AOT_AUTOGRAD_NOT_YET_WORKING = {
     # https://github.com/pytorch/functorch/issues/586
     "tts_angular",
-    "demucs",
     "tacotron2",  # also has an issue with normalize_ir
     # https://github.com/pytorch/torchdynamo/issues/590
     "pyhpc_isoneutral_mixing",
@@ -168,6 +167,8 @@ INDUCTOR_INFERENCE_NOT_YET_WORKING = {
     "hf_Longformer",
     "hf_Reformer",
     "maml",
+    # OOM
+    "demucs",
 }
 
 INDUCTOR_TRAINING_NOT_YET_WORKING = {

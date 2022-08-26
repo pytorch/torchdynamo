@@ -191,10 +191,10 @@ jobs:
             make develop
             python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 0 \
-              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x AlbertForQuestionAnswering -x BertForQuestionAnswering -x BigBird \
               -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
               -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
-              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
               --output=inductor_hf_inference_0.csv
@@ -220,10 +220,10 @@ jobs:
             make develop
             python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 2 --partition-id 1 \
-              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x AlbertForQuestionAnswering -x BertForQuestionAnswering -x BigBird \
               -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
               -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
-              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
               --output=inductor_hf_inference_1.csv
@@ -249,10 +249,10 @@ jobs:
             make develop
             python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 0 \
-              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x AlbertForQuestionAnswering -x BertForQuestionAnswering -x BigBird \
               -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
               -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
-              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
               -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
@@ -282,10 +282,10 @@ jobs:
             make develop
             python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 1 \
-              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x AlbertForQuestionAnswering -x BertForQuestionAnswering -x BigBird \
               -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
               -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
-              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
               -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
@@ -315,10 +315,10 @@ jobs:
             make develop
             python benchmarks/huggingface.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 3 --partition-id 2 \
-              -x AlbertForQuestionAnswering -x AllenaiLongformerBase -x BertForQuestionAnswering -x BigBird \
+              -x AlbertForQuestionAnswering -x BertForQuestionAnswering -x BigBird \
               -x DebertaForQuestionAnswering -x DebertaV2ForQuestionAnswering -x DistilBertForQuestionAnswering \
               -x ElectraForQuestionAnswering -x GPT2ForSequenceClassification -x GPTNeoForSequenceClassification \
-              -x GoogleFnet -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
+              -x LayoutLMForSequenceClassification -x MBartForConditionalGeneration \
               -x MegatronBertForQuestionAnswering -x MobileBertForQuestionAnswering \
               -x PLBartForConditionalGeneration -x RobertaForQuestionAnswering \
               -x AlbertForMaskedLM -x BartForConditionalGeneration -x DebertaForMaskedLM -x DebertaV2ForMaskedLM \
