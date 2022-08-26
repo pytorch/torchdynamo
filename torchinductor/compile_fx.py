@@ -8,6 +8,7 @@ from functorch.compile import min_cut_rematerialization_partition
 
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
+from torchdynamo.utils import dynamo_timed
 from torchdynamo.utils import identity
 
 from . import config
@@ -36,6 +37,7 @@ class BoxedBool:
         return False
 
 
+@dynamo_timed
 @DebugContext.wrap
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -71,6 +73,7 @@ def compile_fx_inner(
     return compiled_fn
 
 
+@dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
@@ -165,12 +168,14 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
+    @dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
             model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
         )
 
+    @dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
         return compile_fx_inner(

@@ -13,6 +13,7 @@ from .eval_frame import optimize_assert
 from .eval_frame import reset_code
 from .eval_frame import run
 from .eval_frame import skip
+from .utils import compilation_metrics
 from .utils import guard_failures
 from .utils import orig_code_map
 
@@ -43,6 +44,7 @@ def reset():
     guard_failures.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
     eval_frame.most_recent_backend = None
+    compilation_metrics.clear()
 
 
 def list_backends():

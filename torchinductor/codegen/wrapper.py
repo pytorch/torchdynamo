@@ -6,6 +6,8 @@ from typing import Any
 from typing import Dict
 from typing import List
 
+from torchdynamo.utils import dynamo_timed
+
 from .. import codecache
 from .. import config
 from .. import ir
@@ -292,6 +294,7 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
+    @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)

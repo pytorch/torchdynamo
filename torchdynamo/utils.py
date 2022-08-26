@@ -37,6 +37,31 @@ troubleshooting_url = (
 
 log = logging.getLogger(__name__)
 
+# profiling compilation time
+compilation_metrics = collections.OrderedDict()
+
+
+def dynamo_timed(func):
+    def time_wrapper(*args, **kwargs):
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        compilation_metrics[key].append(time.time() - t0)
+        return r
+
+    return time_wrapper
+
+
+def print_compile_times():
+    rows = [
+        (k, list(map(lambda f: f"{f:.4f}", compilation_metrics[k])))
+        for k in compilation_metrics
+    ]
+    print(tabulate.tabulate(rows, headers=("Function", "Runtimes (s)")))
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {

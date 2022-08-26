@@ -32,6 +32,7 @@ from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import dynamo_timed
 from .utils import filter_stack
 from .utils import format_bytecode
 from .utils import guard_failures
@@ -214,6 +215,7 @@ def format_error_msg(exc, frame):
     return msg
 
 
+@dynamo_timed
 def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
     """Fully convert a frame into an FX graph"""
     init_logging()
@@ -375,7 +377,8 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
         except BackendCompilerFailed:
             raise
         except Exception:
-            pass
+            raise
+            # pass
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn

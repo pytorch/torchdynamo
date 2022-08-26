@@ -10,6 +10,8 @@ from sympy import Integer
 from torch._decomp import get_decompositions
 from torch.utils._mode_utils import no_dispatch
 
+from torchdynamo.utils import dynamo_timed
+
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
@@ -131,6 +133,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
+    @dynamo_timed
     def run(self, *args):
         if self.num_dynamic_inputs is None:
             self.num_dynamic_inputs = len(args)
@@ -310,6 +313,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate()
 
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 

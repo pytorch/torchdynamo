@@ -16,6 +16,8 @@ import numpy as np
 import sympy
 import torch
 
+from torchdynamo.utils import dynamo_timed
+
 from . import config
 from . import dependencies
 from . import ir
@@ -497,6 +499,7 @@ class NodeUser:
 
 
 class Scheduler:
+    @dynamo_timed
     def __init__(self, nodes):
         super(Scheduler, self).__init__()
         self.backends = {}
@@ -570,6 +573,7 @@ class Scheduler:
             for node in self.nodes:
                 node.log_details()
 
+    @dynamo_timed
     def compute_dependencies(self):
         """
         Create dependency edges between nodes, handling aliasing and
@@ -733,6 +737,7 @@ class Scheduler:
             if len(self.nodes) == old_len:
                 break
 
+    @dynamo_timed
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
@@ -984,6 +989,7 @@ class Scheduler:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
+    @dynamo_timed
     def codegen(self):
         for node in self.nodes:
             self.buffer_names_no_longer_needed.update(node.last_usage)
