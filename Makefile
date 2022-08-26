@@ -112,12 +112,6 @@ build-deps: clone-deps
 	make setup_lint
 	python setup.py develop
 
-fixed1-gpu: develop
-	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
-
-fixed2-gpu: develop
-	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed2 -n100
-
 baseline-cpu: develop
 	 rm -f baseline_*.csv
 	 python benchmarks/torchbench.py -n50 --overhead

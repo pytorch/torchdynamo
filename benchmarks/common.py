@@ -26,8 +26,6 @@ from torch.utils._pytree import tree_map
 import torchdynamo
 import torchdynamo.utils
 from torchdynamo.optimizations import backends
-from torchdynamo.optimizations.inference import fixed_strategy1
-from torchdynamo.optimizations.inference import fixed_strategy2
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
@@ -1280,16 +1278,6 @@ def parse_args():
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
     )
     group.add_argument(
-        "--speedup-fixed1",
-        action="store_true",
-        help="speedup using experimental fixed_strategy backend",
-    )
-    group.add_argument(
-        "--speedup-fixed2",
-        action="store_true",
-        help="speedup using experimental fixed_strategy backend",
-    )
-    group.add_argument(
         "--speedup-ltc",
         action="store_true",
         help="speedup using the ltc backend",
@@ -1354,11 +1342,6 @@ def parse_args():
         "--print-aten-ops",
         action="store_true",
         help="Print traces of aten ops captured by AOT autograd",
-    )
-    group.add_argument(
-        "--accuracy-ts",
-        action="store_true",
-        help="Accuracy testing and speedup using Torchscript (NNC/NVFuser) vs eager",
     )
     group.add_argument(
         "--inductor",
@@ -1560,14 +1543,6 @@ def main(runner, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "speedups_ltc_trivial.csv"
-    elif args.speedup_fixed1:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups_fixed1.csv"
-    elif args.speedup_fixed2:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy2, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups_fixed2.csv"
     elif args.speedup_ts:
         experiment = speedup_experiment_ts
         output_filename = "baseline_ts.csv"
@@ -1636,11 +1611,6 @@ def main(runner, original_dir=None):
             print_aten_ops,
             nopython=args.nopython,
         )
-    elif args.accuracy_ts:
-        optimize_ctx = torchdynamo.optimize(fixed_strategy1, nopython=args.nopython)
-        experiment = speedup_experiment
-        backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = f"accuracy_{backend_str}.csv"
     elif args.nothing:
         pass
     elif args.nops:
