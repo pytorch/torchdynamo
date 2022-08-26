@@ -37,7 +37,7 @@ Running runner.py generates a file named `run.sh`. This file contains the actual
 
 ### Advanced Usage
 
-One could directly call torchbench.py, huggingface.py or timm_models.py with the necessary flags. There are a lot of flags in the benchmarks runner. Some of the examples are as follows. These are subject to change.
+One could directly call `torchbench.py`, `huggingface.py` or `timm_models.py` with the necessary flags. There are a lot of flags in the benchmarks runner. Some of the examples are as follows. These are subject to change.
 
 **Inference Commands**
 * TorchScript NVFuser Inference - `python benchmarks/torchbench.py -dcuda -n100 --speedup-ts`
