@@ -15,6 +15,7 @@ from .utils import orig_code_map
 
 # TODO: remove this config entirely
 import functorch.compile
+
 functorch.compile.config.use_functionalize = True
 
 __all__ = [
