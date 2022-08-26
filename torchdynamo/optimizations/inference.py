@@ -9,7 +9,6 @@ import shutil
 import time
 from collections import defaultdict
 
-import numpy as np
 import torch
 
 from .. import config
@@ -19,7 +18,6 @@ from ..utils import checkpoint_params
 from ..utils import clone_inputs
 from ..utils import count_calls
 from ..utils import counters
-from ..utils import timed
 from .backends import BACKENDS
 from .normalize import long_name
 from .normalize import normalize_ir
