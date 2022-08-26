@@ -69,7 +69,7 @@ jobs:
           name: TorchBench run
           command: |
             source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --repeat 2 --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco
+            python benchmarks/torchbench.py --ci --coverage -d cuda --raise-on-assertion-error --raise-on-backend-error -x Super_SloMo -x moco -x yolov3
       - store_artifacts:
           path: coverage.csv
       - run:
@@ -77,6 +77,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             python .circleci/check_coverage.py
+
   aot_eager:
     machine:
       # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
@@ -90,7 +91,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --repeat 2 --training --accuracy-aot-nop -d cuda -x Super_SloMo -x moco -x dlrm -x fambench_dlrm -x fastNLP_Bert -x hf_Reformer -x tacotron2 -x yolov3 --use-eval-mode --output=aot_eager.csv
+            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
       - run:
