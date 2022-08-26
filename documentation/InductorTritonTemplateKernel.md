@@ -10,7 +10,7 @@ for ops with now lowerings, TorchInductor generate a fallback `ir.ExternKernel`,
 Codegen from custom templates is derived from codegen normal Triton kernels. So in this tutorial, we will only focus on the difference.
 The main python file for codegen triton templates is [triton_template.py](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/codegen/triton_template.py). Other files that need to modify when adding a new implementation as template file for Torchinductor codegen are [scheduler.py](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/scheduler.py), [ir.py](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/ir.py).
 
-Class TemplateSchedulerNode is a subclass of BaseSchedulerNode. During the `init` of Scheduler, it will create TemplateSchedulerNode if the node `should_use_template()`, and append to the `self.nodes` list. And when Sheduler `codegen()`, the TemplateSchedulerNode will call `codege_template_call()`, where call [`template_codegen()`](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/codegen/triton_template.py#L299) inside the function.
+Class TemplateSchedulerNode is a subclass of BaseSchedulerNode. During the `init` of Scheduler, it will create TemplateSchedulerNode if the node `should_use_template()`, and append to the `self.nodes` list. And when the Scheduler does `codegen()`, the TemplateSchedulerNode will call [`template_codegen()`](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/codegen/triton_template.py#L299) to generate the combined kernel.
 
 Class TritonTemplateKernel is a subclass of TritonKernel. In `template_codegen()`, TritonTemplateKernel will be initialized by the TemplateSchedulerNode with epilog-fusable nodes. And do the following things:
 
