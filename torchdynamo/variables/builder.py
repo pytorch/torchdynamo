@@ -240,11 +240,9 @@ class VariableBuilder:
             else:
                 result = ConstDictVariable(result, type(value), guards=guards)
 
-            if istype(value, (dict, collections.defaultdict)):
-                return self.tx.output.side_effects.track_dict(
-                    self.source, value, result
-                )
-            return result
+            return self.tx.output.side_effects.track_dict(
+                self.source, value, result
+            )
         elif isinstance(value, torch.nn.Module):
             if mutation_guard.is_dynamic_nn_module(value):
                 # created dynamically, don't specialize on it

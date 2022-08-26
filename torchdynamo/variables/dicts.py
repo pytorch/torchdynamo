@@ -8,7 +8,6 @@ from typing import List
 import torch
 
 from torchdynamo.variables.constant import ConstantVariable
-from torchdynamo.variables.lists import ListVariable
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -216,6 +215,8 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from . import ListVariable
+        from . import TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -233,10 +234,12 @@ class DefaultDictVariable(ConstDictVariable):
                     new_val = collections.OrderedDict(self.items)
                     if self.default_factory is list:
                         default_var = ListVariable([], mutable_local=MutableLocal())
+                    elif self.default_factory is tuple:
+                        default_var = TupleVariable([], mutable_local=MutableLocal())
                     elif self.default_factory is dict:
                         default_var = ConstDictVariable({}, dict, mutable_local=MutableLocal())
                     else:
-                        assert False
+                        unimplemented(f"defaultdict with default_factory = {self.default_factory}")
                     new_val[k] = default_var
                     tx.replace_all(
                         self, self.modifed(new_val, self.user_cls, **options)
