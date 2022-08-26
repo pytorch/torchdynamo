@@ -18,6 +18,7 @@ from . import config
 from . import overrides
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import ceildiv
 from .utils import gen_gm_and_inputs
 from .virtualized import V
 
@@ -97,9 +98,22 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+
+    def static_input(x):
+        # make sure alignment and contiguity of inputs is preserved
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
+        needed_size = ceildiv(needed_size, 32) * 32
+        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
+        cache_line_offset = (
+            (x.data_ptr() - buffer.data_ptr()) % 32
+        ) // x.element_size()
+        return torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx]
+        static_input(x) if idx not in static_input_idxs else inputs[idx]
         for idx, x in enumerate(inputs)
     ]
 
