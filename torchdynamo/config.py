@@ -117,6 +117,5 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         return object.__setattr__(self, name, value)
 
-
 _allowed_config_names = {*globals().keys()}
 sys.modules[__name__].__class__ = _AccessLimitingConfig
