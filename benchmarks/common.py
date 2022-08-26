@@ -1322,7 +1322,6 @@ def parse_args():
         action="store_true",
         help="TorchDynamo frontend with torchscript backend",
     )
-    group.add_argument("--python-key", action="store_true")
     group.add_argument(
         "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
     )
