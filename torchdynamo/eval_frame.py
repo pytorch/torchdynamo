@@ -213,24 +213,6 @@ def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         try:
-            # TODO(whc) move the ddp code below the bailouts. but make sure it doesn't cause DDP to be skipped
-            if config.optimize_ddp:
-                ddp_module = DistributedDataParallel._get_active_ddp_module()
-                if ddp_module and frame.f_code.co_name == "forward":
-                    # print(
-                    #     f"compile for ddp: {frame.f_code.co_name} {frame.f_code.co_filename}"
-                    # )
-                    with compile_lock:
-                        ddp_optimizer = DDPOptimizer(
-                            bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                            parameters_to_ignore=ddp_module.parameters_to_ignore,
-                            backend_compile_fn=callback._torchdynamo_orig_callable,
-                            debug=config.debug_optimize_ddp,
-                        )
-                        hijacked_callback = convert_frame.convert_frame(
-                            ddp_optimizer.compile_fn, guard_export_fn=None
-                        )
-                        return hijacked_callback(frame, cache_size)
             if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
                 log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
                 return None
@@ -240,6 +222,20 @@ def catch_errors_wrapper(callback):
             ):
                 # nametuple constructor
                 return None
+            if config.optimize_ddp:
+                ddp_module = DistributedDataParallel._get_active_ddp_module()
+                if ddp_module and frame.f_code.co_name == "forward":
+                    with compile_lock:
+                        ddp_optimizer = DDPOptimizer(
+                            bucket_bytes_cap=ddp_module.bucket_bytes_cap,
+                            parameters_to_ignore=ddp_module.parameters_to_ignore,
+                            backend_compile_fn=callback._torchdynamo_orig_callable,
+                        )
+                        hijacked_callback = convert_frame.convert_frame(
+                            ddp_optimizer.compile_fn, guard_export_fn=None
+                        )
+                        return hijacked_callback(frame, cache_size)
+
             with compile_lock:
                 return callback(frame, cache_size)
         except Exception:
@@ -579,6 +575,7 @@ def skip(fn=None):
     fn._torchdynamo_disable = True
     return fn
 
+
 class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
@@ -606,7 +603,9 @@ class TorchPatcher:
         ]
 
         # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
-        DistributedDataParallel._inside_ddp_forward = skip(DistributedDataParallel._inside_ddp_forward)
+        DistributedDataParallel._inside_ddp_forward = skip(
+            DistributedDataParallel._inside_ddp_forward
+        )
 
         # disable profile hook
         for opt in optimizers:

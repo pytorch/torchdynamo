@@ -101,9 +101,6 @@ class DDPOptimizer:
             for node in nodes:
                 partition_map[node] = p
 
-        # hack to make each node its own graph (for debugging)
-        # partition_map = {node: idx for idx, node in enumerate(gm.graph.nodes)}
-
         split_gm = fx.passes.split_module.split_module(
             gm, None, lambda node: partition_map[node]
         )
@@ -176,7 +173,7 @@ class DDPOptimizer:
                                 dump_file.write(str(submod.graph))
                         compiled_submod = self.compile_submod(submod, args, kwargs)
                         n.target = "compiled_" + n.target
-                        # self.module.delete_submodule(n.target)
+                        self.module.delete_submodule(n.target)
                         self.module.add_submodule(n.target, compiled_submod)
 
                     # then we execute the modified node using the usual logic

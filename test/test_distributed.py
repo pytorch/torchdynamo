@@ -9,8 +9,9 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import torchdynamo
-from torchdynamo.testing import same
 from torchdynamo import config
+from torchdynamo.testing import same
+
 
 class ToyModel(nn.Module):
     def __init__(self, in_feat=10, hidden_feat=5000, num_hidden=2, out_feat=5):
@@ -41,12 +42,13 @@ class TestDDPOptimizer(torchdynamo.testing.TestCase):
         # _exit_stack is set up in TestCase
         cls._exit_stack.enter_context(
             patch.dict(
-            os.environ,
-            {
-                "MASTER_ADDR": "localhost",
-                "MASTER_PORT": "12355",
-            },
-        ))
+                os.environ,
+                {
+                    "MASTER_ADDR": "localhost",
+                    "MASTER_PORT": "12355",
+                },
+            )
+        )
         cls._exit_stack.enter_context(patch.object(config, "optimize_ddp", True))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
