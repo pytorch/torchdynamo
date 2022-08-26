@@ -48,9 +48,9 @@ imports = [
     "PegasusForConditionalGeneration",
     "PegasusModel",
     "ReformerConfig",
-    "ViTForImageClassification",
-    "ViTForMaskedImageModeling",
-    "ViTModel",
+    # "ViTForImageClassification",
+    # "ViTForMaskedImageModeling",
+    # "ViTModel",
 ]
 
 
@@ -100,6 +100,11 @@ SKIP = {
     "BlenderbotForConditionalGeneration",
     "GPTJForCausalLM",
     "GPTJForQuestionAnswering",
+    "GPTNeoForCausalLM",
+    "GPTNeoForSequenceClassification",
+    # Fails with even batch size = 1
+    "DebertaV2ForMaskedLM",
+    "DebertaV2ForQuestionAnswering",
 }
 
 # TODO - Fails even after fake tensors
@@ -482,9 +487,9 @@ def refresh_model_names_and_batch_sizes():
             SwinForImageClassification,
             SwinForMaskedImageModeling,
             SwinModel,
-            ViTForImageClassification,
-            ViTForMaskedImageModeling,
-            ViTModel,
+            # ViTForImageClassification,
+            # ViTForMaskedImageModeling,
+            # ViTModel,
         ]:
             continue
 
