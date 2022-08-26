@@ -17,6 +17,7 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GlobalWeakRefSource
 from ..utils import global_key_name
+from .base import MutableLocal
 from .base import VariableTracker
 from .tensor import TensorVariable
 
@@ -231,9 +232,9 @@ class DefaultDictVariable(ConstDictVariable):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     if self.default_factory is list:
-                        default_var = ListVariable([])
+                        default_var = ListVariable([], mutable_local=MutableLocal())
                     elif self.default_factory is dict:
-                        default_var = ConstDictVariable({}, dict)
+                        default_var = ConstDictVariable({}, dict, mutable_local=MutableLocal())
                     else:
                         assert False
                     new_val[k] = default_var
