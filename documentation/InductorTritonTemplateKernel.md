@@ -1,6 +1,6 @@
 # How to let Torchinductor codegen from user-defined templates
 
-This tutorial assumes the reader has an overview of how Torchinductor codegen Triton code and a basic understanding of Triton languange. This tutorial is for developers who want to further improve the performance of some operations, like Convolution and MatMul, by manually-written triton kernel.
+This tutorial assumes the reader has an overview of how Torchinductor generates Triton code and a basic understanding of the Triton languange. This tutorial is intended for developers who want to further improve the performance of some operations, like Convolution and Matrix Multiply, via manually-written triton kernel combined with automatically generated epilogue.
 
 ## Motivation
 For most of the operations, Torchinductor is able to automatically codegen corresponding Triton kernel. However,
