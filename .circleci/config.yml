@@ -289,7 +289,7 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 0 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
               --output=inductor_timm_inference_0.csv
       - store_artifacts:
           path: inductor_timm_inference_0.csv
@@ -313,7 +313,7 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 1 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
               --output=inductor_timm_inference_1.csv
       - store_artifacts:
           path: inductor_timm_inference_1.csv
@@ -337,7 +337,7 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 2 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
               --output=inductor_timm_inference_2.csv
       - store_artifacts:
           path: inductor_timm_inference_2.csv
@@ -361,7 +361,7 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 3 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
               --output=inductor_timm_inference_3.csv
       - store_artifacts:
           path: inductor_timm_inference_3.csv
@@ -385,8 +385,8 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 0 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
-              -x cait_m36_384 -x coat_lite_mini -x mobilevit_s -x swin_base_patch4_window7_224\
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
+              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
               --output=inductor_timm_training_0.csv
       - store_artifacts:
           path: inductor_timm_training_0.csv
@@ -410,8 +410,8 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 1 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
-              -x cait_m36_384 -x coat_lite_mini -x mobilevit_s -x swin_base_patch4_window7_224\
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
+              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
               --output=inductor_timm_training_1.csv
       - store_artifacts:
           path: inductor_timm_training_1.csv
@@ -435,8 +435,8 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 2 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
-              -x cait_m36_384 -x coat_lite_mini -x mobilevit_s -x swin_base_patch4_window7_224\
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
+              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
               --output=inductor_timm_training_2.csv
       - store_artifacts:
           path: inductor_timm_training_2.csv
@@ -460,8 +460,8 @@ jobs:
             make develop
             python benchmarks/timm_models.py --ci --repeat 2 --batch_size 1 --quiet -d cuda --inductor --float32 --training --use-eval-mode \
               --raise-on-assertion-error --raise-on-backend-error --total-partitions 4 --partition-id 3 \
-              -x cait_m36_384 -x ghostnet_100 -x volo_d1_224 \
-              -x cait_m36_384 -x coat_lite_mini -x mobilevit_s -x swin_base_patch4_window7_224\
+              -x cait_m36_384 -x ghostnet_100 -x visformer_small -x volo_d1_224 \
+              -x coat_lite_mini -x convnext_base -x mobilevit_s -x swin_base_patch4_window7_224 -x twins_pcpvt_base\
               --output=inductor_timm_training_3.csv
       - store_artifacts:
           path: inductor_timm_training_3.csv
