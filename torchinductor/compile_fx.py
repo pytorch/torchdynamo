@@ -18,6 +18,8 @@ from . import config
 from . import overrides
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import ceildiv
+from .utils import gen_gm_and_inputs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -44,26 +46,11 @@ class CheckEachNode(torch.fx.Interpreter):
         if target in (operator.getitem,):
             return expected
 
-        g = torch.fx.Graph()
-        g_args = []
-        a_args = []
-        for n, arg in enumerate(args):
-            if isinstance(arg, torch.Tensor):
-                g_args.append(g.placeholder(f"arg{n}"))
-                a_args.append(arg)
-            else:
-                g_args.append(arg)
-        assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-        node = g.call_function(target, tuple(g_args), kwargs)
-        if isinstance(expected, torch.Tensor):
-            node = (node,)
-        g.output(node)
-
-        gm = torch.fx.GraphModule({}, g)
+        gm, gm_inps = gen_gm_and_inputs(target, args, kwargs)
         graph = GraphLowering(gm)
         with V.set_graph_handler(graph):
             graph.run(*args, **kwargs)
-            actual = graph.compile_to_fn()(*a_args)
+            actual = graph.compile_to_fn()(*gm_inps)
 
         if isinstance(expected, torch.Tensor):
             actual = actual[0]
@@ -111,9 +98,22 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+
+    def static_input(x):
+        # make sure alignment and contiguity of inputs is preserved
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
+        needed_size = ceildiv(needed_size, 32) * 32
+        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
+        cache_line_offset = (
+            (x.data_ptr() - buffer.data_ptr()) % 32
+        ) // x.element_size()
+        return torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx]
+        static_input(x) if idx not in static_input_idxs else inputs[idx]
         for idx, x in enumerate(inputs)
     ]
 

@@ -513,33 +513,6 @@ Test on torchbenchmark models with:
 python torchbench.py
 ```
 
-## Performance Measurement
-
-To reproduce the performance measurements shared in the posts above,
-run either `make offline-autotune-cpu` or `make offline-autotune-gpu`.  These targets
-will run something like the following:
-
-```shell
-# cleanup leftover state
-rm -rf subgraphs
-
-# initial run to record all the graphs to ./subgraphs/*
-python torchbench.py -dcuda --speedup -n1
-
-# autotune each graph and store which backend is best on disk
-python autotune.py
-
-# measure the speedups using the autotuned backend choices
-python torchbench.py -dcuda --speedup -n100
-
-# results are in ./speedups.csv
-```
-
-The baselines can be run with `make baseline-cpu` or `make baseline-gpu`.
-Which both string together a lot of calls to `./torchbench.py` and
-generate `*.csv` files.  See `./torchbench.py --help` for more options.
-
-
 ## Linting and Automatic Code Formatting
 
 [![Lint](https://github.com/pytorch/torchdynamo/actions/workflows/lint.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/lint.yml)
