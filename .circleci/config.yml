@@ -65,18 +65,6 @@ jobs:
             pytest -v --junitxml=test-results/junit.xml
       - store_test_results:
           path: test-results
-      - run:
-          name: TorchBench run
-          command: |
-            source .circleci/setup_env.sh
-            python benchmarks/torchbench.py --ci --coverage -d cuda
-      - store_artifacts:
-          path: coverage.csv
-      - run:
-          name: TorchBench coverage
-          command: |
-            source .circleci/setup_env.sh
-            python .circleci/check_coverage.py
 
   aot_eager:
     machine:
