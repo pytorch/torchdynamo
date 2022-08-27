@@ -427,15 +427,16 @@ class TorchPyOperator(VariableTracker):
                 return arg.as_proxy().node.meta["example_value"]
             if isinstance(arg, UserFunctionVariable):
                 return arg.fn
-            if isinstance(arg, ListVariable):
+            if arg.has_unpack_var_sequence(tx):
                 return [
                     unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
                 ]
             return arg
 
+        # Get values
         u_args = [unwrap_real(arg) for arg in args]
-        from torch.utils._mode_utils import no_dispatch
 
+        # Make fx to get a graph out (All PyOperator's should produce valid fx)
         graph = make_fx(self.value)(*u_args)
 
         def unwrap_proxy(arg):
@@ -461,6 +462,7 @@ class TorchPyOperator(VariableTracker):
             tx.output.add_submodule(gm, next_name, source=NNModuleSource(src))
             return next_name
 
+        # Get args as proxies
         p_args = [unwrap_proxy(arg) for arg in args]
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -494,9 +496,14 @@ class TorchPyOperator(VariableTracker):
             p_args[1] = true_node
             p_args[2] = false_node
 
+        # Get real value for binding to create
+        # a la track_tensor_tree
         value = graph(*u_args)
 
+        # Store make_fx output
         register_subgraph(graph, self.value.__name__)
+
+        # Store the invocation as a call
         return variables.TensorVariable.create(
             tx=tx,
             proxy=tx.output.create_proxy(
