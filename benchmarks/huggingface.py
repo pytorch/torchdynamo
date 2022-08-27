@@ -100,6 +100,11 @@ SKIP = {
     "BlenderbotForConditionalGeneration",
     "GPTJForCausalLM",
     "GPTJForQuestionAnswering",
+    "GPTNeoForCausalLM",
+    "GPTNeoForSequenceClassification",
+    # Fails with even batch size = 1
+    "DebertaV2ForMaskedLM",
+    "DebertaV2ForQuestionAnswering",
 }
 
 # TODO - Fails even after fake tensors

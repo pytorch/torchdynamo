@@ -60,7 +60,7 @@ BATCH_SIZE_DIVISORS = {
     "gmixer_24_224": 2,
     "gmlp_s16_224": 2,
     "hrnet_w18": 64,
-    "jx_nest_base": 1,
+    "jx_nest_base": 2,
     "legacy_senet154": 2,
     "mixer_b16_224": 2,
     "mixnet_l": 2,
@@ -85,6 +85,11 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = set()
+
+SKIP = {
+    # Unusual training setup
+    "levit_128",
+}
 
 
 def refresh_model_names():
