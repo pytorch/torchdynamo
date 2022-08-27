@@ -6,8 +6,6 @@ from typing import List
 
 import torch._C
 import torch.nn
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-from torch.fx.experimental.proxy_tensor import PythonKeyTracer
 from torch.fx.experimental.proxy_tensor import make_fx
 
 from torchdynamo.source import LocalSource
