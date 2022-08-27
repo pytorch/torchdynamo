@@ -236,14 +236,14 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
-        # with no_dispatch():
-        if value.shape == ():
-            return Constant(value.item(), value.dtype, value.device)
-        if len(value.shape) == 1 and value.shape[0] <= 8:
-            # tensor lowering has constant inlining logic
-            from .lowering import tensor
+        with no_dispatch():
+            if value.shape == ():
+                return Constant(value.item(), value.dtype, value.device)
+            if len(value.shape) == 1 and value.shape[0] <= 8:
+                # tensor lowering has constant inlining logic
+                from .lowering import tensor
 
-            return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
         return self.add_tensor_constant(value)
 
