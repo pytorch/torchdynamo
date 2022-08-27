@@ -68,8 +68,10 @@ CI_SKIP_INFERENCE = [
     # Huggingface
     "AlbertForQuestionAnswering",
     "AllenaiLongformerBase",
+    "BartForCausalLM",
     "BertForQuestionAnswering",
     "BigBird",
+    "BlenderbotSmallForConditionalGeneration",
     "DebertaForQuestionAnswering",
     "DebertaV2ForQuestionAnswering",
     "DistilBertForQuestionAnswering",

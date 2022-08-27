@@ -1619,6 +1619,16 @@ class CommonTemplate:
             ),
         )
 
+    def test_fill(self):
+        def fn(x):
+            tmp = torch.ones_like(x)
+            return tmp, aten.fill.Scalar(tmp, 2)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_pow1(self):
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]

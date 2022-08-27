@@ -290,6 +290,11 @@ def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
 
 
+@register_decomposition([aten.fill.Scalar])
+def fill_scalar(self, value):
+    return torch.full_like(self, value)
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow

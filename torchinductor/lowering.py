@@ -892,6 +892,7 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
+make_fallback(aten.as_strided_scatter)
 make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
@@ -905,6 +906,7 @@ make_fallback(aten.im2col)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
+make_fallback(aten.sort.stable)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
 make_fallback(aten.unfold_backward)
