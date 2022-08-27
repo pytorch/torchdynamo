@@ -10,7 +10,9 @@ from . import test_unspec
 
 
 def make_dynamic_cls(cls):
-    return make_test_cls_with_patches(cls, "DynamicShapes", "_dynamic_shapes", ("dynamic_shapes", True))
+    return make_test_cls_with_patches(
+        cls, "DynamicShapes", "_dynamic_shapes", ("dynamic_shapes", True)
+    )
 
 
 DynamicShapesFunctionTests = make_dynamic_cls(test_functions.FunctionTests)
