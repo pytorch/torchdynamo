@@ -66,9 +66,10 @@ from .tensor import TensorWithTFOverrideVariable
 from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchVariable
+from .torch import TorchPyOperator
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
-
+from functorch.experimental.ops import PyOperator
 
 @dataclasses.dataclass
 class GraphArg:
@@ -376,6 +377,8 @@ class VariableBuilder:
                 for k in ("start", "stop", "step")
             ]
             return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
+        elif isinstance(value, PyOperator):
+            return TorchPyOperator(value, guards=self.make_guards(GuardBuilder.TYPE_MATCH))
         else:
             result = UserDefinedObjectVariable(
                 value,

@@ -61,6 +61,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        print("Calling function:", args)
         return tx.inline_user_function_return(
             self, list(self.self_args()) + list(args), kwargs
         )
@@ -236,6 +237,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        print("Calling function wrap:", args)
         self.context.enter(tx)
         result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
