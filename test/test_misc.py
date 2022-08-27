@@ -2147,7 +2147,8 @@ class MiscTests(torchdynamo.testing.TestCase):
         def f(pred, pred2, x):
             return cond(pred, true_fn, false_fn, [pred2, x])
 
-        opt_fn = torchdynamo.optimize("eager")(f)
+        cc = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cc)(f)
         true_true_sin = opt_fn(
             torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
         )
@@ -2171,6 +2172,53 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
+        self.assertTrue(cc.frame_count, 2)
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_cond_nested_fake_tensor_off(self):
+        from functorch.experimental.cond import cond
+
+        def true_fn_nested(x):
+            return x * 10
+
+        def false_fn_nested(x):
+            return x * -1
+
+        def true_fn(pred2, x):
+            return x.sin()
+
+        def false_fn(pred2, x):
+            return x + cond(pred2, true_fn_nested, false_fn_nested, [x])
+
+        def f(pred, pred2, x):
+            return cond(pred, true_fn, false_fn, [pred2, x])
+
+        cc = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cc)(f)
+        true_true_sin = opt_fn(
+            torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_true_sin))
+
+        true_false_sin = opt_fn(
+            torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_false_sin))
+
+        false_true_sum_mult = opt_fn(
+            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(
+            same(torch.tensor([2.75, 2.75]), false_true_sum_mult)
+        )  # * 10 then add x
+
+        false_false_sum_neg = opt_fn(
+            torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(
+            same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
+        )  # * -1 then add x
+        self.assertTrue(cc.frame_count, 1)
 
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_cond_export(self):
