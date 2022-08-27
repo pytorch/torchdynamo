@@ -3053,7 +3053,9 @@ class CommonTemplate:
             x = x.view(x.shape[0] * 2, -1)
             return (x,)
 
-        traced = make_fx(f, tracing_mode="symbolic")(torch.randn(8, 4, device=self.device))
+        traced = make_fx(f, tracing_mode="symbolic")(
+            torch.randn(8, 4, device=self.device)
+        )
         compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
 
         out = compiled(torch.randn(8, 4, device=self.device))
