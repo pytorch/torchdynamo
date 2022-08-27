@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import operator
 from collections.abc import Iterable
 from typing import List
 
@@ -1269,12 +1270,9 @@ def full_like(x, fill_value, **kwargs):
 
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
-    def inner(
-        *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
-    ):
+    def inner(*size, dtype=None, device=None, layout=0, pin_memory=False):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -1300,7 +1298,7 @@ def create_tensor_like(creation_fn):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
+
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1308,12 +1306,7 @@ def create_tensor_like(creation_fn):
         device = device or x.get_device()
         size = list(x.get_size())
         return creation_fn(
-            size,
-            dtype=dtype,
-            device=device,
-            layout=layout,
-            pin_memory=pin_memory,
-            memory_format=memory_format,
+            size, dtype=dtype, device=device, layout=layout, pin_memory=pin_memory
         )
 
     return _constant_like
@@ -2589,12 +2582,18 @@ def _validate_reduction_axis(x, axis):
 
 def make_reduction(reduction_type: str, override_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
+        if reduction_type == "min" and axis is not None:
+            return (
+                reduce_amin(x, axis, keepdims, dtype=dtype),
+                reduce_argmin(x, axis, keepdims),
+            )
+        if reduction_type == "max" and axis is not None:
+            return (
+                reduce_amax(x, axis, keepdims, dtype=dtype),
+                reduce_argmax(x, axis, keepdims),
+            )
         if dtype is not None:
             x = to_dtype(x, dtype)
-        assert (
-            reduction_type in ("sum", "amax", "amin", "any", "argmax", "argmin")
-            or axis is None
-        ), "TODO: max with index"
         if reduction_type == "any":
             x = to_dtype(x, torch.bool)
         size = x.get_size()
@@ -2840,11 +2839,15 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
-register_lowering(aten.amax)(make_reduction("amax"))
-register_lowering(aten.amin)(make_reduction("amin"))
+reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
-register_lowering(aten.argmax)(make_reduction("argmax", override_dtype=torch.int64))
-register_lowering(aten.argmin)(make_reduction("argmin", override_dtype=torch.int64))
+reduce_argmax = register_lowering(aten.argmax)(
+    make_reduction("argmax", override_dtype=torch.int64)
+)
+reduce_argmin = register_lowering(aten.argmin)(
+    make_reduction("argmin", override_dtype=torch.int64)
+)
 
 add = register_pointwise(aten.add)
 exp = register_pointwise(aten.exp)
@@ -2907,3 +2910,13 @@ register_inplace(aten.div_, div)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
+
+
+@register_lowering(aten.sym_size)
+def sym_size(a, dim):
+    return a.get_size()[dim]
+
+
+@register_lowering(operator.mul)
+def op_mul(a, b):
+    return a * b
