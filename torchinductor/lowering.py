@@ -2584,12 +2584,18 @@ def _validate_reduction_axis(x, axis):
 
 def make_reduction(reduction_type: str, override_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
+        if reduction_type == "min" and axis is not None:
+            return (
+                reduce_amin(x, axis, keepdims, dtype=dtype),
+                reduce_argmin(x, axis, keepdims),
+            )
+        if reduction_type == "max" and axis is not None:
+            return (
+                reduce_amax(x, axis, keepdims, dtype=dtype),
+                reduce_argmax(x, axis, keepdims),
+            )
         if dtype is not None:
             x = to_dtype(x, dtype)
-        assert (
-            reduction_type in ("sum", "amax", "amin", "any", "argmax", "argmin")
-            or axis is None
-        ), "TODO: max with index"
         if reduction_type == "any":
             x = to_dtype(x, torch.bool)
         size = x.get_size()
@@ -2835,11 +2841,15 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
-register_lowering(aten.amax)(make_reduction("amax"))
-register_lowering(aten.amin)(make_reduction("amin"))
+reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
-register_lowering(aten.argmax)(make_reduction("argmax", override_dtype=torch.int64))
-register_lowering(aten.argmin)(make_reduction("argmin", override_dtype=torch.int64))
+reduce_argmax = register_lowering(aten.argmax)(
+    make_reduction("argmax", override_dtype=torch.int64)
+)
+reduce_argmin = register_lowering(aten.argmin)(
+    make_reduction("argmin", override_dtype=torch.int64)
+)
 
 add = register_pointwise(aten.add)
 exp = register_pointwise(aten.exp)
