@@ -186,10 +186,10 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False) -> str:
+    def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"load({name}, {index}, {upcast})"
+        return f"load({name}, {index})"
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)

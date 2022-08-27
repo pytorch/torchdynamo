@@ -700,7 +700,7 @@ class TritonKernel(Kernel):
             yield mask
         self._load_mask = prior
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
@@ -713,7 +713,7 @@ class TritonKernel(Kernel):
         else:
             ep = ""
         line = f"tl.load({var} + {index}, {mask}{ep})"
-        if upcast:
+        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
         if (
