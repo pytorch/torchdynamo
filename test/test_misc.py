@@ -2182,8 +2182,17 @@ class MiscTests(torchdynamo.testing.TestCase):
         
         cc = torchdynamo.testing.CompileCounter()
         graph, guard = torchdynamo.export(f, torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25]))
-        print(graph)
-        self.assertTrue(False)
+        true_true_sin = graph(torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25]))
+        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_true_sin))
+
+        true_false_sin = graph(torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25]))
+        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_false_sin))
+
+        false_true_sum_mult = graph(torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25]))
+        self.assertTrue(same(torch.tensor([2.75, 2.75]), false_true_sum_mult)) # * 10 then add x
+
+        false_false_sum_neg = graph(torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25]))
+        self.assertTrue(same(torch.tensor([0.0, 0.0]), false_false_sum_neg)) # * -1 then add x
         
 
         

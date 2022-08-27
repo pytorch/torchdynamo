@@ -407,8 +407,8 @@ class TorchPyOperator(VariableTracker):
         super(TorchPyOperator, self).__init__(**kwargs)
         
         self.value = value
-        import torchdynamo
-        torchdynamo.allow_in_graph(self.value)
+        print("VALUE IS OP?", self.value, self.value.__name__)
+        
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -481,24 +481,32 @@ class TorchPyOperator(VariableTracker):
                     i += 1
                 else:
                     next_name = candidate
-                    
+            
+            true_name = next_name + "_true"
+            false_name = next_name + "_false"
+            true_source = LocalSource(graph.true_graph_0)
+            true_source.local_name = true_name
+            false_source = LocalSource(graph.false_graph_0)
+            false_source.local_name = false_name
+            graph.true_graph_0.force_dynamic = False
             tx.output.add_submodule(
-                graph.true_graph_0, next_name + "_true"
+                graph.true_graph_0, true_name, source=NNModuleSource(true_source)
             )
+            graph.false_graph_0.force_dynamic = False
             tx.output.add_submodule(
-                graph.false_graph_0, next_name + "_false"
+                graph.false_graph_0, false_name, source=NNModuleSource(false_source)
             )
             node_args = [x.as_proxy() for x in args[3].unpack_var_sequence(tx)]
             print("NODE ARGS", node_args[0].__class__)
             true_node = tx.output.create_proxy(
                 "get_attr",
-                next_name + "_true",
+                true_name,
                 tuple(node_args),
                 {},
             )
             false_node = tx.output.create_proxy(
                 "get_attr",
-                next_name + "_false",
+                false_name,
                 tuple(node_args),
                 {},
             )
@@ -554,9 +562,26 @@ class TorchPyOperator(VariableTracker):
 
         from torchdynamo.output_graph import FakeRootModule
         # tx.output.root = FakeRootModule(tx.output.nn_modules)
-        graph.__name__ = 'cond'
+        candidate_func_name = self.value.__name__
+        next_name = None
+        i = 0
+        while not next_name:
+            candidate = f"{candidate_func_name}_{i}"
+            if candidate in tx.output.nn_modules:
+                i += 1
+            else:
+                next_name = candidate
+
+        graph.__name__ = next_name
+
+        src = LocalSource(graph)
+        src.local_name = next_name
+        graph.force_dynamic = False
+        tx.output.add_submodule(
+            graph, next_name, source=NNModuleSource(src)
+        )
         return variables.TensorVariable.create(
             tx=tx,
-            proxy=tx.output.create_proxy("call_function", graph, args=tuple(p_args), kwargs={}, current_tx=tx),
+            proxy=tx.output.create_proxy("call_module", graph.__name__, args=tuple(p_args), kwargs={}, current_tx=tx),
             example_value=value
         )

@@ -83,9 +83,13 @@ class GenerationTracker:
 
 def is_dynamic_nn_module(obj):
     """Check for nn.Modules() created dynamically or mutated"""
-    return GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
+    if hasattr(obj, "force_dynamic"):
+        return obj.force_dynamic
+    dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj
     )
+    print(f"Is {obj} dynamic? {dyn}")
+    return dyn
 
 
 def install_generation_tagging_init():
