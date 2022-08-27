@@ -513,9 +513,9 @@ workflows:
       - inductor_timm_inference_1
       - inductor_timm_inference_2
       - inductor_timm_inference_3
-      - inductor_timm_training_0
-      - inductor_timm_training_1
-      - inductor_timm_training_2
-      - inductor_timm_training_3
-      - inductor_timm_training_4
-      - inductor_timm_training_5
+      # - inductor_timm_training_0
+      # - inductor_timm_training_1
+      # - inductor_timm_training_2
+      # - inductor_timm_training_3
+      # - inductor_timm_training_4
+      # - inductor_timm_training_5
