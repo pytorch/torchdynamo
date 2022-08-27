@@ -1,1 +1,0 @@
-/data/shared/bin/c++ -rdynamic CMakeFiles/test_cpp_prefix.dir/test_cpp_prefix.o -o test/bin/test_cpp_prefix   -L/scratch/voz/work/torchdynamo/test/cpp/lib  lib/libgtest.a lib/libgtest_main.a lib/libgtest.a -lpthread 
