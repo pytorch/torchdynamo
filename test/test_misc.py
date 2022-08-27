@@ -2110,7 +2110,7 @@ class MiscTests(torchdynamo.testing.TestCase):
 
             result = f(torch.ones(6), 3)
             self.assertEqual(result, 3)
-    
+
     def test_cond(self):
         from functorch.experimental.cond import cond
 
@@ -2120,10 +2120,9 @@ class MiscTests(torchdynamo.testing.TestCase):
         def false_fn(x):
             return x.cos()
 
-
         def f(pred, x):
             return cond(pred, true_fn, false_fn, [x])
-        
+
         opt_fn = torchdynamo.optimize("eager")(f)
         a = opt_fn(torch.tensor(False), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.cos(torch.tensor([0.25, 0.25])), a))
@@ -2137,8 +2136,8 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x * 10
 
         def false_fn_nested(x):
-            return x * - 1
-        
+            return x * -1
+
         def true_fn(pred2, x):
             return x.sin()
 
@@ -2147,21 +2146,33 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         def f(pred, pred2, x):
             return cond(pred, true_fn, false_fn, [pred2, x])
-        
+
         opt_fn = torchdynamo.optimize("eager")(f)
-        true_true_sin = opt_fn(torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25]))
+        true_true_sin = opt_fn(
+            torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_true_sin))
 
-        true_false_sin = opt_fn(torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25]))
+        true_false_sin = opt_fn(
+            torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_false_sin))
 
-        false_true_sum_mult = opt_fn(torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25]))
-        self.assertTrue(same(torch.tensor([2.75, 2.75]), false_true_sum_mult)) # * 10 then add x
+        false_true_sum_mult = opt_fn(
+            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(
+            same(torch.tensor([2.75, 2.75]), false_true_sum_mult)
+        )  # * 10 then add x
 
-        false_false_sum_neg = opt_fn(torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25]))
-        self.assertTrue(same(torch.tensor([0.0, 0.0]), false_false_sum_neg)) # * -1 then add x
+        false_false_sum_neg = opt_fn(
+            torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(
+            same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
+        )  # * -1 then add x
 
-    
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_cond_export(self):
         from functorch.experimental.cond import cond
 
@@ -2169,8 +2180,8 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x * 10
 
         def false_fn_nested(x):
-            return x * - 1
-        
+            return x * -1
+
         def true_fn(pred2, x):
             return x.sin()
 
@@ -2179,23 +2190,34 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         def f(pred, pred2, x):
             return cond(pred, true_fn, false_fn, [pred2, x])
-        
+
         cc = torchdynamo.testing.CompileCounter()
-        graph, guard = torchdynamo.export(f, torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25]))
-        true_true_sin = graph(torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25]))
+        graph, guard = torchdynamo.export(
+            f, torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
+        true_true_sin = graph(
+            torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_true_sin))
 
-        true_false_sin = graph(torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25]))
+        true_false_sin = graph(
+            torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_false_sin))
 
-        false_true_sum_mult = graph(torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25]))
-        self.assertTrue(same(torch.tensor([2.75, 2.75]), false_true_sum_mult)) # * 10 then add x
+        false_true_sum_mult = graph(
+            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(
+            same(torch.tensor([2.75, 2.75]), false_true_sum_mult)
+        )  # * 10 then add x
 
-        false_false_sum_neg = graph(torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25]))
-        self.assertTrue(same(torch.tensor([0.0, 0.0]), false_false_sum_neg)) # * -1 then add x
-        
-
-        
+        false_false_sum_neg = graph(
+            torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
+        self.assertTrue(
+            same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
+        )  # * -1 then add x
 
 
 class TestTracer(JitTestCase):

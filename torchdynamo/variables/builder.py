@@ -11,6 +11,7 @@ from typing import List
 
 import numpy as np
 import torch
+from functorch.experimental.ops import PyOperator
 
 import torchdynamo
 
@@ -65,11 +66,11 @@ from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
 from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
-from .torch import TorchVariable
 from .torch import TorchPyOperator
+from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
-from functorch.experimental.ops import PyOperator
+
 
 @dataclasses.dataclass
 class GraphArg:
@@ -378,7 +379,9 @@ class VariableBuilder:
             ]
             return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         elif isinstance(value, PyOperator):
-            return TorchPyOperator(value, guards=self.make_guards(GuardBuilder.TYPE_MATCH))
+            return TorchPyOperator(
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,

@@ -6,7 +6,12 @@ from typing import List
 
 import torch._C
 import torch.nn
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+from torch.fx.experimental.proxy_tensor import make_fx
 
+from torchdynamo.source import LocalSource
+from torchdynamo.source import NNModuleSource
 from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import FakeContextWrappingVariable
 
@@ -22,9 +27,6 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
-from torch.fx.experimental.proxy_tensor import make_fx, PythonKeyTracer, ProxyTorchDispatchMode
-from torchdynamo.source import LocalSource
-from torchdynamo.source import NNModuleSource
 
 log = logging.getLogger(__name__)
 
@@ -402,186 +404,107 @@ class TorchVariable(VariableTracker):
         else:
             return handle_ntuple(args[0])
 
+
 class TorchPyOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super(TorchPyOperator, self).__init__(**kwargs)
-        
         self.value = value
-        print("VALUE IS OP?", self.value, self.value.__name__)
-        
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import TensorVariable, UserFunctionVariable, ListVariable
-        from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
+        from torch.utils._python_dispatch import TorchDispatchMode
+        from torch.utils._python_dispatch import enable_torch_dispatch_mode
 
+        from . import ListVariable
+        from . import TensorVariable
+        from . import UserFunctionVariable
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
+
         def unwrap_real(arg):
             if isinstance(arg, TensorVariable):
                 return arg.as_proxy().node.meta["example_value"]
             if isinstance(arg, UserFunctionVariable):
                 return arg.fn
             if isinstance(arg, ListVariable):
-                return [unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)]
+                return [
+                    unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
+                ]
             return arg
 
         u_args = [unwrap_real(arg) for arg in args]
         from torch.utils._mode_utils import no_dispatch
 
-        print("Args are:", args)
-        # fx_tracer = PythonKeyTracer()
-        # fx_tracer = torch.fx.Tracer()
-        # from torchdynamo.output_graph import FakeRootModule
-        # tx.output.root = FakeRootModule(tx.output.nn_modules)
-        # mode = ProxyTorchDispatchMode(tx.output)
-        # # torch._C._set_torch_dispatch_mode(proxy_mode)
-        # # with no_dispatch():
-        # from torch._subclasses.fake_tensor import FakeTensorMode
-        # mode = ProxyTorchDispatchMode(fx_tracer)
-        # # TODO: module.to() doesn't work because it assigns .data, which is ignored
-        # with torch._subclasses.fake_tensor.FakeCopyMode(mode):
-        #     mod_copied = copy.deepcopy(m)
-
-        # with enable_torch_dispatch_mode(mode):
-        print("Mode?", torch._C._get_torch_dispatch_mode())
-        # torch._C._set_torch_dispatch_mode(None)
-        # with no_dispatch():
-            # torch._C._set_torch_dispatch_mode(None)
         graph = make_fx(self.value)(*u_args)
-        # torch._C._set_torch_dispatch_mode(None)
-        print("graph?", graph)
-        for node in graph.graph.nodes:
-            print("Node is?", node.op)
-            if node.op == 'placeholder':
-                print(node)
-                # print(getattr(graph.graph, node.target))
 
-        # # This doesn't feel generic enough to go on as_proxy on UserFunctionVariable
-        # def fn_as_proxy(): 
         def unwrap_proxy(arg):
             try:
                 return arg.as_proxy()
             except NotImplementedError:
-                # No as_proxy support, do it here as its probably not general enough.
                 return arg
 
-        p_args = [unwrap_proxy(arg) for arg in args]
-        if self.value.__name__ == 'cond':
-            print("P ARGS", p_args)
-            print("OP 1", graph.true_graph_0)
-            print("OP 2", graph.false_graph_0.__class__)
-            print("OP 2", graph.false_graph_0)
+        def register_subgraph(gm, name):
             next_name = None
             i = 0
             while not next_name:
-                candidate = f"cond_op_graph_{i}"
+                candidate = f"name_{i}"
                 if candidate in tx.output.nn_modules:
                     i += 1
                 else:
                     next_name = candidate
-            
-            true_name = next_name + "_true"
-            false_name = next_name + "_false"
-            true_source = LocalSource(graph.true_graph_0)
-            true_source.local_name = true_name
-            false_source = LocalSource(graph.false_graph_0)
-            false_source.local_name = false_name
-            graph.true_graph_0.force_dynamic = False
-            tx.output.add_submodule(
-                graph.true_graph_0, true_name, source=NNModuleSource(true_source)
-            )
-            graph.false_graph_0.force_dynamic = False
-            tx.output.add_submodule(
-                graph.false_graph_0, false_name, source=NNModuleSource(false_source)
-            )
+
+            gm.__name__ = next_name
+            src = LocalSource(gm)
+            src.local_name = next_name
+            gm.force_dynamic = False
+            tx.output.add_submodule(gm, next_name, source=NNModuleSource(src))
+            return next_name
+
+        p_args = [unwrap_proxy(arg) for arg in args]
+        if self.value.__name__ == "cond":
+            # TODO(voz): Support fake tensor dispatch for recursive
+            # ops - see torch/dispatch/_dispatcher.py
+            import torchdynamo.config as config
+
+            if config.fake_tensor_propagation:
+                unimplemented("Fake tensor mode not yet supported for cond")
+
+            assert len(p_args) == 4
+            assert type(args[0]) is TensorVariable  # predicate
+            assert type(p_args[1]) is UserFunctionVariable  # true_fn
+            assert type(p_args[2]) is UserFunctionVariable  # false_fn
+            assert type(args[3]) is ListVariable  # args
+
+            true_name = register_subgraph(graph.true_graph_0, "true")
+            false_name = register_subgraph(graph.false_graph_0, "false")
             node_args = [x.as_proxy() for x in args[3].unpack_var_sequence(tx)]
-            print("NODE ARGS", node_args[0].__class__)
-            true_node = tx.output.create_proxy(
-                "get_attr",
-                true_name,
-                tuple(node_args),
-                {},
-            )
-            false_node = tx.output.create_proxy(
-                "get_attr",
-                false_name,
-                tuple(node_args),
-                {},
-            )
-            assert(type(p_args[1]) is UserFunctionVariable)
-            assert(type(p_args[2]) is UserFunctionVariable)
+
+            def make_attr(name):
+                node = tx.output.create_proxy(
+                    "get_attr",
+                    name,
+                    tuple(node_args),
+                    {},
+                )
+                return node
+
+            true_node = make_attr(true_name)
+            false_node = make_attr(false_name)
             p_args[1] = true_node
             p_args[2] = false_node
-            # Not all args were unwrapped, some are funcs, replace them with graph values
-        #     node = tx.output.create_proxy(
-        #         "get_attr",
-        #         name,
-        #         *args,
-        #         {},
-        #     )
-        print("Args are now", p_args)
-        # def unwrap(arg):
-        #     if isinstance(arg, TensorVariable):
-        #         return arg.as_proxy()
-        #     if isinstance(arg, UserFunctionVariable):
-        #         return 
-        #     return arg
 
-        # args = [unwrap(arg) for arg in args]
-
-        # next_name = None
-        # i = 0
-        # while not next_name:
-        #     candidate = f"cond_op_graph_{i}"
-        #     if candidate in tx.output.nn_modules:
-        #         i += 1
-        #     else:
-        #         next_name = candidate
-
-        # name = next_name
-
-        # class FakeMod(torch.nn.Module):
-        #     def __init__(self, graph):
-        #         self.graph = graph
-
-        #     def forward(self, *args):
-        #         return self.graph(*args)
-
-        # f = FakeMod(graph)
-        # source = LocalSource(f)
-        # source.local_name = name
-        # print(f.__class__)
-        # tx.output.add_submodule(
-        #     f, source=NNModuleSource(source)
-        # )
-        print("graph.graph?", graph.graph.__class__)
-        
         value = graph(*u_args)
 
-        from torchdynamo.output_graph import FakeRootModule
-        # tx.output.root = FakeRootModule(tx.output.nn_modules)
-        candidate_func_name = self.value.__name__
-        next_name = None
-        i = 0
-        while not next_name:
-            candidate = f"{candidate_func_name}_{i}"
-            if candidate in tx.output.nn_modules:
-                i += 1
-            else:
-                next_name = candidate
-
-        graph.__name__ = next_name
-
-        src = LocalSource(graph)
-        src.local_name = next_name
-        graph.force_dynamic = False
-        tx.output.add_submodule(
-            graph, next_name, source=NNModuleSource(src)
-        )
+        register_subgraph(graph, self.value.__name__)
         return variables.TensorVariable.create(
             tx=tx,
-            proxy=tx.output.create_proxy("call_module", graph.__name__, args=tuple(p_args), kwargs={}, current_tx=tx),
-            example_value=value
+            proxy=tx.output.create_proxy(
+                "call_module",
+                graph.__name__,
+                args=tuple(p_args),
+                kwargs={},
+                current_tx=tx,
+            ),
+            example_value=value,
         )
