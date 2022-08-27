@@ -716,6 +716,11 @@ def mm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.MatrixMultiply.create(a, b))
 
 
+@register_lowering(aten.addmm)
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b))
+
+
 @register_lowering(aten.bmm)
 def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))

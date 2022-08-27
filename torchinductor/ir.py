@@ -2502,6 +2502,31 @@ class MatrixMultiply(ExternKernelOut):
         return inout_dict, args_dict, const_dict, other_dict
 
 
+class MatrixMultiplyAdd(ExternKernelOut):
+    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+        super().__init__(layout, inputs, constant_args, output_view)
+        self.kernel = "aten.addmm.out"
+
+    @classmethod
+    def create(cls, inp, a, b):
+        m, k1 = a.get_size()
+        k2, n = b.get_size()
+        V.graph.sizevars.guard_equals(k1, k2)
+        inp = cls.realize_input(inp)
+        a = cls.realize_input(a)
+        b = cls.realize_input(b)
+        a = cls.require_stride1(a)
+        b = cls.require_stride1(b)
+        return MatrixMultiplyAdd(
+            layout=FlexibleLayout(
+                device=a.get_device(),
+                dtype=a.get_dtype(),
+                size=[m] + [n],
+            ),
+            inputs=[inp, a, b],
+        )
+
+
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"
 
