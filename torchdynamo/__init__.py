@@ -1,4 +1,4 @@
-# TODO: remove this config entirely later
+# TODO: remove this config entirely
 import functorch.compile
 
 from . import allowed_functions
