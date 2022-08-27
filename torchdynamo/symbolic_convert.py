@@ -163,8 +163,8 @@ def break_graph_if_unsupported(*, push):
 
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
-                # if not explain:
-                    # log.warning(f"Graph break: {exc} from user code at {user_stack}")
+                if not explain:
+                    log.warning(f"Graph break: {exc} from user code at {user_stack}")
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
