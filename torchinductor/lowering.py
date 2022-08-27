@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import operator
 from collections.abc import Iterable
 from typing import List
 
@@ -2906,18 +2907,11 @@ register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
 
 
-@register_lowering(aten.size)
-def size(a, dim):
+@register_lowering(aten.sym_size)
+def sym_size(a, dim):
     return a.get_size()[dim]
 
 
-try:
-    math = torch.ops.math
-
-    @register_lowering(math.mul)
-    def mul(a, b):
-        return a * b
-
-
-except:
-    pass
+@register_lowering(operator.mul)
+def op_mul(a, b):
+    return a * b

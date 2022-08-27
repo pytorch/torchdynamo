@@ -3046,6 +3046,21 @@ class CommonTemplate:
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
+    def test_symbolic(self):
+        def f(x):
+            x = x.cos()
+            x = x.view(x.shape[0] * 2, -1)
+            return (x,)
+
+        traced = make_fx(f, tracing_mode="symbolic")(torch.randn(8, 4))
+        compiled = compile_fx_inner(traced, [torch.randn(8, 4)])
+
+        out = compiled(torch.randn(8, 4))
+        self.assertEqual(out[0].shape, (16, 2))
+
+        out = compiled(torch.randn(12, 4))
+        self.assertEqual(out[0].shape, (24, 2))
+
 
 if HAS_CPU:
 
