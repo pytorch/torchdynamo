@@ -66,7 +66,7 @@ class AccessLimitingConfig(ModuleType):
     fake_tensor_propagation = True
 
     # run FX normalization passes in optimizer
-    normalize_ir = True
+    normalize_ir = False
 
     # If a tensor subclass type is in this set, torchdynamo will inline the
     # __torch_function__ logic of the subclass.
