@@ -250,6 +250,9 @@ class GraphLowering(torch.fx.Interpreter):
     def call_module(self, target, args, kwargs):
         assert False
 
+    def call_method(self, target, args, kwargs):
+        assert False
+
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
