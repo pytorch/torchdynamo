@@ -18,6 +18,7 @@ if [ ! -d "${conda_dir}" ]; then
     bash ./miniconda.sh -b -f -p "${conda_dir}"
 fi
 eval "$(${conda_dir}/bin/conda shell.bash hook)"
+export GIT_LFS_SKIP_SMUDGE=1
 
 if [ ! -d "${env_dir}" ]; then
     printf "* Creating a test environment at ${env_dir}\n"
