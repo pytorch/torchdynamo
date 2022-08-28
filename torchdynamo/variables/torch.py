@@ -434,16 +434,17 @@ class TorchPyOperator(VariableTracker):
         # Get values
         u_args = [unwrap_real(arg) for arg in args]
 
-        # Make fx to get a graph out (All PyOperator's should produce valid fx)
-        graph = make_fx(self.value)(*u_args)
-
         def unwrap_proxy(arg):
             try:
                 return arg.as_proxy()
             except NotImplementedError:
                 return arg
 
-        def register_subgraph(gm, name):
+        def register_as_subgraph(fn, name, args):
+            import torchdynamo
+
+            gm, _ = torchdynamo.export(fn, *args)
+
             next_name = None
             i = 0
             while not next_name:
@@ -456,7 +457,7 @@ class TorchPyOperator(VariableTracker):
             gm.__name__ = next_name
             src = LocalSource(gm)
             src.local_name = next_name
-            gm.force_dynamic = False
+            gm.torchdynamo_force_dynamic = False
             tx.output.add_submodule(gm, next_name, source=NNModuleSource(src))
             return next_name
 
@@ -476,15 +477,20 @@ class TorchPyOperator(VariableTracker):
             assert type(p_args[2]) is UserFunctionVariable  # false_fn
             assert type(args[3]) is ListVariable  # args
 
-            true_name = register_subgraph(graph.true_graph_0, "true")
-            false_name = register_subgraph(graph.false_graph_0, "false")
-            node_args = [x.as_proxy() for x in args[3].unpack_var_sequence(tx)]
+            node_args = [unwrap_real(x) for x in args[3].unpack_var_sequence(tx)]
+            proxy_args = [unwrap_proxy(x) for x in args[3].unpack_var_sequence(tx)]
+            true_name = register_as_subgraph(
+                p_args[1].get_function(), "true", node_args
+            )
+            false_name = register_as_subgraph(
+                p_args[2].get_function(), "false", node_args
+            )
 
             def make_attr(name):
                 node = tx.output.create_proxy(
                     "get_attr",
                     name,
-                    tuple(node_args),
+                    tuple(proxy_args),
                     {},
                 )
                 return node
@@ -494,22 +500,15 @@ class TorchPyOperator(VariableTracker):
             p_args[1] = true_node
             p_args[2] = false_node
 
-        # Get real value for binding to create
-        # a la track_tensor_tree
-        value = graph(*u_args)
-
-        # Store make_fx output
-        register_subgraph(graph, self.value.__name__)
-
         # Store the invocation as a call
         return variables.TensorVariable.create(
             tx=tx,
             proxy=tx.output.create_proxy(
-                "call_module",
-                graph.__name__,
+                "call_function",
+                self.value,
                 args=tuple(p_args),
                 kwargs={},
                 current_tx=tx,
             ),
-            example_value=value,
+            example_value=self.value(*u_args),
         )
