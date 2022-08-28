@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import re
 import textwrap
 from collections import OrderedDict
 from functools import partial
@@ -3239,6 +3240,19 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
+    def debug_str(self):
+        lines = [f"var_ranges = {dict(self.var_ranges)}"]
+        lines.extend([f"{name} = {val}" for name, val in self.indexing_exprs.items()])
+        lines.extend(
+            [
+                block.debug_str(name)
+                for name, block in itertools.chain(
+                    [("body", self.root_block)], self.subblocks.items()
+                )
+            ]
+        )
+        return "\n".join(lines)
+
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
         if buf_name is not None:
@@ -3372,8 +3386,19 @@ class LoopBodyBlock:
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph
 
-    def __call__(self):
-        gm = torch.fx.GraphModule(
+    def make_gm(self):
+        return torch.fx.GraphModule(
             {**self.body.submodules, "get_index": self.body.get_index}, self.graph
         )
-        return gm.forward(V.get_ops_handler())
+
+    def __call__(self):
+        return self.make_gm().forward(V.get_ops_handler())
+
+    def debug_str(self, name="block"):
+        code = self.make_gm().code
+        return re.sub(
+            # strip `; del var0` suffixes to make output prettier
+            r";[^\n]*",
+            "",
+            code.strip().replace("def forward(", f"def {name}("),
+        )
