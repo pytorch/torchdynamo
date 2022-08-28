@@ -4,17 +4,11 @@ debug = False
 # dead code elimination
 dce = False
 
-# assume there will be no backwards
-forward_only = False
-
 # assume input tensors are dynamic
 dynamic_shapes = True
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
-
-# enable some approximation algorithms
-approximations = False
 
 # put correctness assertions in generated code
 size_asserts = True
@@ -35,9 +29,6 @@ realize_bytes_threshold = 2000
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
-# python_key_normalize versus aot_autograd
-aot_autograd = True
-
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
@@ -52,6 +43,9 @@ aggressive_fusion = True
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
+# replace small reductions with pointwise, disable with `= 1`
+unroll_reductions_threshold = 8
 
 
 # config specific to codegen/cpp.pp

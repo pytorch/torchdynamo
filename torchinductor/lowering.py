@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-import math
+import operator
 from collections.abc import Iterable
 from typing import List
 
@@ -26,6 +26,7 @@ from .ir import Reduction
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
+from .utils import ceildiv
 from .utils import has_torchvision_roi_align
 from .utils import sympy_product
 from .virtualized import V
@@ -33,6 +34,7 @@ from .virtualized import ops
 
 log = logging.getLogger(__name__)
 lowerings = {}
+fallbacks = set()
 aten = torch.ops.aten
 prims = torch.ops.prims
 needs_realized_inputs = set()
@@ -308,10 +310,15 @@ def _to_copy(
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
     assert not memory_format, "TODO"
+    if device:
+        device = decode_device(device)
+    if device is not None and device != x.get_device():
+        if dtype is not None and device.type == "cpu":
+            # CPU can do fewer type conversions
+            x = to_dtype(x, decode_dtype(dtype))
+        x = to_device(x, device)
     if dtype is not None:
         x = to_dtype(x, decode_dtype(dtype))
-    if device is not None and device != x.get_device():
-        x = to_device(x, device)
     return x
 
 
@@ -433,6 +440,15 @@ def squeeze(x, dim=None):
     removed = new_shape.pop(dim)
     assert removed == 1, removed
     return view(x, new_shape)
+
+
+@register_lowering([aten.squeeze_])
+def squeeze_(x, dim=None):
+    val = squeeze(x, dim)
+    assert isinstance(x, TensorBox)
+    assert isinstance(val, TensorBox)
+    x.data = val.data
+    return x
 
 
 @register_lowering(aten.expand, type_promote=False)
@@ -700,12 +716,19 @@ def mm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.MatrixMultiply.create(a, b))
 
 
+@register_lowering(aten.addmm)
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b))
+
+
 @register_lowering(aten.bmm)
 def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
 def fallback_handler(kernel):
+    fallbacks.add(kernel)
+
     def handler(*args, **kwargs):
         result = ir.FallbackKernel.create(kernel, *args, **kwargs)
         if isinstance(result, (list, tuple)):
@@ -869,6 +892,7 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
+make_fallback(aten.as_strided_scatter)
 make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
@@ -882,13 +906,13 @@ make_fallback(aten.im2col)
 make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
+make_fallback(aten.sort.stable)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
 make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
-make_fallback(aten.upsample_nearest2d_backward)
 
 
 @register_lowering(aten.convolution)
@@ -1248,12 +1272,9 @@ def full_like(x, fill_value, **kwargs):
 
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
-    def inner(
-        *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
-    ):
+    def inner(*size, dtype=None, device=None, layout=0, pin_memory=False):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -1279,7 +1300,7 @@ def create_tensor_like(creation_fn):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
+
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1287,12 +1308,7 @@ def create_tensor_like(creation_fn):
         device = device or x.get_device()
         size = list(x.get_size())
         return creation_fn(
-            size,
-            dtype=dtype,
-            device=device,
-            layout=layout,
-            pin_memory=pin_memory,
-            memory_format=memory_format,
+            size, dtype=dtype, device=device, layout=layout, pin_memory=pin_memory
         )
 
     return _constant_like
@@ -2187,6 +2203,36 @@ def pad_adaptive_loader(x):
     return load
 
 
+def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
+    h_start_index_fn, w_start_index_fn = start_index_fns
+    h_end_index_fn, w_end_index_fn = end_index_fns
+
+    def fn_sum(idx, loader):
+        *prefix, bh, bw = idx
+
+        h_start_index = h_start_index_fn(bh)
+        h_end_index = h_end_index_fn(bh)
+
+        w_start_index = w_start_index_fn(bw)
+        w_end_index = w_end_index_fn(bw)
+
+        total = None
+        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
+            val = loader(
+                prefix,
+                [ih, iw],
+                [h_start_index, w_start_index],
+                [h_end_index, w_end_index],
+            )
+            if total is None:
+                total = val
+            else:
+                total = ops.add(val, total)
+        return total
+
+    return fn_sum
+
+
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
     assert isinstance(x, TensorBox)
@@ -2208,40 +2254,29 @@ def _adaptive_avg_pool2d(x, output_size):
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)
 
-    h_kernel_max = math.ceil((h_in + h_out - 1) / h_out)
-    w_kernel_max = math.ceil((w_in + h_out - 1) / w_out)
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
 
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
 
-    def fn_sum(idx, loader):
-        *prefix, bh, bw = idx
+    def start_index(index, out_dim, inp_dim):
+        return ir.IndexingDiv((index * inp_dim), out_dim)
 
-        def start_index(index, out_dim, inp_dim):
-            return ir.IndexingDiv((index * inp_dim), out_dim)
+    def end_index(index, out_dim, inp_dim):
+        return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
-        def end_index(index, out_dim, inp_dim):
-            return ir.IndexingDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+    h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
+    h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
 
-        h_start_index = start_index(bh, h_out, h_in)
-        h_end_index = end_index(bh, h_out, h_in)
+    w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
+    w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
 
-        w_start_index = start_index(bw, w_out, w_in)
-        w_end_index = end_index(bw, w_out, w_in)
-
-        total = None
-        for ih, iw in itertools.product(range(h_kernel_max), range(w_kernel_max)):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
-        return total
+    fn_sum = _adaptive_pooling_idx_sum(
+        [h_kernel_max, w_kernel_max],
+        [h_start_index, w_start_index],
+        [h_end_index, w_end_index],
+    )
 
     ones_loader = pad_adaptive_loader(ones_like(x))
 
@@ -2258,6 +2293,55 @@ def _adaptive_avg_pool2d(x, output_size):
     return rv
 
 
+@register_lowering(aten.upsample_nearest2d_backward.vec)
+def upsample_nearest2d_backward(
+    x, output_size=None, input_size=None, scale_factors=None
+):
+    x.realize_hint()
+
+    *batch, inp_h, inp_w = x.get_size()
+    inp_h = V.graph.sizevars.guard_static_shape(inp_h)
+    inp_w = V.graph.sizevars.guard_static_shape(inp_w)
+
+    *batch, out_h, out_w = input_size
+
+    if inp_h % out_h == 0 and inp_w % out_w == 0:
+        return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
+
+    h_kernel_max = ceildiv(inp_h, out_h)
+    w_kernel_max = ceildiv(inp_w, out_w)
+
+    def start_index(index, out_dim, inp_dim):
+        return ir.CeilDiv(index * inp_dim, out_dim)
+
+    def end_index(index, out_dim, inp_dim):
+        return start_index((index + 1), out_dim, inp_dim)
+
+    h_start_index = functools.partial(start_index, out_dim=out_h, inp_dim=inp_h)
+    h_end_index = functools.partial(end_index, out_dim=out_h, inp_dim=inp_h)
+
+    w_start_index = functools.partial(start_index, out_dim=out_w, inp_dim=inp_w)
+    w_end_index = functools.partial(end_index, out_dim=out_w, inp_dim=inp_w)
+
+    fn_sum = _adaptive_pooling_idx_sum(
+        [h_kernel_max, w_kernel_max],
+        [h_start_index, w_start_index],
+        [h_end_index, w_end_index],
+    )
+
+    def fn(idx):
+        return fn_sum(idx, pad_adaptive_loader(x))
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=list(input_size),
+    )
+
+    return rv
+
+
 @register_lowering(aten.avg_pool2d, type_promote=False)
 def avg_pool2d(
     x,
@@ -2268,7 +2352,6 @@ def avg_pool2d(
     count_include_pad=True,
     divisor_override=None,
 ):
-    assert not divisor_override
     if not stride:
         stride = kernel_size
     if not padding:
@@ -2309,8 +2392,11 @@ def avg_pool2d(
                 total = ops.add(val, total)
         return total
 
-    if count_include_pad or not had_padding:
-        scale = 1.0 / (kernel_size[0] * kernel_size[1])
+    if count_include_pad or not had_padding or divisor_override:
+        if divisor_override:
+            scale = 1 / divisor_override
+        else:
+            scale = 1.0 / (kernel_size[0] * kernel_size[1])
 
         def fn(idx):
             return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
@@ -2498,12 +2584,18 @@ def _validate_reduction_axis(x, axis):
 
 def make_reduction(reduction_type: str, override_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
+        if reduction_type == "min" and axis is not None:
+            return (
+                reduce_amin(x, axis, keepdims, dtype=dtype),
+                reduce_argmin(x, axis, keepdims),
+            )
+        if reduction_type == "max" and axis is not None:
+            return (
+                reduce_amax(x, axis, keepdims, dtype=dtype),
+                reduce_argmax(x, axis, keepdims),
+            )
         if dtype is not None:
             x = to_dtype(x, dtype)
-        assert (
-            reduction_type in ("sum", "amax", "amin", "any", "argmax", "argmin")
-            or axis is None
-        ), "TODO: max with index"
         if reduction_type == "any":
             x = to_dtype(x, torch.bool)
         size = x.get_size()
@@ -2749,11 +2841,15 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
-register_lowering(aten.amax)(make_reduction("amax"))
-register_lowering(aten.amin)(make_reduction("amin"))
+reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("amin"))
 register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
-register_lowering(aten.argmax)(make_reduction("argmax", override_dtype=torch.int64))
-register_lowering(aten.argmin)(make_reduction("argmin", override_dtype=torch.int64))
+reduce_argmax = register_lowering(aten.argmax)(
+    make_reduction("argmax", override_dtype=torch.int64)
+)
+reduce_argmin = register_lowering(aten.argmin)(
+    make_reduction("argmin", override_dtype=torch.int64)
+)
 
 add = register_pointwise(aten.add)
 exp = register_pointwise(aten.exp)
@@ -2816,3 +2912,13 @@ register_inplace(aten.div_, div)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
+
+
+@register_lowering(aten.sym_size)
+def sym_size(a, dim):
+    return a.get_size()[dim]
+
+
+@register_lowering(operator.mul)
+def op_mul(a, b):
+    return a * b

@@ -425,10 +425,6 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def zero_vars(it):
-    return {k: 0 for k in it}
-
-
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
@@ -653,8 +649,12 @@ class TritonKernel(Kernel):
             dense_mask.append(f"{tree.prefix}mask")
 
         if (need_dense and not have_dense) or index == 0:
-            mask = dense_mask
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+            if index == 0:
+                return index_str, "None"
+            else:
+                mask = dense_mask
+
         elif not have_loop_vars and copy_shape:
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
@@ -668,8 +668,7 @@ class TritonKernel(Kernel):
 
         if mask == ["xmask"] and index == 0 and self.range_trees[0].numel == 1:
             # This causes a triton error:
-            # https://gist.github.com/jansel/70c4b1c8041f0f27f96ee95e2edca04a
-            # TODO(jansel): submit a bug report
+            # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
         return index_str, " & ".join(mask)
@@ -705,6 +704,7 @@ class TritonKernel(Kernel):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
+
         if "rmask" in mask:
             # This eviction policy heuristic is untested.
             # ptillet suggested we should try only doing this for

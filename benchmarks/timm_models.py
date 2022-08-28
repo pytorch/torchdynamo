@@ -10,6 +10,7 @@ import warnings
 import torch
 from common import BenchmarkRunner
 from common import main
+from torch._subclasses import FakeTensor
 
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
@@ -59,7 +60,7 @@ BATCH_SIZE_DIVISORS = {
     "gmixer_24_224": 2,
     "gmlp_s16_224": 2,
     "hrnet_w18": 64,
-    "jx_nest_base": 1,
+    "jx_nest_base": 2,
     "legacy_senet154": 2,
     "mixer_b16_224": 2,
     "mixnet_l": 2,
@@ -84,6 +85,11 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = set()
+
+SKIP = {
+    # Unusual training setup
+    "levit_128",
+}
 
 
 def refresh_model_names():
@@ -264,7 +270,11 @@ class TimmRunnner(BenchmarkRunner):
 
     def iter_model_names(self, args):
         # for model_name in list_models(pretrained=True, exclude_filters=["*in21k"]):
-        for model_name in sorted(TIMM_MODELS.keys()):
+        model_names = sorted(TIMM_MODELS.keys())
+        start, end = self.get_benchmark_indices(len(model_names))
+        for index, model_name in enumerate(model_names):
+            if index < start or index >= end:
+                continue
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
@@ -297,7 +307,10 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        return self.loss(pred, self.target)
+        if isinstance(pred, FakeTensor) and not isinstance(self.target, FakeTensor):
+            return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
+        else:
+            return self.loss(pred, self.target)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)

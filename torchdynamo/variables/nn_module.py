@@ -3,6 +3,7 @@ import inspect
 import itertools
 import re
 import types
+from contextlib import contextmanager
 from typing import Dict
 from typing import List
 
@@ -154,58 +155,68 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
-        is_lazy = is_lazy_module(mod)
-        if (
-            isinstance(mod, torch.nn.Sequential)
-            and mod.__class__.forward is torch.nn.Sequential.forward
-        ):
-            # unroll Sequential()
-            assert not kwargs
-            (arg,) = args
-            for idx, submod in enumerate(mod):
-                tx.call_function(
-                    tx.output.add_submodule(
-                        submod,
+
+        @contextmanager
+        def record_nn_module_stack():
+            try:
+                tx.nn_module_stack[self.module_key] = mod.__class__.__name__
+                yield
+            finally:
+                del tx.nn_module_stack[self.module_key]
+
+        with record_nn_module_stack():
+            is_lazy = is_lazy_module(mod)
+            if (
+                isinstance(mod, torch.nn.Sequential)
+                and mod.__class__.forward is torch.nn.Sequential.forward
+            ):
+                # unroll Sequential()
+                assert not kwargs
+                (arg,) = args
+                for idx, submod in enumerate(mod):
+                    tx.call_function(
+                        tx.output.add_submodule(
+                            submod,
+                            self.module_key,
+                            idx,
+                            source=NNModuleSource(GetItemSource(self.source, idx)),
+                            **options,
+                        ),
+                        [arg],
+                        {},
+                    )
+                    arg = tx.pop()
+                return arg
+            elif is_allowed(mod.__class__):
+                # The module type will change after it is called
+                if is_lazy:
+                    self.module_type = mod.cls_to_become
+
+                return variables.TensorVariable.create(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_module",
                         self.module_key,
-                        idx,
-                        source=NNModuleSource(GetItemSource(self.source, idx)),
-                        **options,
+                        *proxy_args_kwargs(args, kwargs),
+                        current_tx=tx,
                     ),
-                    [arg],
-                    {},
+                    nnmodule=mod,
+                    **options,
                 )
-                arg = tx.pop()
-            return arg
-        elif is_allowed(mod.__class__):
-            # The module type will change after it is called
-            if is_lazy:
-                self.module_type = mod.cls_to_become
-
-            return variables.TensorVariable.create(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_module",
-                    self.module_key,
-                    *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
-                ),
-                nnmodule=mod,
-                **options,
-            )
-        else:
-            # for lazy modules, run the pre-hooks which will update the type
-            # TODO mlazos: we don't fully support all of the hooks that exist,
-            # so restrict using __call__ only to lazy modules for now
-            if is_lazy:
-                fn = mod.__class__.__call__
             else:
-                fn = mod.__class__.forward
+                # for lazy modules, run the pre-hooks which will update the type
+                # TODO mlazos: we don't fully support all of the hooks that exist,
+                # so restrict using __call__ only to lazy modules for now
+                if is_lazy:
+                    fn = mod.__class__.__call__
+                else:
+                    fn = mod.__class__.forward
 
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
-                [self] + args,
-                kwargs,
-            )
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(fn, **options),
+                    [self] + args,
+                    kwargs,
+                )
 
     def call_method(
         self,

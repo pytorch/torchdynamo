@@ -17,8 +17,10 @@ import warnings
 import numpy as np
 import pandas as pd
 import torch
+from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
 
 import torchdynamo
@@ -26,10 +28,7 @@ import torchdynamo.utils
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.inference import fixed_strategy1
 from torchdynamo.optimizations.inference import fixed_strategy2
-from torchdynamo.optimizations.inference import offline_autotuner
-from torchdynamo.optimizations.inference import online_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
-from torchdynamo.optimizations.python_key import python_key
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
 from torchdynamo.testing import CompileCounterWithBackend
@@ -54,6 +53,70 @@ current_name = ""
 current_device = ""
 current_batch_size = None
 output_filename = None
+
+CI_SKIP_INFERENCE = [
+    # TorchBench
+    "dlrm",
+    "fambench_dlrm",
+    "fastNLP_Bert",
+    "hf_Reformer",
+    "moco",
+    "pyhpc_",
+    "Super_SloMo",
+    "tacotron2",
+    "yolov3",
+    # Huggingface
+    "AlbertForQuestionAnswering",
+    "AllenaiLongformerBase",
+    "BartForCausalLM",
+    "BertForQuestionAnswering",
+    "BigBird",
+    "BlenderbotSmallForConditionalGeneration",
+    "DebertaForQuestionAnswering",
+    "DebertaV2ForQuestionAnswering",
+    "DistilBertForQuestionAnswering",
+    "ElectraForQuestionAnswering",
+    "GPT2ForSequenceClassification",
+    "GPTNeoForSequenceClassification",
+    "LayoutLMForSequenceClassification",
+    "MBartForConditionalGeneration",
+    "MegatronBertForQuestionAnswering",
+    "MobileBertForQuestionAnswering",
+    "PLBartForConditionalGeneration",
+    "RobertaForQuestionAnswering",
+]
+
+CI_SKIP_TRAINING = [
+    # TorchBench
+    "attention_is_all_you_need_pytorch",
+    "hf_Albert",
+    "hf_Bart",
+    "hf_GPT2",
+    "mobilenet_",
+    "pytorch_struct",
+    "vgg16",
+    "Background_Matting",  # from functionalization
+    "mobilenet_v2_quantized_qat",  # from functionalization
+    "resnet50_quantized_qat",  # from functionalization
+    "speech_transformer",  # from functionalization
+    "vision_maskrcnn",  # from functionalization
+    "timm_efficientnet",  # from functionalization (only fails for inductor)
+    # Huggingface
+    "AlbertForMaskedLM",
+    "BartForConditionalGeneration",
+    "DebertaForMaskedLM",
+    "DebertaV2ForMaskedLM",
+    "GPTNeoForCausalLM",
+    "M2M100ForConditionalGeneration",
+    "MT5ForConditionalGeneration",
+    "MegatronBertForCausalLM",
+    "MobileBertForMaskedLM",
+    "PegasusForConditionalGeneration",
+    "T5ForConditionalGeneration",
+    "T5Small",
+    "XGLMForCausalLM",
+    "XLNetLMHeadModel",
+]
 
 
 def output_csv(filename, headers, row):
@@ -307,10 +370,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
 
 def speedup_experiment(args, model_iter_fn, model, example_inputs):
     """
-    Measure speedups over eager using the autotuning inference backend.  To use this:
-        1) First run once to record graphs that need autotuning
-        2) Next run ./autotune.py to select the right backend for each recorded graph
-        3) Finally, run this target again to measure speedups
+    Measure speedups over eager.
 
     Writes to ./speedups.csv
     """
@@ -840,10 +900,6 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def failing_python_key_models(self):
-        return set()
-
-    @property
     def failing_torchinductor_models(self):
         return set()
 
@@ -944,6 +1000,15 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
+    def get_benchmark_indices(self, length):
+        start = self._args.partition_id * (length // self._args.total_partitions)
+        end = (
+            (self._args.partition_id + 1) * (length // self._args.total_partitions)
+            if self._args.partition_id < self._args.total_partitions - 1
+            else length
+        )
+        return start, end
+
     def run_one_model(
         self,
         name,
@@ -1006,7 +1071,7 @@ class BenchmarkRunner:
 
         fp64_outputs = None
         # Skip float64 checks for CI because it has smaller DRAM, leading to OOMs.
-        if not self.args.ci:
+        if not self.args.skip_fp64_check:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             try:
                 fp64_outputs = model_iter_fn(
@@ -1133,6 +1198,19 @@ def parse_args():
     parser.add_argument(
         "--exclude", "-x", action="append", help="filter benchmarks with regexp"
     )
+    parser.add_argument(
+        "--total-partitions",
+        type=int,
+        default=1,
+        choices=range(1, 10),
+        help="Total number of partitions we want to divide the benchmark suite into",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        default=0,
+        help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
+    )
     parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
@@ -1161,7 +1239,11 @@ def parse_args():
         action="store_true",
         help="dump raw timing metrics from speedup experiment",
     )
-
+    parser.add_argument(
+        "--log-operator-inputs",
+        action="store_true",
+        default=False,
+    )
     parser.add_argument(
         "--channels-last",
         action="store_true",
@@ -1175,6 +1257,9 @@ def parse_args():
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--skip-fp64-check", action="store_true", help="skip accuracy check using fp64"
     )
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
@@ -1262,12 +1347,6 @@ def parse_args():
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
     )
     group.add_argument(
-        "--online-autotune", action="store_true", help=help(speedup_experiment)
-    )
-    group.add_argument(
-        "--offline-autotune", action="store_true", help=help(speedup_experiment)
-    )
-    group.add_argument(
         "--speedup-fixed1",
         action="store_true",
         help="speedup using experimental fixed_strategy backend",
@@ -1310,7 +1389,6 @@ def parse_args():
         action="store_true",
         help="TorchDynamo frontend with torchscript backend",
     )
-    group.add_argument("--python-key", action="store_true")
     group.add_argument(
         "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
     )
@@ -1403,6 +1481,23 @@ def main(runner, original_dir=None):
     # defaults
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+
+    if args.ci:
+        # Only dump error on CI
+        args.quiet = True
+        args.raise_on_assertion_error = True
+        args.raise_on_backend_error = True
+        # fp64 check cause OOM on CI
+        args.skip_fp64_check = True
+        # Repeat less on CI
+        args.repeat = 2
+        args.exclude += CI_SKIP_INFERENCE
+        if args.training:
+            args.exclude += CI_SKIP_TRAINING
+
+    if args.partition_id > args.total_partitions or args.partition_id < 0:
+        print("Invalid partition id")
+        return sys.exit(-1)
 
     if not args.devices:
         if torch.cuda.is_available():
@@ -1533,20 +1628,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.online_autotune:
-        optimize_ctx = torchdynamo.optimize(online_autotuner, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups.csv"
-    elif args.offline_autotune:
-        optimize_ctx = torchdynamo.optimize(offline_autotuner, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedups.csv"
-    elif args.python_key:
-        optimize_ctx = torchdynamo.optimize(python_key, nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "pythonkey.csv"
-        if not args.no_skip:
-            runner.skip_models.update(runner.failing_python_key_models)
     elif args.speedup_ltc:
         optimize_ctx = torchdynamo.optimize(
             backends.ltc_reuse_graph, nopython=args.nopython
@@ -1724,6 +1805,15 @@ def main(runner, original_dir=None):
             current_batch_size = batch_size
             set_model_name(name)
 
+            if args.float32:
+                model, example_inputs = cast_to_fp32(model, example_inputs)
+            elif args.float16:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
+
+            if args.log_operator_inputs:
+                log_operator_inputs(model, example_inputs, model_iter_fn, name, args)
+                continue
+
             runner.run_one_model(
                 name,
                 model,
@@ -1762,6 +1852,40 @@ def main(runner, original_dir=None):
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
         print_summary(output_filename)
+
+
+def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
+    mode = "training" if args.training else "eval"
+    output = os.path.join(os.path.dirname(args.output), f"{name}_{mode}.txt")
+
+    # TODO - add option for coalescing inputs over multiple runs
+    if os.path.exists(output):
+        print(f"Skipping {name}, {output} already exists")
+        return
+
+    print(f"Running {name}")
+
+    operator_mode = OperatorInputsMode()
+    fake_tensor_mode = FakeTensorMode()
+
+    with torch._subclasses.fake_tensor.FakeCopyMode(fake_tensor_mode):
+        model_fake = copy.deepcopy(model)
+        example_inputs_fake = copy.deepcopy(example_inputs)
+    try:
+        with fake_tensor_mode, operator_mode:
+            model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
+    except Exception as e:
+        print(f"{name} failed to run with fake tensors, trying real. Exception: {e}")
+        operator_mode = OperatorInputsMode()
+        try:
+            with operator_mode:
+                model_iter_fn(model, example_inputs, collect_outputs=False)
+        except Exception as e2:
+            print(f"{name} failed to run with real. Exception: {e2}")
+            raise
+
+    print(f"Writing output to {output}")
+    operator_mode.log_to_file(output)
 
 
 if __name__ == "__main__":

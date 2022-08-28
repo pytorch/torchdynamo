@@ -278,21 +278,29 @@ def clone_input(x):
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
         if x.is_quantized:
-            buffer = torch.empty_quantized((needed_size + 32,), x)
+            result = torch.empty_quantized((needed_size + 32,), x)
         else:
-            buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+            result = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
         cache_line_offset = (
-            (x.data_ptr() - buffer.data_ptr()) % 32
+            (x.data_ptr() - result.data_ptr()) % 32
         ) // x.element_size()
-        result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+        result.as_strided_(x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
-            result.requires_grad_(x.requires_grad)
+            if x.is_leaf:
+                result.requires_grad_(x.requires_grad)
+            if x.is_leaf and x.grad is not None:
+                result.grad = clone_input(x.grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            return torch.clone(x)
+            y = torch.clone(x)
+            if x.is_leaf:
+                y.requires_grad_(x.requires_grad)
+            if x.is_leaf and x.grad is not None:
+                y.grad = clone_input(x.grad)
+            return y
         return result
 
 
