@@ -3397,5 +3397,6 @@ class LoopBodyBlock:
     def debug_str(self, name="block"):
         code = self.make_gm().code
         return re.sub(
+            # strip `; del var0` suffixes to make output prettier
             r";[^\n]*", "", code.strip().replace("def forward(", f"def {name}(")
         )
