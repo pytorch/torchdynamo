@@ -3,6 +3,7 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
+from .dicts import DefaultDictVariable
 from .functions import NestedUserFunctionVariable
 from .functions import UserFunctionVariable
 from .functions import UserMethodVariable
@@ -48,6 +49,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextManagerVariable",
     "DataClassVariable",
+    "DefaultDictVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",

@@ -52,6 +52,70 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
+CI_SKIP_INFERENCE = [
+    # TorchBench
+    "dlrm",
+    "fambench_dlrm",
+    "fastNLP_Bert",
+    "hf_Reformer",
+    "moco",
+    "pyhpc_",
+    "Super_SloMo",
+    "tacotron2",
+    "yolov3",
+    # Huggingface
+    "AlbertForQuestionAnswering",
+    "AllenaiLongformerBase",
+    "BartForCausalLM",
+    "BertForQuestionAnswering",
+    "BigBird",
+    "BlenderbotSmallForConditionalGeneration",
+    "DebertaForQuestionAnswering",
+    "DebertaV2ForQuestionAnswering",
+    "DistilBertForQuestionAnswering",
+    "ElectraForQuestionAnswering",
+    "GPT2ForSequenceClassification",
+    "GPTNeoForSequenceClassification",
+    "LayoutLMForSequenceClassification",
+    "MBartForConditionalGeneration",
+    "MegatronBertForQuestionAnswering",
+    "MobileBertForQuestionAnswering",
+    "PLBartForConditionalGeneration",
+    "RobertaForQuestionAnswering",
+]
+
+CI_SKIP_TRAINING = [
+    # TorchBench
+    "attention_is_all_you_need_pytorch",
+    "hf_Albert",
+    "hf_Bart",
+    "hf_GPT2",
+    "mobilenet_",
+    "pytorch_struct",
+    "vgg16",
+    "Background_Matting",  # from functionalization
+    "mobilenet_v2_quantized_qat",  # from functionalization
+    "resnet50_quantized_qat",  # from functionalization
+    "speech_transformer",  # from functionalization
+    "vision_maskrcnn",  # from functionalization
+    "timm_efficientnet",  # from functionalization (only fails for inductor)
+    # Huggingface
+    "AlbertForMaskedLM",
+    "BartForConditionalGeneration",
+    "DebertaForMaskedLM",
+    "DebertaV2ForMaskedLM",
+    "GPTNeoForCausalLM",
+    "M2M100ForConditionalGeneration",
+    "MT5ForConditionalGeneration",
+    "MegatronBertForCausalLM",
+    "MobileBertForMaskedLM",
+    "PegasusForConditionalGeneration",
+    "T5ForConditionalGeneration",
+    "T5Small",
+    "XGLMForCausalLM",
+    "XLNetLMHeadModel",
+]
+
 
 def output_csv(filename, headers, row):
     assert filename
@@ -1005,7 +1069,7 @@ class BenchmarkRunner:
 
         fp64_outputs = None
         # Skip float64 checks for CI because it has smaller DRAM, leading to OOMs.
-        if not self.args.ci:
+        if not self.args.skip_fp64_check:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             try:
                 fp64_outputs = model_iter_fn(
@@ -1191,6 +1255,9 @@ def parse_args():
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--skip-fp64-check", action="store_true", help="skip accuracy check using fp64"
     )
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
@@ -1392,6 +1459,19 @@ def main(runner, original_dir=None):
     # defaults
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
+
+    if args.ci:
+        # Only dump error on CI
+        args.quiet = True
+        args.raise_on_assertion_error = True
+        args.raise_on_backend_error = True
+        # fp64 check cause OOM on CI
+        args.skip_fp64_check = True
+        # Repeat less on CI
+        args.repeat = 2
+        args.exclude += CI_SKIP_INFERENCE
+        if args.training:
+            args.exclude += CI_SKIP_TRAINING
 
     if args.partition_id > args.total_partitions or args.partition_id < 0:
         print("Invalid partition id")

@@ -91,6 +91,9 @@ class MemoryDep(typing.NamedTuple):
             return False
         return True
 
+    def is_contiguous(self) -> bool:
+        return isinstance(self.index, (sympy.Symbol, sympy.Integer))
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -105,6 +108,9 @@ class StarDep(typing.NamedTuple):
         return 1
 
     def is_simple(self) -> bool:
+        return False
+
+    def is_contiguous(self) -> bool:
         return False
 
 
@@ -186,10 +192,10 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False) -> str:
+    def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"load({name}, {index}, {upcast})"
+        return f"load({name}, {index})"
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)

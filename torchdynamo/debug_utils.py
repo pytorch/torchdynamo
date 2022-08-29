@@ -96,18 +96,22 @@ def dump_state(gm, args, compiler_name):
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
     print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
-        fd.write(generate_repro_string(gm, args))
-        fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
-        fd.write(
-            textwrap.dedent(
-                f"""
-                compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(*args)
-                """
-            )
-        )
+        save_graph_repro(fd, gm, args, compiler_name)
     repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
     shutil.copyfile(file_name, repro_path)
+
+
+def save_graph_repro(fd, gm, args, compiler_name):
+    fd.write(generate_repro_string(gm, args))
+    fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
+    fd.write(
+        textwrap.dedent(
+            f"""
+            compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
+            compiled(*args)
+            """
+        )
+    )
 
 
 def isolate_fails(fx_g, args, compiler_name: str, env=None):
