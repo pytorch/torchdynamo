@@ -947,7 +947,9 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp16(
                 copy.deepcopy(model), clone_inputs(example_inputs)
             )
-        import pdb
+        else:
+            model = copy.deepcopy(model)
+            example_inputs = clone_inputs(example_inputs)
 
         try:
             self.model_iter_fn(model, example_inputs)
