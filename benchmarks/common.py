@@ -116,6 +116,7 @@ CI_SKIP_TRAINING = [
     "T5Small",
     "XGLMForCausalLM",
     "XLNetLMHeadModel",
+    "PegasusForCausalLM",
 ]
 
 
