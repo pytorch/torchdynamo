@@ -1857,9 +1857,12 @@ class MiscTests(torchdynamo.testing.TestCase):
         # idx should be 1 -> slicing off [1:] of 8 elem tensor
         self.assertEqual(list(out.shape), [7])
 
-        # graph break on slice
-        self.assertEqual(counter.op_count, 5)
-        self.assertEqual(counter.frame_count, 1)
+        dyn = torchdynamo.config.dynamic_shapes
+        expected_ops = 5 if dyn else 4
+        expected_frame = 1 if dyn else 2
+
+        self.assertEqual(expected_ops, expected_ops)
+        self.assertEqual(expected_frame, expected_frame)
 
         self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
 

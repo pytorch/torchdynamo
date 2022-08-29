@@ -154,11 +154,12 @@ class TensorVariable(VariableTracker):
         # fake tensors, and which would determine the output shape of the slice.
         # It is a workaround until https://github.com/pytorch/pytorch/pull/83567
         # is landed and there is more complete support for breaking on data dependent operators.
+
         if (
             proxy.node.target == operator.getitem
             and use_fake_tensors
             and args is not None
-            and config.dynamic_shapes
+            and not config.dynamic_shapes
         ):
             if (
                 isinstance(args[0], FakeTensor)
