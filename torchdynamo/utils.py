@@ -37,6 +37,56 @@ troubleshooting_url = (
 
 log = logging.getLogger(__name__)
 
+# profiling compilation time
+compilation_metrics = collections.OrderedDict()
+
+
+def dynamo_timed(func):
+    def time_wrapper(*args, **kwargs):
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        compilation_metrics[key].append(time.time() - t0)
+        return r
+
+    return time_wrapper
+
+
+def compile_times(repr="str", aggregate=False):
+    """
+    Get metrics about torchdynamo frontend/backend compilation times.
+
+    Accumulates information from functions tagged with `@dynamo_timed`.
+
+    repr='str' returns a printable string for user interaction, and 'csv'
+    returns headers, rows which can be logged for output
+
+    aggregate causes values from multiple compilations (e.g. split graphs)
+    to be accumulated into one value.  If false, expect more than one value
+    per metric.
+    """
+
+    def fmt_fn(values):
+        def as_str(v):
+            return f"{v:.4f}"
+
+        if aggregate:
+            return as_str(sum(values))
+        return ", ".join(map(as_str, values))
+
+    if repr == "str":
+        rows = [(k, fmt_fn(compilation_metrics[k])) for k in compilation_metrics]
+        out = "TorchDynamo compilation metrics:\n"
+        out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+        return out
+    elif repr == "csv":
+        headers = list(compilation_metrics.keys())
+        values = [fmt_fn(v) for v in compilation_metrics.values()]
+        return headers, values
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
