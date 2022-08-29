@@ -188,7 +188,7 @@ The above backends optimize inference. Let's see how TorchDynamo supports traini
 Torchdynamo supports training, using AotAutograd to capture backwards:
 * only the .forward() graph is captured by torchdynamo's python evalframe frontend
 * for each segment of .forward() that torchdynamo captures, it uses AotAutograd to generate a backward graph segment
-* each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backwrad
+* each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backward
 * the forward, backward pairs are wrapped in autograd.function modules
 * usercode calling .backward() still triggers eager's autograd engine, which runs each 'compiled backward' graph as if it were one op, also running any non-compiled eager ops' .backward() functions
 
@@ -196,7 +196,7 @@ Current limitations:
 * optimizer ops are currently not captured at all, and thus not compiled (under investigation to add support)
 * DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
 
-Specifically, these are the exisiting backends
+Specifically, these are the existing backends
 
 * `torchdynamo.optimize("aot_nop")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
 * `torchdynamo.optimize("aot_nvfuser")` - Use AotAutograd with Torchscipt and nvfuser compiler.
