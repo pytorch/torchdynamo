@@ -1907,6 +1907,28 @@ def reflection_pad2d_backward(grad_output, x, padding):
     )
 
 
+@register_lowering(prims.rev.default)
+def rev(x, dims):
+    # note - dims pre-canoncalized
+    x_loader = x.make_loader()
+    sizes = x.get_size()
+
+    def loader(idx):
+        idx = list(idx)
+        assert len(idx) == len(sizes)
+        for dim in dims:
+            idx[dim] = (sizes[dim] - 1) - idx[dim]
+
+        return x_loader(idx)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=loader,
+        ranges=sizes,
+    )
+
+
 @register_lowering(aten.constant_pad_nd, type_promote=False)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
@@ -2827,6 +2849,20 @@ def div(a, b):
         a if isinstance(a, Number) else to_dtype(a, dtype),
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
+
+
+# TODO - enable builtin and disable decomp to lower to ptx instruction
+# Causes compilation to not complete on timm_vision_transformers inference
+# @register_lowering(aten.rsqrt)
+# def rsqrt(x):
+#     dtype = x.get_dtype()
+#     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+#         x = to_dtype(x, torch.get_default_dtype())
+#
+#     def _rsqrt(x):
+#         return ops.rsqrt(x)
+#
+#     return make_pointwise(_rsqrt)(x)
 
 
 @register_lowering([aten.sum, prims.sum])

@@ -1733,6 +1733,15 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    def test_flip(self):
+        def fn(x):
+            return torch.flip(x, (-1,)), torch.flip(x, (0, 2)) - 2
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
+        )
+
     def test_log2(self):
         def fn(x):
             return torch.log2(x), torch.log2(x + 1) - 2

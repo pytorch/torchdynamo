@@ -191,6 +191,10 @@ class CppOverrides(OpOverrides):
         return f"std::sqrt({x})"
 
     @staticmethod
+    def rsqrt(x):
+        return f"1 / std::sqrt({x})"
+
+    @staticmethod
     def pow(a, b):
         return f"std::pow({a}, {b})"
 

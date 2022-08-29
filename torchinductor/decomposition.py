@@ -83,6 +83,7 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.tril.default,
         aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
     ]
