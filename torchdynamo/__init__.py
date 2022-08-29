@@ -1,3 +1,6 @@
+# TODO: remove this config entirely
+import functorch.compile
+
 from . import allowed_functions
 from . import convert_frame
 from . import eval_frame
@@ -12,6 +15,8 @@ from .eval_frame import run
 from .eval_frame import skip
 from .utils import guard_failures
 from .utils import orig_code_map
+
+functorch.compile.config.use_functionalize = True
 
 __all__ = [
     "optimize",

@@ -4,6 +4,8 @@ import functools
 import itertools
 import logging
 import os
+import pprint
+import textwrap
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -28,6 +30,13 @@ from .utils import precompute_methods
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+def pformat(obj):
+    result = pprint.pformat(obj, indent=4)
+    if "\n" in result:
+        return f"\n{textwrap.indent(result, ' '*4)}"
+    return result
 
 
 class OutputNode:
@@ -61,6 +70,26 @@ class BaseSchedulerNode:
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
+
+    def debug_str(self):
+        """Longer form printout for trace logs"""
+        name = self.get_name()
+        lines = [
+            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}.writes = {pformat(self.read_writes.writes)}",
+            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
+            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+        ]
+        try:
+            lines += [
+                self.debug_str_extra(),
+            ]
+        except Exception:
+            log.warning("Ignoring error in debug_str()", exc_info=True)
+        return "\n".join(lines).rstrip()
+
+    def debug_str_extra(self):
+        return ""
 
     def log_details(self):
         log.info(
@@ -151,7 +180,8 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    pass
+    def debug_str_extra(self):
+        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
 
 
 class TemplateSchedulerNode(BaseSchedulerNode):
@@ -213,6 +243,22 @@ class SchedulerNode(BaseSchedulerNode):
             # self.read_writes.writes = self.read_writes.writes | {
             #     w.maybe_swap_sizes() for w in self.read_writes.writes
             # }
+
+    def debug_str_extra(self):
+        name = self.get_name()
+        lines = [
+            f"{name}.group.device = {self.group[0]}",
+            f"{name}.group.iteration = {self.group[1]}",
+            f"{name}.sizes = {self._sizes}",
+        ]
+        if self.get_aliases():
+            lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
+        if self.get_mutations():
+            lines.append(f"{name}.mutations = {pformat(self.get_mutations())}")
+        if isinstance(self._body, ir.LoopBody):
+            lines.append(f"class {name}_loop_body:")
+            lines.append(textwrap.indent(self._body.debug_str(), "    "))
+        return "\n".join(lines)
 
     def get_ranges(self):
         return self._sizes
@@ -355,6 +401,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.get_names() for x in self.snodes])
 
+    def debug_str_extra(self):
+        return (
+            f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
+        )
+
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
 
@@ -492,12 +543,13 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
-        self.debug_print_nodes("PRE FUSION")
+        V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.fuse_nodes()
         self.compute_last_usage()
-        self.debug_print_nodes("POST FUSION")
+        V.debug.ir_post_fusion(self.nodes)
+        V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
         # used during codegen:

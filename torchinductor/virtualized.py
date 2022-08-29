@@ -92,6 +92,7 @@ MockHandler._init_cls()
 ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
+_debug = Virtualized("debug", NullHandler)
 
 
 class _V:
@@ -102,6 +103,7 @@ class _V:
     get_ops_handler = ops._get_handler
     set_graph_handler = _graph._set_handler
     set_kernel_handler = _kernel._set_handler
+    set_debug_handler = _debug._set_handler
 
     @property
     def ops(self) -> MockHandler:
@@ -117,6 +119,10 @@ class _V:
     def kernel(self) -> "torchdynamo.codegen.common.Kernel":
         """The kernel currently being generated"""
         return _kernel._get_handler()
+
+    @property
+    def debug(self) -> "torchdynamo.debug.DebugContext":
+        return _debug._get_handler()
 
 
 V = _V()

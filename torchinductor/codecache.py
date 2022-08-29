@@ -156,11 +156,10 @@ class PyCodeCache:
             with open(path) as f:
                 code = compile(f.read(), path, "exec")
                 mod = types.ModuleType(f"{__name__}.{key}")
+                mod.__file__ = path
                 exec(code, mod.__dict__, mod.__dict__)
                 cls.cache[key] = mod
                 cls.cache[key].key = key
-        if config.debug:
-            print(f"PyCodeCache {path}")
         return cls.cache[key]
 
 
