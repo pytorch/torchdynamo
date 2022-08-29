@@ -192,7 +192,7 @@ class TimmRunnner(BenchmarkRunner):
         dynamic_shapes=False,
     ):
 
-        _, model_dtype, data_dtype = self.resolve_precision()
+        # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
         model = create_model(
@@ -211,7 +211,6 @@ class TimmRunnner(BenchmarkRunner):
         )
         model.to(
             device=device,
-            dtype=model_dtype,
             memory_format=torch.channels_last if channels_last else None,
         )
 

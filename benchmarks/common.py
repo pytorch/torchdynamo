@@ -914,19 +914,12 @@ class BenchmarkRunner:
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
-    def resolve_precision(self):
-        use_amp = False
-        model_dtype = torch.float32
-        data_dtype = torch.float32
-        if self._args.amp:
-            use_amp = True
-        elif self._args.float16:
-            model_dtype = torch.float16
-            data_dtype = torch.float16
-        # elif self._args.bfloat16:
-        #     model_dtype = torch.bfloat16
-        #     data_dtype = torch.bfloat16
-        return use_amp, model_dtype, data_dtype
+    @property
+    def equal_nan(self):
+        equal_nan = True
+        if self.args.float32:
+            equal_nan = False
+        return equal_nan
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
         out_batch_size = batch_size * factor
@@ -1125,7 +1118,12 @@ class BenchmarkRunner:
                 correct_rerun_result = model_iter_fn(
                     copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
                 )
-                if not same(correct_result, correct_rerun_result, fp64_outputs):
+                if not same(
+                    correct_result,
+                    correct_rerun_result,
+                    fp64_outputs,
+                    equal_nan=self.equal_nan,
+                ):
                     print("INCORRECT - Variation in Eager runs itself")
                     if not self.args.skip_accuracy_check:
                         return sys.exit(-1)
@@ -1150,6 +1148,7 @@ class BenchmarkRunner:
                 correct_result,
                 new_result,
                 fp64_outputs,
+                equal_nan=self.equal_nan,
                 cos_similarity=cos_similarity,
                 tol=tolerance,
             ):
