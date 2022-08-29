@@ -54,14 +54,37 @@ def dynamo_timed(func):
     return time_wrapper
 
 
-def compile_times():
-    rows = [
-        (k, list(map(lambda f: f"{f:.4f}", compilation_metrics[k])))
-        for k in compilation_metrics
-    ]
-    out = "TorchDynamo compilation metrics:\n"
-    out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
-    return out
+def compile_times(repr="str", aggregate=False):
+    """
+    Get metrics about torchdynamo frontend/backend compilation times.
+
+    Accumulates information from functions tagged with `@dynamo_timed`.
+
+    repr='str' returns a printable string for user interaction, and 'csv'
+    returns headers, rows which can be logged for output
+
+    aggregate causes values from multiple compilations (e.g. split graphs)
+    to be accumulated into one value.  If false, expect more than one value
+    per metric.
+    """
+
+    def fmt_fn(values):
+        def as_str(v):
+            return f"{v:.4f}"
+
+        if aggregate:
+            return as_str(sum(values))
+        return ", ".join(map(as_str, values))
+
+    if repr == "str":
+        rows = [(k, fmt_fn(compilation_metrics[k])) for k in compilation_metrics]
+        out = "TorchDynamo compilation metrics:\n"
+        out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+        return out
+    elif repr == "csv":
+        headers = list(compilation_metrics.keys())
+        values = [fmt_fn(v) for v in compilation_metrics.values()]
+        return headers, values
 
 
 LOGGING_CONFIG = {
