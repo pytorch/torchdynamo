@@ -153,3 +153,15 @@ def precompute_methods(obj: Any, methods: List[str]):
 
 def cmp(a, b):
     return int(a > b) - int(a < b)
+
+
+def cache_on_self(fn):
+    key = f"__{fn.__name__}_cache"
+
+    @functools.wraps(fn)
+    def wrapper(self):
+        if not hasattr(self, key):
+            setattr(self, key, fn(self))
+        return getattr(self, key)
+
+    return wrapper

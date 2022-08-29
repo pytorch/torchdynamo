@@ -30,6 +30,7 @@ from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .utils import cache_on_self
 from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
@@ -310,6 +311,7 @@ class Loops(IRNode):
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
 
+    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -910,6 +912,7 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()
 
+    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1724,6 +1727,7 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
+    @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1774,6 +1778,7 @@ class NoneAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():

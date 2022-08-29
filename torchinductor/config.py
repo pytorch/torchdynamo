@@ -41,7 +41,7 @@ prefuse_nodes = True
 tune_layout = False
 
 # fuse even in cases without common reads
-aggressive_fusion = True
+aggressive_fusion = False
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
