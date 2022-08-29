@@ -317,11 +317,13 @@ class CppKernel(Kernel):
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        # upcast argument is ignored on cpu
+    def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-        return self.cse.generate(self.loads, f"{var}[{cexpr(index)}]")
+        line = f"{var}[{cexpr(index)}]"
+        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+            line = f"static_cast<float>({line})"
+        return self.cse.generate(self.loads, line)
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name

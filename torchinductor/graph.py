@@ -90,6 +90,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
         self.name_to_buffer = {}
 
+    def get_dtype(self, buffer_name):
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].dtype
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name].get_dtype()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_dtype()
+        raise KeyError(f"could not find {buffer_name}")
+
     def random_seed_buffer(self, device: torch.device):
         """
         Return a device-unique 1-element tensor storing our RNG seed.

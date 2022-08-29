@@ -1287,10 +1287,7 @@ class ReinterpretView(BaseView):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
-            )
-            return ops.load(self.get_name(), indexer(index), upcast)
+            return ops.load(self.get_name(), indexer(index))
 
         return loader
 
@@ -1704,10 +1701,7 @@ class Buffer(IRNode):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
-            )
-            return ops.load(self.name, indexer(index), upcast)
+            return ops.load(self.name, indexer(index))
 
         return loader
 
@@ -3320,9 +3314,9 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
-            def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+            def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
-                return self._inner.load(name, index, upcast)
+                return self._inner.load(name, index)
 
             def store(self, name, index, value, mode=None):
                 index = add_index(index, "writes", name)
