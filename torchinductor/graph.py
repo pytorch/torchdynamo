@@ -275,7 +275,6 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
-
         for name, value in self.graph_inputs.items():
             value.realize()
             assert isinstance(value, TensorBox)
@@ -332,3 +331,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_fn(self):
         return self.compile_to_module().call
+
+    def get_output_names(self):
+        return [
+            node.get_name()
+            for node in self.graph_outputs
+            if not isinstance(node, ir.NoneAsConstantBuffer)
+        ]

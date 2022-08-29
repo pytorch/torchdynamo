@@ -652,10 +652,8 @@ class Scheduler:
                 )
 
         # make sure outputs aren't dead-code-eliminated
-        for node in V.graph.graph_outputs:
-            if not isinstance(node, ir.NoneAsConstantBuffer):
-                name = node.get_name()
-                add_user(node.get_name(), OutputNode(StarDep(name)))
+        for node_name in V.graph.get_output_names():
+            add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -932,9 +930,8 @@ class Scheduler:
         """
 
         future_used_buffers = set()
-        for node in V.graph.graph_outputs:
-            if not isinstance(node, ir.NoneAsConstantBuffer):
-                future_used_buffers.add(node.get_name())
+        for node_name in V.graph.get_output_names():
+            future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
             used_buffers = node.used_buffer_names()

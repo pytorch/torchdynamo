@@ -299,8 +299,14 @@ class WrapperCodeGen(CodeGen):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
+
+        out_names = V.graph.get_output_names()
         with result.indent():
-            while self.lines and isinstance(self.lines[-1], MemoryPlanningLine):
+            while (
+                self.lines
+                and isinstance(self.lines[-1], MemoryPlanningLine)
+                and self.lines[-1].node.name not in out_names
+            ):
                 # these lines will be pointless
                 self.lines.pop()
 
