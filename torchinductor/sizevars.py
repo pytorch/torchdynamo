@@ -49,6 +49,7 @@ class SizeVarAllocator(object):
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = {}
         self.need_seed = False
+        self.stride_vars = self.make_stride_vars_cache()
         if not zero_one_const:
             self.val_to_var.clear()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
@@ -274,7 +275,33 @@ class SizeVarAllocator(object):
     def size_hint(self, expr: Expr) -> int:
         return int(sympy.expand(expr).subs(self.var_to_val))
 
-    def stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+    def _lru_cache(self, fn, maxsize=None):
+        """
+        Wrapper around functools.lru_cache that clears when replacements
+        has been invalidated.
+        """
+        fn_cache = functools.lru_cache(maxsize)(fn)
+        prior_len = len(self.replacements)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            nonlocal prior_len
+            if prior_len != len(self.replacements):
+                prior_len = len(self.replacements)
+                fn_cache.cache_clear()
+            return fn_cache(*args, **kwargs)
+
+        return wrapper
+
+    def make_stride_vars_cache(self):
+        cache = self._lru_cache(self._stride_vars)
+
+        def stride_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+            return cache(index, tuple(vars))
+
+        return stride_vars
+
+    def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
         """Convert an indexing expression back into strides"""
         strides = []
         index = index.subs(self.replacements)

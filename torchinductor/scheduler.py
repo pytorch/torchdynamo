@@ -25,8 +25,8 @@ from .codegen.triton_template import template_codegen
 from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
+from .utils import cache_on_self
 from .utils import cmp
-from .utils import precompute_methods
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -387,17 +387,14 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
 
-        # O(n) methods => O(1) methods
-        precompute_methods(
-            self, ["get_name", "get_names", "is_reduction", "is_template"]
-        )
-
+    @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
 
+    @cache_on_self
     def get_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.get_names() for x in self.snodes])
 
@@ -406,6 +403,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
         )
 
+    @cache_on_self
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
 
@@ -415,9 +413,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def __repr__(self):
         return f"{type(self).__name__}(nodes={self.get_name()})"
 
+    @cache_on_self
     def is_reduction(self):
         return any(x.is_reduction() for x in self.snodes)
 
+    @cache_on_self
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
@@ -763,13 +763,38 @@ class Scheduler:
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
-        for node1_index, node1 in enumerate(self.nodes):
-            for node2 in self.nodes[node1_index + 1 :]:
-                if self.can_fuse(node1, node2):
-                    possible_fusions.append((node1, node2))
-                elif self.can_fuse(node2, node1):
-                    # epilogue fusions are order dependent
-                    possible_fusions.append((node2, node1))
+        seen = set()
+
+        def check_all_pairs(nodes):
+            for node1_index, node1 in enumerate(nodes):
+                for node2 in nodes[node1_index + 1 :]:
+                    key = (node1, node2)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    if self.can_fuse(node1, node2):
+                        possible_fusions.append(key)
+                    elif node2.is_template() and self.can_fuse(node2, node1):
+                        # epilogue fusions are order dependent
+                        possible_fusions.append((node2, node1))
+
+        buffer_names_grouping = collections.defaultdict(list)
+        for node in self.nodes:
+            for buf in node.used_buffer_names():
+                buffer_names_grouping[buf].append(node)
+        for node_grouping in buffer_names_grouping.values():
+            check_all_pairs(node_grouping)
+
+        if config.aggressive_fusion:
+            group_grouping = collections.defaultdict(list)
+            for node in self.nodes:
+                group = getattr(node, "group", None)
+                if group:
+                    group_grouping[group].append(node)
+            for node_grouping in group_grouping.values():
+                check_all_pairs(node_grouping)
+
         return sorted(possible_fusions, key=self.score_fusion_key, reverse=True)
 
     def will_fusion_create_cycle(self, node1, node2):
