@@ -8,6 +8,7 @@ import io
 import itertools
 import logging
 import os
+import random
 import signal
 import subprocess
 import sys
@@ -52,6 +53,24 @@ current_name = ""
 current_device = ""
 current_batch_size = None
 output_filename = None
+
+old_torch_manual_seed = torch.manual_seed
+
+
+def deterministic_torch_manual_seed(*args, **kwargs):
+    from torch._C import default_generator
+
+    seed = 1337
+    import torch.cuda
+
+    if not torch.cuda._is_in_bad_fork():
+        torch.cuda.manual_seed_all(seed)
+
+    return default_generator.manual_seed(seed)
+
+
+torch.manual_seed = deterministic_torch_manual_seed
+
 
 CI_SKIP_INFERENCE = [
     # TorchBench
@@ -172,7 +191,7 @@ def print_summary(filename):
 
 def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
-    torch.manual_seed(1337)
+    reset_rng_state()
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
@@ -853,6 +872,12 @@ def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
 
 
+def reset_rng_state():
+    torch.manual_seed(1337)
+    random.seed(1337)
+    np.random.seed(1337)
+
+
 class DummyGradScaler:
     def scale(self, loss):
         return loss
@@ -939,17 +964,12 @@ class BenchmarkRunner:
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
+        model = copy.deepcopy(model)
+        example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
-            model, example_inputs = cast_to_fp32(
-                copy.deepcopy(model), clone_inputs(example_inputs)
-            )
+            model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
-            model, example_inputs = cast_to_fp16(
-                copy.deepcopy(model), clone_inputs(example_inputs)
-            )
-        else:
-            model = copy.deepcopy(model)
-            example_inputs = clone_inputs(example_inputs)
+            model, example_inputs = cast_to_fp16(model, example_inputs)
 
         try:
             self.model_iter_fn(model, example_inputs)
@@ -1118,7 +1138,7 @@ class BenchmarkRunner:
                 correct_result = model_iter_fn(
                     copy.deepcopy(model), clone_inputs(example_inputs)
                 )
-                torch.manual_seed(1337)
+                reset_rng_state()
                 torchdynamo.reset()
                 results = []
                 results.append(experiment(model, example_inputs, optimize_ctx))
@@ -1137,12 +1157,12 @@ class BenchmarkRunner:
             for submod in itertools.chain([model], model.modules()):
                 assert not torchdynamo.utils.is_jit_model(submod)
 
-            torch.manual_seed(1337)
+            reset_rng_state()
             correct_result = model_iter_fn(
                 copy.deepcopy(model), clone_inputs(example_inputs)
             )
 
-            torch.manual_seed(1337)
+            reset_rng_state()
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
                     copy.deepcopy(model), clone_inputs(example_inputs)
@@ -1158,7 +1178,7 @@ class BenchmarkRunner:
                         return sys.exit(-1)
 
             t0 = time.perf_counter()
-            torch.manual_seed(1337)
+            reset_rng_state()
             torchdynamo.reset()
             try:
                 optimized_model_iter_fn = optimize_ctx(model_iter_fn)
