@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 import torchdynamo
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import compile_times
 from torchdynamo.utils import same
 
 from . import config
@@ -387,6 +388,8 @@ def explain(f, *args, **kwargs):
     explanation = f"Dynamo produced {graph_count} graphs"
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
     explanation += f"\n Break reasons: \n\n{formatted_list}"
+
+    explanation += compile_times()
 
     # TODO(voz): Do we want a decorator for this?
     torchdynamo.reset()

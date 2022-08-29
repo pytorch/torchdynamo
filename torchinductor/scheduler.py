@@ -573,7 +573,6 @@ class Scheduler:
             for node in self.nodes:
                 node.log_details()
 
-    @dynamo_timed
     def compute_dependencies(self):
         """
         Create dependency edges between nodes, handling aliasing and
@@ -737,7 +736,6 @@ class Scheduler:
             if len(self.nodes) == old_len:
                 break
 
-    @dynamo_timed
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.

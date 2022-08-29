@@ -54,12 +54,14 @@ def dynamo_timed(func):
     return time_wrapper
 
 
-def print_compile_times():
+def compile_times():
     rows = [
         (k, list(map(lambda f: f"{f:.4f}", compilation_metrics[k])))
         for k in compilation_metrics
     ]
-    print(tabulate.tabulate(rows, headers=("Function", "Runtimes (s)")))
+    out = "TorchDynamo compilation metrics:\n"
+    out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+    return out
 
 
 LOGGING_CONFIG = {
