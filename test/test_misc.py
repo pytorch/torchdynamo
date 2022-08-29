@@ -1856,8 +1856,12 @@ class MiscTests(torchdynamo.testing.TestCase):
         out = opt_fn(torch.ones(10, dtype=torch.long))
         # idx should be 1 -> slicing off [1:] of 8 elem tensor
         self.assertEqual(list(out.shape), [7])
+
         # graph break on slice
-        self.assertEqual(counter.op_count, 3)
+        self.assertEqual(counter.op_count, 5)
+        self.assertEqual(counter.frame_count, 1)
+
+        self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
 
     def test_cross_entropy_loss_fancy_ctor(self):
         output = None
