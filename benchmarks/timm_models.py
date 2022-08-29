@@ -186,11 +186,11 @@ class TimmRunnner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
+
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
 
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
@@ -251,21 +251,9 @@ class TimmRunnner(BenchmarkRunner):
         else:
             model.eval()
 
-        return device, model_name, model, example_inputs, batch_size
+        self.validate_model(model, example_inputs)
 
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
+        return device, model_name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
         # for model_name in list_models(pretrained=True, exclude_filters=["*in21k"]):
