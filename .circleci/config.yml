@@ -26,7 +26,7 @@ commands:
               git lfs install --skip-repo
               # git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git torchbenchmark
               # above doesn't work due to git-lfs auth issues, workaround with a tarball:
-              wget -O torchbenchmark.tar.bz2 "https://drive.google.com/u/0/uc?id=1KvYsqipsvvv3pnNkJzME0iTemDZe0buC&export=download&confirm=t"
+              wget -O torchbenchmark.tar.bz2 "https://github.com/jansel/benchmark/releases/download/snapshots/torchbenchmark.tar.bz2"
               tar jxvf torchbenchmark.tar.bz2
               (cd torchbenchmark && python install.py && touch env-v4.key)
             fi
