@@ -160,11 +160,6 @@ def special_erf(x):
     return sign * y
 
 
-@register_decomposition([aten.rsqrt])
-def rsqrt(x):
-    return torch.reciprocal(torch.sqrt(x))
-
-
 @register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
 def rsub(a, b):
     if isinstance(b, numbers.Number):
