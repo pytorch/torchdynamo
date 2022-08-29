@@ -1,8 +1,9 @@
+import builtins
 import hashlib
 import json
 import logging
 import os.path
-import textwrap
+import time
 from typing import List
 
 import triton
@@ -21,6 +22,63 @@ from .conv_perf_model import early_config_prune as conv_early_config_prune
 from .conv_perf_model import estimate_conv_time
 
 log = logging.getLogger(__name__)
+
+
+class CachingAutotuner(triton.code_gen.Autotuner):
+    """
+    Simplified version of Triton autotuner that has no invalidation key
+    and caches the best config to disk.
+    """
+
+    def __init__(self, kernel, arg_names, configs, save_cache_hook):
+        super().__init__(kernel, arg_names, configs, [], None, None)
+        assert not self.early_config_prune
+        assert not self.perf_model
+        self.save_cache_hook = save_cache_hook
+
+    def _bench(self, *args, config, **kwargs):
+        try:
+            return super()._bench(*args, config=config, **kwargs)
+        except triton.code_gen.OutOfResources as e:
+            log.warning("OutOfResources: %s %s", e, config)
+            return (float("inf"), float("inf"), float("inf"))
+
+    def __call__(self, *args, **kwargs):
+        if len(self.configs) > 1:
+            bench_start = time.time()
+            timings = {
+                config: self._bench(*args, config=config, **kwargs)
+                for config in self.configs
+            }
+            self.bench_time = time.time() - bench_start
+            self.configs = [builtins.min(timings, key=timings.get)]
+            if self.save_cache_hook:
+                self.save_cache_hook(self.configs[0])
+
+        config = self.configs[0]
+        if config.pre_hook is not None:
+            config.pre_hook(dict(zip(self.arg_names, args)))
+        return self.kernel(
+            *args,
+            num_warps=config.num_warps,
+            num_stages=config.num_stages,
+            **kwargs,
+            **config.kwargs,
+        )
+
+
+def hash_configs(configs: List[Config]):
+    """
+    Hash used to check for changes in configurations
+    """
+    hasher = hashlib.sha256()
+    for cfg in configs:
+        hasher.update(
+            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode(
+                "utf-8"
+            )
+        )
+    return hasher.hexdigest()
 
 
 def load_cached_autotuning(
@@ -47,26 +105,8 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
-def hash_configs(configs: List[Config]):
-    """
-    Hash used to check for changes in configurations
-    """
-    hasher = hashlib.sha256()
-    for cfg in configs:
-        hasher.update(
-            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode(
-                "utf-8"
-            )
-        )
-    return hasher.hexdigest()
-
-
-def autotune(
+def cached_autotune(
     configs: List[Config],
-    key: List[str],
-    prune_configs_by=None,
-    reset_to_zero=None,
-    debug_label=None,
     filename=None,
 ):
     """
@@ -74,53 +114,26 @@ def autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     configs = unique_configs(configs)
-    results = []
-
-    class Autotuner(triton.code_gen.Autotuner):
-        def _bench(self, *args, config, **kwargs):
-            try:
-                result = super()._bench(*args, config=config, **kwargs)
-                if debug_label:
-                    results.append(f"{config}: {result[0]}")
-                    if len(results) == len(configs):
-                        log.warning(
-                            "Autouning Results %s\n%s",
-                            debug_label,
-                            textwrap.indent("\n".join(results), " " * 4),
-                        )
-                return result
-            except triton.code_gen.OutOfResources as e:
-                log.warning("OutOfResources: %s %s", e, config)
-                return (float("inf"), float("inf"), float("inf"))
 
     # on disk caching logic
     if filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
-
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
         if best_config:
             configs = [best_config]
-        else:
 
-            def call_and_store_cache(self, *args, **kwargs):
-                result = triton.code_gen.Autotuner.__call__(self, *args, **kwargs)
-                with open(cache_filename, "w") as fd:
-                    fd.write(
-                        json.dumps(
-                            {**self.best_config.kwargs, "configs_hash": configs_hash}
-                        )
-                    )
-                self.configs = [self.best_config]
-                del Autotuner.__call__  # uninstall this hook
-                return result
+        def save_cache_hook(cfg):
+            with open(cache_filename, "w") as fd:
+                fd.write(json.dumps({**cfg.kwargs, "configs_hash": configs_hash}))
 
-            Autotuner.__call__ = call_and_store_cache
+    else:
+        save_cache_hook = None
 
     def decorator(fn):
         def wrapper(kernel):
-            return Autotuner(
-                kernel, fn.arg_names, configs, key, reset_to_zero, prune_configs_by
+            return CachingAutotuner(
+                kernel, fn.arg_names, configs, save_cache_hook=save_cache_hook
             )
 
         fn.kernel_decorators.append(wrapper)
@@ -253,7 +266,7 @@ def apply_triton_config(config):
     Decorator that applies a fixed triton config using triton.heuristics.
     """
     # Autotuner with 1-config is no-op
-    return autotune([config], ["xnumel"])
+    return cached_autotune([config])
 
 
 def pointwise_heuristics(size_hints, contiguous=False, filename=None):
@@ -265,7 +278,7 @@ def pointwise_heuristics(size_hints, contiguous=False, filename=None):
     if len(size_hints) == 2:
         if not config.triton.autotune:
             return apply_triton_config(triton_config(size_hints, 64, 64))
-        return autotune(
+        return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
                 triton_config(size_hints, 8, 256),
@@ -273,13 +286,12 @@ def pointwise_heuristics(size_hints, contiguous=False, filename=None):
                 triton_config(size_hints, 1, 1024),
                 triton_config(size_hints, 1024, 1),
             ],
-            key=["xnumel", "ynumel"],
             filename=filename,
         )
     if len(size_hints) == 3:
         if not config.triton.autotune:
             return apply_triton_config(triton_config(size_hints, 16, 16, 16))
-        return autotune(
+        return cached_autotune(
             [
                 triton_config(size_hints, 16, 16, 16),
                 triton_config(size_hints, 64, 8, 8),
@@ -289,7 +301,6 @@ def pointwise_heuristics(size_hints, contiguous=False, filename=None):
                 triton_config(size_hints, 1, 1024, 1),
                 triton_config(size_hints, 1, 1, 1024),
             ],
-            key=["xnumel", "ynumel", "znumel"],
             filename=filename,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
@@ -306,7 +317,7 @@ def reduction_heuristics(size_hints, contiguous=False, filename=None):
             return apply_triton_config(contiguous_config)
         if not config.triton.autotune:
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
-        return autotune(
+        return cached_autotune(
             [
                 triton_config_reduction(size_hints, 64, 64),
                 triton_config_reduction(
@@ -317,7 +328,6 @@ def reduction_heuristics(size_hints, contiguous=False, filename=None):
                 ),  # this and the next one seem very similar but both are needed for perf
                 contiguous_config,
             ],
-            key=["xnumel", "rnumel"],
             filename=filename,
         )
     """
@@ -327,14 +337,13 @@ def reduction_heuristics(size_hints, contiguous=False, filename=None):
             return apply_triton_config(
                 triton_config_tiled_reduction(size_hints, 16, 16, 16)
             )
-        return autotune(
+        return cached_autotune(
             [
                 triton_config_tiled_reduction(size_hints, 16, 16, 16),
                 triton_config_tiled_reduction(size_hints, 1, 32, 128),
                 triton_config_tiled_reduction(size_hints, 32, 1, 128),
                 triton_config_tiled_reduction(size_hints, 1, 1, 2048, num_stages=1),
             ],
-            key=["xnumel", "ynumel", "rnumel"],
             filename=filename,
         )
     """
@@ -421,7 +430,7 @@ def conv_heuristics():
         "perf_model": estimate_conv_time,
         "top_k": 10,
     }
-    return autotune(configs, key, prune_configs_by=prune_configs_by)
+    return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
 
 
 def mm_heuristics():
@@ -536,7 +545,7 @@ def mm_autotune(get_io_bound_configs=False):
         "perf_model": estimate_matmul_time,
         "top_k": 10,
     }
-    return autotune(configs, key, prune_configs_by=prune_configs_by)
+    return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
 
 
 def grid(xnumel, ynumel=None, znumel=None):
