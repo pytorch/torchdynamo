@@ -10,6 +10,10 @@ from transformers import AutoTokenizer
 
 import torchdynamo
 
+torchdynamo.config.fake_tensor_propagation = False
+
+# You will download around 84G dataset if you run this end to end training/evaluation example.
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 num_samples = 10000
@@ -42,9 +46,7 @@ def data_processing(num_samples):
     return train_dataloader, eval_dataloader
 
 
-@torchdynamo.optimize("eager")
 def training_iter_fn(batch, model, optimizer):
-    batch = {k: v.to(device) for k, v in batch.items()}
     outputs = model(**batch)
     loss = outputs.loss
     loss.backward()
@@ -53,21 +55,19 @@ def training_iter_fn(batch, model, optimizer):
     return loss
 
 
-@torchdynamo.optimize("eager")
-def eval_iter_fn(batch):
-    return model(**batch)
-
-
 def model_training_evaluation(
     train_dataloader, eval_dataloader, model, optimizer, num_epochs
 ):
     model.to(device)
     model.train()
     loss_history = []
+    # Support backends: eager, aot_nop and aot_nvfuser
+    opt_training_iter_fn = torchdynamo.optimize("eager")(training_iter_fn)
     for epoch in range(num_epochs):
         running_loss = 0.0
         for i, batch in enumerate(train_dataloader, 0):
-            loss = training_iter_fn(batch, model, optimizer)
+            batch = {k: v.to(device) for k, v in batch.items()}
+            loss = opt_training_iter_fn(batch, model, optimizer)
             running_loss += loss.item()
             if i % 100 == 99:
                 loss_history.append(running_loss / 100)
@@ -75,16 +75,18 @@ def model_training_evaluation(
 
     metric = load_metric("accuracy")
     model.eval()
+    opt_model = torchdynamo.optimize("eager")(model)
     for batch in eval_dataloader:
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
-            outputs = eval_iter_fn(batch)
+            outputs = opt_model(**batch)
 
         logits = outputs.logits
         predictions = torch.argmax(logits, dim=-1)
         metric.add_batch(predictions=predictions, references=batch["labels"])
 
-    return loss_history, metric.compute()
+    print("Loss history : " + str(loss_history))
+    print("Accuracy : " + str(metric.compute()))
 
 
 if __name__ == "__main__":
@@ -93,8 +95,6 @@ if __name__ == "__main__":
         "bert-base-cased", num_labels=5
     )
     optimizer = SGD(model.parameters(), lr=5e-5, momentum=0.9)
-    loss_history, accuracy = model_training_evaluation(
+    model_training_evaluation(
         train_dataloader, eval_dataloader, model, optimizer, num_epochs
     )
-    print("Loss history : " + str(loss_history))
-    print("Accuracy : " + str(accuracy))
