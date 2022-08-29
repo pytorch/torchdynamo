@@ -1,3 +1,6 @@
+# TODO: remove this config entirely
+import functorch.compile
+
 from . import allowed_functions
 from . import convert_frame
 from . import eval_frame
@@ -11,8 +14,11 @@ from .eval_frame import optimize_assert
 from .eval_frame import reset_code
 from .eval_frame import run
 from .eval_frame import skip
+from .utils import compilation_metrics
 from .utils import guard_failures
 from .utils import orig_code_map
+
+functorch.compile.config.use_functionalize = True
 
 __all__ = [
     "optimize",
@@ -40,6 +46,7 @@ def reset():
     guard_failures.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
     eval_frame.most_recent_backend = None
+    compilation_metrics.clear()
 
 
 def list_backends():

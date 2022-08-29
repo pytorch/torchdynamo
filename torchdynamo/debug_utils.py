@@ -19,6 +19,33 @@ def minifier_dir():
     return f"/tmp/minifier_{getpass.getuser()}"
 
 
+@functools.lru_cache(None)  # subprocess is expensive
+def _cuda_system_info_comment():
+    if not torch.cuda.is_available():
+        return "# torch.cuda.is_available()==False, no GPU info collected\n"
+
+    model_str = "# CUDA Info: \n"
+    cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
+    cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
+    cuda_version_out = "".join(
+        [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
+    )
+    model_str += f"{cuda_version_out}\n"
+    gpu_names = subprocess.run(
+        ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
+        stdout=subprocess.PIPE,
+    )
+    gpu_names = gpu_names.stdout.decode().split("\n")
+    gpu_names = [name for name in gpu_names if name not in ("", "name")]
+    gpu_names = Counter(gpu_names)
+
+    model_str += "# GPU Hardware Info: \n"
+    for name, count in gpu_names.items():
+        model_str += f"# {name} : {count} \n"
+    model_str += "\n"
+    return model_str
+
+
 def generate_repro_string(gm, args):
     model_str = textwrap.dedent(
         """
@@ -34,30 +61,7 @@ def generate_repro_string(gm, args):
     model_str += f"# torch version: {torch.version.__version__}\n"
     model_str += f"# torch cuda version: {torch.version.cuda}\n"
     model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-    if torch.cuda.is_available():
-        model_str += "# CUDA Info: \n"
-        cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
-        cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
-        cuda_version_out = "".join(
-            [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
-        )
-        model_str += f"{cuda_version_out}\n"
-        gpu_names = subprocess.run(
-            ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
-            stdout=subprocess.PIPE,
-        )
-        gpu_names = gpu_names.stdout.decode().split("\n")
-        gpu_names = [name for name in gpu_names if name not in ("", "name")]
-        gpu_names = Counter(gpu_names)
-
-        model_str += "# GPU Hardware Info: \n"
-        for name, count in gpu_names.items():
-            model_str += f"# {name} : {count} \n"
-        model_str += "\n"
-    else:
-        model_str += (
-            "torch.cuda.is_available() returned False - no GPU info collected \n"
-        )
+    model_str += _cuda_system_info_comment()
 
     model_str += "class Repro(torch.nn.Module):\n"
     attrs = dir(gm)
@@ -96,18 +100,22 @@ def dump_state(gm, args, compiler_name):
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
     print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
-        fd.write(generate_repro_string(gm, args))
-        fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
-        fd.write(
-            textwrap.dedent(
-                f"""
-                compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(*args)
-                """
-            )
-        )
+        save_graph_repro(fd, gm, args, compiler_name)
     repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
     shutil.copyfile(file_name, repro_path)
+
+
+def save_graph_repro(fd, gm, args, compiler_name):
+    fd.write(generate_repro_string(gm, args))
+    fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
+    fd.write(
+        textwrap.dedent(
+            f"""
+            compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
+            compiled(*args)
+            """
+        )
+    )
 
 
 def isolate_fails(fx_g, args, compiler_name: str, env=None):
@@ -153,7 +161,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
     return False
 
 
-def inductor_fails(fx_g, args, check_str="CompilationError"):
+def inductor_fails(fx_g, args, check_str=None):
     from torchinductor import config
     from torchinductor.compile_fx import compile_fx_inner
 
@@ -194,6 +202,7 @@ def nvfuser_fails(fx_g, args, check_str=None):
 
 
 def dump_to_minify(gm, args, compiler_name: str):
+    favored_device = 1 if torch.cuda.device_count() >= 2 else 0
     with open(
         os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py"), "w"
     ) as fd:
@@ -209,7 +218,7 @@ def dump_to_minify(gm, args, compiler_name: str):
                 )
                 from functorch.compile import minifier
 
-                env_variables = {{"CUDA_VISIBLE_DEVICES": "1"}}
+                env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
 
                 minifier(
                     mod,

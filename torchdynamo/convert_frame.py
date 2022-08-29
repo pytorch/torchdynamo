@@ -33,6 +33,7 @@ from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import dynamo_timed
 from .utils import filter_stack
 from .utils import format_bytecode
 from .utils import gen_record_filename
@@ -254,6 +255,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
 
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
+    @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)

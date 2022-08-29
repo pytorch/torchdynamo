@@ -1,3 +1,4 @@
+import functools
 import logging
 import math
 import numbers
@@ -82,21 +83,12 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.tril.default,
         aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
-
-if not config.fallback_random:
-    # these decomps have different results than eager mode
-    decompositions.update(
-        get_decompositions(
-            [
-                aten.native_dropout,
-            ]
-        )
-    )
 
 
 def register_decomposition(ops):
@@ -115,14 +107,17 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2):
-    return torch.mm(mat1, mat2) + input
-
-
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
+@register_decomposition([aten.addmm])
+def addmm(input, mat1, mat2):
+    if config.triton.mm != "aten":
+        return torch.mm(mat1, mat2) + input
+    else:
+        return NotImplemented  # go directly to lowering
 
 
 @register_decomposition([aten.rsqrt])
@@ -296,8 +291,34 @@ def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
 
 
-if not config.fallback_random:
+@register_decomposition([aten.fill.Scalar])
+def fill_scalar(self, value):
+    return torch.full_like(self, value)
 
-    @register_decomposition([aten.bernoulli_])
-    def bernoulli_(self, p=0.5):
-        return self.copy_(torch.rand_like(self) < p)
+
+"""
+Some decomps result in differences from eager related to randomness.
+We put these decomps in a separate table `extra_random_decomps` to allow
+turning them on and off via `config.fallback_random`.
+"""
+extra_random_decomps = get_decompositions([aten.native_dropout])
+register_extra_random_decomp = functools.partial(
+    decomp.register_decomposition, registry=extra_random_decomps, disable_meta=True
+)
+
+
+@register_extra_random_decomp([aten.bernoulli_])
+def bernoulli_(self, p=0.5):
+    return self.copy_(torch.rand_like(self) < p)
+
+
+@functools.lru_cache(None)
+def fast_random_decomps():
+    return {**decompositions, **extra_random_decomps}
+
+
+def select_decomp_table():
+    """decomps can change based on config"""
+    if config.fallback_random:
+        return decompositions
+    return fast_random_decomps()

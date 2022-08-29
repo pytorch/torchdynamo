@@ -92,6 +92,7 @@ class OutputGraph(fx.Tracer):
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
+        self.initial_random_state = ()
         self.unspec_variable_map = {}
 
     @property
@@ -267,6 +268,14 @@ class OutputGraph(fx.Tracer):
             rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
+            random_calls_instructions.extend(
+                [
+                    codegen.create_load_global("random", add=True),
+                    codegen.create_load_attr("setstate"),
+                    codegen.create_load_const(tx.output.initial_random_state),
+                    create_instruction("CALL_FUNCTION", 1),
+                ]
+            )
             random_calls_instructions.extend(codegen.load_function_name(rand_fn_name))
             random_calls_instructions.extend(
                 [
@@ -472,11 +481,20 @@ class OutputGraph(fx.Tracer):
 
         # append stack trace to fx node
         tx = current_tx if current_tx else self.root_tx
+
+        nn_module_stack = getattr(tx, "nn_module_stack")
+        if nn_module_stack:
+            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
         msgs = traceback.StackSummary.from_list(frame_summaries).format()
-        rv.node.stack_trace = "".join(msgs)
+
+        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
+        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
+        rv.node.stack_trace = nn_module_stack_str + "".join(msgs)
+
         return rv

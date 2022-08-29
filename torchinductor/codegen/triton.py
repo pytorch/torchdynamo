@@ -14,7 +14,6 @@ import torch
 
 import torchinductor
 
-from .. import codecache
 from .. import config
 from .. import ir
 from ..utils import has_triton_libdevice
@@ -158,6 +157,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
         return f"tl.randn({seed}, {offset})"
+
+    @staticmethod
+    def rsqrt(x):
+        return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
     def pow(a, b):
@@ -425,15 +428,11 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def zero_vars(it):
-    return {k: 0 for k in it}
-
-
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}):
+    def __init__(self, *groups, pid_cache={}, is_contiguous=False):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -446,6 +445,7 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
+        self.is_contiguous = is_contiguous
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -653,8 +653,12 @@ class TritonKernel(Kernel):
             dense_mask.append(f"{tree.prefix}mask")
 
         if (need_dense and not have_dense) or index == 0:
-            mask = dense_mask
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+            if index == 0:
+                return index_str, "None"
+            else:
+                mask = dense_mask
+
         elif not have_loop_vars and copy_shape:
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
@@ -668,8 +672,7 @@ class TritonKernel(Kernel):
 
         if mask == ["xmask"] and index == 0 and self.range_trees[0].numel == 1:
             # This causes a triton error:
-            # https://gist.github.com/jansel/70c4b1c8041f0f27f96ee95e2edca04a
-            # TODO(jansel): submit a bug report
+            # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
         return index_str, " & ".join(mask)
@@ -701,10 +704,11 @@ class TritonKernel(Kernel):
             yield mask
         self._load_mask = prior
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask = self.indexing(index)
+
         if "rmask" in mask:
             # This eviction policy heuristic is untested.
             # ptillet suggested we should try only doing this for
@@ -713,7 +717,7 @@ class TritonKernel(Kernel):
         else:
             ep = ""
         line = f"tl.load({var} + {index}, {mask}{ep})"
-        if upcast:
+        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
         if (
@@ -889,14 +893,13 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from {codecache.__name__} import {heuristics}
-
+                    from torchinductor.triton_ops.autotune import {heuristics}
                 """
             )
 
         code.splice(
             f"""
-                @{heuristics}(size_hints={size_hints!r})
+                @{heuristics}(size_hints={size_hints!r}, contiguous={self.is_contiguous!r}, filename=__file__)
                 @triton.jit
             """
         )
@@ -1098,10 +1101,21 @@ class TritonScheduling:
         log.info("schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
+    @staticmethod
+    def is_contiguous(node):
+        if node in (EnableReduction, DisableReduction):
+            return True
+        return all(
+            dep.is_contiguous()
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
+        )
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
 
-        with TritonKernel(*tiled_groups) as kernel:
+        with TritonKernel(
+            *tiled_groups, is_contiguous=all(map(self.is_contiguous, node_schedule))
+        ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node is DisableReduction:
@@ -1112,18 +1126,14 @@ class TritonScheduling:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         wrapper = V.graph.wrapper_code
-        if config.triton.many_files:
-            kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        src_code = kernel.codegen_kernel()
+        if src_code in wrapper.kernels:
+            kernel_name = wrapper.kernels[src_code]
         else:
-            src_code = kernel.codegen_kernel("{kernel_name}")
-            if src_code in wrapper.kernels:
-                kernel_name = wrapper.kernels[src_code]
-            else:
-                kernel_name = wrapper.next_kernel_name()
-                wrapper.kernels[src_code] = kernel_name
-                code = src_code.format(kernel_name=kernel_name)
-                wrapper.header.splice(code)
+            kernel_name = wrapper.next_kernel_name()
+            wrapper.define_kernel(kernel_name, src_code)
+            wrapper.kernels[src_code] = kernel_name
+
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 

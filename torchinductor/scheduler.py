@@ -4,7 +4,8 @@ import functools
 import itertools
 import logging
 import os
-from typing import Any
+import pprint
+import textwrap
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -14,7 +15,8 @@ from typing import Union
 import numpy as np
 import sympy
 import torch
-import torch.fx as fx
+
+from torchdynamo.utils import dynamo_timed
 
 from . import config
 from . import dependencies
@@ -25,11 +27,18 @@ from .codegen.triton_template import template_codegen
 from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
+from .utils import cache_on_self
 from .utils import cmp
-from .utils import precompute_methods
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+def pformat(obj):
+    result = pprint.pformat(obj, indent=4)
+    if "\n" in result:
+        return f"\n{textwrap.indent(result, ' '*4)}"
+    return result
 
 
 class OutputNode:
@@ -63,6 +72,26 @@ class BaseSchedulerNode:
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
+
+    def debug_str(self):
+        """Longer form printout for trace logs"""
+        name = self.get_name()
+        lines = [
+            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}.writes = {pformat(self.read_writes.writes)}",
+            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
+            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+        ]
+        try:
+            lines += [
+                self.debug_str_extra(),
+            ]
+        except Exception:
+            log.warning("Ignoring error in debug_str()", exc_info=True)
+        return "\n".join(lines).rstrip()
+
+    def debug_str_extra(self):
+        return ""
 
     def log_details(self):
         log.info(
@@ -153,7 +182,8 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    pass
+    def debug_str_extra(self):
+        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
 
 
 class TemplateSchedulerNode(BaseSchedulerNode):
@@ -186,42 +216,6 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
 
 
-def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
-    """
-    A heuristic to decide loop iteration orders.  This has not been well
-    tuned and may be something we should autotune.
-    """
-
-    @functools.cmp_to_key
-    def index_cmp(a, b):
-        if sizes[a] == 1 or sizes[b] == 1:
-            # 1-sizes don't matter, just move them to the end
-            return cmp(sizes[a] == 1, sizes[b] == 1)
-
-        a_first = np.logical_or(
-            stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
-        ).all()
-        b_first = np.logical_or(
-            stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
-        ).all()
-
-        if a_first and not b_first:
-            return -1
-        if b_first and not a_first:
-            return 1
-
-        # otherwise contiguous
-        return cmp(b, a)
-
-    order = list(reversed(range(stride_lengths.shape[1])))
-    if len(priority_idx) > 0:
-        # if we have priority node, only use that node's order
-        stride_lengths = stride_lengths[priority_idx]
-    if config.pick_loop_orders:
-        order.sort(key=index_cmp)
-    return order
-
-
 class SchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
         super().__init__(scheduler, node)
@@ -251,6 +245,22 @@ class SchedulerNode(BaseSchedulerNode):
             # self.read_writes.writes = self.read_writes.writes | {
             #     w.maybe_swap_sizes() for w in self.read_writes.writes
             # }
+
+    def debug_str_extra(self):
+        name = self.get_name()
+        lines = [
+            f"{name}.group.device = {self.group[0]}",
+            f"{name}.group.iteration = {self.group[1]}",
+            f"{name}.sizes = {self._sizes}",
+        ]
+        if self.get_aliases():
+            lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
+        if self.get_mutations():
+            lines.append(f"{name}.mutations = {pformat(self.get_mutations())}")
+        if isinstance(self._body, ir.LoopBody):
+            lines.append(f"class {name}_loop_body:")
+            lines.append(textwrap.indent(self._body.debug_str(), "    "))
+        return "\n".join(lines)
 
     def get_ranges(self):
         return self._sizes
@@ -311,10 +321,14 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
-        with V.set_ops_handler(
-            SimplifyIndexing(V.get_ops_handler(), var_ranges)
-        ), V.kernel.set_current_node(self):
-            self._body(*index_vars)
+        try:
+            with V.set_ops_handler(
+                SimplifyIndexing(V.get_ops_handler(), var_ranges)
+            ), V.kernel.set_current_node(self):
+                self._body(*index_vars)
+        except Exception:
+            log.fatal("Error in codegen for %s", self.node)
+            raise
 
     def pointwise_read_writes(self):
         """
@@ -375,20 +389,23 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
 
-        # O(n) methods => O(1) methods
-        precompute_methods(
-            self, ["get_name", "get_names", "is_reduction", "is_template"]
-        )
-
+    @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
 
+    @cache_on_self
     def get_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.get_names() for x in self.snodes])
 
+    def debug_str_extra(self):
+        return (
+            f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
+        )
+
+    @cache_on_self
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
 
@@ -398,9 +415,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def __repr__(self):
         return f"{type(self).__name__}(nodes={self.get_name()})"
 
+    @cache_on_self
     def is_reduction(self):
         return any(x.is_reduction() for x in self.snodes)
 
+    @cache_on_self
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
@@ -434,6 +453,42 @@ class FusedSchedulerNode(BaseSchedulerNode):
         raise NotImplementedError
 
 
+def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
+    """
+    A heuristic to decide loop iteration orders.  This has not been well
+    tuned and may be something we should autotune.
+    """
+
+    @functools.cmp_to_key
+    def index_cmp(a, b):
+        if sizes[a] == 1 or sizes[b] == 1:
+            # 1-sizes don't matter, just move them to the end
+            return cmp(sizes[a] == 1, sizes[b] == 1)
+
+        a_first = np.logical_or(
+            stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
+        ).all()
+        b_first = np.logical_or(
+            stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
+        ).all()
+
+        if a_first and not b_first:
+            return -1
+        if b_first and not a_first:
+            return 1
+
+        # otherwise contiguous
+        return cmp(b, a)
+
+    order = list(reversed(range(stride_lengths.shape[1])))
+    if len(priority_idx) > 0:
+        # if we have priority node, only use that node's order
+        stride_lengths = stride_lengths[priority_idx]
+    if config.pick_loop_orders:
+        order.sort(key=index_cmp)
+    return order
+
+
 @dataclasses.dataclass
 class NodeUser:
     node: BaseSchedulerNode
@@ -443,130 +498,8 @@ class NodeUser:
         return self.node.get_name()
 
 
-def draw_buffers(nodes, fname, print_graph=False):
-    """
-    Draw a graph in fname.svg.
-    nodes is a list of SchedulerNode objects.
-    """
-
-    from functorch.compile import draw_graph
-    from torch.fx.graph_module import GraphModule
-    from torch.fx.passes.shape_prop import TensorMetadata
-    from torch.fx.passes.tools_common import legalize_graph
-
-    graph = create_fx_from_snodes(nodes)
-
-    for node in graph.nodes:
-        if "fusion_meta" not in node.meta:
-            continue
-        group = node.meta["fusion_meta"].group
-        if isinstance(group, tuple):
-            group = group[1]
-
-        # gather meta data
-        dtype = None
-        if isinstance(node, ir.ComputedBuffer):
-            dtype = node.data.dtype
-
-        metadata = TensorMetadata(group, dtype, None, None, None, None, None)
-        node.meta["tensor_meta"] = metadata
-
-    if print_graph:
-        print(graph)
-    print("starting creating module")
-    gm = GraphModule({}, graph)
-    legalize_graph(gm)
-    gm.graph.lint()
-    print("starting drawing")
-    draw_graph(gm, fname, clear_meta=False)
-
-
-def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
-    """
-    Creates a FX Graph from a list of SchedulerNode objects.
-    """
-
-    def get_fake_func(name):
-        def func1(*args):
-            return 0
-
-        func1.__name__ = name
-        return func1
-
-    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snodes", "type"])
-
-    func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
-    buf_to_fx_node = {}
-    graph = torch.fx.Graph()
-    first_node = None
-
-    outputs = []
-    group: Any = None
-    # create call_function node for each Buffer and Kernel
-    for snode in snodes:
-        if isinstance(snode, ExternKernelSchedulerNode):
-            node_type = "extern"
-            group = node_type
-        elif isinstance(snode, TemplateSchedulerNode):
-            node_type = "template"
-            group = node_type
-        elif isinstance(snode, NopKernelSchedulerNode):
-            node_type = "nop"
-            group = node_type
-        elif isinstance(snode, SchedulerNode):
-            node_type = "compute"
-            group = snode.group
-        elif isinstance(snode, FusedSchedulerNode):
-            node_type = "fused"
-            group = snode.group
-        else:
-            raise RuntimeError("Unknown node type")
-        node_func = func_dict[node_type]
-        fx_node = graph.call_function(node_func, args=(), kwargs=None)
-
-        def in_output(snode):
-            if isinstance(snode, FusedSchedulerNode):
-                return any([in_output(x) for x in snode.snodes])
-            return any([isinstance(user.node, OutputNode) for user in snode.users])
-
-        if in_output(snode):
-            outputs.append(fx_node)
-        name = snode.get_name()
-        fx_node.name = name
-
-        fx_node.meta["fusion_meta"] = FusionMeta(group, [snode], node_type)
-
-        if isinstance(snode, FusedSchedulerNode):
-            for x in snode.snodes:
-                buf_to_fx_node[x.get_name()] = fx_node
-        buf_to_fx_node[name] = fx_node
-
-        if first_node is None:
-            first_node = fx_node
-
-    # create edges between nodes
-    for snode in snodes:
-        name = snode.get_name()
-        deps = snode.read_writes.reads
-
-        fx_node = buf_to_fx_node[name]
-        new_args = []
-        for dep in deps:
-            if dep.name in buf_to_fx_node:
-                dep_node = buf_to_fx_node[dep.name]
-            else:
-                with graph.inserting_before(first_node):
-                    dep_node = graph.placeholder(dep.name)
-                    buf_to_fx_node[dep.name] = dep_node
-            new_args.append(dep_node)
-
-        fx_node.args = tuple(new_args)
-
-    graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
-    return graph
-
-
 class Scheduler:
+    @dynamo_timed
     def __init__(self, nodes):
         super(Scheduler, self).__init__()
         self.backends = {}
@@ -613,12 +546,13 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
-        self.debug_print_nodes("PRE FUSION")
+        V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.fuse_nodes()
         self.compute_last_usage()
-        self.debug_print_nodes("POST FUSION")
+        V.debug.ir_post_fusion(self.nodes)
+        V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
         # used during codegen:
@@ -629,18 +563,9 @@ class Scheduler:
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
         if os.environ.get("INDUCTOR_WRITE_SCHEDULER_GRAPH", None) == "1":
-            try:
-                from functorch.compile import get_graph_being_compiled
+            from .debug import draw_buffers
 
-                graph_name = get_graph_being_compiled()
-            except ImportError:
-                logging.warning(
-                    "Could not get graph name from `get_graph_being_compiled` \
-                    in functorch, use 'model' as default"
-                )
-                graph_name = "model"
-
-            draw_buffers(self.nodes, graph_name, print_graph=True)
+            draw_buffers(self.nodes, print_graph=True)
 
     def debug_print_nodes(self, label):
         if log.isEnabledFor(logging.INFO):
@@ -727,10 +652,8 @@ class Scheduler:
                 )
 
         # make sure outputs aren't dead-code-eliminated
-        for node in V.graph.graph_outputs:
-            if not isinstance(node, ir.NoneAsConstantBuffer):
-                name = node.get_name()
-                add_user(node.get_name(), OutputNode(StarDep(name)))
+        for node_name in V.graph.get_output_names():
+            add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -841,13 +764,38 @@ class Scheduler:
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
-        for node1_index, node1 in enumerate(self.nodes):
-            for node2 in self.nodes[node1_index + 1 :]:
-                if self.can_fuse(node1, node2):
-                    possible_fusions.append((node1, node2))
-                elif self.can_fuse(node2, node1):
-                    # epilogue fusions are order dependent
-                    possible_fusions.append((node2, node1))
+        seen = set()
+
+        def check_all_pairs(nodes):
+            for node1_index, node1 in enumerate(nodes):
+                for node2 in nodes[node1_index + 1 :]:
+                    key = (node1, node2)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    if self.can_fuse(node1, node2):
+                        possible_fusions.append(key)
+                    elif node2.is_template() and self.can_fuse(node2, node1):
+                        # epilogue fusions are order dependent
+                        possible_fusions.append((node2, node1))
+
+        buffer_names_grouping = collections.defaultdict(list)
+        for node in self.nodes:
+            for buf in node.used_buffer_names():
+                buffer_names_grouping[buf].append(node)
+        for node_grouping in buffer_names_grouping.values():
+            check_all_pairs(node_grouping)
+
+        if config.aggressive_fusion:
+            group_grouping = collections.defaultdict(list)
+            for node in self.nodes:
+                group = getattr(node, "group", None)
+                if group:
+                    group_grouping[group].append(node)
+            for node_grouping in group_grouping.values():
+                check_all_pairs(node_grouping)
+
         return sorted(possible_fusions, key=self.score_fusion_key, reverse=True)
 
     def will_fusion_create_cycle(self, node1, node2):
@@ -876,9 +824,15 @@ class Scheduler:
         """
         if node1 is node2:
             return False
-        if isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode)):
+        if (
+            isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node1.is_template()
+        ):
             return False
-        if isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode)):
+        if (
+            isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node2.is_template()
+        ):
             return False
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
@@ -976,9 +930,8 @@ class Scheduler:
         """
 
         future_used_buffers = set()
-        for node in V.graph.graph_outputs:
-            if not isinstance(node, ir.NoneAsConstantBuffer):
-                future_used_buffers.add(node.get_name())
+        for node_name in V.graph.get_output_names():
+            future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
             used_buffers = node.used_buffer_names()
@@ -1056,6 +1009,7 @@ class Scheduler:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
+    @dynamo_timed
     def codegen(self):
         for node in self.nodes:
             self.buffer_names_no_longer_needed.update(node.last_usage)
