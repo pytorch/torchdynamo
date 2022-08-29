@@ -4,6 +4,8 @@ import functools
 import itertools
 import logging
 import os
+import pprint
+import textwrap
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -23,11 +25,18 @@ from .codegen.triton_template import template_codegen
 from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
+from .utils import cache_on_self
 from .utils import cmp
-from .utils import precompute_methods
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+def pformat(obj):
+    result = pprint.pformat(obj, indent=4)
+    if "\n" in result:
+        return f"\n{textwrap.indent(result, ' '*4)}"
+    return result
 
 
 class OutputNode:
@@ -61,6 +70,26 @@ class BaseSchedulerNode:
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
+
+    def debug_str(self):
+        """Longer form printout for trace logs"""
+        name = self.get_name()
+        lines = [
+            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}.writes = {pformat(self.read_writes.writes)}",
+            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
+            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+        ]
+        try:
+            lines += [
+                self.debug_str_extra(),
+            ]
+        except Exception:
+            log.warning("Ignoring error in debug_str()", exc_info=True)
+        return "\n".join(lines).rstrip()
+
+    def debug_str_extra(self):
+        return ""
 
     def log_details(self):
         log.info(
@@ -151,7 +180,8 @@ class BaseSchedulerNode:
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    pass
+    def debug_str_extra(self):
+        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
 
 
 class TemplateSchedulerNode(BaseSchedulerNode):
@@ -213,6 +243,22 @@ class SchedulerNode(BaseSchedulerNode):
             # self.read_writes.writes = self.read_writes.writes | {
             #     w.maybe_swap_sizes() for w in self.read_writes.writes
             # }
+
+    def debug_str_extra(self):
+        name = self.get_name()
+        lines = [
+            f"{name}.group.device = {self.group[0]}",
+            f"{name}.group.iteration = {self.group[1]}",
+            f"{name}.sizes = {self._sizes}",
+        ]
+        if self.get_aliases():
+            lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
+        if self.get_mutations():
+            lines.append(f"{name}.mutations = {pformat(self.get_mutations())}")
+        if isinstance(self._body, ir.LoopBody):
+            lines.append(f"class {name}_loop_body:")
+            lines.append(textwrap.indent(self._body.debug_str(), "    "))
+        return "\n".join(lines)
 
     def get_ranges(self):
         return self._sizes
@@ -341,20 +387,23 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
 
-        # O(n) methods => O(1) methods
-        precompute_methods(
-            self, ["get_name", "get_names", "is_reduction", "is_template"]
-        )
-
+    @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
 
+    @cache_on_self
     def get_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.get_names() for x in self.snodes])
 
+    def debug_str_extra(self):
+        return (
+            f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
+        )
+
+    @cache_on_self
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
 
@@ -364,9 +413,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def __repr__(self):
         return f"{type(self).__name__}(nodes={self.get_name()})"
 
+    @cache_on_self
     def is_reduction(self):
         return any(x.is_reduction() for x in self.snodes)
 
+    @cache_on_self
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
@@ -492,12 +543,13 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
-        self.debug_print_nodes("PRE FUSION")
+        V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.fuse_nodes()
         self.compute_last_usage()
-        self.debug_print_nodes("POST FUSION")
+        V.debug.ir_post_fusion(self.nodes)
+        V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
         # used during codegen:
@@ -709,13 +761,38 @@ class Scheduler:
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
-        for node1_index, node1 in enumerate(self.nodes):
-            for node2 in self.nodes[node1_index + 1 :]:
-                if self.can_fuse(node1, node2):
-                    possible_fusions.append((node1, node2))
-                elif self.can_fuse(node2, node1):
-                    # epilogue fusions are order dependent
-                    possible_fusions.append((node2, node1))
+        seen = set()
+
+        def check_all_pairs(nodes):
+            for node1_index, node1 in enumerate(nodes):
+                for node2 in nodes[node1_index + 1 :]:
+                    key = (node1, node2)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    if self.can_fuse(node1, node2):
+                        possible_fusions.append(key)
+                    elif node2.is_template() and self.can_fuse(node2, node1):
+                        # epilogue fusions are order dependent
+                        possible_fusions.append((node2, node1))
+
+        buffer_names_grouping = collections.defaultdict(list)
+        for node in self.nodes:
+            for buf in node.used_buffer_names():
+                buffer_names_grouping[buf].append(node)
+        for node_grouping in buffer_names_grouping.values():
+            check_all_pairs(node_grouping)
+
+        if config.aggressive_fusion:
+            group_grouping = collections.defaultdict(list)
+            for node in self.nodes:
+                group = getattr(node, "group", None)
+                if group:
+                    group_grouping[group].append(node)
+            for node_grouping in group_grouping.values():
+                check_all_pairs(node_grouping)
+
         return sorted(possible_fusions, key=self.score_fusion_key, reverse=True)
 
     def will_fusion_create_cycle(self, node1, node2):
@@ -744,9 +821,15 @@ class Scheduler:
         """
         if node1 is node2:
             return False
-        if isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode)):
+        if (
+            isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node1.is_template()
+        ):
             return False
-        if isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode)):
+        if (
+            isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node2.is_template()
+        ):
             return False
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1

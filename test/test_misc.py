@@ -6,6 +6,7 @@ import dis
 import enum
 import functools
 import math
+import os
 import sys
 import typing
 import unittest
@@ -2075,6 +2076,20 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_torch_nn_parameter_isinstance(self):
+        def fn(x):
+            a = torch.nn.Parameter(torch.rand(2, 3))
+            if isinstance(a, torch.Tensor):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.tensor([2.5])
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_change_backends(self):
         @torchdynamo.optimize("eager", nopython=True)
         def fn1():
@@ -2110,6 +2125,32 @@ class MiscTests(torchdynamo.testing.TestCase):
 
             result = f(torch.ones(6), 3)
             self.assertEqual(result, 3)
+
+    def test_disable_optimize(self):
+        cnt = torchdynamo.testing.CompileCounter()
+
+        def f1(x):
+            return x + 1
+
+        with torchdynamo.optimize(cnt, disable=True):
+            f1(torch.ones(6))
+        self.assertEqual(cnt.frame_count, 0)
+
+        @torchdynamo.optimize(cnt, disable=True)
+        def f2(x):
+            return x + 1
+
+        f2(torch.ones(6))
+        self.assertEqual(cnt.frame_count, 0)
+
+        with patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"}):
+
+            @torchdynamo.optimize(cnt)
+            def f3(x):
+                return x + 1
+
+            f3(torch.ones(6))
+        self.assertEqual(cnt.frame_count, 0)
 
 
 class TestTracer(JitTestCase):

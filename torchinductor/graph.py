@@ -1,5 +1,6 @@
 import logging
 import operator
+import os
 from itertools import chain
 
 import sympy
@@ -23,6 +24,7 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
+from .virtualized import V
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +89,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
+
+    def get_dtype(self, buffer_name):
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].dtype
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name].get_dtype()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_dtype()
+        raise KeyError(f"could not find {buffer_name}")
 
     def random_seed_buffer(self, device: torch.device):
         """
@@ -250,6 +261,9 @@ class GraphLowering(torch.fx.Interpreter):
     def call_module(self, target, args, kwargs):
         assert False
 
+    def call_method(self, target, args, kwargs):
+        assert False
+
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
@@ -295,7 +309,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate()
 
-    def compile_to_fn(self):
+    def compile_to_module(self):
         from .codecache import PyCodeCache
 
         code = self.codegen()
@@ -303,11 +317,16 @@ class GraphLowering(torch.fx.Interpreter):
             print(code)
 
         mod = PyCodeCache.load(code)
-
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        return mod.call
+        log.info("Output code: %s", mod.__file__)
+        V.debug.output_code(mod.__file__)
+        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        return mod
+
+    def compile_to_fn(self):
+        return self.compile_to_module().call
 
     def get_output_names(self):
         return [
