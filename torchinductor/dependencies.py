@@ -91,6 +91,9 @@ class MemoryDep(typing.NamedTuple):
             return False
         return True
 
+    def is_contiguous(self) -> bool:
+        return isinstance(self.index, (sympy.Symbol, sympy.Integer))
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -105,6 +108,9 @@ class StarDep(typing.NamedTuple):
         return 1
 
     def is_simple(self) -> bool:
+        return False
+
+    def is_contiguous(self) -> bool:
         return False
 
 

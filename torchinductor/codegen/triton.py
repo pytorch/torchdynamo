@@ -14,7 +14,6 @@ import torch
 
 import torchinductor
 
-from .. import codecache
 from .. import config
 from .. import ir
 from ..utils import has_triton_libdevice
@@ -429,7 +428,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}):
+    def __init__(self, *groups, pid_cache={}, is_contiguous=False):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -442,6 +441,7 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
+        self.is_contiguous = is_contiguous
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -889,14 +889,13 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from {codecache.__name__} import {heuristics}
-
+                    from torchinductor.triton_ops.autotune import {heuristics}
                 """
             )
 
         code.splice(
             f"""
-                @{heuristics}(size_hints={size_hints!r})
+                @{heuristics}(size_hints={size_hints!r}, contiguous={self.is_contiguous!r}, filename=__file__)
                 @triton.jit
             """
         )
@@ -1098,10 +1097,21 @@ class TritonScheduling:
         log.info("schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
+    @staticmethod
+    def is_contiguous(node):
+        if node in (EnableReduction, DisableReduction):
+            return True
+        return all(
+            dep.is_contiguous()
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
+        )
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
 
-        with TritonKernel(*tiled_groups) as kernel:
+        with TritonKernel(
+            *tiled_groups, is_contiguous=all(map(self.is_contiguous, node_schedule))
+        ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node is DisableReduction:
@@ -1112,18 +1122,14 @@ class TritonScheduling:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         wrapper = V.graph.wrapper_code
-        if config.triton.many_files:
-            kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, kernel.codegen_kernel())
+        src_code = kernel.codegen_kernel()
+        if src_code in wrapper.kernels:
+            kernel_name = wrapper.kernels[src_code]
         else:
-            src_code = kernel.codegen_kernel("{kernel_name}")
-            if src_code in wrapper.kernels:
-                kernel_name = wrapper.kernels[src_code]
-            else:
-                kernel_name = wrapper.next_kernel_name()
-                wrapper.kernels[src_code] = kernel_name
-                code = src_code.format(kernel_name=kernel_name)
-                wrapper.header.splice(code)
+            kernel_name = wrapper.next_kernel_name()
+            wrapper.define_kernel(kernel_name, src_code)
+            wrapper.kernels[src_code] = kernel_name
+
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 
