@@ -16,6 +16,7 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GlobalWeakRefSource
 from ..utils import global_key_name
+from .base import MutableLocal
 from .base import VariableTracker
 from .tensor import TensorVariable
 
@@ -199,6 +200,55 @@ class ConstDictVariable(VariableTracker):
         else:
             assert ConstantVariable.is_literal(key)
             return ConstantVariable(key, **options)
+
+
+class DefaultDictVariable(ConstDictVariable):
+    def __init__(self, items, user_cls, default_factory=None, **kwargs):
+        super(DefaultDictVariable, self).__init__(items, user_cls, **kwargs)
+        assert user_cls is collections.defaultdict
+        self.default_factory = default_factory
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from . import ListVariable
+        from . import TupleVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if name == "__getitem__":
+            k = ConstDictVariable.get_key(args[0])
+
+            if k in self.items:
+                return self.getitem_const(args[0])
+            else:
+                if self.default_factory is None:
+                    raise KeyError(f"{k}")
+                else:
+                    if isinstance(k, torch.nn.Parameter):
+                        tx.store_dict_key(global_key_name(k), k)
+                    new_val = collections.OrderedDict(self.items)
+                    if self.default_factory is list:
+                        default_var = ListVariable([], mutable_local=MutableLocal())
+                    elif self.default_factory is tuple:
+                        default_var = TupleVariable([], mutable_local=MutableLocal())
+                    elif self.default_factory is dict:
+                        default_var = ConstDictVariable(
+                            {}, dict, mutable_local=MutableLocal()
+                        )
+                    else:
+                        unimplemented(
+                            f"defaultdict with default_factory = {self.default_factory}"
+                        )
+                    new_val[k] = default_var
+                    tx.replace_all(self, self.modifed(new_val, **options))
+                    return default_var
+        else:
+            return super().call_method(tx, name, args, kwargs)
 
 
 class DataClassVariable(ConstDictVariable):

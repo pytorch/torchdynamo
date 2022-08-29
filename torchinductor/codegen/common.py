@@ -556,16 +556,16 @@ class Kernel(CodeGen):
         self.stores = stores
         self.cse = cse
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
 
-    def indirect_load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def indirect_load(self, name: str, index: sympy.Expr):
         """A load the depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
             self.loads = self.compute
-            return self.load(name, index, upcast)
+            return self.load(name, index)
         finally:
             self.loads = prior
 
@@ -591,17 +591,17 @@ class Kernel(CodeGen):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
-            def load(name: str, index: sympy.Expr, upcast: bool = False):
+            def load(name: str, index: sympy.Expr):
                 if name in self.cse.invalidated_stores:
                     # A load from an invalidated store requires us to
                     # keep the actual buffer around
                     V.kernel.must_keep_buffers.add(name)
                 if "tmp" in str(index):
-                    return self.indirect_load(name, index, upcast)
+                    return self.indirect_load(name, index)
                 store_cache = self.cse.store_cache
                 if name in store_cache:
                     return store_cache[name]
-                return self.load(name, index, upcast)
+                return self.load(name, index)
 
             @staticmethod
             def store(name, index, value, mode=None):
