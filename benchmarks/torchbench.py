@@ -89,7 +89,7 @@ ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
+ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs", "hf_Reformer"}
 ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
