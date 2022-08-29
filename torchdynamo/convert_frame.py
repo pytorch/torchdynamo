@@ -377,8 +377,7 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
         except BackendCompilerFailed:
             raise
         except Exception:
-            raise
-            # pass
+            pass
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn
