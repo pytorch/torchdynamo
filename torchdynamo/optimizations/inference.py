@@ -16,7 +16,6 @@ from ..utils import checkpoint_params
 from ..utils import clone_inputs
 from ..utils import count_calls
 from ..utils import counters
-from .backends import BACKENDS
 from .normalize import long_name
 from .normalize import normalize_ir
 
@@ -163,25 +162,6 @@ class TorchScriptStrategy(object):
 
     def candidate(self):
         raise NotImplementedError()
-
-
-class FixedStrategy1(TorchScriptStrategy):
-    def candidate(self):
-        return self.scripted
-
-
-fixed_strategy1 = FixedStrategy1.compile_fn
-
-
-class FixedStrategy2(TorchScriptStrategy):
-    def candidate(self):
-        cg = BACKENDS["cudagraphs_ts"](self.scripted, self.example_inputs)
-        if cg is not None:
-            return cg
-        return self.scripted
-
-
-fixed_strategy2 = FixedStrategy2.compile_fn
 
 
 def save_pt(path, name, data):
