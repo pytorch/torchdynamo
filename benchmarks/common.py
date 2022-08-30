@@ -973,8 +973,8 @@ class BenchmarkRunner:
 
         try:
             self.model_iter_fn(model, example_inputs)
-        except:
-            raise NotImplementedError(f"Eager model failed to run")
+        except Exception:
+            raise NotImplementedError("Eager model failed to run")
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
         out_batch_size = batch_size * factor
