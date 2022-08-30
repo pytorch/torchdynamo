@@ -426,11 +426,14 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         ("dev", "name", "batch_size", "speedup"),
         [current_device, current_name, current_batch_size, float(speedup)],
     )
-    headers, data = torchdynamo.utils.compile_times(repr='csv', aggregate=True)
+    headers, data = torchdynamo.utils.compile_times(repr="csv", aggregate=True)
+    assert (
+        output_filename.find(".csv") > 0
+    ), f"expected output_filename to be a .csv, but got {output_filename}"
     output_csv(
-        "compilation_metrics.csv",
+        output_filename[:-4] + "_compilation_metrics.csv",
         ["dev", "name", "batch_size"] + headers,
-        [current_device, current_name, current_batch_size] + data
+        [current_device, current_name, current_batch_size] + data,
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 

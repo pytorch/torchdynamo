@@ -37,7 +37,6 @@ class BoxedBool:
         return False
 
 
-@dynamo_timed
 @DebugContext.wrap
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
