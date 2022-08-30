@@ -68,13 +68,10 @@ user_constraints_M2M100Model = [z3.And([input == tensor_type.tensor2(D(1, s1), D
                                                                                               s2 < 2000])] * 7 + [False] + [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
                                                                                                                                      s1 > 0,
                                                                                                                                      s2 > 1,
-                                                                                                                                     s2 < 2000])] * 6 + [False] * 2 + [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
+                                                                                                                                     s2 < 2000])] * 6 + [False]  + [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
                                                                                                                                                                                s1 > 0,
                                                                                                                                                                                s2 > 1,
-                                                                                                                                                                               s2 < 2000])] * 7 + [False] +  [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
-                                                                                                                                                                                                                      s1 > 0,
-                                                                                                                                                                                                                      s2 > 1,
-                                                                                                                                                                                                                      s2 < 2000])] * 5 + [False]* 40
+                                                                                                                                                                               s2 < 2000])] * 10 + [False] * 50
 
 
 
@@ -137,12 +134,12 @@ user_constraints_marian_mt = [z3.And([input_embeds_2 == tensor_type.tensor3(D(1,
                                                                                             input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
                                                                                             s1 > 0,
                                                                                             s2 > 1,
-                                                                                            s2 < 2000])] * 6 + [False] + \
+                                                                                            s2 < 2000])] * 6 + [False]  + \
                              [z3.And([input == tensor_type.tensor3(D(1,s1), D(1, s2), D(1, s3)),
                                       input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
                                       s1 > 0,
                                       s2 > 1,
-                                      s2 < 2000])] * 8 + [False] * 40
+                                      s2 < 2000])] * 6 + [False] * 40
 
 
 
@@ -258,11 +255,22 @@ def run_function(model, user_constraints):
         print(cnts.frame_count)
 
 
-# run_function(BlenderbotSmallModel, user_constraints_blenderbot)
 
+# 16 / 25
+print('blender bot \n \n')
+run_function(BlenderbotSmallModel, user_constraints_blenderbot)
+
+
+# 18 / 44
+# print('marian \n \n')
 # run_function(MarianModel, user_constraints_marian_mt)
 
+
+# 18 / 44
+# print('marian MT \n \n')
 # run_function(MarianMTModel, user_constraints_marian_mt)
 
 
-run_function(M2M100Model, user_constraints_M2M100Model)
+# 25 / 47
+# print('m2m100 \n \n')
+# run_function(M2M100Model, user_constraints_M2M100Model)
