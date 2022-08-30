@@ -366,6 +366,7 @@ def dump_dynamo_gm_state(gm, args, compiler_name):
     gm.recompile()
 
     with open(file_name, "w") as fd:
+        # TODO - Add the readable version of to_folder when available
         gm.to_folder(gm_dir, "ReproModule")
         fd.write(generate_backend_repro_string(gm, args, compiler_name))
     local_dir = os.path.join(torchdynamo.config.base_dir, "repro")
@@ -434,15 +435,12 @@ def wrap_dynamo_gm_debug(compiler_fn, compiler_name: str):
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
                     )
                 else:
-                    # Instead of creating a new file that we could minify
-                    # further, as is the case with wrap_post_aot_debug, we
-                    # directly run the minifier here.
+                    # As opposed to using dump_to_minify, like we do in
+                    # wrap_post_aot_debug, we directly run minifier here. This
+                    # is because we can't serialize compiler_fn here.
 
-                    # The key reason is that minifier needs Fx GraphModule to
-                    # run. wrap_post_aot_debug uses make_fx to generate Fx
-                    # GraphModule, which is ok because it is run after
-                    # AotAutograd has completed. In our case, we plan to run
-                    # torchdynamo.optimize, and make_fx is the not right choice.
+                    # The minified version uses
+                    # torchdynamo.optimize(compiler_str) to repro the error.
 
                     # Directly running the minifier could be bad if something
                     # goes bad while minification is running. We will have to
