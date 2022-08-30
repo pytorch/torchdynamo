@@ -111,6 +111,10 @@ class AccessLimitingConfig(ModuleType):
     # When this flag is set to False, we introduce a graph break instead of capturing.
     capture_scalar_outputs = False
 
+    # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
+    # false_fn produces code with identical guards.
+    enforce_cond_guards_match = True
+
     def __setattr__(self, name, value):
         if sys.version_info > (3, 8):
             assert hasattr(

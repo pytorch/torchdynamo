@@ -443,7 +443,7 @@ class TorchPyOperator(VariableTracker):
         def register_as_subgraph(fn, name, args):
             import torchdynamo
 
-            gm, _ = torchdynamo.export(fn, *args)
+            gm, guards = torchdynamo.export(fn, *args)
 
             next_name = None
             i = 0
@@ -459,7 +459,7 @@ class TorchPyOperator(VariableTracker):
             src.local_name = next_name
             gm.torchdynamo_force_dynamic = False
             tx.output.add_submodule(gm, next_name, source=NNModuleSource(src))
-            return next_name
+            return next_name, gm, guards
 
         # Get args as proxies
         p_args = [unwrap_proxy(arg) for arg in args]
@@ -479,12 +479,19 @@ class TorchPyOperator(VariableTracker):
 
             node_args = [unwrap_real(x) for x in args[3].unpack_var_sequence(tx)]
             proxy_args = [unwrap_proxy(x) for x in args[3].unpack_var_sequence(tx)]
-            true_name = register_as_subgraph(
+            true_name, true_graph, true_guards = register_as_subgraph(
                 p_args[1].get_function(), "true", node_args
             )
-            false_name = register_as_subgraph(
+            false_name, false_graph, false_guards = register_as_subgraph(
                 p_args[2].get_function(), "false", node_args
             )
+
+            if config.enforce_cond_guards_match:
+                assert (
+                    true_guards == false_guards
+                ), "Guards for true and false path must be equal."
+
+            print("EQUAL? ", true_guards == false_guards)
 
             def make_attr(name):
                 node = tx.output.create_proxy(
