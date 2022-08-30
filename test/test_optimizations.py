@@ -10,7 +10,6 @@ import torch
 import torchdynamo
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.analysis import has_mutation
-from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
@@ -157,15 +156,6 @@ class TestOptimizations(torchdynamo.testing.TestCase):
             self.assertIn("output_padding", conv_args_dict.keys())
             self.assertIn("groups", conv_args_dict.keys())
         os.remove(filename)
-
-    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    def test_export(self):
-        s = Seq()
-        i = torch.randn(10)
-        r1 = s(i)
-        opt_s = torchdynamo.optimize_assert(offline_autotuner)(s)
-        r2 = opt_s(i)
-        self.assertTrue(same(r1, r2))
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
     def test_ipex_fp32(self):

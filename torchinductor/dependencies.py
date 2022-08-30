@@ -16,6 +16,7 @@ import sympy
 
 from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
+from .utils import VarRanges
 from .utils import sympy_product
 from .virtualized import V
 
@@ -90,6 +91,9 @@ class MemoryDep(typing.NamedTuple):
             return False
         return True
 
+    def is_contiguous(self) -> bool:
+        return isinstance(self.index, (sympy.Symbol, sympy.Integer))
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -106,13 +110,13 @@ class StarDep(typing.NamedTuple):
     def is_simple(self) -> bool:
         return False
 
+    def is_contiguous(self) -> bool:
+        return False
+
 
 class IndexExprDep(typing.NamedTuple):
     index: sympy.Expr  # type: ignore[assignment]
     size: Tuple[sympy.Expr, ...]
-
-
-VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 @dataclasses.dataclass
@@ -188,10 +192,10 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         index = sympy.expand(index).subs(replacement)
         return index, tuple(new_sizes)
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False) -> str:
+    def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"load({name}, {index}, {upcast})"
+        return f"load({name}, {index})"
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
@@ -209,7 +213,7 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         return f"index_expr({index}, {dtype})"
 
 
-def var_builder(prefix: str) -> Tuple[VarRanges, Callable]:
+def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = collections.OrderedDict()
 

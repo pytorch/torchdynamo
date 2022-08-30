@@ -83,6 +83,7 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
+        aten.tril.default,
         aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
     ]
@@ -106,14 +107,17 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2):
-    return torch.mm(mat1, mat2) + input
-
-
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
+@register_decomposition([aten.addmm])
+def addmm(input, mat1, mat2):
+    if config.triton.mm != "aten":
+        return torch.mm(mat1, mat2) + input
+    else:
+        return NotImplemented  # go directly to lowering
 
 
 @register_decomposition([aten.rsqrt])
@@ -285,6 +289,11 @@ def lift(self):
 @register_decomposition([aten.sgn])
 def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
+
+
+@register_decomposition([aten.fill.Scalar])
+def fill_scalar(self, value):
+    return torch.full_like(self, value)
 
 
 """

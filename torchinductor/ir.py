@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import re
 import textwrap
 from collections import OrderedDict
 from functools import partial
@@ -29,6 +30,7 @@ from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .utils import cache_on_self
 from .utils import sympy_dot
 from .utils import sympy_product
 from .virtualized import V
@@ -202,6 +204,18 @@ class CleanDiv(IndexingDiv):
     pass
 
 
+class CeilDiv(sympy.Function):
+    """
+    Div used in indexing that rounds up.
+    """
+
+    def __new__(cls, base, divisor):
+        if sympy.gcd(base, divisor) == divisor:
+            return CleanDiv(base, divisor)
+        else:
+            return IndexingDiv(base + (divisor - 1), divisor)
+
+
 def is_triton(x):
     # TODO(jansel): a config check once we have multi-backend
     if getattr(x, "get_device", None):
@@ -297,6 +311,7 @@ class Loops(IRNode):
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
 
+    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
@@ -562,6 +577,81 @@ class Reduction(Loops):
         else:  # outer reduction
             return outer_reduction_splits(reduction_numel_hint, numel_hint)
 
+    @staticmethod
+    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
+        """Convert inner_fn from a reduction to an pointwise"""
+        reduction_ranges = [
+            V.graph.sizevars.guard_static_shape(x) for x in reduction_ranges
+        ]
+
+        if reduction_type == "sum":
+
+            def combine_fn(a, b):
+                return ops.add(a, b)
+
+        elif reduction_type == "min":
+
+            def combine_fn(a, b):
+                return ops.minimum(a, b)
+
+        elif reduction_type == "max":
+
+            def combine_fn(a, b):
+                return ops.maximum(a, b)
+
+        elif reduction_type == "any":
+
+            def combine_fn(a, b):
+                return ops.logical_or(a, b)
+
+        elif reduction_type == "argmin":
+
+            def combine_fn(a, b):
+                return ops.minimum(a[0], b[0]), ops.where(
+                    ops.lt(b[0], a[0]), b[1], a[1]
+                )
+
+        elif reduction_type == "argmax":
+
+            def combine_fn(a, b):
+                return ops.maximum(a[0], b[0]), ops.where(
+                    ops.gt(b[0], a[0]), b[1], a[1]
+                )
+
+        else:
+            raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+
+        def fn(index):
+            return functools.reduce(
+                combine_fn,
+                (
+                    value_fn(index, rindex)
+                    for rindex in itertools.product(
+                        *[range(x) for x in reduction_ranges]
+                    )
+                ),
+            )
+
+        if reduction_type in ("argmin", "argmax"):
+            flatten_index = FixedLayout(
+                None,
+                None,
+                reduction_ranges,
+                FlexibleLayout.contiguous_strides(reduction_ranges),
+            ).make_indexer()
+
+            def value_fn(index, rindex):
+                rindex = [sympy.expand(i) for i in rindex]
+                return (
+                    inner_fn(index, rindex),
+                    ops.index_expr(flatten_index(rindex), torch.int64),
+                )
+
+            return lambda index: fn(index)[1]
+        else:
+            value_fn = inner_fn
+            return fn
+
     @classmethod
     def create(
         cls,
@@ -573,7 +663,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
     ):
-        reduction_numel = sympy_product(reduction_ranges)
+        reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             def fn(index):
@@ -581,6 +671,19 @@ class Reduction(Loops):
                 return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dst_dtype, fn, ranges)
+
+        if (
+            isinstance(reduction_numel, sympy.Integer)
+            and V.graph.sizevars.size_hint(reduction_numel)
+            < config.unroll_reductions_threshold
+            and sympy_product(ranges) != 1
+        ):
+            return Pointwise.create(
+                device,
+                dst_dtype,
+                cls._unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type),
+                ranges,
+            )
 
         if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
             # triton doesn't support reduce to single element well, so break it up
@@ -809,6 +912,7 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()
 
+    @cache_on_self
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1186,10 +1290,7 @@ class ReinterpretView(BaseView):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
-            )
-            return ops.load(self.get_name(), indexer(index), upcast)
+            return ops.load(self.get_name(), indexer(index))
 
         return loader
 
@@ -1603,10 +1704,7 @@ class Buffer(IRNode):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            upcast = (
-                self.get_dtype() == torch.float16 or self.get_dtype() == torch.bfloat16
-            )
-            return ops.load(self.name, indexer(index), upcast)
+            return ops.load(self.name, indexer(index))
 
         return loader
 
@@ -1629,6 +1727,7 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
+    @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1679,6 +1778,7 @@ class NoneAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
@@ -1990,6 +2090,13 @@ class ConcatKernel(NopKernel):
 
     @classmethod
     def realize_into(cls, src, dst):
+        # Attempt to turn this into a ReinterpretView rather than assert.
+        # This has concessions around layout, as as_storage_and_layout
+        # can cause us to go from flexible to fixed layout.
+        if not isinstance(dst, ReinterpretView):
+            if is_storage_and_layout(dst):
+                storage, layout = as_storage_and_layout(dst)
+                dst = ReinterpretView(storage, layout)
         assert isinstance(dst, ReinterpretView), dst
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
@@ -2393,6 +2500,31 @@ class MatrixMultiply(ExternKernelOut):
         other_dict = OrderedDict()
 
         return inout_dict, args_dict, const_dict, other_dict
+
+
+class MatrixMultiplyAdd(ExternKernelOut):
+    def __init__(self, layout, inputs, constant_args=(), output_view=None):
+        super().__init__(layout, inputs, constant_args, output_view)
+        self.kernel = "aten.addmm.out"
+
+    @classmethod
+    def create(cls, inp, a, b):
+        m, k1 = a.get_size()
+        k2, n = b.get_size()
+        V.graph.sizevars.guard_equals(k1, k2)
+        inp = cls.realize_input(inp)
+        a = cls.realize_input(a)
+        b = cls.realize_input(b)
+        a = cls.require_stride1(a)
+        b = cls.require_stride1(b)
+        return MatrixMultiplyAdd(
+            layout=FlexibleLayout(
+                device=a.get_device(),
+                dtype=a.get_dtype(),
+                size=[m] + [n],
+            ),
+            inputs=[inp, a, b],
+        )
 
 
 class BatchMatrixMultiply(ExternKernelOut):
@@ -3107,6 +3239,19 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
+    def debug_str(self):
+        lines = [f"var_ranges = {dict(self.var_ranges)}"]
+        lines.extend([f"{name} = {val}" for name, val in self.indexing_exprs.items()])
+        lines.extend(
+            [
+                block.debug_str(name)
+                for name, block in itertools.chain(
+                    [("body", self.root_block)], self.subblocks.items()
+                )
+            ]
+        )
+        return "\n".join(lines)
+
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
         if buf_name is not None:
@@ -3174,9 +3319,9 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
-            def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+            def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
-                return self._inner.load(name, index, upcast)
+                return self._inner.load(name, index)
 
             def store(self, name, index, value, mode=None):
                 index = add_index(index, "writes", name)
@@ -3240,8 +3385,19 @@ class LoopBodyBlock:
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph
 
-    def __call__(self):
-        gm = torch.fx.GraphModule(
+    def make_gm(self):
+        return torch.fx.GraphModule(
             {**self.body.submodules, "get_index": self.body.get_index}, self.graph
         )
-        return gm.forward(V.get_ops_handler())
+
+    def __call__(self):
+        return self.make_gm().forward(V.get_ops_handler())
+
+    def debug_str(self, name="block"):
+        code = self.make_gm().code
+        return re.sub(
+            # strip `; del var0` suffixes to make output prettier
+            r";[^\n]*",
+            "",
+            code.strip().replace("def forward(", f"def {name}("),
+        )
