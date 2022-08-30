@@ -8,6 +8,7 @@ import torch._C
 import torch.nn
 from torch.fx.experimental.proxy_tensor import make_fx
 
+from torchdynamo.source import GetItemSource
 from torchdynamo.source import LocalSource
 from torchdynamo.source import NNModuleSource
 from torchdynamo.variables.lists import TupleVariable
@@ -455,10 +456,9 @@ class TorchPyOperator(VariableTracker):
                     next_name = candidate
 
             gm.__name__ = next_name
-            src = LocalSource(gm)
-            src.local_name = next_name
+            src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
-            tx.output.add_submodule(gm, next_name, source=NNModuleSource(src))
+            tx.output.add_submodule(gm, next_name, source=src)
             return next_name, gm, guards
 
         # Get args as proxies

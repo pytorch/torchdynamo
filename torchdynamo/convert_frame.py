@@ -161,7 +161,6 @@ def has_tensor_in_frame(frame):
             and hasattr(obj, "__dict__")
             and len(getattr(obj, "__dict__"))
         ):
-            print("Considering type?", obj.__class__)
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
