@@ -114,6 +114,7 @@ capture_scalar_outputs = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
+
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
         if name not in _allowed_config_names:
