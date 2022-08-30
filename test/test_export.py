@@ -473,7 +473,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-
     @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_with_aten_graph(self):
         def pre_attention_state_ops(input, mems, state):

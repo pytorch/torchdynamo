@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo
 from torchdynamo.utils import checkpoint_params
@@ -24,8 +25,6 @@ from . import skipfiles
 from . import utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-
-from torch.fx.experimental.proxy_tensor import make_fx
 
 log = logging.getLogger(__name__)
 
@@ -505,10 +504,9 @@ def export(f, *args, **kwargs):
 
             return super().output(target, (new_result,), {})
 
-
     if config.export_aten_graph:
         graph = make_fx(graph)(*graph_captured_input)
-    
+
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
