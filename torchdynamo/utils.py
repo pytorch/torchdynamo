@@ -539,7 +539,7 @@ def specialize_args_kwargs(tx, args, kwargs):
     specialized_kwargs = {}
     for x in args:
         specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs:
+    for k, v in kwargs.items():
         specialized_kwargs.update({k: v.as_specialized(tx)})
     return specialized_args, specialized_kwargs
 
