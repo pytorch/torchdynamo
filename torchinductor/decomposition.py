@@ -252,7 +252,7 @@ class Reduction(Enum):
 
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
-    return torch.index_put_(self.clone(), indices, values, accumulate)
+    return aten.index_put_(self.clone(), indices, values, accumulate)
 
 
 @register_decomposition([aten.scatter])
