@@ -462,4 +462,6 @@ def wrap_dynamo_gm_debug(compiler_fn, compiler_name: str):
 
         return compiled_gm
 
+    debug_wrapper._torchdynamo_orig_callable = compiler_fn
+
     return debug_wrapper
