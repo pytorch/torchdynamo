@@ -89,7 +89,7 @@ ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
 
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
+ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs", "hf_Reformer"}
 ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
@@ -241,11 +241,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
+
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+        dynamic_shapes = self.args.dynamic_shapes
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
@@ -279,22 +280,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+        self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
-
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                        args.dynamic_shapes,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
 
     def iter_model_names(self, args):
         from torchbenchmark import _list_model_paths
