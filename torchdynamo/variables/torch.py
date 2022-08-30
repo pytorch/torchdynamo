@@ -491,8 +491,6 @@ class TorchPyOperator(VariableTracker):
                     true_guards == false_guards
                 ), "Guards for true and false path must be equal."
 
-            print("EQUAL? ", true_guards == false_guards)
-
             def make_attr(name):
                 node = tx.output.create_proxy(
                     "get_attr",
