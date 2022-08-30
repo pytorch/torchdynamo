@@ -54,24 +54,6 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
-old_torch_manual_seed = torch.manual_seed
-
-
-def deterministic_torch_manual_seed(*args, **kwargs):
-    from torch._C import default_generator
-
-    seed = 1337
-    import torch.cuda
-
-    if not torch.cuda._is_in_bad_fork():
-        torch.cuda.manual_seed_all(seed)
-
-    return default_generator.manual_seed(seed)
-
-
-torch.manual_seed = deterministic_torch_manual_seed
-
-
 CI_SKIP_INFERENCE = [
     # TorchBench
     "dlrm",
@@ -160,6 +142,23 @@ class NullContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
+
+
+@functools.lru_cache(None)
+def patch_torch_manual_seed():
+    """Make torch manual seed deterministic. Helps with accuracy testing."""
+
+    def deterministic_torch_manual_seed(*args, **kwargs):
+        from torch._C import default_generator
+
+        seed = 1337
+        import torch.cuda
+
+        if not torch.cuda._is_in_bad_fork():
+            torch.cuda.manual_seed_all(seed)
+        return default_generator.manual_seed(seed)
+
+    torch.manual_seed = deterministic_torch_manual_seed
 
 
 def synchronize():
@@ -1500,6 +1499,8 @@ def parse_args():
 
 
 def main(runner, original_dir=None):
+    patch_torch_manual_seed()
+
     args = parse_args()
 
     # Pass the parsed args object to benchmark runner object
