@@ -397,7 +397,7 @@ def explain(f, *args, **kwargs):
     return explanation, out_guards, graphs, ops_per_graph
 
 
-def export(f, *args, **kwargs):
+def export(f, *args, aten_graph=False, **kwargs):
     f = innermost_fn(f)
 
     graph = None
@@ -504,7 +504,7 @@ def export(f, *args, **kwargs):
 
             return super().output(target, (new_result,), {})
 
-    if config.export_aten_graph:
+    if aten_graph:
         graph = make_fx(graph)(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(

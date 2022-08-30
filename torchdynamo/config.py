@@ -110,9 +110,6 @@ repro_level = int(os.environ.get("COMPILER_REPRO_LEVEL", 0))
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
 
-# True -> .export() exports a graph of aten ops.
-export_aten_graph = False
-
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):

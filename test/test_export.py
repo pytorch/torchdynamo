@@ -473,7 +473,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_with_aten_graph(self):
         def pre_attention_state_ops(input, mems, state):
             lc_key = state[0]
@@ -509,13 +508,12 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func)
+        exported = torchdynamo.export(func, aten_graph=True)
         out_graph = exported[0]
 
         dynamo_result = out_graph()
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_mismatched_out_with_aten_graph(self):
         def func(x):
             y = x + 1
@@ -526,14 +524,15 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, torch.tensor([[[1.3737, 0.1]]]))
+        exported = torchdynamo.export(
+            func, torch.tensor([[[1.3737, 0.1]]]), aten_graph=True
+        )
         out_graph = exported[0]
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_graph_bypass_with_aten_graph(self):
         inp = [
             torch.tensor([0.1, 0.1]),
@@ -551,7 +550,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, inp)
+        exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
 
@@ -559,7 +558,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_list_unpack_with_aten_graph(self):
         inp = [
             torch.tensor([0.1, 0.1]),
@@ -577,7 +575,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, inp)
+        exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
 
@@ -585,7 +583,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_mismatched_out_2_with_aten_graph(self):
         def func(x):
             y = x + 1
@@ -596,14 +593,15 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, torch.tensor([[[1.3737, 0.1]]]))
+        exported = torchdynamo.export(
+            func, torch.tensor([[[1.3737, 0.1]]]), aten_graph=True
+        )
         out_graph = exported[0]
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_graph_with_list_with_aten_graph(self):
         inp = [
             torch.tensor([0.1, 0.1]),
@@ -622,7 +620,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, inp)
+        exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
 
@@ -630,7 +628,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_export_graph_with_complex_reorder_with_aten_graph(self):
         inp = [
             torch.tensor([0.1, 0.1]),
@@ -650,7 +647,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, inp)
+        exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
 
@@ -658,7 +655,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_dupes_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
 
@@ -671,7 +667,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, inp)
+        exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
 
@@ -679,7 +675,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_dupes_2_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
 
@@ -692,7 +687,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, inp)
+        exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inp)
 
@@ -700,7 +695,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_dupes_and_bypass_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
         inp2 = torch.tensor([0.4, 0.4])
@@ -715,7 +709,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, *inps)
+        exported = torchdynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inps)
 
@@ -723,7 +717,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_dupes_and_bypass_with_non_tensor_arg_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
         inp2 = torch.tensor([0.1, 0.1])
@@ -739,7 +732,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, *inps)
+        exported = torchdynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inps)
 
@@ -747,7 +740,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_dupes_and_bypass_reorder_with_non_tensor_arg_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
         inp2 = torch.tensor([0.1, 0.1])
@@ -763,7 +755,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, *inps)
+        exported = torchdynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inps)
 
@@ -795,7 +787,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_zeroes_in_and_out_different_shape_on_test_with_aten_graph(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
@@ -812,7 +803,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, *inps)
+        exported = torchdynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inps_rand)
 
@@ -820,7 +811,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_func_return_with_aten_graph(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
@@ -842,7 +832,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, *inps)
+        exported = torchdynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inps_rand)
 
@@ -850,7 +840,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torchdynamo.config, "export_aten_graph", True)
     def test_dict_return_with_aten_graph(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
@@ -868,7 +857,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         torchdynamo.reset()
 
-        exported = torchdynamo.export(func, *inps)
+        exported = torchdynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
         flat_input, _ = pytree.tree_flatten(inps_rand)
 
