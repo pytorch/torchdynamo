@@ -74,7 +74,7 @@ user_constraints_M2M100Model = [z3.And([input == tensor_type.tensor2(D(1, s1), D
                                                                                                                                                                                s2 < 2000])] * 7 + [False] +  [z3.And([input == tensor_type.tensor3(D(1, s1), D(1, s2), D(1, 1024)),
                                                                                                                                                                                                                       s1 > 0,
                                                                                                                                                                                                                       s2 > 1,
-                                                                                                                                                                                                                      s2 < 2000])] * 8 + [False]* 40
+                                                                                                                                                                                                                      s2 < 2000])] * 5 + [False]* 40
 
 
 
