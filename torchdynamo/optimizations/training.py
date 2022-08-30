@@ -36,6 +36,8 @@ class AotAutogradStrategy(object):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
         import functorch.compile
 
+        functorch.compile.config.use_functionalize = True
+
         super(AotAutogradStrategy, self).__init__()
         counters["aot_autograd"]["total"] += 1
         self.use_fallback = False
