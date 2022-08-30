@@ -25,9 +25,9 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         correct1 = fn(v1, v2)
         correct2 = fn(v2, v1)
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnt):
-            r1 = fn(v1, v2)
-            r2 = fn(v2, v1)
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        r1 = opt_fn(v1, v2)
+        r2 = opt_fn(v2, v1)
         self.assertTrue(torchdynamo.testing.same(r1, correct1))
         self.assertTrue(torchdynamo.testing.same(r2, correct2))
         self.assertEqual(cnt.frame_count, frame_count)
@@ -281,9 +281,9 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         correct1 = fn(v1, v2, t)
         correct2 = fn(v1, v2, f)
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnt):
-            r1 = fn(v1, v2, t)
-            r2 = fn(v1, v2, f)
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        r1 = opt_fn(v1, v2, t)
+        r2 = opt_fn(v1, v2, f)
         self.assertTrue(torchdynamo.testing.same(r1, correct1))
         self.assertTrue(torchdynamo.testing.same(r2, correct2))
         self.assertEqual(cnt.frame_count, 3)
@@ -407,11 +407,11 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         t = torch.Tensor([True])
         f = torch.Tensor([False])
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnt):
-            for a in (t, f):
-                for b in (t, f):
-                    for c in (t, f):
-                        fn(v1, a, b, c)
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        for a in (t, f):
+            for b in (t, f):
+                for c in (t, f):
+                    opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
         self.assertEqual(cnt.frame_count, 7)
@@ -494,9 +494,9 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         v1 = torch.randn(10)
         v2, it2 = fn(v1)
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnt):
-            v3, it3 = fn(v1)
-            v4, it4 = fn(v1)
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        v3, it3 = opt_fn(v1)
+        v4, it4 = opt_fn(v1)
         self.assertEqual(v2.tolist(), v3.tolist())
         self.assertEqual(v2.tolist(), v4.tolist())
         self.assertEqual(list(it2), list(it3))
@@ -515,8 +515,8 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         v1 = torch.randn(10)
         it1 = iter(tuple(range(10)))
         cnt = torchdynamo.testing.CompileCounter()
-        with torchdynamo.optimize(cnt):
-            self.assertEqual(fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        self.assertEqual(opt_fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
         self.assertEqual(list(it1), [4, 5, 6, 7, 8, 9])
 
     def test_enumerate_not_break_graph(self):

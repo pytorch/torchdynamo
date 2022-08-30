@@ -1,6 +1,9 @@
+import logging
 import os
+import sys
 from os.path import abspath
 from os.path import dirname
+from types import ModuleType
 
 import torch
 
@@ -12,14 +15,15 @@ try:
 except ImportError:
     HAS_REFS_PRIMS = False
 
-# print out lots of stuff
-debug = False
 
-# an unreasonable amount of debug printouts
-trace = False
-
-# print the torchdynamo internal exceptions
-print_internal_exceptions = True
+# log level (levels print what it says + all levels listed below it)
+# DEBUG print full traces <-- lowest level + print tracing of every instruction
+# INFO print compiled functions + graphs
+# WARN print warnings (including graph breaks)
+# ERROR print exceptions (and what user code was being processed when it occurred)
+log_level = logging.WARNING
+# Verbose will print full stack traces on warnings and errors
+verbose = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -41,6 +45,8 @@ constant_functions = {
     torch.jit.is_scripting: False,
     torch.jit.is_tracing: False,
     torch._C._get_tracing_state: None,
+    torch.fx._symbolic_trace.is_fx_tracing: False,
+    torch.onnx.is_in_onnx_export: False,
 }
 
 # root folder of the project
@@ -59,7 +65,7 @@ dynamic_propagation = True
 fake_tensor_propagation = True
 
 # run FX normalization passes in optimizer
-normalize_ir = True
+normalize_ir = False
 
 # If a tensor subclass type is in this set, torchdynamo will inline the
 # __torch_function__ logic of the subclass.
@@ -93,6 +99,24 @@ allowed_functions_module_string_ignorelist = {
     "torch._decomp",
 }
 
+# Compiler compilation debug info
+# 0: Nothing printed out when compilation fails
+# 1: Dump the graph out to repro.py if compilation fails
+# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
+# 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
+repro_level = int(os.environ.get("COMPILER_REPRO_LEVEL", 0))
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
+
+
+class _AccessLimitingConfig(ModuleType):
+    def __setattr__(self, name, value):
+        if name not in _allowed_config_names:
+            raise AttributeError(f"{__name__}.{name} does not exist")
+        return object.__setattr__(self, name, value)
+
+
+_allowed_config_names = {*globals().keys()}
+sys.modules[__name__].__class__ = _AccessLimitingConfig

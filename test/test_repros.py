@@ -879,6 +879,27 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, ifdyn(14, 11))
 
+    def test_slicing_dynamic_shape(self):
+        def fn(y):
+            x = torch.ones(8)
+            idx = y[0]
+            out = x[idx:]
+            return (out + 3) * 5
+
+        counter = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(counter)(fn)
+        out = opt_fn(torch.ones(10, dtype=torch.long))
+        # idx should be 1 -> slicing off [1:] of 8 elem tensor
+        self.assertEqual(list(out.shape), [7])
+
+        expected_ops = ifdyn(5, 4)
+        expected_frame = ifdyn(1, 2)
+
+        self.assertEqual(expected_ops, expected_ops)
+        self.assertEqual(expected_frame, expected_frame)
+
+        self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
+
     @requires_static_shapes
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -1475,6 +1496,15 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_specialized_stride(self):
+        def f():
+            e = torch.empty(4)
+            x = e[::2]
+            return x.stride()
+
+        self.assertEqual(f(), torchdynamo.optimize("eager")(f)())
+
     @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
         @torchdynamo.optimize("eager", nopython=True)
@@ -1489,6 +1519,49 @@ class ReproTests(torchdynamo.testing.TestCase):
                 return boxes + 1
 
         self.assertTrue((to_bitmasks(torch.zeros(10)) == torch.ones(10)).all())
+
+    def test_multi_dot_import(self):
+        def fn1(x):
+            return torch.sin(x)
+
+        def fn(x):
+            import torch.fx
+
+            _ = torch.fx.symbolic_trace(fn1)
+            return x * 2
+
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_relative_import(self):
+        def fn(x):
+            from .test_functions import tensor_for_import_testing
+
+            return x * 2 * tensor_for_import_testing
+
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_relative_import_no_modulename(self):
+        def fn(x):
+            from . import test_functions
+
+            return x * 2 * test_functions.tensor_for_import_testing
+
+        x = torch.randn(10)
+        fn(x)
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

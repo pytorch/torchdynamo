@@ -1,8 +1,6 @@
 import dataclasses
 import functools
 import logging
-import operator
-import os
 from typing import List
 
 import torch.fx
@@ -10,17 +8,15 @@ from functorch.compile import min_cut_rematerialization_partition
 
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
-from torchdynamo.optimizations.python_key import python_key_normalize
-from torchdynamo.testing import same
+from torchdynamo.utils import dynamo_timed
 from torchdynamo.utils import identity
-from torchdynamo.utils import init_logging
 
 from . import config
 from . import overrides
-from .debug_utils import dump_to_minify
-from .debug_utils import dump_to_repro
-from .decomposition import decompositions
+from .debug import DebugContext
+from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import ceildiv
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -33,128 +29,70 @@ class BoxedBool:
     def __bool__(self):
         return self.value
 
-
-class CheckEachNode(torch.fx.Interpreter):
-    def call_function(self, target, args, kwargs):
-        expected = target(*args, **kwargs)
-        if target in (operator.getitem,):
-            return expected
-
-        g = torch.fx.Graph()
-        g_args = []
-        a_args = []
-        for n, arg in enumerate(args):
-            if isinstance(arg, torch.Tensor):
-                g_args.append(g.placeholder(f"arg{n}"))
-                a_args.append(arg)
-            else:
-                g_args.append(arg)
-        assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-        node = g.call_function(target, tuple(g_args), kwargs)
-        if isinstance(expected, torch.Tensor):
-            node = (node,)
-        g.output(node)
-
-        gm = torch.fx.GraphModule({}, g)
-        graph = GraphLowering(gm)
-        with V.set_graph_handler(graph):
-            graph.run(*args, **kwargs)
-            actual = graph.compile_to_fn()(*a_args)
-
-        if isinstance(expected, torch.Tensor):
-            actual = actual[0]
-
-        print(target, same(expected, actual))
-        assert same(expected, actual)
-
-        return expected
+    @staticmethod
+    def disable(obj):
+        if isinstance(obj, BoxedBool):
+            obj.value = False
+            return obj
+        return False
 
 
-def compile_fx_python_key(
-    model: torch.fx.GraphModule, example_inputs: List[torch.Tensor], cudagraphs=None
-):
-    """Alternate version for inference only"""
-    assert isinstance(model, torch.fx.GraphModule)
-    assert all(isinstance(x, torch.Tensor) for x in example_inputs)
-
-    with overrides.patch_functions():
-        model = overrides.replace_fx(model)
-        gm, wrap = python_key_normalize(
-            model, example_inputs, decompositions=decompositions
-        )
-
-    if config.dce:
-        gm.graph.eliminate_dead_code()
-    if config.debug:
-        gm.graph.print_tabular()
-
-    if os.environ.get("TORCHINDUCTOR_CHECK_OPS") == "1":
-        wrap(CheckEachNode(gm).run)(*example_inputs)
-
-    return compile_fx_inner(gm, example_inputs, wrap=wrap, cudagraphs=cudagraphs)
-
-
+@DebugContext.wrap
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     wrap=identity,
     cudagraphs=None,
     num_fixed=0,
+    is_backward=False,
 ):
-    init_logging()
+    log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
+    V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
-    if config.repro_level == 3:
-        dump_to_minify(gm, example_inputs)
-    try:
-        graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
-        with V.set_graph_handler(graph):
-            wrap(graph.run)(*example_inputs)
-            compiled_fn = wrap(graph.compile_to_fn())
+    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+    with V.set_graph_handler(graph):
+        wrap(graph.run)(*example_inputs)
+        compiled_fn = wrap(graph.compile_to_fn())
 
-        # make sure it works, causes issues for mutation
-        # compiled_fn(*example_inputs)
+    if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
+        compiled_fn = cudagraphify(
+            compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+        )
+    elif cudagraphs:
+        BoxedBool.disable(cudagraphs)
 
-        if (
-            cudagraphs
-            and set(graph.device_types) == {"cuda"}
-            and not graph.mutated_inputs
-        ):
-            compiled_fn = cudagraphify(
-                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
-            )
-        elif cudagraphs:
-            if isinstance(cudagraphs, BoxedBool):
-                # Disable cudagraphs in the backwards pass too:
-                cudagraphs.value = False
+        if len(set(graph.device_types)) > 1:
+            log.warning("skipping cudagraphs due to multiple devices")
+        elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
+            log.warning("skipping cudagraphs due to input mutation")
 
-            if set(graph.device_types) == {"cuda"}:
-                log.warning("skipping cudagraphs due to input mutation")
-            elif set(graph.device_types) != {"cpu"}:
-                log.warning("skipping cudagraphs due to multiple devices")
-
-        if config.repro_level > 0:
-            compiled_fn(*example_inputs)
-
-        return compiled_fn
-    except Exception:
-        if config.repro_level == 1:
-            dump_to_repro(gm, example_inputs)
-        elif config.repro_level == 2:
-            dump_to_minify(gm, example_inputs)
-
-        raise
+    return compiled_fn
 
 
+@dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+
+    def static_input(x):
+        # make sure alignment and contiguity of inputs is preserved
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
+        needed_size = ceildiv(needed_size, 32) * 32
+        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
+        cache_line_offset = (
+            (x.data_ptr() - buffer.data_ptr()) % 32
+        ) // x.element_size()
+        return torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx]
+        static_input(x) if idx not in static_input_idxs else inputs[idx]
         for idx, x in enumerate(inputs)
     ]
 
@@ -221,7 +159,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
@@ -229,22 +167,22 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
+    @dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        if config.debug:
-            print("FORWARD GRAPH:")
-            model.graph.print_tabular()
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
             model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
         )
 
+    @dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        if config.debug:
-            print("BACKWARD GRAPH:")
-            model.graph.print_tabular()
         fixed = count_tangents(model)
         return compile_fx_inner(
-            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+            model,
+            example_inputs,
+            num_fixed=fixed,
+            cudagraphs=cudagraphs,
+            is_backward=True,
         )
 
     with overrides.patch_functions():
@@ -253,19 +191,8 @@ def compile_fx_aot(model_: torch.fx.GraphModule, example_inputs_: List[torch.Ten
             example_inputs_,
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            decompositions=decompositions,
+            decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
         )
-
-
-def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
-    """Main entrypoint to a compile given FX graph"""
-    logging.getLogger("torchinductor").setLevel(
-        logging.DEBUG if config.debug else logging.WARNING
-    )
-    if config.aot_autograd:
-        return compile_fx_aot(model_, example_inputs_)
-    else:
-        return compile_fx_python_key(model_, example_inputs_)

@@ -2,6 +2,7 @@ import collections
 import contextlib
 import copy
 import dataclasses
+import dis
 import functools
 import gc
 import inspect
@@ -29,17 +30,71 @@ import torchdynamo.config
 
 from . import config
 
-log = logging.getLogger(__name__)
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
     "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
 )
 
+log = logging.getLogger(__name__)
+
+# profiling compilation time
+compilation_metrics = collections.OrderedDict()
+
+
+def dynamo_timed(func):
+    def time_wrapper(*args, **kwargs):
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        compilation_metrics[key].append(time.time() - t0)
+        return r
+
+    return time_wrapper
+
+
+def compile_times(repr="str", aggregate=False):
+    """
+    Get metrics about torchdynamo frontend/backend compilation times.
+
+    Accumulates information from functions tagged with `@dynamo_timed`.
+
+    repr='str' returns a printable string for user interaction, and 'csv'
+    returns headers, rows which can be logged for output
+
+    aggregate causes values from multiple compilations (e.g. split graphs)
+    to be accumulated into one value.  If false, expect more than one value
+    per metric.
+    """
+
+    def fmt_fn(values, item_fn=lambda x: x):
+
+        if aggregate:
+            return item_fn(sum(values))
+        return ", ".join(map(item_fn, values))
+
+    if repr == "str":
+        rows = [
+            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_metrics
+        ]
+        out = "TorchDynamo compilation metrics:\n"
+        out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+        return out
+    elif repr == "csv":
+        values = [
+            fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
+            for v in compilation_metrics.values()
+        ]
+        headers = list(compilation_metrics.keys())
+        return headers, values
+
 
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "%(levelname)s %(name)s: %(message)s"},
+        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
     },
     "handlers": {
         "torchdynamo_console": {
@@ -65,10 +120,41 @@ LOGGING_CONFIG = {
 }
 
 
-@functools.lru_cache(None)
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
+        logger = logging.getLogger("torchdynamo")
+        logger.setLevel(config.log_level)
+        logger = logging.getLogger("torchinductor")
+        logger.setLevel(config.log_level)
+
+
+# filter out all frames after entering dynamo
+def filter_stack(stack):
+    user_stack = []
+    for frame in stack:
+        if "convert_frame" in frame.filename:
+            break
+        if "eval_frame" in frame.filename or "torchdynamo.optimize(" in frame.line:
+            continue
+        user_stack.append(frame)
+
+    return user_stack
+
+
+def format_graph_tabular(graph):
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        raise
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
+    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+
+
+def format_bytecode(prefix, frame, code):
+    return f"{prefix} {frame.f_code.co_name} {frame.f_code.co_filename}\
+ line {frame.f_code.co_firstlineno} \n{dis.Bytecode(code).dis()}\n "
 
 
 def count_calls(g: fx.Graph):
@@ -156,9 +242,14 @@ def is_numpy_float_type(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    return istype(
-        obj, (torch.Tensor, torch.nn.Parameter, *config.traceable_tensor_subclasses)
+    tensor_list = (
+        torch.Tensor,
+        torch.nn.Parameter,
+        *config.traceable_tensor_subclasses,
     )
+    if fake_tensors_available:
+        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    return istype(obj, tensor_list)
 
 
 def is_lazy_module(mod):
@@ -240,19 +331,30 @@ def clone_input(x):
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
-        buffer = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+        if x.is_quantized:
+            result = torch.empty_quantized((needed_size + 32,), x)
+        else:
+            result = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
         cache_line_offset = (
-            (x.data_ptr() - buffer.data_ptr()) % 32
+            (x.data_ptr() - result.data_ptr()) % 32
         ) // x.element_size()
-        result = torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+        result.as_strided_(x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
-            result.requires_grad_(x.requires_grad)
+            if x.is_leaf:
+                result.requires_grad_(x.requires_grad)
+            if x.is_leaf and x.grad is not None:
+                result.grad = clone_input(x.grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            return torch.clone(x)
+            y = torch.clone(x)
+            if x.is_leaf:
+                y.requires_grad_(x.requires_grad)
+            if x.is_leaf and x.grad is not None:
+                y.grad = clone_input(x.grad)
+            return y
         return result
 
 
@@ -555,7 +657,7 @@ def same(
                     exact_dtype=exact_dtype,
                 )
             ):
-                print("Accuracy failed for key name", k)
+                log.info("Accuracy failed for key name", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -575,7 +677,7 @@ def same(
                 return True
             res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if res < 0.99:
-                print(f"Similarity score={res.cpu().detach().item()}")
+                log.warning(f"Similarity score={res.cpu().detach().item()}")
             return res >= 0.99
         else:
             if not exact_dtype:
@@ -589,7 +691,12 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                return res_error <= (1.1 * ref_error + 1e-5)
+                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                if not passes_test:
+                    log.warning(
+                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                    )
+                return passes_test
 
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):

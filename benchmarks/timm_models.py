@@ -10,6 +10,7 @@ import warnings
 import torch
 from common import BenchmarkRunner
 from common import main
+from torch._subclasses import FakeTensor
 
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
@@ -54,20 +55,26 @@ BATCH_SIZE_DIVISORS = {
     "dla102": 2,
     "dpn107": 2,
     "ecaresnet101d": 2,
+    "eca_botnext26ts_256": 2,
+    "eca_halonext26ts": 2,
     "gluon_senet154": 2,
     "gluon_xception65": 2,
     "gmixer_24_224": 2,
     "gmlp_s16_224": 2,
-    "jx_nest_base": 2,
+    "hrnet_w18": 64,
+    "jx_nest_base": 4,
     "legacy_senet154": 2,
     "mixer_b16_224": 2,
     "mixnet_l": 2,
-    "mobilevit_s": 2,
+    "mobilevit_s": 4,
     "nasnetalarge": 2,
+    "nfnet_l0": 2,
     "pit_b_224": 2,
     "pnasnet5large": 2,
     "poolformer_m36": 2,
     "res2net101_26w_4s": 2,
+    "res2net50_14w_8s": 64,
+    "res2next50": 64,
     "resnest101e": 4,
     "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
@@ -80,13 +87,11 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-# https://github.com/pytorch/torchdynamo/issues/611
-REQUIRE_HIGHER_TOLERANCE = {
-    "adv_inception_v3",
-    "convmixer_768_32",
-    "convnext_base",
-    "gluon_inception_v3",
-    "inception_v3",
+REQUIRE_HIGHER_TOLERANCE = set()
+
+SKIP = {
+    # Unusual training setup
+    "levit_128",
 }
 
 
@@ -184,13 +189,13 @@ class TimmRunnner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
 
-        _, model_dtype, data_dtype = self.resolve_precision()
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+
+        # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
         model = create_model(
@@ -209,7 +214,6 @@ class TimmRunnner(BenchmarkRunner):
         )
         model.to(
             device=device,
-            dtype=model_dtype,
             memory_format=torch.channels_last if channels_last else None,
         )
 
@@ -245,25 +249,22 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
-        return device, model_name, model, example_inputs, batch_size
+        if is_training and not use_eval_mode:
+            model.train()
+        else:
+            model.eval()
 
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
+        self.validate_model(model, example_inputs)
+
+        return device, model_name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
         # for model_name in list_models(pretrained=True, exclude_filters=["*in21k"]):
-        for model_name in sorted(TIMM_MODELS.keys()):
+        model_names = sorted(TIMM_MODELS.keys())
+        start, end = self.get_benchmark_indices(len(model_names))
+        for index, model_name in enumerate(model_names):
+            if index < start or index >= end:
+                continue
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
@@ -296,7 +297,10 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        return self.loss(pred, self.target)
+        if isinstance(pred, FakeTensor) and not isinstance(self.target, FakeTensor):
+            return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
+        else:
+            return self.loss(pred, self.target)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)

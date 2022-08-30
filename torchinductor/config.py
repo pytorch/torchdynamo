@@ -6,17 +6,11 @@ debug = False
 # dead code elimination
 dce = False
 
-# assume there will be no backwards
-forward_only = False
-
 # assume input tensors are dynamic
 dynamic_shapes = True
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
-
-# enable some approximation algorithms
-approximations = False
 
 # put correctness assertions in generated code
 size_asserts = True
@@ -37,9 +31,6 @@ realize_bytes_threshold = 2000
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
-# python_key_normalize versus aot_autograd
-aot_autograd = True
-
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
@@ -49,12 +40,14 @@ prefuse_nodes = True
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
 
-# Inductor compilation debug info
-# 0: Nothing printed out when compilation fails
-# 1: Dump the graph out to repro.py if compilation fails
-# 2: Dumps the graph out to minify_repro.py with a minifier if compilation fails
-# 3: Always dumps the last graph ran out to minify_repro.py, useful for segfaults/irrecoverable errors
-repro_level = int(os.environ.get("INDUCTOR_REPRO_LEVEL", 0))
+# fuse even in cases without common reads
+aggressive_fusion = False
+
+# how many nodes to allow into a single fusion
+max_fusion_size = 64
+
+# replace small reductions with pointwise, disable with `= 1`
+unroll_reductions_threshold = 8
 
 
 # config specific to codegen/cpp.pp
@@ -99,10 +92,41 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
-    # put each kernel in its own file
-    many_files = False
-
     # use triton.autotune?
     autotune = True
 
     use_bmm = False
+
+    # should we stop a fusion to allow better tiling?
+    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_reduction_fusion = True
+
+
+# create a directory containing lots of debug information
+class trace:
+    # master switch for all debugging flags below
+    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+
+    # Save python logger call >=logging.DEBUG
+    debug_log = True
+
+    # Save python logger call >=logging.INFO
+    info_log = False
+
+    # Save input FX graph (post decomps)
+    fx_graph = True
+
+    # Save TorchInductor IR before fusion pass
+    ir_pre_fusion = True
+
+    # Save TorchInductor IR after fusion pass
+    ir_post_fusion = True
+
+    # Copy generated code to trace dir
+    output_code = True
+
+    # SVG figure showing post-fusion graph
+    graph_diagram = False
+
+    # Store cProfile (see snakeviz to view)
+    compile_profile = False

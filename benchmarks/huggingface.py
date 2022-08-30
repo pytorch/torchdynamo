@@ -100,6 +100,11 @@ SKIP = {
     "BlenderbotForConditionalGeneration",
     "GPTJForCausalLM",
     "GPTJForQuestionAnswering",
+    "GPTNeoForCausalLM",
+    "GPTNeoForSequenceClassification",
+    # Fails with even batch size = 1
+    "DebertaV2ForMaskedLM",
+    "DebertaV2ForQuestionAnswering",
 }
 
 # TODO - Fails even after fake tensors
@@ -107,7 +112,9 @@ USE_SMALL_BATCH_SIZE = {
     "AlbertForMaskedLM": 2,
     "AlbertForPreTraining": 4,
     "AlbertForQuestionAnswering": 2,
-    "BartForCausalLM": 4,
+    "BartForCausalLM": 2,
+    "BartForConditionalGeneration": 1,
+    "BlenderbotSmallForConditionalGeneration": 32,
     "DebertaForMaskedLM": 4,
     "DebertaForQuestionAnswering": 4,
     "DebertaV2ForMaskedLM": 1,
@@ -124,7 +131,7 @@ USE_SMALL_BATCH_SIZE = {
     "PegasusForConditionalGeneration": 4,
     "RobertaForCausalLM": 4,
     "TrOCRForCausalLM": 8,
-    "XGLMForCausalLM": 2,
+    "XGLMForCausalLM": 1,
     "XLNetLMHeadModel": 4,
 }
 
@@ -319,11 +326,11 @@ class HuggingfaceRunner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
+
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -387,27 +394,18 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
+        self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
-
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
 
     def iter_model_names(self, args):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         model_names = set(model_names)
         model_names = sorted(model_names)
-        for model_name in model_names:
+
+        start, end = self.get_benchmark_indices(len(model_names))
+        for index, model_name in enumerate(model_names):
+            if index < start or index >= end:
+                continue
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)

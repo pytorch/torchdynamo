@@ -30,7 +30,7 @@ from .. import variables
 from ..exc import TorchRuntimeError
 from ..exc import unimplemented
 from ..source import AttrSource
-from ..utils import clone_tensor
+from ..utils import clone_input
 from ..utils import is_lazy_module
 from ..utils import istype
 from ..utils import product
@@ -113,7 +113,9 @@ class TensorVariable(VariableTracker):
             def wrap_fake_exception(func):
                 return func()
 
+        args = kwargs = None
         initial_example_value = example_value
+
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op
@@ -148,13 +150,35 @@ class TensorVariable(VariableTracker):
                 if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
 
+        # Avoids a .item() call in the tensor slice that would attempt to get a value out
+        # fake tensors, and which would determine the output shape of the slice.
+        # It is a workaround until https://github.com/pytorch/pytorch/pull/83567
+        # is landed and there is more complete support for breaking on data dependent operators.
+
+        if (
+            proxy.node.target == operator.getitem
+            and use_fake_tensors
+            and args is not None
+            and not config.dynamic_shapes
+        ):
+            if (
+                isinstance(args[0], FakeTensor)
+                and isinstance(args[1], slice)
+                and any(
+                    isinstance(e, FakeTensor)
+                    for e in (args[1].start, args[1].stop, args[1].step)
+                )
+            ):
+                unimplemented("dynamic shape slicing")
+
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
             parameter_value = initial_example_value if is_parameter else None
 
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(example_value, FakeTensor):
-                example_value = clone_tensor(example_value)
+                # NB: ensure strides are preserved
+                example_value = clone_input(example_value)
             proxy.node.meta["example_value"] = example_value
             specialized_props = cls.specialize(example_value)
             if use_fake_tensors and isinstance(example_value, FakeTensor):
@@ -310,7 +334,7 @@ class TensorVariable(VariableTracker):
 
         def check_type(ty):
             if ty not in tensortype_to_dtype:
-                return self.python_type() is ty
+                return issubclass(self.python_type(), ty)
 
             dtypes = tensortype_to_dtype[ty]
             return self.dtype in dtypes

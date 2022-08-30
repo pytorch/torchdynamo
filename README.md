@@ -41,12 +41,6 @@ nightly builds.
 
 [PyTorch from source]: https://github.com/pytorch/pytorch#from-source
 
-For reproducing the experiments in the posts above, use the TorchBenchmark
-[fork found here].  This fork contains a few minor fixes that have not
-yet been merged upstream.
-
-[fork found here]: https://github.com/jansel/benchmark
-
 Other development requirements can be installed with:
 ```shell
 pip install -r requirements.txt
@@ -194,7 +188,7 @@ The above backends optimize inference. Let's see how TorchDynamo supports traini
 Torchdynamo supports training, using AotAutograd to capture backwards:
 * only the .forward() graph is captured by torchdynamo's python evalframe frontend
 * for each segment of .forward() that torchdynamo captures, it uses AotAutograd to generate a backward graph segment
-* each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backwrad
+* each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backward
 * the forward, backward pairs are wrapped in autograd.function modules
 * usercode calling .backward() still triggers eager's autograd engine, which runs each 'compiled backward' graph as if it were one op, also running any non-compiled eager ops' .backward() functions
 
@@ -202,7 +196,7 @@ Current limitations:
 * optimizer ops are currently not captured at all, and thus not compiled (under investigation to add support)
 * DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
 
-Specifically, these are the exisiting backends
+Specifically, these are the existing backends
 
 * `torchdynamo.optimize("aot_nop")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
 * `torchdynamo.optimize("aot_nvfuser")` - Use AotAutograd with Torchscipt and nvfuser compiler.
@@ -278,7 +272,7 @@ def toy_example(a, b):
 ```
 
 [optimize_for_inference]: https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html
-[backends.py]: https://github.com/jansel/torchdynamo/blob/main/torchdynamo/optimizations/backends.py
+[backends.py]: https://github.com/pytorch/torchdynamo/blob/main/torchdynamo/optimizations/backends.py
 
 ## Guards
 
@@ -484,7 +478,7 @@ testing:
 cd ..  # if still in torchdynamo/
 
 # download everything
-git clone git@github.com:jansel/benchmark.git torchbenchmark
+git clone git@github.com:pytorch/benchmark.git torchbenchmark
 cd torchbenchmark
 python install.py
 
@@ -518,33 +512,6 @@ Test on torchbenchmark models with:
 ```shell
 python torchbench.py
 ```
-
-## Performance Measurement
-
-To reproduce the performance measurements shared in the posts above,
-run either `make offline-autotune-cpu` or `make offline-autotune-gpu`.  These targets
-will run something like the following:
-
-```shell
-# cleanup leftover state
-rm -rf subgraphs
-
-# initial run to record all the graphs to ./subgraphs/*
-python torchbench.py -dcuda --speedup -n1
-
-# autotune each graph and store which backend is best on disk
-python autotune.py
-
-# measure the speedups using the autotuned backend choices
-python torchbench.py -dcuda --speedup -n100
-
-# results are in ./speedups.csv
-```
-
-The baselines can be run with `make baseline-cpu` or `make baseline-gpu`.
-Which both string together a lot of calls to `./torchbench.py` and
-generate `*.csv` files.  See `./torchbench.py --help` for more options.
-
 
 ## Linting and Automatic Code Formatting
 

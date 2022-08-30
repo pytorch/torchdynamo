@@ -29,7 +29,6 @@ from torchdynamo.source import GlobalWeakRefSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
-from . import config
 from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
@@ -118,7 +117,7 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            self.output.compile_subgraph(self)
+            self.output.compile_subgraph(self, msg="generic_jump")
             self.pop()
 
             if_next = self.create_call_resume_at(self.next_instruction)
@@ -142,20 +141,36 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     return inner
 
 
+explain = False
+
+
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
+            msg = None
             try:
                 return inner_fn(self, inst)
             except Unsupported as exc:
                 if not self.should_compile_partial_graph():
                     raise
+                user_stack = "".join(
+                    traceback.format_list(
+                        [([self.frame_summary()] + list(reversed(exc.real_stack)))[-1]]
+                    )
+                ).strip()
+
+                # torchdynamo.explain() formats this a little nicer, and presents a slightly
+                # more actionable user code pointer
+                if not explain:
+                    log.warning(f"Graph break: {exc} from user code at {user_stack}")
+
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
+                msg = exc.msg
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self)
+            self.output.compile_subgraph(self, msg=msg)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
@@ -281,8 +296,7 @@ class InstructionTranslatorBase(object):
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
-        if config.trace:
-            print("TRACE", inst.opname, inst.argval, self.stack)
+        log.debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
 
         try:
             if not hasattr(self, inst.opname):
@@ -293,6 +307,11 @@ class InstructionTranslatorBase(object):
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
                 raise
+        except Exception as exc:
+            real_stack = getattr(exc, "real_stack", [])
+            real_stack.append(self.frame_summary())
+            exc.real_stack = real_stack
+            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -312,21 +331,7 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except (
-            exc.BackendCompilerFailed,
-            exc.RestartAnalysis,
-            exc.SkipFrame,
-            exc.TorchRuntimeError,
-            exc.Unsupported,
-        ):
-            raise
-        except Exception as e:
-            if config.debug or config.trace or config.print_internal_exceptions:
-                sys.stderr.write(
-                    f"ERROR FROM offset={self.current_instruction.offset} "
-                    f"filename {self.code_options.get('co_filename')} "
-                    f"{self.lineno} {typestr(e)}\n"
-                )
+        except Exception:
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -437,15 +442,75 @@ class InstructionTranslatorBase(object):
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
+    def resolve_name(self, name, package, level):
+        """
+        Copied from the Cpython implementation of __import__
+        Resolve a relative module name to an absolute one.
+        https://github.com/python/cpython/blob/5a094f0255eea1db58fb2cf14c200971e64ec36e/Lib/importlib/_bootstrap.py#L902
+        """
+        bits = package.rsplit(".", level - 1)
+        if len(bits) < level:
+            raise ImportError("attempted relative import beyond top-level package")
+        base = bits[0]
+        return "{}.{}".format(base, name) if name else base
+
+    def calc_package(self):
+        """
+        Copied from the Cpython implementation of __import__
+        https://github.com/python/cpython/blob/5a094f0255eea1db58fb2cf14c200971e64ec36e/Lib/importlib/_bootstrap.py#L1090
+        """
+        package = self.f_globals.get("__package__")
+        spec = self.f_globals.get("__spec__")
+        if package is not None:
+            if spec is not None and package != spec.parent:
+                log.warn(
+                    "__package__ != __spec__.parent "
+                    f"({package!r} != {spec.parent!r})",
+                    ImportWarning,
+                    stacklevel=3,
+                )
+            return package
+        elif spec is not None:
+            return spec.parent
+        else:
+            log.warn(
+                "can't resolve package from __spec__ or __package__, "
+                "falling back on __name__ and __path__",
+                ImportWarning,
+                stacklevel=3,
+            )
+            package = self.f_globals["__name__"]
+            if "__path__" not in self.f_globals:
+                package = package.rpartition(".")[0]
+        return package
+
     def IMPORT_NAME(self, inst):
         level, fromlist = self.popn(2)
+        level = level.as_python_constant()
+        fromlist = fromlist.as_python_constant()
         module_name = inst.argval
+
         value = __import__(
             module_name,
-            fromlist=fromlist.as_python_constant(),
-            level=level.as_python_constant(),
+            fromlist=fromlist,
+            level=level,
+            globals=self.f_globals,
         )
-        source = self.import_source(module_name)
+
+        if level != 0:
+            pkg = self.calc_package()
+            module_name = self.resolve_name(module_name, pkg, level)
+
+        # For __import__, when the name variable is of the form package.module,
+        # normally, the top-level package (the name up till the first dot) is
+        # returned, not the module named by module_name. However, when a
+        # non-empty fromlist argument is given, the module named by name is
+        # returned. Therefore, we set the source correctly here.
+        if not fromlist:
+            top_level_module_name = module_name.partition(".")[0]
+            source = self.import_source(top_level_module_name)
+        else:
+            source = self.import_source(module_name)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
@@ -714,7 +779,7 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(prior)
 
         # break the graph
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(self, "store_attr")
         self.output.add_output_instructions([inst])
         self.popn(2)
         self.output.add_output_instructions(
@@ -772,6 +837,7 @@ class InstructionTranslatorBase(object):
             assert isinstance(k, ConstantVariable) or (
                 isinstance(k, TensorVariable) and k.parameter_value is not None
             )
+
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(
@@ -1191,6 +1257,9 @@ class InstructionTranslatorBase(object):
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
+        # Stack of module being parsed, current nn.module is at the end of ordered dict
+        self.nn_module_stack: Dict[str, str] = {}
+
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode() as fake_mode:
                 pass
@@ -1372,7 +1441,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as exc:
-            print(func.get_filename(), func.get_function(), args, kwargs, exc)
+            log.warning(
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
+            )
             unimplemented("arg mismatch inlining")
 
         for v in itertools.chain(sub_locals.values(), closure_cells.values()):
@@ -1383,10 +1454,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        if config.trace:
-            print("INLINING ", code)
-            dis.dis(code)
-            print()
+        log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
 
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -1405,8 +1473,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        if config.trace:
-            print("DONE INLINING", code)
+        log.debug(f"DONE INLINING {code}")
 
         if is_generator(code):
             assert tracer.symbolic_result.as_python_constant() is None
@@ -1444,6 +1511,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells
+        self.nn_module_stack = parent.nn_module_stack.copy()
 
     @property
     def fake_mode(self):

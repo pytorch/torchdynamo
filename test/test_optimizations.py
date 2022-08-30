@@ -10,7 +10,6 @@ import torch
 import torchdynamo
 from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.analysis import has_mutation
-from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.optimizations.normalize import Inplacifier
 from torchdynamo.optimizations.normalize import normalize
@@ -100,8 +99,8 @@ class TestOptimizations(torchdynamo.testing.TestCase):
             self.assertTrue(has_mutation(graph, example_inputs))
             return graph
 
-        with torchdynamo.optimize(compiler_fn):
-            fn()
+        opt_fn = torchdynamo.optimize(compiler_fn)(fn)
+        opt_fn()
 
     def test_example_inputs(self):
         def fn(a, bc, d):
@@ -119,8 +118,8 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         d = 4
         r1 = None
         r2 = fn(a, (b, c), d)
-        with torchdynamo.optimize_assert(compiler_fn):
-            r3 = fn(a, (b, c), d)
+        opt_fn = torchdynamo.optimize_assert(compiler_fn)(fn)
+        r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
         self.assertTrue(same(r1, r2))
@@ -138,8 +137,9 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         filename = "tmp/conv_args.json"
         if os.path.exists(filename):
             os.remove(filename)
-        with torchdynamo.optimize(conv_args_analysis), torch.no_grad():
-            r2 = model(input)
+        opt_model = torchdynamo.optimize(conv_args_analysis)(model)
+        with torch.no_grad():
+            r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertTrue(os.path.exists(filename))
         with open(filename) as f:
@@ -157,15 +157,6 @@ class TestOptimizations(torchdynamo.testing.TestCase):
             self.assertIn("groups", conv_args_dict.keys())
         os.remove(filename)
 
-    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    def test_export(self):
-        s = Seq()
-        i = torch.randn(10)
-        r1 = s(i)
-        with torchdynamo.optimize_assert(offline_autotuner):
-            r2 = s(i)
-        self.assertTrue(same(r1, r2))
-
     @unittest.skipIf(not has_ipex(), "requires ipex")
     def test_ipex_fp32(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
@@ -173,8 +164,9 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        with torchdynamo.optimize(backends.ipex_fp32), torch.no_grad():
-            r2 = model(input)
+        opt_model = torchdynamo.optimize(backends.ipex_fp32)(model)
+        with torch.no_grad():
+            r2 = opt_model(input)
         self.assertTrue(same(r1, r2))
         self.assertEqual(r2.dtype, torch.float32)
 
@@ -185,10 +177,9 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        with torchdynamo.optimize(
-            backends.ipex_bf16
-        ), torch.no_grad(), torch.cpu.amp.autocast():
-            r2 = model(input)
+        opt_model = torchdynamo.optimize(backends.ipex_bf16)
+        with torch.no_grad(), torch.cpu.amp.autocast():
+            r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
 

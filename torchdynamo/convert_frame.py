@@ -1,9 +1,7 @@
-import dis
 import functools
 import itertools
 import logging
 import os
-import sys
 import traceback
 import types
 import typing
@@ -34,6 +32,9 @@ from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import dynamo_timed
+from .utils import filter_stack
+from .utils import format_bytecode
 from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
@@ -174,14 +175,44 @@ def has_tensor_in_frame(frame):
         if has_tensor(value):
             return True
 
-    if config.debug:
-        print(
-            "skipping because no torch.*",
-            frame.f_code.co_name,
-            frame.f_code.co_filename,
-            frame.f_code.co_firstlineno,
-        )
+    log.debug(
+        f"skipping because no torch.* {frame.f_code.co_name} \
+            {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+    )
+
     return False
+
+
+def format_error_msg(exc, frame):
+    msg = os.linesep * 2
+    if config.verbose:
+        msg = format_bytecode("WON'T CONVERT", frame, frame.f_code)
+        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+        msg += traceback.format_exc()
+        if hasattr(exc, "real_stack"):
+            msg += (
+                "\n"
+                + "=" * 10
+                + " The above exception occurred while processing the following code "
+                + "=" * 10
+                + "\n\n"
+            )
+            msg += "".join(
+                traceback.format_list(
+                    filter_stack(traceback.extract_stack(frame))
+                    + list(reversed(exc.real_stack))
+                )
+            )
+    else:
+        msg = f"WON'T CONVERT {frame.f_code.co_name} {frame.f_code.co_filename}\
+ line {frame.f_code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
+
+        if hasattr(exc, "real_stack"):
+            msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+
+        msg += "\nSet torchdynamo.config.verbose=True for more information\n"
+    msg += "=" * 10
+    return msg
 
 
 def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
@@ -190,6 +221,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
 
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
+    @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
@@ -239,9 +271,9 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
                 f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                f"   function: {format_func_info(code)}\n"
-                f"   reasons:  {format_guard_failures(code)}\n"
-                f"to diagnose recompilation issues, see {troubleshooting_url}."
+                + f"   function: {format_func_info(code)}\n"
+                + f"   reasons:  {format_guard_failures(code)}\n"
+                + f"to diagnose recompilation issues, see {troubleshooting_url}."
             )
             unimplemented("cache_size_limit reached")
         output = None
@@ -272,18 +304,6 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             if config.dead_code_elimination:
                 instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        def debug_print(prefix):
-            if not config.debug:
-                return
-            print(
-                f"\n{prefix}",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-            )
-            # print(dis.Bytecode(frame.f_code).info())
-            print(dis.Bytecode(frame.f_code).dis())
-
         try:
             for attempt in itertools.count():
                 try:
@@ -291,51 +311,50 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                     orig_code_map[code] = frame.f_code
                     break
                 except exc.RestartAnalysis:
+                    log.debug("Restarting analysis ...")
                     if attempt > 100:
                         unimplemented("100+ RestartAnalysis() calls")
                 except exc.SkipFrame:
-                    if one_graph and config.debug:
-                        print("ERROR: No graph captured with one_graph=True")
+                    log.debug(
+                        f"Skipping frame {frame.f_code.co_name} \
+                        {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+                    )
+                    if one_graph:
+                        log.debug("No graph captured with one_graph=True")
                     return None
             output_codes.add(code)
-            if config.debug:
-                debug_print("ORIGINAL BYTECODE")
-                print("MODIFIED BYTECODE")
-                # print(dis.Bytecode(code).info())
-                print(dis.Bytecode(code).dis())
+
+            log.info(format_bytecode("ORIGINAL BYTECODE", frame, frame.f_code))
+            log.info(format_bytecode("MODIFIED BYTECODE", frame, code))
 
             assert output.guards is not None
             CleanupManager.instance[code] = output.cleanups
             check_fn = CheckFunctionManager(
                 output.guards, frame.f_locals, frame.f_globals
             )
+
             guarded_code = GuardedCode(code, check_fn.check_fn)
-            if config.debug:
-                print("\nGUARDS:")
-                for guard in sorted(output.guards):
-                    print(" -", str(guard))
-                print()
+            guard_str = "GUARDS:\n"
+            guard_str += "\n".join(
+                [f" - {str(guard)}" for guard in sorted(output.guards)]
+            )
+
+            log.info(guard_str)
 
             if guard_export_fn is not None:
                 guard_export_fn(output.guards)
 
             return guarded_code
-        except (Unsupported, TorchRuntimeError, BackendCompilerFailed, AssertionError):
-            if config.debug or config.trace or config.print_internal_exceptions:
-                debug_print("WONT CONVERT")
+        except (
+            Unsupported,
+            TorchRuntimeError,
+            BackendCompilerFailed,
+            AssertionError,
+        ) as e:
+            log.error(format_error_msg(e, frame))
             raise
-        except Exception:
-            if config.debug or config.trace or config.print_internal_exceptions:
-                debug_print("WONT CONVERT")
-                sys.stderr.write(
-                    "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-                )
-                traceback.print_exc()
-                sys.stderr.write(
-                    "=" * 10 + " Exception (above) while processing " + "=" * 10 + "\n"
-                )
-                traceback.print_stack(frame)
-                sys.stderr.write("=" * 10 + " End debug info " + "=" * 10 + "\n")
+        except Exception as e:
+            log.error(format_error_msg(e, frame))
             raise InternalTorchDynamoError()
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn

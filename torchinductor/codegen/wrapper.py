@@ -6,6 +6,8 @@ from typing import Any
 from typing import Dict
 from typing import List
 
+from torchdynamo.utils import dynamo_timed
+
 from .. import codecache
 from .. import config
 from .. import ir
@@ -177,7 +179,7 @@ class WrapperCodeGen(CodeGen):
                 from ctypes import c_void_p, c_long
                 import torch
                 import random
-                from torch import empty_strided, as_strided
+                from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import CppCodeCache, TritonCodeCache
 
                 aten = torch.ops.aten
@@ -292,12 +294,19 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
+    @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
+
+        out_names = V.graph.get_output_names()
         with result.indent():
-            while self.lines and isinstance(self.lines[-1], MemoryPlanningLine):
+            while (
+                self.lines
+                and isinstance(self.lines[-1], MemoryPlanningLine)
+                and self.lines[-1].node.name not in out_names
+            ):
                 # these lines will be pointless
                 self.lines.pop()
 

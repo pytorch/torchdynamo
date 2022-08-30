@@ -30,8 +30,8 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
         else:
             fn = opt.step
 
-        with torchdynamo.optimize(counter):
-            fn()
+        opt_fn = torchdynamo.optimize(counter)(fn)
+        opt_fn()
 
         self.assertEqual(counter.frame_count, exp_frame_cnt)
 
@@ -71,7 +71,7 @@ class OptimizerTests(torchdynamo.testing.TestCase):
     # NB: in python versions < 3.8, we don't capture graphs when
     # breaks occur in a loop
     test_radam = make_test(
-        torch.optim.RAdam, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 5)
+        torch.optim.RAdam, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 6)
     )
 
     # ASGD has a small optimization that avoids averaging
@@ -79,7 +79,7 @@ class OptimizerTests(torchdynamo.testing.TestCase):
     # NB: in python versions < 3.8, we don't capture graphs when breaks
     # occur in a loop
     test_asgd = make_test(
-        torch.optim.ASGD, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 5)
+        torch.optim.ASGD, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 6)
     )
 
 

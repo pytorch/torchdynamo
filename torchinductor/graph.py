@@ -1,5 +1,6 @@
 import logging
 import operator
+import os
 from itertools import chain
 
 import sympy
@@ -7,6 +8,9 @@ import torch
 import torch.fx
 from sympy import Integer
 from torch._decomp import get_decompositions
+from torch.utils._mode_utils import no_dispatch
+
+from torchdynamo.utils import dynamo_timed
 
 from . import config
 from . import ir
@@ -22,6 +26,7 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
+from .virtualized import V
 
 log = logging.getLogger(__name__)
 
@@ -41,18 +46,22 @@ class GraphLowering(torch.fx.Interpreter):
 
         while any(x is None for x in stride):
             candidates = {
-                ex.size(i) * ex.stride(i): size[i] * stride[i]
+                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex.stride(i) >= 0
+                if stride[i] is not None and ex.stride()[i] >= 0
             }
             for i in chain(reversed(range(len(stride))), range(len(stride))):
-                if stride[i] is None and ex.stride(i) in candidates:
-                    stride[i] = candidates[ex.stride(i)]
-                    candidates[ex.size(i) * ex.stride(i)] = size[i] * stride[i]
+                if stride[i] is None and ex.stride()[i] in candidates:
+                    stride[i] = candidates[ex.stride()[i]]
+                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = sorted(
-                    [(ex.stride(i), i) for i in range(len(stride)) if stride[i] is None]
+                    [
+                        (ex.stride()[i], i)
+                        for i in range(len(stride))
+                        if stride[i] is None
+                    ]
                 )[0]
                 stride[i] = self.sizevars[val]
         return size, stride
@@ -82,6 +91,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
+
+    def get_dtype(self, buffer_name):
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].dtype
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name].get_dtype()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_dtype()
+        raise KeyError(f"could not find {buffer_name}")
 
     def random_seed_buffer(self, device: torch.device):
         """
@@ -115,6 +133,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
+    @dynamo_timed
     def run(self, *args):
         if self.num_dynamic_inputs is None:
             self.num_dynamic_inputs = len(args)
@@ -231,20 +250,21 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
-        if value.shape == ():
-            return Constant(value.item(), value.dtype, value.device)
-        if len(value.shape) == 1 and value.shape[0] <= 8:
-            # tensor lowering has constant inlining logic
-            from .lowering import tensor
+        with no_dispatch():
+            if value.shape == ():
+                return Constant(value.item(), value.dtype, value.device)
+            if len(value.shape) == 1 and value.shape[0] <= 8:
+                # tensor lowering has constant inlining logic
+                from .lowering import tensor
 
-            return tensor(value.tolist(), dtype=value.dtype, device=value.device)
+                return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        # we should not be hitting this case if
-        # python key tracing is working properly, see:
-        # https://github.com/pytorch/torchdynamo/issues/203
         return self.add_tensor_constant(value)
 
     def call_module(self, target, args, kwargs):
+        assert False
+
+    def call_method(self, target, args, kwargs):
         assert False
 
     def output(self, target, args, kwargs):
@@ -255,7 +275,6 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
-
         for name, value in self.graph_inputs.items():
             value.realize()
             assert isinstance(value, TensorBox)
@@ -293,7 +312,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate()
 
-    def compile_to_fn(self):
+    @dynamo_timed
+    def compile_to_module(self):
         from .codecache import PyCodeCache
 
         code = self.codegen()
@@ -301,8 +321,20 @@ class GraphLowering(torch.fx.Interpreter):
             print(code)
 
         mod = PyCodeCache.load(code)
-
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        return mod.call
+        log.info("Output code: %s", mod.__file__)
+        V.debug.output_code(mod.__file__)
+        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        return mod
+
+    def compile_to_fn(self):
+        return self.compile_to_module().call
+
+    def get_output_names(self):
+        return [
+            node.get_name()
+            for node in self.graph_outputs
+            if not isinstance(node, ir.NoneAsConstantBuffer)
+        ]

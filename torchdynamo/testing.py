@@ -1,6 +1,7 @@
 import contextlib
 import dis
 import functools
+import logging
 import os.path
 import types
 import unittest
@@ -181,7 +182,7 @@ class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._exit_stack = contextlib.ExitStack()
-        cls._exit_stack.enter_context(patch.object(config, "debug", True))
+        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls._exit_stack.enter_context(
             patch.object(config, "raise_on_backend_error", True)
         )
@@ -226,3 +227,35 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     else:
         buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
+
+
+def _make_fn_with_patches(fn, *patches):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        with contextlib.ExitStack() as stack:
+            for attr, val in patches:
+                stack.enter_context(patch.object(torchdynamo.config, attr, val))
+
+            return fn(*args, **kwargs)
+
+    return _fn
+
+
+def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
+    class DummyTestClass(cls):
+        pass
+
+    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+
+    for name in dir(cls):
+        if name.startswith("test_"):
+            fn = getattr(cls, name)
+            if not callable(fn):
+                continue
+            new_name = f"{name}{fn_suffix}"
+            fn = _make_fn_with_patches(fn, *patches)
+            fn.__name__ = new_name
+            setattr(DummyTestClass, name, None)
+            setattr(DummyTestClass, new_name, fn)
+
+    return DummyTestClass

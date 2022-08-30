@@ -1,6 +1,9 @@
 import functools
 import operator
 import time
+from typing import Any
+from typing import Dict
+from typing import List
 
 import numpy as np
 import sympy
@@ -8,6 +11,8 @@ import torch
 from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
+
+VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 @functools.lru_cache(None)
@@ -59,6 +64,34 @@ def unique(it):
     return {id(x): x for x in it}.values()
 
 
+def ceildiv(numer: int, denom: int):
+    assert isinstance(numer, int) and isinstance(denom, int)
+    return (numer + (denom - 1)) // denom
+
+
+def gen_gm_and_inputs(target, args, kwargs):
+    g = torch.fx.Graph()
+    g_args = []
+    a_args = []
+    for n, arg in enumerate(args):
+        if isinstance(arg, torch.Tensor):
+            g_args.append(g.placeholder(f"arg{n}"))
+            a_args.append(arg)
+        else:
+            g_args.append(arg)
+    assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
+    node = g.call_function(target, tuple(g_args), kwargs)
+    if (
+        len(target._schema.returns) == 1
+        and str(target._schema.returns[0].type) == "Tensor"
+    ):
+        node = (node,)
+    g.output(node)
+
+    gm = torch.fx.GraphModule({}, g)
+    return gm, a_args
+
+
 def timed(model, example_inputs, times=1):
     synchronize()
     torch.manual_seed(1337)
@@ -89,6 +122,8 @@ def freeze_inputs(f):
     """
 
     def freeze_value(x):
+        if isinstance(x, (immutable_dict, immutable_list)):
+            return x
         if isinstance(x, list):
             return immutable_list(x)
         if isinstance(x, dict):
@@ -102,3 +137,31 @@ def freeze_inputs(f):
 
     wrapped.cache_info = f.cache_info
     return wrapped
+
+
+def precompute_method(obj: Any, method: str):
+    """Replace obj.method() with a new method that returns a precomputed constant."""
+    result = getattr(obj, method)()
+    setattr(obj, method, lambda: result)
+
+
+def precompute_methods(obj: Any, methods: List[str]):
+    """Replace methods with new methods that returns a precomputed constants."""
+    for method in methods:
+        precompute_method(obj, method)
+
+
+def cmp(a, b):
+    return int(a > b) - int(a < b)
+
+
+def cache_on_self(fn):
+    key = f"__{fn.__name__}_cache"
+
+    @functools.wraps(fn)
+    def wrapper(self):
+        if not hasattr(self, key):
+            setattr(self, key, fn(self))
+        return getattr(self, key)
+
+    return wrapper

@@ -1,3 +1,4 @@
+import logging
 import os
 
 import sympy
@@ -8,9 +9,9 @@ from jinja2 import StrictUndefined
 from .. import ir
 from ..virtualized import V
 from .common import IndentedBuffer
-from .triton import CantSplit
 from .triton import TritonKernel
 
+log = logging.getLogger((__name__))
 template_dict = {ir.Convolution: "triton_conv", ir.MatrixMultiply: "triton_mm"}
 
 
@@ -274,96 +275,76 @@ class TritonTemplateKernel(TritonKernel):
         wrapper.writeline(f"{name}[grid_{name}]({args_kwargs})")
 
 
-def template_codegen(scheduler, scheduler_node):
+def should_use_template(node: ir.ExternKernel):
+    template_kernels = [ir.Convolution, ir.MatrixMultiply]
+    if type(node) in template_kernels and ir.is_triton(node.get_device()):
+        if isinstance(node, ir.Convolution):
+            return node.kernel != "aten.convolution"
+        elif isinstance(node, ir.MatrixMultiply):
+            return node.kernel != "aten.mm.out"
+    return False
+
+
+def template_can_fuse(snode1, snode2):
+    assert snode1.is_template()
+    if snode1.group != snode2.group:
+        return False
+    tiling = snode1.get_nodes()[0].node.get_template_tiling()
+    for node in snode2.get_nodes():
+        if not TritonKernel.is_compatible(tiling, node.get_ranges()):
+            return False
+    return True
+
+
+def template_codegen(scheduler, scheduler_node, epilogue):
     """
     codegen function for triton templates
     scheduler: Scheduler
     scheduler_node: ExternKernelSchedulerNode
     """
+    log.debug("template_codegen: %s -- %s", scheduler_node, epilogue)
+
     wrapper = V.graph.wrapper_code
     _, groups = scheduler_node.group
 
-    reschedule = []
-    fuse = False
-    could_remove_kernel_buf = False
-    fusable_nodes = []
-    with scheduler.kernel(TritonTemplateKernel(scheduler_node.node, *groups)) as kernel:
+    with TritonTemplateKernel(
+        scheduler_node.node, *scheduler_node.node.get_template_tiling()
+    ) as kernel:
         # map const args/ shape/ strides to kernel args
         kernel.map_args()
         # set self.args name to match the TritonTemplateKernel's args names
         kernel.rename_vars()
-        # update node dep from StarDep to MemoryDep
-        scheduler_node.update_dep_type()
-        # mark node of TritonTemplateKernel as fusable and update fusable_deps
-        scheduler_node.mark_fusable()
         # scheduler.pop_group will keep iterating all reachable fusable SchedulerNodes
         assert type(kernel.node) in template_dict.keys()
-        tile1, tile2, _ = groups
-        fusable_group = tile1 * tile2
 
-        # Add pointwise with compatible dimensions
-        for node in scheduler.pop_group(
-            (fusable_group, sympy.Integer(1)),
-        ):
-            # make sure we force the reads of conv are channel_last layout
-            if type(node.node) in template_dict.keys() or (
-                len(node.node.get_size()) == 4 and node.node.get_stride()[1] != 1
-            ):
-                reschedule.append(node)
-                continue
-            # because triton mm will reorder pid, we need to make sure the
-            # the pointwise fusable nodes are consumers of the kernel.node
-            if (
-                isinstance(kernel.node, ir.MatrixMultiply)
-                and scheduler_node not in node.inverse_users
-            ):
-                reschedule.append(node)
-                continue
-            try:
-                node.run(*kernel.split_and_set_ranges(node.get_ranges()))
-                node.mark_fusable()
-                fuse = True
-                fusable_nodes.append(node)
-                # if node.output buffer has the same stride/size as kernel output buffer
-                # replace kernel output buffer name as node.output buffer
-                could_remove_kernel_buf = True
-            except CantSplit:
-                reschedule.append(node)
+        kernel.store_buffer_names.add(scheduler_node.get_name())
 
-        else:
-            for node in scheduler.pop_group(groups):
-                # scheduler.maybe_remove_buffer(node, check_group=is_group_matching)
-                node.run(*kernel.set_ranges(*node.get_ranges()))
-                node.mark_fusable()
+        for node in epilogue:
+            node.mark_run()
+            node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
-        # TODO: reduction
+    could_remove_kernel_buf = (
+        kernel.args.output_buffers[scheduler_node.get_name()] == "REMOVED"
+    )
+    kernel_buf_replace_name = None
+    if could_remove_kernel_buf:
+        for node in epilogue:
+            if kernel.args.output_buffers[node.get_name()] != "REMOVED":
+                kernel_buf_replace_name = node.get_name()
+                break
+        assert kernel_buf_replace_name is not None
 
-        kernel_buf_replace_name = None
-        if fuse and could_remove_kernel_buf:
-            writes = scheduler_node.read_writes.writes
-            assert len(writes) == 1
-            # if all users of buf0 are in fusable groups
-            # safe to remove buf0
-            for user in scheduler_node.users:
-                if user.node not in fusable_nodes or not user.can_inplace:
-                    could_remove_kernel_buf = False
-                    break
-            if could_remove_kernel_buf:
-                scheduler.remove_buffer(writes.pop().name)
-            kernel_buf_replace_name = fusable_nodes[0].get_name()
-
-        kernel_name = wrapper.next_kernel_name()
-        # code gen kernel
-        wrapper.header.splice(
-            kernel.codegen_kernel(
-                kernel_name, fuse, could_remove_kernel_buf, kernel_buf_replace_name
-            )
+    kernel_name = wrapper.next_kernel_name()
+    # code gen kernel
+    wrapper.header.splice(
+        kernel.codegen_kernel(
+            kernel_name,
+            bool(epilogue),
+            could_remove_kernel_buf,
+            kernel_buf_replace_name,
         )
-        # gen precompute tensor (like delta_x_ptr) if needed
-        kernel.precompute(wrapper, kernel_name)
-        # code gen call to kernel
-        kernel.call_kernel(wrapper, kernel_name)
-
-        scheduler.enqueue(reschedule)  # TODO: consider reschedule
-        scheduler.barrier()  # enqueue any nodes that became runnable after this node is run
-        scheduler.maybe_free_buffers()
+    )
+    # gen precompute tensor (like delta_x_ptr) if needed
+    kernel.precompute(wrapper, kernel_name)
+    # code gen call to kernel
+    kernel.call_kernel(wrapper, kernel_name)

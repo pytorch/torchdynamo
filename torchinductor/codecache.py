@@ -114,7 +114,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++20 -Wno-unused-variable
+            {cpp_compiler()} -shared -fPIC -Wall -std=c++2a -Wno-unused-variable
             {ipaths} {lpaths} {libs}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
             -o{output} {input}
@@ -156,11 +156,10 @@ class PyCodeCache:
             with open(path) as f:
                 code = compile(f.read(), path, "exec")
                 mod = types.ModuleType(f"{__name__}.{key}")
+                mod.__file__ = path
                 exec(code, mod.__dict__, mod.__dict__)
                 cls.cache[key] = mod
                 cls.cache[key].key = key
-        if config.debug:
-            print(f"PyCodeCache {path}")
         return cls.cache[key]
 
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import collections
 import functools
 import inspect
 import itertools
@@ -12,6 +13,7 @@ from torch.nn import functional as F
 import torchdynamo.testing
 from torchdynamo.testing import requires_static_shapes
 
+tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
@@ -150,6 +152,20 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_tuple2(a, b):
         args = [a, b]
         return sub(*args)
+
+    @make_test
+    def test_is_in_onnx_export(x, y):
+        if torch.onnx.is_in_onnx_export():
+            return x - 1
+        else:
+            return y + 1
+
+    @make_test
+    def test_is_fx_tracing(x, y):
+        if torch.fx._symbolic_trace.is_fx_tracing():
+            return x - 1
+        else:
+            return y + 1
 
     @make_test
     def test_listarg1(a, b):
@@ -459,6 +475,19 @@ class FunctionTests(torchdynamo.testing.TestCase):
         def fn(a):
             tmp = {"a": a, a_param: 3}
             return tmp["a"] + tmp[a_param]
+
+        test = make_test(fn)
+        test(self)
+
+    def test_default_dict(self):
+        dd = collections.defaultdict(dict)
+        param = torch.nn.Parameter(torch.ones([2, 2]))
+
+        def fn(x):
+            dd["a"] = x + 1
+            dd[param] = 123
+            dd["c"] = x * 2
+            return dd["b"], dd
 
         test = make_test(fn)
         test(self)

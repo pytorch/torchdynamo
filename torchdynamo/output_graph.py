@@ -1,6 +1,7 @@
 import collections
 import copy
 import itertools
+import logging
 import operator
 import re
 import sys
@@ -32,10 +33,13 @@ from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
 from .utils import fake_tensors_available
+from .utils import format_graph_tabular
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
+
+log = logging.getLogger(__name__)
 
 
 def _get_gen_rand_values_fn(random_calls):
@@ -88,6 +92,7 @@ class OutputGraph(fx.Tracer):
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
+        self.initial_random_state = ()
         self.unspec_variable_map = {}
 
     @property
@@ -218,12 +223,17 @@ class OutputGraph(fx.Tracer):
 
         assert False
 
-    def compile_subgraph(self, tx, partial_convert=False):
+    def compile_subgraph(self, tx, partial_convert=False, msg=None):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
         self.partial_convert = partial_convert
+        if msg is not None:
+            stack = tx.frame_summary()
+            msgs = reversed(traceback.StackSummary.from_list([stack]).format())
+            msg = f"{msg} \n {''.join(msgs)}"
+        self.compile_subgraph_reason = msg
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -258,6 +268,14 @@ class OutputGraph(fx.Tracer):
             rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
+            random_calls_instructions.extend(
+                [
+                    codegen.create_load_global("random", add=True),
+                    codegen.create_load_attr("setstate"),
+                    codegen.create_load_const(tx.output.initial_random_state),
+                    create_instruction("CALL_FUNCTION", 1),
+                ]
+            )
             random_calls_instructions.extend(codegen.load_function_name(rand_fn_name))
             random_calls_instructions.extend(
                 [
@@ -345,14 +363,25 @@ class OutputGraph(fx.Tracer):
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
+        gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = torchdynamo.disable(compiled_fn)
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
-        if config.debug:
-            print(f"\n{name} {gm.forward.__code__.co_filename}")
-            self.graph.print_tabular()
+
+        try:
+            # the call to tabulate can cause a lot of memory to be allocated
+            if config.log_level <= logging.INFO:
+                log.info(
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
+                )
+        except ImportError:
+            log.warning(
+                "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
+                "which could not be found on this machine. Run `pip "
+                "install tabulate` to install the library."
+            )
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
@@ -452,12 +481,20 @@ class OutputGraph(fx.Tracer):
 
         # append stack trace to fx node
         tx = current_tx if current_tx else self.root_tx
+
+        nn_module_stack = getattr(tx, "nn_module_stack")
+        if nn_module_stack:
+            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
-        msgs = reversed(traceback.StackSummary.from_list(frame_summaries).format())
-        rv.node.stack_trace = "".join(msgs)
+        msgs = traceback.StackSummary.from_list(frame_summaries).format()
+
+        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
+        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
+        rv.node.stack_trace = nn_module_stack_str + "".join(msgs)
 
         return rv
