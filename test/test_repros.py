@@ -970,6 +970,22 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
 
+    def test_rng_state(self):
+        def fn():
+            state = torch.get_rng_state()
+            before = torch.rand(1000)
+            torch.set_rng_state(state)
+            after = torch.rand(1000)
+            return before, after
+
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+
+        before, after = opt_fn()
+        self.assertTrue(same(before, after))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)  # clone, rand, rand
+
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
         model = SequentialAppendList(

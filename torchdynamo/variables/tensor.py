@@ -113,6 +113,12 @@ class TensorVariable(VariableTracker):
             def wrap_fake_exception(func):
                 return func()
 
+        if (
+            proxy.node.target is torch.set_rng_state
+            or proxy.node.target is torch.get_rng_state
+        ):
+            unimplemented("rng state manipulation")
+
         initial_example_value = example_value
         with preserve_rng_state():
             if example_value is None:
