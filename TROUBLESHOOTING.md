@@ -6,16 +6,12 @@ In the mean time, you may need to diagnose a particular issue and determine if i
 
 We're also actively developing debug tools, profilers, and improving our errors/warnings.  Please give us feedback if you have an issue with this infra, or an idea for an improvement.
 
-## File an Issue
-You should feel encouraged to [file a github issue](https://github.com/pytorch/torchdynamo/issues) and expect a timely response.
 
-Before filing an issue, read over the README.md, TROUBLESHOOTING.md, and search for similar issues.
+## Diagnosing Runtime Errors
+... Insert steps to narrow error to before/after fx graph generation/and then wich tool to narrow the scope of the error
 
-When filing an issue, please include
-- a minimal repro script
-- a description of the error
-- the expected behavior
-- your OS/python/pytorch version
+
+
 
 ## Graph Breaks
 Given a program like this,
@@ -32,9 +28,45 @@ Some graph break reasons are insurmountable to torchdynamo, and can't be easily 
 - calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without torchdynamo being able to introduce necessary guards to ensure that the compiled program would be safe to reuse
 
 ### Identifying the cause of a graph break
-It is possible to get an aggregate list of graph break reasons by using the [recompilation profiler](#recompilation-profiler).
 
-[No Python mode](#nopython-mode) makes torchdynamo throw an error at the first graph break, giving you the ability to jump into a stack trace.
+To identify all graph breaks in a program and the associated reasons for the breaks, `torchdynamo.explain` can be used. This tool runs Torchdynamo on the supplied function and aggregates the graph breaks that are encountered. Here is an example usage:
+
+```python
+from typing import List
+import torch
+import torchdynamo
+
+def toy_example(a, b):
+    x = a / (torch.abs(a) + 1)
+    print("woo")
+    if b.sum() < 0:
+        b = b * -1
+    return x * b
+
+explained = torchdynamo.explain(toy_example, torch.randn(10), torch.randn(10))
+print(explained[0])
+
+"""
+Dynamo produced 3 graphs, with 2 graph break and 6 ops. 
+ Break reasons: 
+
+1. call_function BuiltinVariable(print) [ConstantVariable(str)] {} 
+   File "t2.py", line 16, in toy_example
+    print("woo")
+ 
+2. generic_jump 
+   File "t2.py", line 17, in toy_example
+    if b.sum() < 0:
+ """
+```
+
+To throw an error on the first graph break encountered, `nopython` mode can be used. This disables Torchdynamo's python fallback, and only succeeds if the entire program is convertible to a single graph. Example usage:
+
+```python
+@torchdynamo.optimize(<compiler>, nopython=True)
+def toy_example(a, b):
+   ...
+```
 
 ## Excessive Recompilation
 When torchdynamo compiles a function (or part of one), it makes certain assumptions
@@ -52,13 +84,6 @@ torchdynamo.config.cache_size_limit = <your desired cache limit>
 
 Torchdynamo plans to support many common cases of dynamic tensor shapes, such as varying batch size or sequence length.  It does not plan to support rank-dynamism.  In the mean time, setting a specific cache limit can be used in coordination with bucketing techniques to achieve an acceptable number of recompilations for some dynamic models.
 
-## Debug/Profiling Tools
-
-### Recompilation Profiler
-The recompilation profiler collects information about the guard failures and graph breaks that occur when running your program. It ignores the current setting of `torchdynamo.config.cache_size_limit`, instead behaving as if `cache_size_limit = 1`, in order to capture the worst case behavior.
-
-If graph breaks are observed, the profiler report will list the reasons for each graph break.  If recompilations of particular graphs are observed, The failing guards for each recompilation instance are listed separately.
-
 ```
 prof = torchdynamo.utils.CompilationProfiler()
 with torchdynamo.optimize(prof):
@@ -66,8 +91,14 @@ with torchdynamo.optimize(prof):
 print(prof.report())
 ```
 
-### Nopython Mode
-`torchdynamo.optimize(<compiler>, nopython=True)` causes torchdynamo to throw an exception on the first graph break, rather than falling back to python transparently as it does by default.  This can be a useful tool for finding the source of a graph break and getting a stack trace.
 
-### Debug Mode
-Setting `torchdynamo.config.debug = True` offers verbose information about each compiled graph, and what it guards on.  It is generally useful for learning what torchdynamo is doing, and how it is treating your program.
+## File an Issue
+You should feel encouraged to [file a github issue](https://github.com/pytorch/torchdynamo/issues) and expect a timely response.
+
+Before filing an issue, read over the README.md, TROUBLESHOOTING.md, and search for similar issues.
+
+When filing an issue, please include
+- a minimal repro script
+- a description of the error
+- the expected behavior
+- your OS/python/pytorch version
