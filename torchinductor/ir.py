@@ -2271,8 +2271,8 @@ class ExternKernel(InputsKernel):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
             stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
-            wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
-            wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
+            wrapper.writeline(f"assert_size_match({self.get_name()}, {size})")
+            wrapper.writeline(f"assert_stride_match({self.get_name()}, {stride})")
 
     def get_group_stride(self):
         """
@@ -2748,6 +2748,9 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
         if isinstance(example_output, (list, tuple)):
+            example_output_flat, example_output_spec = pytree.tree_flatten(
+                example_output
+            )
             packed = FallbackKernel(
                 MultiOutputLayout(tensor_args[0].get_device()),
                 kernel,
@@ -2759,18 +2762,18 @@ class FallbackKernel(ExternKernelAlloc):
                 (
                     MultiOutput(
                         FixedLayout(
-                            example_output[i].device,
-                            example_output[i].dtype,
-                            [sympy.Integer(s) for s in example_output[i].size()],
-                            [sympy.Integer(s) for s in example_output[i].stride()],
+                            example_output_flat[i].device,
+                            example_output_flat[i].dtype,
+                            [sympy.Integer(s) for s in example_output_flat[i].size()],
+                            [sympy.Integer(s) for s in example_output_flat[i].stride()],
                         ),
                         packed,
                         i,
                     )
-                    if example_output[i] is not None
+                    if example_output_flat[i] is not None
                     else None
                 )
-                for i in range(len(example_output))
+                for i in range(len(example_output_flat))
             ]
         else:
             return FallbackKernel(
