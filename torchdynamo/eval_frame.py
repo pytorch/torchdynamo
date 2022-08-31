@@ -47,7 +47,7 @@ set_guard_error_hook = _eval_frame.set_guard_error_hook
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 unset = object()
-compile_lock = threading.Lock()
+compile_lock = threading.RLock()
 most_recent_backend = None
 
 

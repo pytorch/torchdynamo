@@ -110,6 +110,10 @@ repro_level = int(os.environ.get("COMPILER_REPRO_LEVEL", 0))
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
 
+# Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
+# false_fn produces code with identical guards.
+enforce_cond_guards_match = True
+
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
