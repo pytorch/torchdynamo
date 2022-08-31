@@ -21,6 +21,75 @@ def minifier_dir():
     return f"/tmp/minifier_{getpass.getuser()}"
 
 
+class NNModuleToString:
+    safe_reprs = [
+        torch.nn.Linear,
+        torch.nn.Conv1d,
+        torch.nn.Conv2d,
+        torch.nn.Conv3d,
+        torch.nn.BatchNorm1d,
+        torch.nn.BatchNorm2d,
+        torch.nn.BatchNorm3d,
+        torch.nn.LayerNorm,
+        torch.nn.Dropout,
+        torch.nn.Softmax,
+    ]
+
+    @staticmethod
+    def can_convert_to_string(gm):
+        cant_convert = set()
+        for _, module in gm.named_children():
+            if type(module) not in NNModuleToString.safe_reprs:
+                cant_convert.update(type(module))
+
+        if len(cant_convert) > 0:
+            logging.warn(
+                f"Was not able to save the following children modules as reprs {cant_convert}"
+            )
+            return False
+        return True
+
+    @staticmethod
+    def convert(gm):
+        from torch.nn.modules.module import _addindent
+
+        tab = " " * 4
+
+        model_str = textwrap.dedent(
+            """
+            from torch.nn import *
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+            """
+        )
+
+        for module_name, module in gm.named_children():
+            module_str = f"{module.__repr__()}"
+            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+
+        for buffer_name, buffer in gm._buffers.items():
+            if buffer is None:
+                continue
+            tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+
+        for param_name, param in gm._parameters.items():
+            if param is None:
+                continue
+            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
+
+        attrs = dir(gm)
+        for attr in attrs:
+            if "_tensor_constant" in attr:
+                val = getattr(gm, attr)
+                model_str += f"    {attr} = {val!r}\n"
+
+        model_str += f"{_addindent(gm.code, 4)}\n"
+        return model_str
+
+
 @functools.lru_cache(None)  # subprocess is expensive
 def _cuda_system_info_comment():
     if not torch.cuda.is_available():
@@ -48,7 +117,7 @@ def _cuda_system_info_comment():
     return model_str
 
 
-def generate_repro_string(gm, args):
+def generate_post_aot_repro_string(gm, args):
     model_str = textwrap.dedent(
         """
         import torch
@@ -65,14 +134,7 @@ def generate_repro_string(gm, args):
     model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
     model_str += _cuda_system_info_comment()
 
-    model_str += "class Repro(torch.nn.Module):\n"
-    attrs = dir(gm)
-    for attr in attrs:
-        if "_tensor_constant" in attr:
-            val = getattr(gm, attr)
-            model_str += f"    {attr} = {val!r}\n"
-    model_str += textwrap.indent(gm.code, "    ")
-    model_str += "\n"
+    model_str += NNModuleToString.convert(gm)
 
     model_str += f"args = {[(tuple(arg.shape), tuple(arg.stride()), arg.dtype, arg.device.type) for arg in args]!r}\n"
     model_str += "args = [rand_strided(shape, stride, dtype, device) for shape, stride, dtype, device in args]\n"
@@ -108,7 +170,7 @@ def dump_post_aot_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
-    fd.write(generate_repro_string(gm, args))
+    fd.write(generate_post_aot_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     fd.write(
         textwrap.dedent(
@@ -128,7 +190,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
-        fd.write(generate_repro_string(fx_g, args))
+        fd.write(generate_post_aot_repro_string(fx_g, args))
         fail_fn = COMPILER_REPRO_OPTIONS[compiler_name][2]
         fd.write(
             textwrap.dedent(
@@ -208,7 +270,7 @@ def dump_to_minify(gm, args, compiler_name: str):
     with open(
         os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py"), "w"
     ) as fd:
-        fd.write(generate_repro_string(gm, args))
+        fd.write(generate_post_aot_repro_string(gm, args))
         fd.write("\n")
         fd.write(
             textwrap.dedent(
@@ -288,7 +350,7 @@ def run_fwd_maybe_bwd(gm, args):
         return out
 
 
-def generate_backend_repro_string(gm, args, compiler_name):
+def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
     """
     Generate a repro string for backend-agnostic minified version.
     """
@@ -297,7 +359,10 @@ def generate_backend_repro_string(gm, args, compiler_name):
         """
         import torch
         import torchdynamo
+        from torch import tensor, device
+        import torch.fx as fx
         from torchdynamo.testing import rand_strided
+        from math import inf
         from torchdynamo.debug_utils import run_fwd_maybe_bwd
 
         """
@@ -313,8 +378,7 @@ def generate_backend_repro_string(gm, args, compiler_name):
 
     setup_module = textwrap.dedent(
         f"""
-        import module
-        mod = module.ReproModule().cuda()
+        mod = Repro().cuda()
         opt_mod = torchdynamo.optimize("{compiler_name}")(mod)
 
         """
@@ -329,16 +393,33 @@ def generate_backend_repro_string(gm, args, compiler_name):
         """
     )
 
-    return imports + prep_inputs + setup_module + run_module
+    return imports + model_str + setup_module + prep_inputs + run_module
 
 
-def dump_dynamo_gm_state(gm, args, compiler_name):
+def dump_dynamo_gm_to_file(gm, args, compiler_name):
     """
-    Saves the graph module and accompany it with a repro.py script. This is not
-    as clean as the wrap_post_aot_debug, where the repro is limited to one file.
-    This is because post_aot counterpart works on the functionalized graphs with
-    params lifted as graph inputs. Here, we have TorchDynamo produced Fx graphs,
-    which we save using to_folder utility.
+    Saves the repro to a repro.py file
+    """
+    subdir = f"{minifier_dir()}/checkpoints"
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+
+    model_str = NNModuleToString.convert(gm)
+    with open(file_name, "w") as fd:
+        fd.write(generate_dynamo_fx_repro_string(model_str, args, compiler_name))
+    repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
+    shutil.copyfile(file_name, repro_path)
+
+
+def dump_dynamo_gm_as_tarfile(gm, args, compiler_name):
+    """
+    Saves the repro in repro.tar.gz, as opposed to a file. This is used for
+    cases, where we can't convert a Fx GraphModule to a string, and therefore
+    fallback to to_folder for serialization. We accompany this with a repro.py
+    script that imports the saved module, sets it up and runs the model to repro
+    the error.
     """
     import tarfile
 
@@ -355,7 +436,6 @@ def dump_dynamo_gm_state(gm, args, compiler_name):
     gm_dir = os.path.join(tmp_dir, "module")
     if not os.path.exists(gm_dir):
         os.makedirs(gm_dir, exist_ok=True)
-    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     for node in gm.graph.nodes:
         new_kwargs = {}
         for k, v in node.kwargs.items():
@@ -365,17 +445,37 @@ def dump_dynamo_gm_state(gm, args, compiler_name):
         node.kwargs = new_kwargs
     gm.recompile()
 
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
         # TODO - Add the readable version of to_folder when available
-        gm.to_folder(gm_dir, "ReproModule")
-        fd.write(generate_backend_repro_string(gm, args, compiler_name))
+        gm.to_folder(gm_dir, "Repro")
+        fd.write(
+            generate_dynamo_fx_repro_string(
+                "from module import Repro", args, compiler_name
+            )
+        )
+
     local_dir = os.path.join(torchdynamo.config.base_dir, "repro")
     if os.path.exists(local_dir):
         shutil.rmtree(local_dir)
     shutil.copytree(tmp_dir, local_dir)
     local_tar_file = os.path.join(torchdynamo.config.base_dir, "repro.tar.gz")
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to {local_tar_file}")
     with tarfile.open(local_tar_file, "w:gz") as tar:
         tar.add(local_dir, arcname=os.path.basename(local_dir))
+
+
+def dump_dynamo_gm_state(gm, args, compiler_name):
+    """
+    Dumps the dynamo graph to repro the issue.
+    1) It tries to convert Fx GraphModule to a string. If we can, it writes to a
+    repro.py file.
+    2) If we can't convert Fx GraphModule to a string, we use to_folder to save
+    the module and save a tar file.
+    """
+    if NNModuleToString.can_convert_to_string(gm):
+        return dump_dynamo_gm_to_file(gm, args, compiler_name)
+    return dump_dynamo_gm_as_tarfile(gm, args, compiler_name)
 
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
