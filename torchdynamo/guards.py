@@ -217,6 +217,11 @@ class GuardBuilder:
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         self._produce_guard_code(guard, [code])
 
+    def NAME_MATCH(self, guard: Guard):
+        obj = self.get(guard.name)
+        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__})"
+        self._produce_guard_code(guard, [code])
+
     def HASATTR(self, guard: Guard):
         m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
         assert m, f"invalid hasattr check {guard.name}"

@@ -326,11 +326,11 @@ class HuggingfaceRunner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
+
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -394,21 +394,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
+        self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
-
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
 
     def iter_model_names(self, args):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
