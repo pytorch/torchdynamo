@@ -693,14 +693,25 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 passes_test = res_error <= (1.1 * ref_error + 1e-5)
                 if not passes_test:
-                    log.warning(
-                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                    # Try a very strict cosine similarity check
+                    ref = ref.flatten().to(torch.float32)
+                    res = res.flatten().to(torch.float32)
+                    passes_test = (
+                        torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
+                        > 0.9999
                     )
+                    if not passes_test:
+                        log.warning(
+                            f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                        )
                 return passes_test
 
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
-        return ref == res
+        passing = ref == res
+        if not passing:
+            log.warning(f"type(ref)={type(ref)}, type(res)={type(res)}")
+        return passing
     elif isinstance(ref, float):
         return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
