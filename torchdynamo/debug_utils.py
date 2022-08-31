@@ -310,25 +310,23 @@ def wrap_compiler_debug(compiler, compiler_name: str):
     @functools.wraps(compiler)
     def debug_wrapper(gm, example_inputs, **kwargs):
         orig_graph = copy.deepcopy(gm.graph)
-        if config.repro_level == 3:
-            dump_to_minify(
-                fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
-            )
-
-        try:
-            compiled_fn = compiler(gm, example_inputs, **kwargs)
-            if config.repro_level > 0:
+        assert config.repro_after in ("dynamo", "aot", None)
+        if config.repro_after == "aot":
+            try:
+                compiled_fn = compiler(gm, example_inputs, **kwargs)
                 compiled_fn(*example_inputs)
-        except Exception as e:
-            if config.repro_level == 1:
-                dump_compiler_graph_state(
-                    fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
-                )
-            elif config.repro_level == 2:
-                dump_to_minify(
-                    fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
-                )
-            raise e
+            except Exception as e:
+                if config.repro_level == 1:
+                    dump_compiler_graph_state(
+                        fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                    )
+                elif config.repro_level == 2:
+                    dump_to_minify(
+                        fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                    )
+                raise e
+        else:
+            compiled_fn = compiler(gm, example_inputs, **kwargs)
 
         return compiled_fn
 
@@ -517,11 +515,12 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
 
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
-        compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
-        if config.backend_repro_level > 0:
+        assert config.repro_after in ("dynamo", "aot", None)
+        if config.repro_after == "dynamo":
             # Ensure that we fail when backend fails
             config.raise_on_backend_error = True
             try:
+                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
                 run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
             except Exception as exc:
                 orig_failure = str(exc)
@@ -531,7 +530,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 dump_state_fn = functools.partial(
                     dump_backend_state, compiler_name=compiler_name
                 )
-                if config.backend_repro_level == 1:
+                if config.repro_level == 1:
                     dump_state_fn(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
                     )
@@ -558,6 +557,8 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                         dump_state=dump_state_fn,
                     )
                     raise exc
+        else:
+            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
         return compiled_gm
 
