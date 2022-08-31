@@ -6,10 +6,8 @@ from typing import List
 
 import torch._C
 import torch.nn
-from torch.fx.experimental.proxy_tensor import make_fx
 
 from torchdynamo.source import GetItemSource
-from torchdynamo.source import LocalSource
 from torchdynamo.source import NNModuleSource
 from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import FakeContextWrappingVariable
@@ -412,9 +410,6 @@ class TorchPyOperator(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from torch.utils._python_dispatch import TorchDispatchMode
-        from torch.utils._python_dispatch import enable_torch_dispatch_mode
-
         from . import ListVariable
         from . import TensorVariable
         from . import UserFunctionVariable

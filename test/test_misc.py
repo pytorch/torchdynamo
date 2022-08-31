@@ -2254,7 +2254,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         def f(pred, pred2, x):
             return cond(pred, true_fn, false_fn, [pred2, x])
 
-        cc = torchdynamo.testing.CompileCounter()
         graph, guard = torchdynamo.export(
             f, torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
         )
