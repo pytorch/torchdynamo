@@ -256,9 +256,9 @@ def run_function(model, user_constraints):
 
 
 
-# 16 / 25
-print('blender bot \n \n')
-run_function(BlenderbotSmallModel, user_constraints_blenderbot)
+# 16 / 35
+# print('blender bot \n \n')
+# run_function(BlenderbotSmallModel, user_constraints_blenderbot)
 
 
 # 18 / 44

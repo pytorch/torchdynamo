@@ -374,8 +374,14 @@ class TensorVariable(VariableTracker):
                     else:
                         pass
 
-        except Exception as e:
+        except AssertionError as e:
             print(e)
+            pass
+
+        except Exception as e:
+            num_of_branches += 1
+            print(e)
+            pass
 
         if "guards" in options:
             tx.output.guards.update(options["guards"])
