@@ -1005,7 +1005,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         before, after = opt_fn()
         self.assertTrue(same(before, after))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 3)  # clone, rand, rand
+        self.assertEqual(cnt.op_count, 2)  # rand, rand
 
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
