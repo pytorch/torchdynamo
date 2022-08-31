@@ -184,6 +184,9 @@ class WrapperCodeGen(CodeGen):
 
                 aten = torch.ops.aten
 
+                import operator as _operator
+                from torchinductor.utils import assert_size_match, assert_stride_match
+
             """
         )
 
@@ -196,9 +199,6 @@ class WrapperCodeGen(CodeGen):
                     from torchinductor.triton_ops.autotune import pointwise_heuristics
                     from torchinductor.triton_ops.autotune import reduction_heuristics
                     from torchinductor.triton_ops.autotune import grid
-
-                    import operator as _operator
-                    from torchinductor.utils import assert_size_match, assert_stride_match
 
                 """
             )
