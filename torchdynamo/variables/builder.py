@@ -384,7 +384,10 @@ class VariableBuilder:
             return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         elif isinstance(value, PyOperator):
             return TorchPyOperator(
-                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+                value,
+                guards=self.make_guards(
+                    GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
+                ),
             )
         else:
             result = UserDefinedObjectVariable(
