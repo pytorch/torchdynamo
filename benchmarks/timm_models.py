@@ -55,17 +55,20 @@ BATCH_SIZE_DIVISORS = {
     "dla102": 2,
     "dpn107": 2,
     "ecaresnet101d": 2,
+    "eca_botnext26ts_256": 2,
+    "eca_halonext26ts": 2,
     "gluon_senet154": 2,
     "gluon_xception65": 2,
     "gmixer_24_224": 2,
     "gmlp_s16_224": 2,
     "hrnet_w18": 64,
-    "jx_nest_base": 1,
+    "jx_nest_base": 4,
     "legacy_senet154": 2,
     "mixer_b16_224": 2,
     "mixnet_l": 2,
-    "mobilevit_s": 2,
+    "mobilevit_s": 4,
     "nasnetalarge": 2,
+    "nfnet_l0": 2,
     "pit_b_224": 2,
     "pnasnet5large": 2,
     "poolformer_m36": 2,
@@ -75,7 +78,7 @@ BATCH_SIZE_DIVISORS = {
     "resnest101e": 4,
     "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
-    "swsl_resnext101_32x16d": 1,
+    "swsl_resnext101_32x16d": 2,
     "tf_mixnet_l": 2,
     "tnt_s_patch16_224": 2,
     "twins_pcpvt_base": 4,
@@ -85,6 +88,11 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = set()
+
+SKIP = {
+    # Unusual training setup
+    "levit_128",
+}
 
 
 def refresh_model_names():
@@ -181,13 +189,13 @@ class TimmRunnner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
 
-        _, model_dtype, data_dtype = self.resolve_precision()
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+
+        # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
         model = create_model(
@@ -206,7 +214,6 @@ class TimmRunnner(BenchmarkRunner):
         )
         model.to(
             device=device,
-            dtype=model_dtype,
             memory_format=torch.channels_last if channels_last else None,
         )
 
@@ -247,21 +254,9 @@ class TimmRunnner(BenchmarkRunner):
         else:
             model.eval()
 
-        return device, model_name, model, example_inputs, batch_size
+        self.validate_model(model, example_inputs)
 
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
+        return device, model_name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
         # for model_name in list_models(pretrained=True, exclude_filters=["*in21k"]):

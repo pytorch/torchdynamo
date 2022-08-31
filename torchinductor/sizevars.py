@@ -15,8 +15,6 @@ from sympy import Symbol
 from . import ir
 from .codegen.common import IndentedBuffer
 from .utils import VarRanges
-from .utils import freeze_inputs
-from .utils import immutable_dict
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -51,8 +49,10 @@ class SizeVarAllocator(object):
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = {}
         self.need_seed = False
+        self.stride_vars = self.make_stride_vars_cache()
         if not zero_one_const:
             self.val_to_var.clear()
+        self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
 
     def seed(self):
         """
@@ -67,9 +67,29 @@ class SizeVarAllocator(object):
     def simplify(self, expr: Expr):
         return sympy.expand(expr).subs(self.replacements)
 
-    @freeze_inputs
-    @functools.lru_cache(256)
-    def simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
+    def make_simplify_with_ranges_cache(self):
+        """
+        self._simplify_with_ranges() can be expensive, cache its results
+        """
+        cache = dict()
+        replacement_count = len(self.replacements)
+
+        def simplify_with_ranges(expr: Expr, var_ranges: VarRanges):
+            nonlocal replacement_count
+            if replacement_count != len(self.replacements):
+                # new replacements invalidates cached results
+                cache.clear()
+                replacement_count = len(self.replacements)
+            key = (expr, *var_ranges.items())
+            result = cache.get(key, None)
+            if result is None:
+                result = self._simplify_with_ranges(expr, var_ranges)
+                cache[key] = result
+            return result
+
+        return simplify_with_ranges
+
+    def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
         """
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
@@ -104,24 +124,27 @@ class SizeVarAllocator(object):
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
-        expr = expr.replace(
-            ModularIndexing(
-                sympy.Wild("base"),
-                sympy.Wild("divisor"),
-                sympy.Wild("modulus"),
-            ),
-            visit_modular_indexing,
-        )
-        expr = expr.replace(
-            IndexingDiv(
-                sympy.Wild("base"),
-                sympy.Wild("divisor"),
-            ),
-            visit_indexing_div,
-        )
+        if "ModularIndexing" in str(expr):
+            expr = expr.replace(
+                ModularIndexing(
+                    sympy.Wild("base"),
+                    sympy.Wild("divisor"),
+                    sympy.Wild("modulus"),
+                ),
+                visit_modular_indexing,
+            )
+
+        if "IndexingDiv" in str(expr):
+            expr = expr.replace(
+                IndexingDiv(
+                    sympy.Wild("base"),
+                    sympy.Wild("divisor"),
+                ),
+                visit_indexing_div,
+            )
 
         if expr != original_expr:
-            return self.simplify_with_ranges(expr, var_ranges)
+            return self._simplify_with_ranges(expr, var_ranges)
         return expr
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
@@ -252,7 +275,33 @@ class SizeVarAllocator(object):
     def size_hint(self, expr: Expr) -> int:
         return int(sympy.expand(expr).subs(self.var_to_val))
 
-    def stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+    def _lru_cache(self, fn, maxsize=None):
+        """
+        Wrapper around functools.lru_cache that clears when replacements
+        has been invalidated.
+        """
+        fn_cache = functools.lru_cache(maxsize)(fn)
+        prior_len = len(self.replacements)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            nonlocal prior_len
+            if prior_len != len(self.replacements):
+                prior_len = len(self.replacements)
+                fn_cache.cache_clear()
+            return fn_cache(*args, **kwargs)
+
+        return wrapper
+
+    def make_stride_vars_cache(self):
+        cache = self._lru_cache(self._stride_vars)
+
+        def stride_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+            return cache(index, tuple(vars))
+
+        return stride_vars
+
+    def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
         """Convert an indexing expression back into strides"""
         strides = []
         index = index.subs(self.replacements)
@@ -359,8 +408,14 @@ class SizeVarAllocator(object):
         return f"({', '.join(parts)})"
 
 
-@functools.lru_cache(256)
 def join_dimensions(expr: Expr) -> Expr:
+    if not isinstance(expr, sympy.Add) or "ModularIndexing" not in str(expr):
+        return expr  # fast exit path
+    return _join_dimensions_cached(expr)
+
+
+@functools.lru_cache(256)
+def _join_dimensions_cached(expr: Expr) -> Expr:
     """
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
     becomes
@@ -374,8 +429,7 @@ def join_dimensions(expr: Expr) -> Expr:
     from .ir import IndexingDiv
     from .ir import ModularIndexing
 
-    if not isinstance(expr, sympy.Add):
-        return expr
+    assert isinstance(expr, sympy.Add)
 
     scale = sympy.Wild("scale", exclude=[0])
     base = sympy.Wild("base")
@@ -415,7 +469,6 @@ def join_dimensions(expr: Expr) -> Expr:
                         + m1[scale] * IndexingDiv(m1[base], m1[divisor])
                     )
                     return expr
-
     return expr
 
 
@@ -427,13 +480,12 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
-        var_ranges = immutable_dict(var_ranges)
         self._simplify: Callable[
             [Expr], Expr
         ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
-        return self._inner.load(name, self._simplify(index), upcast)
+    def load(self, name: str, index: sympy.Expr):
+        return self._inner.load(name, self._simplify(index))
 
     def store(self, name, index, value, mode=None):
         return self._inner.store(name, self._simplify(index), value, mode=mode)

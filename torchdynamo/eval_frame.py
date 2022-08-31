@@ -3,6 +3,7 @@ import copy
 import functools
 import inspect
 import logging
+import os
 import threading
 import types
 import warnings
@@ -10,10 +11,12 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import compile_times
 from torchdynamo.utils import same
 
 from . import config
@@ -289,7 +292,15 @@ def get_compiler_fn(compiler_fn):
     return compiler_fn
 
 
-def optimize(backend, nopython=False, guard_export_fn=None):
+class _NullDecorator(contextlib.nullcontext):
+    def __call__(self, fn):
+        assert callable(fn)
+        return fn
+
+
+def optimize(
+    backend="inductor", *, nopython=False, guard_export_fn=None, disable=False
+):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -305,18 +316,17 @@ def optimize(backend, nopython=False, guard_export_fn=None):
             - Or, a string backend name in `torchdynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
+        disable: If True, turn this decorator into a no-op
 
     Example Usage:
 
-        @torchdynamo.optimize("ofi")
+        @torchdynamo.optimize()
         def toy_example(a, b):
             ...
-
-        or
-
-        with torchdynamo.optimize(my_compiler):
-           ...
     """
+    if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
+        return _NullDecorator()
+
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -380,12 +390,14 @@ def explain(f, *args, **kwargs):
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
     explanation += f"\n Break reasons: \n\n{formatted_list}"
 
+    explanation += compile_times()
+
     # TODO(voz): Do we want a decorator for this?
     torchdynamo.reset()
     return explanation, out_guards, graphs, ops_per_graph
 
 
-def export(f, *args, **kwargs):
+def export(f, *args, aten_graph=False, **kwargs):
     f = innermost_fn(f)
 
     graph = None
@@ -450,7 +462,7 @@ def export(f, *args, **kwargs):
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), optimize_assert(
-        dynamo_normalization_capturing_compiler, guard_export_print
+        dynamo_normalization_capturing_compiler, guard_export_fn=guard_export_print
     ):
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = f(*args, **kwargs)
@@ -492,6 +504,9 @@ def export(f, *args, **kwargs):
 
             return super().output(target, (new_result,), {})
 
+    if aten_graph:
+        graph = make_fx(graph)(*graph_captured_input)
+
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
@@ -499,7 +514,7 @@ def export(f, *args, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, guard_export_fn=None):
+def optimize_assert(backend, *, guard_export_fn=None):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """

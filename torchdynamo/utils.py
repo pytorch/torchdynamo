@@ -37,6 +37,60 @@ troubleshooting_url = (
 
 log = logging.getLogger(__name__)
 
+# profiling compilation time
+compilation_metrics = collections.OrderedDict()
+
+
+def dynamo_timed(func):
+    def time_wrapper(*args, **kwargs):
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        compilation_metrics[key].append(time.time() - t0)
+        return r
+
+    return time_wrapper
+
+
+def compile_times(repr="str", aggregate=False):
+    """
+    Get metrics about torchdynamo frontend/backend compilation times.
+
+    Accumulates information from functions tagged with `@dynamo_timed`.
+
+    repr='str' returns a printable string for user interaction, and 'csv'
+    returns headers, rows which can be logged for output
+
+    aggregate causes values from multiple compilations (e.g. split graphs)
+    to be accumulated into one value.  If false, expect more than one value
+    per metric.
+    """
+
+    def fmt_fn(values, item_fn=lambda x: x):
+
+        if aggregate:
+            return item_fn(sum(values))
+        return ", ".join(map(item_fn, values))
+
+    if repr == "str":
+        rows = [
+            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_metrics
+        ]
+        out = "TorchDynamo compilation metrics:\n"
+        out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+        return out
+    elif repr == "csv":
+        values = [
+            fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
+            for v in compilation_metrics.values()
+        ]
+        headers = list(compilation_metrics.keys())
+        return headers, values
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
@@ -485,8 +539,8 @@ def specialize_args_kwargs(tx, args, kwargs):
     specialized_kwargs = {}
     for x in args:
         specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs:
-        specialized_kwargs.update({k: x.as_specialized(tx)})
+    for k, v in kwargs.items():
+        specialized_kwargs.update({k: v.as_specialized(tx)})
     return specialized_args, specialized_kwargs
 
 
