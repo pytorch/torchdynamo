@@ -14,7 +14,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo
-from torchdynamo.debug_utils import wrap_dynamo_gm_debug
+from torchdynamo.debug_utils import wrap_backend_debug
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import compile_times
@@ -291,7 +291,7 @@ def get_compiler_fn(compiler_fn):
 
         compiler_fn = BACKENDS[compiler_fn]
 
-    return wrap_dynamo_gm_debug(compiler_fn, compiler_str)
+    return wrap_backend_debug(compiler_fn, compiler_str)
 
 
 class _NullDecorator(contextlib.nullcontext):

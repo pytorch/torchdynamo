@@ -33,6 +33,8 @@ class NNModuleToString:
         torch.nn.LayerNorm,
         torch.nn.Dropout,
         torch.nn.Softmax,
+        torch.nn.ReLU,
+        torch.nn.MaxPool2d,
     ]
 
     @staticmethod
@@ -40,7 +42,7 @@ class NNModuleToString:
         cant_convert = set()
         for _, module in gm.named_children():
             if type(module) not in NNModuleToString.safe_reprs:
-                cant_convert.update(type(module))
+                cant_convert.add(module)
 
         if len(cant_convert) > 0:
             logging.warn(
@@ -117,7 +119,7 @@ def _cuda_system_info_comment():
     return model_str
 
 
-def generate_post_aot_repro_string(gm, args):
+def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
         """
         import torch
@@ -157,7 +159,7 @@ COMPILER_REPRO_OPTIONS = {
 }
 
 
-def dump_post_aot_graph_state(gm, args, compiler_name):
+def dump_compiler_graph_state(gm, args, compiler_name):
     subdir = f"{minifier_dir()}/checkpoints"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -170,7 +172,7 @@ def dump_post_aot_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
-    fd.write(generate_post_aot_repro_string(gm, args))
+    fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     fd.write(
         textwrap.dedent(
@@ -190,7 +192,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
-        fd.write(generate_post_aot_repro_string(fx_g, args))
+        fd.write(generate_compiler_repro_string(fx_g, args))
         fail_fn = COMPILER_REPRO_OPTIONS[compiler_name][2]
         fd.write(
             textwrap.dedent(
@@ -270,7 +272,7 @@ def dump_to_minify(gm, args, compiler_name: str):
     with open(
         os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py"), "w"
     ) as fd:
-        fd.write(generate_post_aot_repro_string(gm, args))
+        fd.write(generate_compiler_repro_string(gm, args))
         fd.write("\n")
         fd.write(
             textwrap.dedent(
@@ -278,7 +280,7 @@ def dump_to_minify(gm, args, compiler_name: str):
                 from functools import partial
                 from torchdynamo.debug_utils import (
                     isolate_fails,
-                    dump_post_aot_graph_state,
+                    dump_compiler_graph_state,
                 )
                 from functorch.compile import minifier
 
@@ -288,7 +290,7 @@ def dump_to_minify(gm, args, compiler_name: str):
                     mod,
                     args,
                     module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}"),
-                    dump_state=partial(dump_post_aot_graph_state, compiler_name="{compiler_name}"),
+                    dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
                 )
                 """
             )
@@ -296,7 +298,7 @@ def dump_to_minify(gm, args, compiler_name: str):
     print("wrote out to minifier_launcher.py")
 
 
-def wrap_post_aot_debug(compiler, compiler_name: str):
+def wrap_compiler_debug(compiler, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler - like
@@ -319,7 +321,7 @@ def wrap_post_aot_debug(compiler, compiler_name: str):
                 compiled_fn(*example_inputs)
         except Exception as e:
             if config.repro_level == 1:
-                dump_post_aot_graph_state(
+                dump_compiler_graph_state(
                     fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
                 )
             elif config.repro_level == 2:
@@ -384,7 +386,6 @@ def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
         """
     )
 
-    # TODO - Figure out the amp state
     run_module = textwrap.dedent(
         f"""
         with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
@@ -396,7 +397,7 @@ def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
     return imports + model_str + setup_module + prep_inputs + run_module
 
 
-def dump_dynamo_gm_to_file(gm, args, compiler_name):
+def dump_backend_repro_as_file(gm, args, compiler_name):
     """
     Saves the repro to a repro.py file
     """
@@ -413,7 +414,7 @@ def dump_dynamo_gm_to_file(gm, args, compiler_name):
     shutil.copyfile(file_name, repro_path)
 
 
-def dump_dynamo_gm_as_tarfile(gm, args, compiler_name):
+def dump_backend_repro_as_tarfile(gm, args, compiler_name):
     """
     Saves the repro in repro.tar.gz, as opposed to a file. This is used for
     cases, where we can't convert a Fx GraphModule to a string, and therefore
@@ -465,7 +466,7 @@ def dump_dynamo_gm_as_tarfile(gm, args, compiler_name):
         tar.add(local_dir, arcname=os.path.basename(local_dir))
 
 
-def dump_dynamo_gm_state(gm, args, compiler_name):
+def dump_backend_state(gm, args, compiler_name):
     """
     Dumps the dynamo graph to repro the issue.
     1) It tries to convert Fx GraphModule to a string. If we can, it writes to a
@@ -474,8 +475,8 @@ def dump_dynamo_gm_state(gm, args, compiler_name):
     the module and save a tar file.
     """
     if NNModuleToString.can_convert_to_string(gm):
-        return dump_dynamo_gm_to_file(gm, args, compiler_name)
-    return dump_dynamo_gm_as_tarfile(gm, args, compiler_name)
+        return dump_backend_repro_as_file(gm, args, compiler_name)
+    return dump_backend_repro_as_tarfile(gm, args, compiler_name)
 
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
@@ -503,10 +504,10 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
         return False
 
 
-def wrap_dynamo_gm_debug(compiler_fn, compiler_name: str):
+def wrap_backend_debug(compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
-    As opposed to wrap_post_aot_debug, this wrapper intercepts at the
+    As opposed to wrap_compiler_debug, this wrapper intercepts at the
     TorchDynamo produced Fx Graph Module. This makes it backend-agnostic to some
     level, e.g., it is useful for minifying issues related to Aot Autograd
     tracing.  If an error is found, we minify and save the minified repro in
@@ -517,7 +518,7 @@ def wrap_dynamo_gm_debug(compiler_fn, compiler_name: str):
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
         compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
-        if config.dynamo_repro_level > 0:
+        if config.backend_repro_level > 0:
             # Ensure that we fail when backend fails
             config.raise_on_backend_error = True
             try:
@@ -528,15 +529,15 @@ def wrap_dynamo_gm_debug(compiler_fn, compiler_name: str):
                     f"Compiled Fx GraphModule failed with {orig_failure}. Starting minifier."
                 )
                 dump_state_fn = functools.partial(
-                    dump_dynamo_gm_state, compiler_name=compiler_name
+                    dump_backend_state, compiler_name=compiler_name
                 )
-                if config.dynamo_repro_level == 1:
+                if config.backend_repro_level == 1:
                     dump_state_fn(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
                     )
                 else:
                     # As opposed to using dump_to_minify, like we do in
-                    # wrap_post_aot_debug, we directly run minifier here. This
+                    # wrap_compiler_debug, we directly run minifier here. This
                     # is because we can't serialize compiler_fn here.
 
                     # The minified version uses
