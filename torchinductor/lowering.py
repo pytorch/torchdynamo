@@ -462,8 +462,7 @@ def expand(x, sizes):
 
     x_size_product = sympy_product(x.get_size())
     if x_size_product > 0:
-        sizes_product = sympy_product(sizes)
-        x.mark_reuse(V.graph.sizevars.size_hint(sizes_product / x_size_product))
+        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product))
 
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
