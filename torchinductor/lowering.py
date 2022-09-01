@@ -469,9 +469,17 @@ def expand(x, sizes):
     assert isinstance(sizes, (list, tuple))
     if tuple(x.get_size()) == tuple(sizes):
         return x
-    x.mark_reuse(
-        V.graph.sizevars.size_hint(sympy_product(sizes) / sympy_product(x.get_size()))
-    )
+
+    x_size_product = sympy_product(x.get_size())
+    try:
+        if x_size_product > 0:
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product)
+            )
+    except TypeError:
+        # Certain sympy products cannot be compared, fails with
+        # cannot determine truth value of Relational
+        pass
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -523,9 +531,17 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    x.mark_reuse(
-        V.graph.sizevars.size_hint(sympy_product(new_size) / sympy_product(old_size))
-    )
+    old_size_product = sympy_product(old_size)
+    try:
+        if old_size_product > 0:
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
+            )
+    except TypeError:
+        # Certain sympy products cannot be compared, fails with
+        # cannot determine truth value of Relational
+        pass
+
     x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),
