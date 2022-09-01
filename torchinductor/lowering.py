@@ -464,8 +464,6 @@ def expand(x, sizes):
     if x_size_product > 0:
         sizes_product = sympy_product(sizes)
         x.mark_reuse(V.graph.sizevars.size_hint(sizes_product / x_size_product))
-    else:
-        x.mark_reuse(V.graph.sizevars.size_hint(0))
 
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -523,8 +521,7 @@ def repeat(x, repeats):
         x.mark_reuse(
             V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
         )
-    else:
-        x.mark_reuse(V.graph.sizevars.size_hint(0))
+
     x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),
