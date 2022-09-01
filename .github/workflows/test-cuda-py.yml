@@ -1,0 +1,27 @@
+name: Test Python 3.10 + CUDA-11.6
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-cuda:
+    runs-on: linux.4xlarge.nvidia.gpu
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Linux
+      uses: ./.github/actions/setup-linux
+    - name: Setup SSH (Click me for login details)
+      uses: ./.github/actions/setup-ssh
+      with:
+        github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+    - run: make setup_nightly
+    - run: make develop
+    - run: make test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
