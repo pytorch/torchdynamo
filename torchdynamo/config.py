@@ -119,6 +119,10 @@ capture_scalar_outputs = False
 enforce_cond_guards_match = True
 
 
+# If True, raises exception if TorchDynamo is called with a context manager
+raise_on_ctx_manager_usage = False
+
+
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
         if name not in _allowed_config_names:

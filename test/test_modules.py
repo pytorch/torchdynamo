@@ -1,6 +1,7 @@
 #!/usr/bin/env pytest
 
 from copy import deepcopy
+from unittest.mock import patch
 
 import torch
 from torch.nn import functional as F
@@ -676,6 +677,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
 
+    @patch.object(torchdynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
         cnt = torchdynamo.testing.CompileCounter()
 
@@ -765,6 +767,7 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
         run()
 
+    @patch.object(torchdynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):

@@ -103,6 +103,15 @@ class _TorchDynamoContext:
         patch_fn()
 
     def __enter__(self):
+        logging.warn(
+            (
+                "Using TorchDynamo with a context manager will be deprecated soon."
+                "Please read https://github.com/pytorch/torchdynamo#usage-example "
+                "to use TorchDynamo using an annotation."
+            )
+        )
+        if config.raise_on_ctx_manager_usage:
+            raise RuntimeError("TorchDynamo is used with a context manager")
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
