@@ -8,6 +8,7 @@ import io
 import itertools
 import logging
 import os
+import random
 import signal
 import subprocess
 import sys
@@ -33,6 +34,7 @@ from torchdynamo.testing import CompileCounterWithBackend
 from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
+from torchdynamo.utils import clone_inputs
 
 try:
     from functorch._src.aot_autograd import set_model_name
@@ -142,6 +144,23 @@ class NullContext:
         pass
 
 
+@functools.lru_cache(None)
+def patch_torch_manual_seed():
+    """Make torch manual seed deterministic. Helps with accuracy testing."""
+
+    def deterministic_torch_manual_seed(*args, **kwargs):
+        from torch._C import default_generator
+
+        seed = 1337
+        import torch.cuda
+
+        if not torch.cuda._is_in_bad_fork():
+            torch.cuda.manual_seed_all(seed)
+        return default_generator.manual_seed(seed)
+
+    torch.manual_seed = deterministic_torch_manual_seed
+
+
 def synchronize():
     pass
 
@@ -171,7 +190,7 @@ def print_summary(filename):
 
 def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
-    torch.manual_seed(1337)
+    reset_rng_state()
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
@@ -425,6 +444,15 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
         output_filename,
         ("dev", "name", "batch_size", "speedup"),
         [current_device, current_name, current_batch_size, float(speedup)],
+    )
+    headers, data = torchdynamo.utils.compile_times(repr="csv", aggregate=True)
+    assert (
+        output_filename.find(".csv") > 0
+    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    output_csv(
+        output_filename[:-4] + "_compilation_metrics.csv",
+        ["dev", "name", "batch_size"] + headers,
+        [current_device, current_name, current_batch_size] + data,
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -852,6 +880,12 @@ def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
 
 
+def reset_rng_state():
+    torch.manual_seed(1337)
+    random.seed(1337)
+    np.random.seed(1337)
+
+
 class DummyGradScaler:
     def scale(self, loss):
         return loss
@@ -859,6 +893,7 @@ class DummyGradScaler:
 
 class BenchmarkRunner:
     def __init__(self):
+        self.model_iter_fn = None
         self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
@@ -914,19 +949,40 @@ class BenchmarkRunner:
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
-    def resolve_precision(self):
-        use_amp = False
-        model_dtype = torch.float32
-        data_dtype = torch.float32
-        if self._args.amp:
-            use_amp = True
-        elif self._args.float16:
-            model_dtype = torch.float16
-            data_dtype = torch.float16
-        # elif self._args.bfloat16:
-        #     model_dtype = torch.bfloat16
-        #     data_dtype = torch.bfloat16
-        return use_amp, model_dtype, data_dtype
+    @property
+    def equal_nan(self):
+        equal_nan = True
+        if self.args.float32:
+            equal_nan = False
+        return equal_nan
+
+    def iter_models(self, args):
+        for model_name in self.iter_model_names(args):
+            for device in args.devices:
+                try:
+                    yield self.load_model(
+                        device,
+                        model_name,
+                        batch_size=args.batch_size,
+                    )
+                except NotImplementedError:
+                    continue  # bad benchmark implementation
+
+    def validate_model(self, model, example_inputs):
+        """
+        Runs the eager model with example inputs to ensure that eager passes.
+        """
+        model = copy.deepcopy(model)
+        example_inputs = clone_inputs(example_inputs)
+        if self.args.float32:
+            model, example_inputs = cast_to_fp32(model, example_inputs)
+        elif self.args.float16:
+            model, example_inputs = cast_to_fp16(model, example_inputs)
+
+        try:
+            self.model_iter_fn(model, example_inputs)
+        except Exception:
+            raise NotImplementedError("Eager model failed to run")
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
         out_batch_size = batch_size * factor
@@ -936,7 +992,7 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def profile_compilation(self, device, model_name, model_iter_fn, backend):
+    def profile_compilation(self, device, model_name, backend):
         """
         Profiles compilation characteristics, e.g., compilation latency and memory.
         """
@@ -952,9 +1008,7 @@ class BenchmarkRunner:
             device, name, model, example_inputs, batch_size = self.load_model(
                 device,
                 model_name,
-                self._args.training,
-                self._args.use_eval_mode,
-                batch_size,
+                batch_size=batch_size,
             )
         except NotImplementedError:
             logging.warn(f"{model_name} failed to load")
@@ -964,7 +1018,7 @@ class BenchmarkRunner:
         ), "The memory measurement is currently specific to CUDA devices"
         experiment = functools.partial(
             compilation_profiling_experiment,
-            model_iter_fn=model_iter_fn,
+            model_iter_fn=self.model_iter_fn,
             model=model,
             example_inputs=example_inputs,
         )
@@ -976,9 +1030,7 @@ class BenchmarkRunner:
             [device, model_name, batch_size, time, memory, graphs],
         )
 
-    def batch_size_finder(
-        self, device, model_name, model_iter_fn, initial_batch_size=128
-    ):
+    def batch_size_finder(self, device, model_name, initial_batch_size=128):
         batch_size = initial_batch_size
         while batch_size >= 1:
             torch.cuda.empty_cache()
@@ -986,11 +1038,9 @@ class BenchmarkRunner:
                 device, name, model, example_inputs, _ = self.load_model(
                     device,
                     model_name,
-                    self._args.training,
-                    self._args.use_eval_mode,
                     batch_size,
                 )
-                model_iter_fn(model, example_inputs)
+                self.model_iter_fn(model, example_inputs)
                 return batch_size
             except RuntimeError as e:
                 error_str = str(e)
@@ -1012,13 +1062,13 @@ class BenchmarkRunner:
         self,
         name,
         model,
-        model_iter_fn,
         example_inputs,
         optimize_ctx,
         experiment,
         diff=False,
         branch=None,
     ):
+        model_iter_fn = self.model_iter_fn
         if diff:
             assert branch is None, "Branch set during top level flow."
             import git
@@ -1076,7 +1126,7 @@ class BenchmarkRunner:
                 fp64_outputs = model_iter_fn(
                     *cast_to_fp64(
                         copy.deepcopy(model),
-                        torchdynamo.utils.clone_inputs(example_inputs),
+                        clone_inputs(example_inputs),
                     )
                 )
             except Exception:
@@ -1094,9 +1144,9 @@ class BenchmarkRunner:
                 # compatible with the code below, and the same benchmarks can be run in
                 # non-dynamic shapes mode for correctness checks
                 correct_result = model_iter_fn(
-                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+                    copy.deepcopy(model), clone_inputs(example_inputs)
                 )
-                torch.manual_seed(1337)
+                reset_rng_state()
                 torchdynamo.reset()
                 results = []
                 results.append(experiment(model, example_inputs, optimize_ctx))
@@ -1115,23 +1165,28 @@ class BenchmarkRunner:
             for submod in itertools.chain([model], model.modules()):
                 assert not torchdynamo.utils.is_jit_model(submod)
 
-            torch.manual_seed(1337)
+            reset_rng_state()
             correct_result = model_iter_fn(
-                copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+                copy.deepcopy(model), clone_inputs(example_inputs)
             )
 
-            torch.manual_seed(1337)
+            reset_rng_state()
             if current_name not in self.non_deterministic_models:
                 correct_rerun_result = model_iter_fn(
-                    copy.deepcopy(model), torchdynamo.utils.clone_inputs(example_inputs)
+                    copy.deepcopy(model), clone_inputs(example_inputs)
                 )
-                if not same(correct_result, correct_rerun_result, fp64_outputs):
+                if not same(
+                    correct_result,
+                    correct_rerun_result,
+                    fp64_outputs,
+                    equal_nan=self.equal_nan,
+                ):
                     print("INCORRECT - Variation in Eager runs itself")
                     if not self.args.skip_accuracy_check:
                         return sys.exit(-1)
 
             t0 = time.perf_counter()
-            torch.manual_seed(1337)
+            reset_rng_state()
             torchdynamo.reset()
             try:
                 optimized_model_iter_fn = optimize_ctx(model_iter_fn)
@@ -1150,6 +1205,7 @@ class BenchmarkRunner:
                 correct_result,
                 new_result,
                 fp64_outputs,
+                equal_nan=self.equal_nan,
                 cos_similarity=cos_similarity,
                 tol=tolerance,
             ):
@@ -1452,6 +1508,8 @@ def parse_args():
 
 
 def main(runner, original_dir=None):
+    patch_torch_manual_seed()
+
     args = parse_args()
 
     # Pass the parsed args object to benchmark runner object
@@ -1536,10 +1594,10 @@ def main(runner, original_dir=None):
     torchdynamo.config.raise_on_backend_error = args.raise_on_backend_error
 
     if args.training:
-        model_iter_fn = runner.forward_and_backward_pass
+        runner.model_iter_fn = runner.forward_and_backward_pass
         runner.skip_models.update(runner.skip_not_suitable_for_training_models)
     else:
-        model_iter_fn = runner.forward_pass
+        runner.model_iter_fn = runner.forward_pass
 
     if args.fast:
         runner.skip_models.update(runner.slow_models)
@@ -1714,7 +1772,7 @@ def main(runner, original_dir=None):
 
     if args.find_batch_sizes and args.only:
         for device in args.devices:
-            batch_size = runner.batch_size_finder(device, args.only, model_iter_fn)
+            batch_size = runner.batch_size_finder(device, args.only)
             print(args.only, batch_size)
             output_csv(output_filename, [], [args.only, batch_size])
         return
@@ -1723,9 +1781,7 @@ def main(runner, original_dir=None):
         if output_filename is None:
             output_filename = "backends_profile.csv"
         for device in args.devices:
-            runner.profile_compilation(
-                device, args.only, model_iter_fn, args.profile_backend
-            )
+            runner.profile_compilation(device, args.only, args.profile_backend)
         return
 
     if args.export_profiler_trace:
@@ -1739,7 +1795,7 @@ def main(runner, original_dir=None):
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
-    experiment = functools.partial(experiment, args, model_iter_fn)
+    experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
     if args.only:
         model_name = args.only
@@ -1753,10 +1809,7 @@ def main(runner, original_dir=None):
                 device, name, model, example_inputs, batch_size = runner.load_model(
                     device,
                     model_name,
-                    args.training,
-                    args.use_eval_mode,
-                    batch_size,
-                    args.dynamic_shapes,
+                    batch_size=batch_size,
                 )
             except NotImplementedError:
                 logging.warn(f"{args.only} failed to load")
@@ -1773,13 +1826,14 @@ def main(runner, original_dir=None):
                 model, example_inputs = cast_to_fp16(model, example_inputs)
 
             if args.log_operator_inputs:
-                log_operator_inputs(model, example_inputs, model_iter_fn, name, args)
+                log_operator_inputs(
+                    model, example_inputs, runner.model_iter_fn, name, args
+                )
                 continue
 
             runner.run_one_model(
                 name,
                 model,
-                model_iter_fn,
                 example_inputs,
                 optimize_ctx,
                 experiment,

@@ -156,7 +156,7 @@ jobs:
             source .circleci/setup_env.sh
             make develop
             python benchmarks/torchbench.py --ci -d cuda --inductor --training --use-eval-mode --float32 \
-              --total-partitions 2 --partition-id 1 --output=inductor_torchbench_training_1.csv
+              --total-partitions 2 --partition-id 1 -x pytorch_CycleGAN_and_pix2pix --output=inductor_torchbench_training_1.csv
       - store_artifacts:
           path: inductor_torchbench_training_1.csv
       - run:

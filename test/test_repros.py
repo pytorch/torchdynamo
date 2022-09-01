@@ -879,6 +879,27 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, ifdyn(14, 11))
 
+    def test_slicing_dynamic_shape(self):
+        def fn(y):
+            x = torch.ones(8)
+            idx = y[0]
+            out = x[idx:]
+            return (out + 3) * 5
+
+        counter = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(counter)(fn)
+        out = opt_fn(torch.ones(10, dtype=torch.long))
+        # idx should be 1 -> slicing off [1:] of 8 elem tensor
+        self.assertEqual(list(out.shape), [7])
+
+        expected_ops = ifdyn(5, 4)
+        expected_frame = ifdyn(1, 2)
+
+        self.assertEqual(expected_ops, expected_ops)
+        self.assertEqual(expected_frame, expected_frame)
+
+        self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
+
     @requires_static_shapes
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -969,6 +990,22 @@ class ReproTests(torchdynamo.testing.TestCase):
             self.assertTrue(same(create_rand_mask_from_inputs(*args), correct))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
+
+    def test_rng_state(self):
+        def fn():
+            state = torch.get_rng_state()
+            before = torch.rand(1000)
+            torch.set_rng_state(state)
+            after = torch.rand(1000)
+            return before, after
+
+        cnt = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+
+        before, after = opt_fn()
+        self.assertTrue(same(before, after))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)  # rand, rand
 
     def test_seq_append_list(self):
         x = torch.randn(4, 10)

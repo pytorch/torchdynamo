@@ -43,11 +43,11 @@ compilation_metrics = collections.OrderedDict()
 
 def dynamo_timed(func):
     def time_wrapper(*args, **kwargs):
-        t0 = time.time()
-        r = func(*args, **kwargs)
         key = func.__qualname__
         if key not in compilation_metrics:
             compilation_metrics[key] = []
+        t0 = time.time()
+        r = func(*args, **kwargs)
         compilation_metrics[key].append(time.time() - t0)
         return r
 
@@ -68,22 +68,26 @@ def compile_times(repr="str", aggregate=False):
     per metric.
     """
 
-    def fmt_fn(values):
-        def as_str(v):
-            return f"{v:.4f}"
+    def fmt_fn(values, item_fn=lambda x: x):
 
         if aggregate:
-            return as_str(sum(values))
-        return ", ".join(map(as_str, values))
+            return item_fn(sum(values))
+        return ", ".join(map(item_fn, values))
 
     if repr == "str":
-        rows = [(k, fmt_fn(compilation_metrics[k])) for k in compilation_metrics]
+        rows = [
+            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_metrics
+        ]
         out = "TorchDynamo compilation metrics:\n"
         out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
         return out
     elif repr == "csv":
+        values = [
+            fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
+            for v in compilation_metrics.values()
+        ]
         headers = list(compilation_metrics.keys())
-        values = [fmt_fn(v) for v in compilation_metrics.values()]
         return headers, values
 
 
@@ -535,8 +539,8 @@ def specialize_args_kwargs(tx, args, kwargs):
     specialized_kwargs = {}
     for x in args:
         specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs:
-        specialized_kwargs.update({k: x.as_specialized(tx)})
+    for k, v in kwargs.items():
+        specialized_kwargs.update({k: v.as_specialized(tx)})
     return specialized_args, specialized_kwargs
 
 
