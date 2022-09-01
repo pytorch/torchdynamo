@@ -276,10 +276,11 @@ class TestPythonAutograd(TestCase):
         grad1 = grad(loss1, [v1, v2])
 
         reset_tape()
-        with torchdynamo.optimize_assert(cnt):
-            loss2 = forward(v1, v2)
-            # force two frames
-            grad2 = grad(loss2, [v1, v2])
+        opt_forward = torchdynamo.optimize_assert(cnt)(forward)
+        opt_grad = torchdynamo.optimize_assert(cnt)(grad)
+        loss2 = opt_forward(v1, v2)
+        # force two frames
+        grad2 = opt_grad(loss2, [v1, v2])
 
         self.assertTrue(same(loss1, loss2))
         self.assertTrue(same(grad1, grad2))
