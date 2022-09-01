@@ -9,6 +9,8 @@ on:
 jobs:
   test-cuda:
     runs-on: linux.4xlarge.nvidia.gpu
+    env:
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7:833fdc01bde1e0f850915c350dae39cd10c300b7
     steps:
     - uses: actions/checkout@v2
     - name: Setup Linux
@@ -17,10 +19,36 @@ jobs:
       uses: ./.github/actions/setup-ssh
       with:
         github-secret: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull docker image
+      uses: ./.github/actions/pull-docker-image
+      with:
+        docker-image: ${{ env.DOCKER_IMAGE }}
+
+    - run: |
+        set -x
+        container_name=$(docker run \
+            --gpus all
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --ipc=host \
+            --shm-size="${SHM_SIZE}" \
+            --tty \
+            --detach \
+            --name="${container_name}" \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+         docker exec -t "${container_name}" sh -c make setup_nightly
 
     - run: make setup_nightly
     - run: make develop
     - run: make test
+
+    - name: Teardown Linux
+      uses: ./.github/actions/teardown-linux
+      if: always()
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
