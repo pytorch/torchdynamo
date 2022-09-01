@@ -479,9 +479,10 @@ class MiscTests(torchdynamo.testing.TestCase):
                 x = x + i
             return x
 
-        return torchdynamo.testing.standard_test(
-            self, fn=functools.partial(fn, rng=range(3)), nargs=1, expected_ops=3
-        )
+        def fn1(a):
+            return fn(a, rng=range(3))
+
+        return torchdynamo.testing.standard_test(self, fn=fn1, nargs=1, expected_ops=3)
 
     def test_no_grad(self):
         def fn1(a, b):
