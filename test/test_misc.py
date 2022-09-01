@@ -2283,11 +2283,11 @@ class MiscTests(torchdynamo.testing.TestCase):
     def test_disable_optimize(self):
         cnt = torchdynamo.testing.CompileCounter()
 
+        @torchdynamo.optimize(cnt, disable=True)
         def f1(x):
             return x + 1
 
-        with torchdynamo.optimize(cnt, disable=True):
-            f1(torch.ones(6))
+        f1(torch.ones(6))
         self.assertEqual(cnt.frame_count, 0)
 
         @torchdynamo.optimize(cnt, disable=True)
