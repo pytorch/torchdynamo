@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import copy
+import cProfile
 import dataclasses
 import dis
 import functools
@@ -11,6 +12,7 @@ import logging.config
 import math
 import operator
 import os
+import pstats
 import re
 import sys
 import time
@@ -41,6 +43,9 @@ log = logging.getLogger(__name__)
 compilation_metrics = collections.OrderedDict()
 
 
+timer_counter = itertools.count()
+
+
 def dynamo_timed(func):
     def time_wrapper(*args, **kwargs):
         key = func.__qualname__
@@ -50,6 +55,25 @@ def dynamo_timed(func):
         r = func(*args, **kwargs)
         compilation_metrics[key].append(time.time() - t0)
         return r
+
+    def profile_wrapper(*args, **kwargs):
+        global timer_counter
+        datafn = (
+            func.__name__ + f"{next(timer_counter)}.profile"
+        )  # Name the data file sensibly
+        prof = cProfile.Profile()
+        prof.enable()
+        retval = prof.runcall(func, *args, **kwargs)
+        prof.disable()
+        print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
+        ps = pstats.Stats(prof)
+        ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+        ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+        prof.dump_stats(datafn)
+        return retval
+
+    if config.use_cprofiler:
+        return profile_wrapper
 
     return time_wrapper
 
