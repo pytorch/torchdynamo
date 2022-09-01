@@ -1381,6 +1381,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
+            self.lineno,
             inst.offset,
             len(self.stack),
             argnames,
