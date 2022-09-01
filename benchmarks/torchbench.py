@@ -82,14 +82,15 @@ SKIP_TRAIN = {
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
-# Some models have bad train dataset. We read eval dataset.
-# yolov3 - seems to have different number of inputs between eval and train
-# timm_efficientdet - loader only exists for eval mode.
-ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
-
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs", "hf_Reformer"}
+ONLY_TRAINING_MODE = {
+    "tts_angular",
+    "tacotron2",
+    "demucs",
+    "hf_Reformer",
+    "yolov3",
+}
 ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
@@ -255,7 +256,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
-        if is_training and model_name not in ONLY_EVAL_DATASET:
+        if is_training:
             benchmark = benchmark_cls(
                 test="train", device=device, jit=False, batch_size=batch_size
             )
@@ -277,6 +278,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.eval()
         gc.collect()
         batch_size = benchmark.batch_size
+
+        # Torchbench has quite different setup for yolov3, so directly passing
+        # the right example_inputs
+        if model_name == "yolov3":
+            example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name

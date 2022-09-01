@@ -6,11 +6,7 @@ Welcome to the first entry in a series of technical documents outlining how Torc
 We assume the reader already has a working knowledge of PyTorch, and Python, and a basic understanding of TorchDynamo's role in the PyTorch Ecosystem. The target audience is engineers and researchers looking to learn more about how TorchDynamo operates under the hood.
 
 ## Using Dynamo
-From a UX perspective, TorchDynamo is very easy to use. The user invokes `torchdynamo.optimize`, either as a context:
-```py
-with torchdynamo.optimize(my_compiler):
-```
-or as an annotation:
+From a UX perspective, TorchDynamo is very easy to use. The user invokes `torchdynamo.optimize` as an annotation:
 ```py
 @torchdynamo.optimize(my_compiler)
 def fn_foo(bar):
@@ -23,20 +19,20 @@ from typing import List
 import torch
 import torchdynamo
 
+def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    print("my_compiler() called with FX graph:")
+    gm.graph.print_tabular()
+    return gm.forward  # return a python callable
+
+@torchdynamo.optimize(my_compiler)
 def toy_example(a, b):
     x = a / (torch.abs(a) + 1)
     if b.sum() < 0:
         b = b * -1
     return x * b
 
-def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-    print("my_compiler() called with FX graph:")
-    gm.graph.print_tabular()
-    return gm.forward  # return a python callable
-
-with torchdynamo.optimize(my_compiler):
-    for _ in range(100):
-        toy_example(torch.randn(10), torch.randn(10))
+for _ in range(100):
+    toy_example(torch.randn(10), torch.randn(10))
 ```
 
 This allows TorchDynamo to capture the interpreted Python frames, grab any and all relevant information, and speed things up wherever it can. The speedup comes from a few places, and can be rather dependent on the backend (my_compiler above) provided, but the one speedup we care about most for today's overview is **caching**. Caching itself is not a direct speedup, so much as a critical enablement to allow us to prevent recompilation. We dig a hole with dynamo, and caching allows us to get out. Its a speedup from that perspective, but relatively neutral when all things are considered - however, it enables us to hold perf neutrality while then enabling backends - the true source of our speedups.

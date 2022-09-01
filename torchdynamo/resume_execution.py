@@ -99,18 +99,19 @@ class ContinueExecutionCache:
     generated_code_metadata = ExactWeakKeyDictionary()
 
     @classmethod
-    def lookup(cls, code, *key):
+    def lookup(cls, code, lineno, *key):
         if code not in cls.cache:
             cls.cache[code] = dict()
         key = tuple(key)
         if key not in cls.cache[code]:
-            cls.cache[code][key] = cls.generate(code, *key)
+            cls.cache[code][key] = cls.generate(code, lineno, *key)
         return cls.cache[code][key]
 
     @classmethod
     def generate(
         cls,
         code,
+        lineno,
         offset: int,
         nstack: int,
         argnames: List[str],
@@ -124,7 +125,7 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, offset, nstack, argnames, setup_fns
+                code, lineno, offset, nstack, argnames, setup_fns
             )
 
         meta = ResumeFunctionMetadata(code)
@@ -137,6 +138,8 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
+            code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
             code_options["co_argcount"] = len(args)
@@ -160,6 +163,14 @@ class ContinueExecutionCache:
             assert not hooks
 
             prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
+
+            # because the line number table monotonically increases from co_firstlineno
+            # remove starts_line for any instructions before the graph break instruction
+            # this will ensure the instructions after the break have the correct line numbers
+            target_ind = int(target.offset / 2)
+            for inst in instructions[0:target_ind]:
+                inst.starts_line = None
+
             if cleanup:
                 prefix.extend(cleanup)
                 prefix.extend(cls.unreachable_codes(code_options))
@@ -186,7 +197,7 @@ class ContinueExecutionCache:
         ]
 
     @classmethod
-    def generate_based_on_original_code_object(cls, code, offset: int, *args):
+    def generate_based_on_original_code_object(cls, code, lineno, offset: int, *args):
         """
         This handles the case of generating a resume into code generated
         to resume something else.  We want to always generate starting
@@ -215,7 +226,7 @@ class ContinueExecutionCache:
             new_offset = new_target.offset
 
         transform_code_object(code, find_new_offset)
-        return ContinueExecutionCache.lookup(meta.code, new_offset, *args)
+        return ContinueExecutionCache.lookup(meta.code, lineno, new_offset, *args)
 
 
 """
