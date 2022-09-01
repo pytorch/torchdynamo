@@ -249,9 +249,17 @@ def promote_constants(inputs):
     ]
 
 
-def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=None):
-    def inner(*inputs: List[TensorBox]):
+def make_pointwise(
+    fn, override_dtype=None, override_device=None, override_bool=None, allow_alpha=False
+):
+    def inner(*inputs: List[TensorBox], alpha=None):
         inputs = promote_constants(inputs)
+        if allow_alpha:
+            if alpha is not None and alpha != 1:
+                inputs = list(inputs)
+                inputs[-1] = mul(inputs[-1], alpha)
+        else:
+            assert alpha is None
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_dtype or inputs[0].get_dtype()
@@ -366,6 +374,7 @@ def register_pointwise(
     override_dtype=None,
     override_device=None,
     override_bool=None,
+    allow_alpha=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -378,6 +387,7 @@ def register_pointwise(
         override_dtype=override_dtype,
         override_device=override_device,
         override_bool=override_bool,
+        allow_alpha=allow_alpha,
     )
     fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
 
@@ -2887,7 +2897,7 @@ reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_dtype=torch.int64)
 )
 
-add = register_pointwise(aten.add)
+add = register_pointwise(aten.add, allow_alpha=True)
 exp = register_pointwise(aten.exp)
 floor = register_pointwise(aten.floor)
 mul = register_pointwise(aten.mul)
@@ -2895,7 +2905,7 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub)
+sub = register_pointwise(aten.sub, allow_alpha=True)
 trunc = register_pointwise(aten.trunc)
 
 register_pointwise(aten.cos)
@@ -2935,8 +2945,8 @@ register_lowering(aten.__or__, type_promote=False)(
 
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promote=False)
-    def fn(*args):
-        result = outplace_op(*args)
+    def fn(*args, **kwargs):
+        result = outplace_op(*args, **kwargs)
         return mutate_to(args[0], result)
 
     return fn

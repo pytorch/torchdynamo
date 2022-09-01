@@ -3109,6 +3109,21 @@ if HAS_CPU:
             result = fn(v)
             assert same(result, mod(v))
 
+        def test_inplace_add_alpha(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(10)
+            x2 = torch.zeros(10)
+            x3 = torch.zeros(10)
+            y = torch.randn(10)
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled(x3, y)
+            assert same(x2, x3)
+
 
 if HAS_CUDA:
 
