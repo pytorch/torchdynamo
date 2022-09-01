@@ -633,9 +633,10 @@ class TorchPatcher:
         ]
 
         # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
-        DistributedDataParallel._inside_ddp_forward = skip(
-            DistributedDataParallel._inside_ddp_forward
-        )
+        if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
+            DistributedDataParallel._inside_ddp_forward = skip(
+                DistributedDataParallel._inside_ddp_forward
+            )
 
         # disable profile hook
         for opt in optimizers:
