@@ -4,7 +4,6 @@ import copy
 import dataclasses
 import dis
 import enum
-import functools
 import math
 import os
 import sys

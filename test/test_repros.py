@@ -8,7 +8,6 @@ import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from lib2to3.pytree import convert
 from typing import List
 from unittest.mock import patch
 
