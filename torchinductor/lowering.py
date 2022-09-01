@@ -461,9 +461,15 @@ def expand(x, sizes):
         return x
 
     x_size_product = sympy_product(x.get_size())
-    if x_size_product > 0:
-        x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product))
-
+    try:
+        if x_size_product > 0:
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product)
+            )
+    except TypeError:
+        # Certain sympy products cannot be compared, fails with
+        # cannot determine truth value of Relational
+        pass
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -516,10 +522,15 @@ def repeat(x, repeats):
         return x_loader(index)
 
     old_size_product = sympy_product(old_size)
-    if old_size_product > 0:
-        x.mark_reuse(
-            V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
-        )
+    try:
+        if old_size_product > 0:
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
+            )
+    except TypeError:
+        # Certain sympy products cannot be compared, fails with
+        # cannot determine truth value of Relational
+        pass
 
     x_loader = x.make_loader()
     return Pointwise.create(
