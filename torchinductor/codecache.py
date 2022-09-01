@@ -76,7 +76,7 @@ def cpp_supports_flag(flag: str) -> bool:
 
 
 def cxx_flags() -> str:
-    flags = "-march=native -O3 -ffast-math -fno-finite-math-only"
+    flags = "-march=native -ffast-math -fno-finite-math-only"
     if config.cpp.use_openmp:
         flags += " -fopenmp"
     return " ".join([f for f in flags.split() if cpp_supports_flag(f)])
@@ -131,7 +131,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         f"""
             {cpp_compiler()} -shared -fPIC -Wall -std=c++2a -Wno-unused-variable
             {ipaths} {lpaths} {libs}
-            {cxx_flags()}
+            -O3 {cxx_flags()}
             -o{output} {input}
         """,
     ).strip()
