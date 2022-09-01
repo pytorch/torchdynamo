@@ -106,7 +106,8 @@ def cpp_prefix():
             #include <cmath>
             #include <cstdlib>
             #include <limits>
-            #include <omp.h>
+            """ + ("#include <omp.h>\n" if config.cpp.use_openmp else "") +
+            """
 
             #include <ATen/core/PhiloxRNGEngine.h>
             #include <c10/util/Half.h>

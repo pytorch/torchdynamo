@@ -47,7 +47,7 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-def cpp_compiler():
+def cpp_compiler() -> str:
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -56,7 +56,7 @@ def cpp_compiler():
 
 
 @functools.lru_cache(1)
-def cpp_compiler_search(search):
+def cpp_compiler_search(search) -> str:
     for cxx in search:
         try:
             if cxx is None:
@@ -68,6 +68,18 @@ def cpp_compiler_search(search):
             continue
     raise exc.InvalidCxxCompiler()
 
+@functools.lru_cache(1)
+def cpp_supports_flag(flag: str) -> bool:
+   rc = subprocess.run([cpp_compiler(), "-E", "-x", "c", flag, "-"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, input="")
+   return rc.returncode == 0
+
+
+
+def cxx_flags() -> str:
+    flags = "-march=native -O3 -ffast-math -fno-finite-math-only"
+    if config.cpp.use_openmp:
+        flags += " -fopenmp"
+    return " ".join([f for f in flags.split() if cpp_supports_flag(f)])
 
 def install_gcc_via_conda():
     """On older systems, this is a quick way to get a modern compiler"""
@@ -98,7 +110,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -106,7 +118,10 @@ def cpp_compile_command(input, output, include_pytorch=False):
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = ["gomp"]
+        libs = []
+    if config.cpp.use_openmp:
+        libs.append("gomp")
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -116,7 +131,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         f"""
             {cpp_compiler()} -shared -fPIC -Wall -std=c++2a -Wno-unused-variable
             {ipaths} {lpaths} {libs}
-            -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
+            {cxx_flags()}
             -o{output} {input}
         """,
     ).strip()

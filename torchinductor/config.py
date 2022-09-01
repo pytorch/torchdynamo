@@ -1,4 +1,5 @@
 import os
+import platform
 
 # add some debug printouts
 debug = False
@@ -53,6 +54,7 @@ unroll_reductions_threshold = 8
 # config specific to codegen/cpp.pp
 class cpp:
     threads = -1  # set to cpu_count()
+    use_openmp = True if platform.system() == 'Linux' else False
     simdlen = None
     min_chunk_size = 4096
     cxx = (
@@ -64,7 +66,7 @@ class cpp:
         "clang++-11",
         "clang++-10",
         "g++",
-    )
+    ) if platform.system() == 'Linux' else ( "clang++" )
 
 
 # config specific to codegen/triton.py
