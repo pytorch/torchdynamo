@@ -169,7 +169,7 @@ class ContinueExecutionCache:
             # this will ensure the instructions after the break have the correct line numbers
             target_ind = int(target.offset / 2)
             for inst in instructions[0:target_ind]:
-                delattr(inst, "starts_line")
+                inst.starts_line = None
 
             if cleanup:
                 prefix.extend(cleanup)
