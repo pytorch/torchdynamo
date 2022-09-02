@@ -1,11 +1,13 @@
 import dataclasses
 import os
 import textwrap
-from .utils import proxy_args_kwargs
 
 from torchdynamo.utils import counters
 
+from .utils import proxy_args_kwargs
+
 unsafe_mode = False
+
 
 class TorchDynamoException(RuntimeError):
     pass
@@ -79,14 +81,16 @@ def unimplemented(msg: str):
     raise Unsupported(msg)
 
 
-def unimplemented_call_method(msg: str, 
-        cls,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-        options):
-    
+def unimplemented_call_method(
+    msg: str,
+    cls,
+    tx,
+    name,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+):
+
     if unsafe_mode:
         return cls.__class__.create(
             tx,
@@ -98,9 +102,8 @@ def unimplemented_call_method(msg: str,
             ),
             **options,
         )
-    
+
     unimplemented(msg)
-    
 
 
 def warning(msg: str):

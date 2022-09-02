@@ -222,11 +222,9 @@ def catch_errors_wrapper(callback):
                 return None
             with compile_lock:
                 return callback(frame, cache_size)
-        except Exception as e:
+        except Exception:
             logging.basicConfig()
             logging.exception("Error while processing frame")
-            # print("WE FAILED ON", frame.f_locals, frame.f_globals)
-            print("GOT EXCEPTION HERE TOO", e, frame.f_code)
             raise
 
     catch_errors._torchdynamo_orig_callable = callback
