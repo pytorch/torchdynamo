@@ -1,3 +1,4 @@
+#!/usr/bin/env pytest
 from unittest.mock import patch
 
 import torch
