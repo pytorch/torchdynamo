@@ -1,5 +1,4 @@
 import collections
-import copy
 import itertools
 import logging
 import operator
@@ -109,7 +108,7 @@ class OutputGraph(fx.Tracer):
         return (
             graph_nodes,
             list(self.graphargs),
-            copy.deepcopy(self.guards),
+            set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
         )
