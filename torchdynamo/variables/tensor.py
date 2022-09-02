@@ -12,7 +12,7 @@ from typing import List
 import torch.fx
 import torch.random
 
-from ..utils import fake_tensors_available
+from ..utils import fake_tensors_available, isnested
 
 if fake_tensors_available:
     from torch._subclasses import FakeTensor
@@ -356,8 +356,9 @@ class TensorVariable(VariableTracker):
             "class_type": type(value),
         }
         if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
-            props["stride"] = tuple(value.stride())
+            if not isnested(value):
+                props["size"] = tuple(value.size())
+                props["stride"] = tuple(value.stride())
             props["is_contiguous"] = value.is_contiguous()
         return props
 

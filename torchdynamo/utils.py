@@ -325,8 +325,23 @@ def clone_tensor(x):
     return y
 
 
+def isnested(x):
+    assert isinstance(x, torch.Tensor)
+    try:
+        # Nested tensors do not have size or stride
+        x.size()
+        x.stride()
+    except RuntimeError:
+        return True
+    return False
+
 def clone_input(x):
     """copy while preserving strides"""
+    assert isinstance(x, torch.Tensor)
+
+    if isnested(x):
+        return x.clone()
+    
     with torch.no_grad():
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
