@@ -2882,7 +2882,7 @@ def div(a, b):
 #   and true division for floating and complex inputs
 @register_lowering([prims.div], broadcast=True)
 def div_prim(a, b):
-    is_integral = isinstance(a, (bool, int)) or is_integer_type(a)
+    is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
         return div_mode(a, b, rounding_mode="floor")
