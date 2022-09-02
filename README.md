@@ -25,7 +25,7 @@ performance of different training backends.  You can read more in the
 [posts on PyTorch dev-discuss]: https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest
 [watch a deep-dive video]: https://www.youtube.com/watch?v=egZB5Uxki0I
 [FX Graph]: https://pytorch.org/docs/stable/fx.html
-[PEP 523]: https://peps.python.org/pep-0532/
+[PEP 523]: https://peps.python.org/pep-0523/
 [training performance dashboard]: https://github.com/pytorch/torchdynamo/issues/681#issuecomment-1233828468
 [TorchInductor post on PyTorch dev-discuss]: https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747
 
@@ -190,7 +190,7 @@ Debugging backends:
 * `torchdynamo.optimize("eager")` - Uses PyTorch to run the extracted GraphModule. This is quite useful in debugging TorchDynamo issues.
 * `torchdynamo.optimize("aot_nop")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
 
-Training & inference backends
+Training & inference backends:
 * `torchdynamo.optimize("inductor")` - Uses TorchInductor backend with AotAutograd and cudagraphs.  [Read more](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)
 * `torchdynamo.optimize("nvfuser")` -  nvFuser with TorchScript. [Read more](https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593)
 * `torchdynamo.optimize("aot_nvfuser")` -  nvFuser with AotAutograd. [Read more](https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593)
