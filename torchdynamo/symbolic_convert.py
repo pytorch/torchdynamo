@@ -331,7 +331,8 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except Exception:
+        except Exception as e:
+            print("Got exception", e)
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the

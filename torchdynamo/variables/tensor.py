@@ -28,7 +28,7 @@ from torchdynamo.guards import GuardBuilder
 from .. import config
 from .. import variables
 from ..exc import TorchRuntimeError
-from ..exc import unimplemented
+from ..exc import unimplemented, unimplemented_call_method
 from ..source import AttrSource
 from ..utils import clone_input
 from ..utils import is_lazy_module
@@ -256,7 +256,7 @@ class TensorVariable(VariableTracker):
             isinstance(example_value, numbers.Number)
             and (
                 proxy.node.target == "item"
-                or proxy.node.target in {math.sqrt, math.pow}
+                or proxy.node.target in {math.sqrt, math.pow, operator.getitem}
             )
             and config.capture_scalar_outputs
         ):
@@ -469,9 +469,9 @@ class TensorVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.repeat")
         elif name in ("tolist", "numpy", "backward"):
-            unimplemented(f"Tensor.{name}")
+            return unimplemented_call_method(f"Tensor.{name}", self, tx, name, args, kwargs, options)
         elif name == "nonzero" and not config.dynamic_shapes:
-            unimplemented(f"Tensor.{name}")
+            return unimplemented_call_method(f"Tensor.{name}", self, tx, name, args, kwargs, options)
         elif name == "item":
             if config.capture_scalar_outputs:
                 return self.__class__.create(

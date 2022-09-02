@@ -222,9 +222,11 @@ def catch_errors_wrapper(callback):
                 return None
             with compile_lock:
                 return callback(frame, cache_size)
-        except Exception:
+        except Exception as e:
             logging.basicConfig()
             logging.exception("Error while processing frame")
+            # print("WE FAILED ON", frame.f_locals, frame.f_globals)
+            print("GOT EXCEPTION HERE TOO", e, frame.f_code)
             raise
 
     catch_errors._torchdynamo_orig_callable = callback
@@ -397,8 +399,10 @@ def explain(f, *args, **kwargs):
     return explanation, out_guards, graphs, ops_per_graph
 
 
-def export(f, *args, aten_graph=False, **kwargs):
+def export(f, *args, aten_graph=False, unsafe=False, **kwargs):
     f = innermost_fn(f)
+
+    torchdynamo.exc.unsafe_mode = unsafe
 
     graph = None
     out_guards = None

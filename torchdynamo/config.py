@@ -62,7 +62,7 @@ guard_nn_modules = False
 dynamic_propagation = True
 
 # Run the FX graph with FakeTensors
-fake_tensor_propagation = True
+fake_tensor_propagation = False
 
 # run FX normalization passes in optimizer
 normalize_ir = False
@@ -108,7 +108,7 @@ repro_level = int(os.environ.get("COMPILER_REPRO_LEVEL", 0))
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
-capture_scalar_outputs = False
+capture_scalar_outputs = True
 
 
 class _AccessLimitingConfig(ModuleType):

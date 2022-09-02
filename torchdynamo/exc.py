@@ -1,9 +1,11 @@
 import dataclasses
 import os
 import textwrap
+from .utils import proxy_args_kwargs
 
 from torchdynamo.utils import counters
 
+unsafe_mode = False
 
 class TorchDynamoException(RuntimeError):
     pass
@@ -75,6 +77,30 @@ class Unsupported(TorchDynamoException):
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
+
+
+def unimplemented_call_method(msg: str, 
+        cls,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+        options):
+    
+    if unsafe_mode:
+        return cls.__class__.create(
+            tx,
+            tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([cls] + args, kwargs),
+                current_tx=tx,
+            ),
+            **options,
+        )
+    
+    unimplemented(msg)
+    
 
 
 def warning(msg: str):

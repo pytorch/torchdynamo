@@ -499,6 +499,11 @@ class GetAttrVariable(VariableTracker):
 
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
+        
+        print("SELF", self)
+        print("SELF.OBJ", self.obj)
+        print("SELF.OBJ.CALL_METHOD", self.obj.call_method)
+        print("SELF.OBJ.CALL_METHOD()", self.obj.call_method(tx, self.name, args, kwargs))
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
 
     def call_method(
