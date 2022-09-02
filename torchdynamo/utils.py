@@ -46,16 +46,7 @@ compilation_metrics = collections.OrderedDict()
 timer_counter = itertools.count()
 
 
-def dynamo_timed(func):
-    def time_wrapper(*args, **kwargs):
-        key = func.__qualname__
-        if key not in compilation_metrics:
-            compilation_metrics[key] = []
-        t0 = time.time()
-        r = func(*args, **kwargs)
-        compilation_metrics[key].append(time.time() - t0)
-        return r
-
+def dynamo_profiled(func):
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         datafn = (
@@ -72,8 +63,18 @@ def dynamo_timed(func):
         prof.dump_stats(datafn)
         return retval
 
-    if config.use_cprofiler:
-        return profile_wrapper
+    return profile_wrapper
+
+
+def dynamo_timed(func):
+    def time_wrapper(*args, **kwargs):
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        compilation_metrics[key].append(time.time() - t0)
+        return r
 
     return time_wrapper
 

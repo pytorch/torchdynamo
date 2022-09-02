@@ -118,9 +118,6 @@ capture_scalar_outputs = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
-# Use cProfiler to profile important functions of the stack
-use_cprofiler = True
-
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
