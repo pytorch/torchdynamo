@@ -25,6 +25,9 @@ log_level = logging.WARNING
 # Verbose will print full stack traces on warnings and errors
 verbose = False
 
+# the name of a file to write the logs to
+log_file = None
+
 # verify the correctness of optimized backend
 verify_correctness = False
 

@@ -6,23 +6,13 @@ In the mean time, you may need to diagnose a particular issue and determine if i
 
 We're also actively developing debug tools, profilers, and improving our errors/warnings.  Please give us feedback if you have an issue with this infra, or an idea for an improvement.
 
-
-## Diagnosing Runtime Errors
-... Insert steps to narrow error to before/after fx graph generation/and then wich tool to narrow the scope of the error
-
-
-
-
 ## Graph Breaks
 Given a program like this,
 
 ```
-@torchdynamo.optimize(...):
-def some_fun(x):
+with torchdynamo.optimize(...):
+   some_fun(x)
    ...
-
-some_fun(x)
-
 ```
 
 Torchdynamo will attempt to compile all of the torch/tensor operations within some_fun into a single FX graph, but it may fail to capture everything into one graph.
@@ -71,6 +61,58 @@ def toy_example(a, b):
    ...
 ```
 
+## Diagnosing Runtime Errors
+... Insert steps to narrow error to before/after fx graph generation/and then wich tool to narrow the scope of the error
+
+
+### Torchdynamo Errors
+Errors in Torchdynamo look like this:
+
+```
+torchdynamo.convert_frame: [ERROR] WON'T CONVERT test_assertion_error /scratch/mlazos/torchdynamo/../test/errors.py line 26 
+due to: 
+Traceback (most recent call last):
+  File "/scratch/mlazos/torchdynamo/torchdynamo/symbolic_convert.py", line 837, in BUILD_MAP
+    assert isinstance(k, ConstantVariable) or (
+AssertionError
+
+from user code:
+   File "/scratch/mlazos/torchdynamo/../test/errors.py", line 34, in test_assertion_error
+    z = {y: 5}
+
+Set torchdynamo.config.verbose=True for more information
+==========
+```
+
+As the message suggests you can set `torchdynamo.config.verbose=True` to get a full stack trace to both the error in torchdynamo and the user code. In addition to this flag, you can also set the `log_level` of torchdynamo through `torchdynamo.config.log_level`. The available levels are the following:
+- `logging.DEBUG`: Print every instruction that is encountered in addition to all below log levels
+- `logging.INFO`: Print each function that is compiled (original and modified bytecode) and the graph that is captured in addition to all below log levels
+- `logging.WARNING` (default): Print graph breaks in addition to all below log levels
+- `logging.ERROR`: Print errors only
+
+If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. The record and replay tool for dynamo can be useful in this case. Instructions and an example are below.
+
+
+### Backend Compiler Errors
+There are different choices for backend compilers for torchdynamo, with torchinductor or nvfuser fitting the needs of most users. This section focuses on torchinductor as the motivating example, but some tools will be usable with other backend compilers.
+
+Below is the pytorch 2.0 stack.
+
+![](./documentation/images/pt_stack.png)
+
+With torchinductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while torchinductor lowers the forward and backward graphs. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes that cause the issue. The first step here is to determine if your error occurs before or after tracing of the backward graph. Once this is determined, the minifier can be run to obtain a minimal graph repro.
+
+Minifying to debug an issue in the backend trace:
+
+
+Minifying to debug an issue in torchinductor lowering:
+
+
+
+Errors in the backend compiler look like this: 
+
+### Minifying Errors
+
 ## Excessive Recompilation
 When torchdynamo compiles a function (or part of one), it makes certain assumptions
 about locals and globals in order to allow compiler optimizations, and expresses these
@@ -89,8 +131,8 @@ Torchdynamo plans to support many common cases of dynamic tensor shapes, such as
 
 ```
 prof = torchdynamo.utils.CompilationProfiler()
-opt_my_model = torchdynamo.optimize(prof)(my_model)
-opt_my_model()
+with torchdynamo.optimize(prof):
+   my_model()
 print(prof.report())
 ```
 
@@ -104,4 +146,5 @@ When filing an issue, please include
 - a minimal repro script
 - a description of the error
 - the expected behavior
+- a log (set `torchdynamo.config.log_file` to a valid file name to dump the logs to a file and `torchdynamo.config.log_level=logging.DEBUG`)
 - your OS/python/pytorch version
