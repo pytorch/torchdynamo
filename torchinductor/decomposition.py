@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten._adaptive_avg_pool2d,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -32,6 +33,8 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.flip,
+        aten.floor_divide.default,
+        aten.fmod.Tensor,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
         aten.gelu_backward,
@@ -74,6 +77,7 @@ decompositions = get_decompositions(
         aten.select_backward,
         aten.select_scatter,
         aten.sigmoid_backward,
+        aten.signbit.default,
         aten.silu_backward,
         aten.slice_backward,
         aten._softmax,
