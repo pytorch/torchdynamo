@@ -928,8 +928,6 @@ make_fallback(aten._embedding_bag)
 make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d_backward)
-make_fallback(aten.im2col)
-make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
@@ -1326,7 +1324,6 @@ def create_tensor_like(creation_fn):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
-
         if dtype is None:
             dtype = x.get_dtype()
         else:

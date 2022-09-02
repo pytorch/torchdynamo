@@ -4,6 +4,7 @@ import logging
 from typing import List
 
 import torch.fx
+from functorch.compile import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 
 from torchdynamo.optimizations.backends import aot_autograd
@@ -69,7 +70,7 @@ def compile_fx_inner(
         elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
 
-    return compiled_fn
+    return make_boxed_func(compiled_fn)
 
 
 @dynamo_timed
