@@ -2845,11 +2845,6 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
-@register_lowering(prims.signbit)
-def signbit(a):
-    return a < 0
-
-
 @register_lowering(aten.div.Tensor_mode)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)

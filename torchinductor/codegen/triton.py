@@ -163,6 +163,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def signbit(x):
+        return f"tl.libdevice.signbit({x})"
+
+    @staticmethod
     def pow(a, b):
         return f"tl.libdevice.pow({a}, {b})"
 

@@ -195,6 +195,10 @@ class CppOverrides(OpOverrides):
         return f"1 / std::sqrt({x})"
 
     @staticmethod
+    def signbit(x):
+        return f"std::signbit({x})"
+
+    @staticmethod
     def pow(a, b):
         return f"std::pow({a}, {b})"
 
