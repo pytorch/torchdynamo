@@ -3,6 +3,7 @@ import functools
 import logging
 from typing import List
 
+import functorch
 import torch.fx
 from functorch.compile import min_cut_rematerialization_partition
 
@@ -161,6 +162,8 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
+    functorch.compile.config.use_functionalize = True
+
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
