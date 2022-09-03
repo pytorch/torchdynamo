@@ -25,6 +25,7 @@ from . import skipfiles
 from . import utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
+from typing import List 
 
 log = logging.getLogger(__name__)
 
@@ -396,6 +397,44 @@ def explain(f, *args, **kwargs):
     torchdynamo.reset()
     return explanation, out_guards, graphs, ops_per_graph
 
+
+class PartiallyDynamicTensor(torch.Tensor):
+    """
+    PartiallyDynamicTensor (PDT) acts exactly as a Tensor for the sake of tracing,
+    except that the guards installed on input for it are either relaxed, or constrained,
+    depending on if torchdynamo.config.dynamic_shapes (dynamic_shapes) are enabled.
+
+    If dynamic_shapes are enabled, PDT acts as a constraint, where all non dynamic_dims are
+    specialized upon.
+
+    If dynamic_shapes are not enabled, PDT acts as a dynamic shape for the dynamic_dims enabled.
+
+    For now, PDT is purely a frontend capture and export notion - is it only valid as an input to
+    torchdynamo.export(). All notions of PDT are not preserved in the exported graph.
+    Instead, it is reflected in the guards. Therefore, for now, passing PDT in without enabling
+    guard_args in torchdynamo.export() is a no-op.
+    
+    Creation of PartiallyDynamicTensor in traced and captured code is not
+    supported. See the documentation for torchdynamo.export() for more information.
+    """
+    @classmethod
+    def create(cls, tensor: torch.Tensor, dynamic_dims: List[int]):
+        assert len(dynamic_dims) <= len(tensor.size()), "Illegal size of dynamic_dims for tensor"
+        pdt = PartiallyDynamicTensor(tensor)
+        pdt.dynamic_dims = dynamic_dims
+        return pdt
+
+    def __getattribute__(self, name):
+        if name == 'size':
+            size = list(object.__getattribute__(self, name)())
+            # print("as list,", list(size))
+            for dim in self.dynamic_dims:
+                size[dim] = -1j
+                # print("as list," list(size))
+            # return torch.Size(size)
+            raise RuntimeError("Calls on PartiallyDynamicTensor's size are illegal")
+        return object.__getattribute__(self, name)
+    
 
 def export(f, *args, aten_graph=False, **kwargs):
     f = innermost_fn(f)

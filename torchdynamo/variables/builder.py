@@ -414,7 +414,7 @@ class VariableBuilder:
                     example_value=value,
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                 )
-            if torch.overrides.has_torch_function_unary(value):
+            if not isinstance(value, torchdynamo.eval_frame.PartiallyDynamicTensor) and torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
                 subclass_type = type(value)
                 return TensorWithTFOverrideVariable(
