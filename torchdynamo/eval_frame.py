@@ -7,6 +7,7 @@ import os
 import threading
 import types
 import warnings
+from typing import List
 from unittest.mock import patch
 
 import torch
@@ -25,7 +26,6 @@ from . import skipfiles
 from . import utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from typing import List 
 
 log = logging.getLogger(__name__)
 
@@ -413,32 +413,64 @@ class PartiallyDynamicTensor(torch.Tensor):
     torchdynamo.export(). All notions of PDT are not preserved in the exported graph.
     Instead, it is reflected in the guards. Therefore, for now, passing PDT in without enabling
     guard_args in torchdynamo.export() is a no-op.
-    
+
     Creation of PartiallyDynamicTensor in traced and captured code is not
     supported. See the documentation for torchdynamo.export() for more information.
     """
+
     @classmethod
     def create(cls, tensor: torch.Tensor, dynamic_dims: List[int]):
-        assert len(dynamic_dims) <= len(tensor.size()), "Illegal size of dynamic_dims for tensor"
+        assert len(dynamic_dims) <= len(
+            tensor.size()
+        ), "Illegal size of dynamic_dims for tensor"
         pdt = PartiallyDynamicTensor(tensor)
         pdt.dynamic_dims = dynamic_dims
         return pdt
 
+    def shape_and_dynamic_dims(self):
+        return (object.__getattribute__(self, 'shape'), self.dynamic_dims)
+
     def __getattribute__(self, name):
-        if name == 'size':
-            size = list(object.__getattribute__(self, name)())
-            for dim in self.dynamic_dims:
-                size[dim] = -1j
+        if name == "size" or name == "shape":
             raise RuntimeError("Calls on PartiallyDynamicTensor's size are illegal")
         return object.__getattribute__(self, name)
-    
 
-def enforce(x, shape):
+
+def enforce(x, shape, dynamic_dims, constrain, dtype, stride):
     assert isinstance(x, torch.Tensor)
+    
+    # TODO(voz): Repetitive, but readable, maybe refactor into something like check_attr(x, attr)
     if shape is not None:
-        assert x.shape == shape, f"Input tensor shape invalidates exported guards {x.shape}. Expected {shape}"
+        if dynamic_dims is None:
+            assert (
+                x.shape == shape
+            ), f"Input tensor shape invalidates exported guards {x.shape}. Expected {shape}"
+        elif not constrain:
+            assert len(shape) == len(x.shape), "Dynamic dim does not support shape length mismatch yet"
+            for i in range(len(shape)):
+                if shape[i] != x.shape[i]:
+                    assert i in dynamic_dims, f"Mismatch on dim not marked as dynamic {i}"
+        else:
+            assert len(shape) == len(x.shape), "Dynamic dim does not support shape length mismatch yet"
+            for i in range(len(shape)):
+                if shape[i] != x.shape[i]:
+                    assert i not in dynamic_dims, f"Mismatch on dim not marked as constrained {i}"
+
+    if dtype is not None:
+        assert (
+            x.dtype == dtype
+        ), f"Input tensor dtype invalidates exported guards {x.dtype}. Expected {dtype}"
+
+    if stride is not None:
+        assert (
+            x.stride() == stride
+        ), f"Input tensor strides invalidates exported guards {x.stride()}. Expected {stride}"
+
 
 def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
+    """
+    TODO - voz - Document me! Don't land PR without docs. 
+    """
     f = innermost_fn(f)
 
     graph = None
@@ -536,7 +568,6 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
 
         def placeholder(self, target, args, kwargs):
             pl = next(self.old_args_gen)
-            # print("Next placeholder:", pl, pl.size, id(pl), id(target), id(args))
             return pl
 
         def output(self, target, args, kwargs):
@@ -560,22 +591,51 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
             a = args[i]
             id_to_arg_mapping[id(a)] = (i, a)
         placeholders = [n for n in new_graph.graph.nodes if n.op == "placeholder"]
-        print("All the placeholders: ", placeholders)
-        for placeholder in placeholders:
-            print("placeholder", placeholder, placeholder.target, id(placeholder))
         if len(placeholders) > 0:
             for guard in out_guards:
-                if 'TENSOR_MATCH' in guard.guard_types:
+                if "TENSOR_MATCH" in guard.guard_types:
                     ref = guard.obj_weakref
                     assert ref is not None, "TENSOR_MATCH guard object must be valid"
                     underlying_tensor_id = id(ref())
                     if underlying_tensor_id in id_to_arg_mapping.keys():
-                        arg_for_guard_position = id_to_arg_mapping[underlying_tensor_id][0]
+                        arg_for_guard_position = id_to_arg_mapping[
+                            underlying_tensor_id
+                        ][0]
                         arg_for_guard = id_to_arg_mapping[underlying_tensor_id][1]
-        
+
+                        dynamic_dims = None
+                        enforce_shape = None
+                        constrain = False
+
+                        if not torchdynamo.config.dynamic_shapes:
+                            if isinstance(arg_for_guard, PartiallyDynamicTensor):
+                                shape_and_dd = arg_for_guard.shape_and_dynamic_dims()
+                                enforce_shape = shape_and_dd[0]
+                                dynamic_dims = shape_and_dd[1]
+                            else:
+                                enforce_shape = arg_for_guard.shape
+                        else:
+                            if isinstance(arg_for_guard, PartiallyDynamicTensor):
+                                constrain = True
+                                shape_and_dd = arg_for_guard.shape_and_dynamic_dims()
+                                enforce_shape = shape_and_dd[0]
+                                dynamic_dims = shape_and_dd[1]
+
                         with new_graph.graph.inserting_after(placeholders[-1]):
-                            new_graph.graph.create_node('call_function', torchdynamo.eval_frame.enforce, (placeholders[arg_for_guard_position], arg_for_guard.shape), {})
-        
+                            new_graph.graph.create_node(
+                                "call_function",
+                                torchdynamo.eval_frame.enforce,
+                                (
+                                    placeholders[arg_for_guard_position],
+                                    enforce_shape,
+                                    dynamic_dims,
+                                    constrain,
+                                    arg_for_guard.dtype,
+                                    None if torchdynamo.config.dynamic_shapes else arg_for_guard.stride(),
+                                ),
+                                {},
+                            )
+
             new_graph.recompile()
 
     return (new_graph, out_guards)

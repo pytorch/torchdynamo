@@ -239,8 +239,10 @@ def is_numpy_float_type(value):
         ),
     )
 
+
 def istensor(obj):
     from torchdynamo.eval_frame import PartiallyDynamicTensor
+
     """Check of obj is a tensor"""
     tensor_list = (
         torch.Tensor,

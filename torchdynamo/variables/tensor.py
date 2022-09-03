@@ -357,11 +357,12 @@ class TensorVariable(VariableTracker):
         }
         if not config.dynamic_shapes:
             from torchdynamo.eval_frame import PartiallyDynamicTensor
+
             if not isinstance(value, PartiallyDynamicTensor):
                 props["size"] = tuple(value.size())
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = value.is_contiguous()
-            
+
         return props
 
     def var_getattr(self, tx, name):
