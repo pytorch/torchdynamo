@@ -5,6 +5,7 @@ from typing import List
 
 import functorch
 import torch.fx
+from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
 
 from torchdynamo.optimizations.backends import aot_autograd
@@ -192,8 +193,8 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         return aot_autograd(
             model_,
             example_inputs_,
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
+            fw_compiler=make_boxed_compiler(fw_compiler),
+            bw_compiler=make_boxed_compiler(bw_compiler),
             decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
