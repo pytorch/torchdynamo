@@ -418,6 +418,7 @@ class PartiallyDynamicTensor(torch.Tensor):
     supported. See the documentation for torchdynamo.export() for more information.
     """
 
+    # TODO(voz): Add support for dynamic dtype, dynamic stride, dynamic contigious
     @classmethod
     def create(cls, tensor: torch.Tensor, dynamic_dims: List[int]):
         assert len(dynamic_dims) <= len(
@@ -428,7 +429,7 @@ class PartiallyDynamicTensor(torch.Tensor):
         return pdt
 
     def shape_and_dynamic_dims(self):
-        return (object.__getattribute__(self, 'shape'), self.dynamic_dims)
+        return (object.__getattribute__(self, "shape"), self.dynamic_dims)
 
     def __getattribute__(self, name):
         if name == "size" or name == "shape":
@@ -438,7 +439,7 @@ class PartiallyDynamicTensor(torch.Tensor):
 
 def enforce(x, shape, dynamic_dims, constrain, dtype, stride):
     assert isinstance(x, torch.Tensor)
-    
+
     # TODO(voz): Repetitive, but readable, maybe refactor into something like check_attr(x, attr)
     if shape is not None:
         if dynamic_dims is None:
@@ -446,15 +447,23 @@ def enforce(x, shape, dynamic_dims, constrain, dtype, stride):
                 x.shape == shape
             ), f"Input tensor shape invalidates exported guards {x.shape}. Expected {shape}"
         elif not constrain:
-            assert len(shape) == len(x.shape), "Dynamic dim does not support shape length mismatch yet"
+            assert len(shape) == len(
+                x.shape
+            ), "Dynamic dim does not support shape length mismatch yet"
             for i in range(len(shape)):
                 if shape[i] != x.shape[i]:
-                    assert i in dynamic_dims, f"Mismatch on dim not marked as dynamic {i}"
+                    assert (
+                        i in dynamic_dims
+                    ), f"Mismatch on dim not marked as dynamic {i}"
         else:
-            assert len(shape) == len(x.shape), "Dynamic dim does not support shape length mismatch yet"
+            assert len(shape) == len(
+                x.shape
+            ), "Dynamic dim does not support shape length mismatch yet"
             for i in range(len(shape)):
                 if shape[i] != x.shape[i]:
-                    assert i not in dynamic_dims, f"Mismatch on dim not marked as constrained {i}"
+                    assert (
+                        i not in dynamic_dims
+                    ), f"Mismatch on dim not marked as constrained {i}"
 
     if dtype is not None:
         assert (
@@ -469,7 +478,7 @@ def enforce(x, shape, dynamic_dims, constrain, dtype, stride):
 
 def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
     """
-    TODO - voz - Document me! Don't land PR without docs. 
+    TODO - voz - Document me! Don't land PR without docs.
     """
     f = innermost_fn(f)
 
@@ -607,6 +616,9 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
                         enforce_shape = None
                         constrain = False
 
+                        # TODO(voz): Potentially get this data from the guard.
+                        # This works, but we are not populating the constraining information from
+                        # PartiallyDynamicTensor on exported guards, on purpose, atm.
                         if not torchdynamo.config.dynamic_shapes:
                             if isinstance(arg_for_guard, PartiallyDynamicTensor):
                                 shape_and_dd = arg_for_guard.shape_and_dynamic_dims()
@@ -631,7 +643,9 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
                                     dynamic_dims,
                                     constrain,
                                     arg_for_guard.dtype,
-                                    None if torchdynamo.config.dynamic_shapes else arg_for_guard.stride(),
+                                    None
+                                    if torchdynamo.config.dynamic_shapes
+                                    else arg_for_guard.stride(),
                                 ),
                                 {},
                             )

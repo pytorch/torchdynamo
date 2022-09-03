@@ -409,6 +409,7 @@ class GuardBuilder:
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
+    # TODO(voz): Add support for PartiallyDynamicTensor here for better exported guard information.
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
