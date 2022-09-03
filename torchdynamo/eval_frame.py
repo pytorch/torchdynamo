@@ -427,16 +427,18 @@ class PartiallyDynamicTensor(torch.Tensor):
     def __getattribute__(self, name):
         if name == 'size':
             size = list(object.__getattribute__(self, name)())
-            # print("as list,", list(size))
             for dim in self.dynamic_dims:
                 size[dim] = -1j
-                # print("as list," list(size))
-            # return torch.Size(size)
             raise RuntimeError("Calls on PartiallyDynamicTensor's size are illegal")
         return object.__getattribute__(self, name)
     
 
-def export(f, *args, aten_graph=False, **kwargs):
+def enforce(x, shape):
+    assert isinstance(x, torch.Tensor)
+    if shape is not None:
+        assert x.shape == shape, f"Input tensor shape invalidates exported guards {x.shape}. Expected {shape}"
+
+def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
     f = innermost_fn(f)
 
     graph = None
@@ -533,7 +535,9 @@ def export(f, *args, aten_graph=False, **kwargs):
             )
 
         def placeholder(self, target, args, kwargs):
-            return next(self.old_args_gen)
+            pl = next(self.old_args_gen)
+            # print("Next placeholder:", pl, pl.size, id(pl), id(target), id(args))
+            return pl
 
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
@@ -549,6 +553,30 @@ def export(f, *args, aten_graph=False, **kwargs):
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    if guard_args:
+        id_to_arg_mapping = dict()
+        for i in range(len(args)):
+            a = args[i]
+            id_to_arg_mapping[id(a)] = (i, a)
+        placeholders = [n for n in new_graph.graph.nodes if n.op == "placeholder"]
+        print("All the placeholders: ", placeholders)
+        for placeholder in placeholders:
+            print("placeholder", placeholder, placeholder.target, id(placeholder))
+        if len(placeholders) > 0:
+            for guard in out_guards:
+                if 'TENSOR_MATCH' in guard.guard_types:
+                    ref = guard.obj_weakref
+                    assert ref is not None, "TENSOR_MATCH guard object must be valid"
+                    underlying_tensor_id = id(ref())
+                    if underlying_tensor_id in id_to_arg_mapping.keys():
+                        arg_for_guard_position = id_to_arg_mapping[underlying_tensor_id][0]
+                        arg_for_guard = id_to_arg_mapping[underlying_tensor_id][1]
+        
+                        with new_graph.graph.inserting_after(placeholders[-1]):
+                            new_graph.graph.create_node('call_function', torchdynamo.eval_frame.enforce, (placeholders[arg_for_guard_position], arg_for_guard.shape), {})
+        
+            new_graph.recompile()
 
     return (new_graph, out_guards)
 
