@@ -919,7 +919,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
-        code.writeline(f"def {name or 'kernel'}({', '.join(argdefs)}):")
+        code.writeline(f"def {name or '{kernel_name}'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
             for old, new in self.args.aliases():
@@ -932,7 +932,7 @@ class TritonKernel(Kernel):
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")
         wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("''').kernel")
+        wrapper.writeline("''').{kernel_name}")
         return wrapper.getvalue()
 
     def reshape_size_str(self, i=None, x=None):
@@ -1131,8 +1131,9 @@ class TritonScheduling:
             kernel_name = wrapper.kernels[src_code]
         else:
             kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, src_code)
             wrapper.kernels[src_code] = kernel_name
+            src_code = src_code.format(kernel_name=kernel_name)
+            wrapper.define_kernel(kernel_name, src_code)
 
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
