@@ -27,6 +27,7 @@ from ._guards import check_obj_id
 from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
+from .eval_frame import PartiallyDynamicTensor
 from .exc import unimplemented
 from .utils import dict_const_keys
 from .utils import dict_param_key_ids
@@ -417,6 +418,9 @@ class GuardBuilder:
             value = self.get(guard.name)
             self.tensor_check_names.append(self.arg_ref(guard))
             self.tensor_check_examples.append(value)
+            is_pdt = isinstance(value, PartiallyDynamicTensor)
+            self.is_pdt_list.append(is_pdt)
+            self.pdt_dims_list.append(value.dynamic_dims if is_pdt else None)
 
             # Note: Guard code produced for tensor_match is a little different.
             # We accumulate tensor names, then do a single install of `___check_tensors`.
@@ -538,8 +542,19 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
+
+            is_pdt_list = (
+                local_builder.is_pdt_list
+                + global_builder.is_pdt_list
+            )
+
+            pdt_dims_list = (
+                local_builder.pdt_dims_list
+                + global_builder.pdt_dims_list
+            )
+
             tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes, is_pdt_list=is_pdt_list, pdt_dims_list=pdt_dims_list
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose

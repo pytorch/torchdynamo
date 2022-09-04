@@ -2152,6 +2152,17 @@ class MiscTests(torchdynamo.testing.TestCase):
             f3(torch.ones(6))
         self.assertEqual(cnt.frame_count, 0)
 
+    @requires_static_shapes
+    def test_shape_change_recompile(self):
+        cnt = torchdynamo.testing.CompileCounter()
+
+        def f1(x):
+            return x + 1
+
+        a = torch.Tensor([0.5, 0.5]) 
+        opt_fn = torchdynamo.optimize(cnt)(fn)
+        self.assertEqual(cnt.frame_count, 2)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

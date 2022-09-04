@@ -22,11 +22,11 @@ struct LocalState {
 class TensorCheck {
 public:
   TensorCheck(const LocalState &state, PyTypeObject *pt, const at::Tensor &v,
-              bool dynamic_shapes)
+              bool dynamic_shapes, bool is_pdt, PyObject *pdt_dims)
       : pytype(pt), dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
         requires_grad_(state.grad_mode_enabled && v.requires_grad()),
-        dynamic_shapes_(dynamic_shapes) {
+        dynamic_shapes_(dynamic_shapes), is_pdt_(is_pdt) {
     auto ndim = v.ndimension();
     const auto &sizes = v.sizes();
     const auto &strides = v.strides();
@@ -36,8 +36,17 @@ public:
       sizes_.emplace_back(sizes[i]);
       strides_.emplace_back(strides[i]);
     }
-  }
 
+    if (is_pdt_) {
+      size_t pdt_size = PyList_Size(pdt_dims);
+      dynamic_dims_.reserve(pdt_size);
+      for (Py_ssize_t i = 0; i < pdt_size; i++) {
+        PyObject *value = PyList_GetItem(pdt_dims, i);
+        dynamic_dims_.emplace_back(PyLong_AsLong(value));
+      }
+    }
+  }
+    
   bool check(const LocalState &state, const at::Tensor &v) {
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||
@@ -99,11 +108,21 @@ public:
       const auto &strides = v.strides();
       for (size_t i = 0; i < ndim; ++i) {
         if (sizes_[i] != sizes[i]) {
-          // return fmt::format("tensor size mismatch at index {}. expected {},
-          // actual {}", i, sizes_[i], sizes[i]);
-          fail_reason << "size mismatch at index " << i << ". expected "
-                      << sizes_[i] << ", actual " << sizes[i];
-          return fail_reason.str();
+          bool is_dynamic_dim = false;
+          for (int dd = 0; dd < dynamic_dims_.size(); dd++) {
+            auto dim = dynamic_dims_[dd];
+            if (i == dim) {
+              is_dynamic_dim = true;
+              break;
+            }
+          }
+          if (!is_dynamic_dim) {
+            // return fmt::format("tensor size mismatch at index {}. expected {},
+            // actual {}", i, sizes_[i], sizes[i]);
+            fail_reason << "size mismatch at index " << i << ". expected "
+                        << sizes_[i] << ", actual " << sizes[i];
+            return fail_reason.str();
+          }
         } else if (strides_[i] != strides[i]) {
           // return fmt::format("tensor strides mismatch at index {}. expected
           // {}, actual {}", i, strides_[i]);
@@ -112,6 +131,8 @@ public:
           return fail_reason.str();
         }
       }
+    } else {
+      // TODO(voz): [WIP] Constrain according to PDT - do not land PR without this
     }
     return "";
   }
@@ -123,8 +144,10 @@ private:
   at::ScalarType dtype_;
   bool requires_grad_;
   bool dynamic_shapes_;
+  bool is_pdt_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
+  std::vector<int64_t> dynamic_dims_;
 };
 
 typedef std::vector<TensorCheck> ChecksList;
@@ -164,18 +187,37 @@ static int TensorGuards_init(TensorGuards *self, PyObject *args,
   }
   bool dynamic_shapes = PyObject_IsTrue(dynamic_shapes_py);
 
+  PyObject *is_pdt_list = PyDict_GetItemString(kwds, "is_pdt_list");
+  if (is_pdt_list == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing is_pdt_list=...");
+    return -1;
+  }
+
+  PyObject *pdt_dims_list = PyDict_GetItemString(kwds, "pdt_dims_list");
+  if (pdt_dims_list == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing pdt_dims_list=...");
+    return -1;
+  }
+
+  if (PyList_Size(is_pdt_list) != PyList_Size(args) != PyList_Size(pdt_dims_list)) {
+    PyErr_SetString(PyExc_TypeError, "is_pdt_list length and pdt_dims_list list length must match arg length.");
+    return -1;
+  }
+
   auto &checks = *self->checks;
   ssize_t len = PyTuple_GET_SIZE(args);
   checks.reserve(len);
   LocalState state;
   for (ssize_t i = 0; i < len; ++i) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
+    bool is_pdt = PyObject_IsTrue(PyTuple_GET_ITEM(is_pdt_list, i));
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
       PyErr_SetString(PyExc_TypeError, "expected Tensor()");
       return -1;
     }
+    PyObject *pdt_dims = PyTuple_GET_ITEM(pdt_dims_list, i);
     checks.emplace_back(TensorCheck(state, Py_TYPE(item),
-                                    THPVariable_Unpack(item), dynamic_shapes));
+                                    THPVariable_Unpack(item), dynamic_shapes, is_pdt, pdt_dims));
   }
   return 0;
 }
