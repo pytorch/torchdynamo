@@ -87,6 +87,8 @@ CI_SKIP_INFERENCE = [
     # TIMM
     "cait_m36_384",
     "ghostnet_100",
+    "inception_v3",
+    "swin_base_patch4_window7_224",
     "visformer_small",
     "volo_d1_224",
 ]
