@@ -2955,6 +2955,8 @@ register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)
+register_pointwise(aten.fmod)
+register_pointwise(aten.signbit, override_dtype=torch.bool)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
 register_pointwise(aten.isnan, override_dtype=torch.bool)
 

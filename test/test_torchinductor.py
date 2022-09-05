@@ -1742,6 +1742,22 @@ class CommonTemplate:
             (torch.randn([1, 2, 6, 6]),),
         )
 
+    def test_signbit(self):
+        def fn(x):
+            return torch.signbit(x), ~torch.signbit(-x) & 1
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
+        )
+
+    def test_fmod(self):
+        def fn(a, b):
+            return torch.fmod(a, b), torch.fmod(3. * a, b) - 2.
+
+        shape = [1, 2, 6, 6]
+        self.common(fn, (torch.randn(shape), torch.randn(shape)))
+
     def test_log2(self):
         def fn(x):
             return torch.log2(x), torch.log2(x + 1) - 2

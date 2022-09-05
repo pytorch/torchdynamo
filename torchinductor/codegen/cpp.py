@@ -235,6 +235,10 @@ class CppOverrides(OpOverrides):
         return f"{a} / {b}"
 
     @staticmethod
+    def fmod(a, b):
+        return f"std::fmod({a}, {b})"
+
+    @staticmethod
     def isinf(x):
         return f"std::isinf({x})"
 

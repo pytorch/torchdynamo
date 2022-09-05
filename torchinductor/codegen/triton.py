@@ -164,7 +164,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def signbit(x):
-        return f"tl.libdevice.signbit({x})"
+        return f"{x} < 0"
+
+    @staticmethod
+    def fmod(a, b):
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):

@@ -33,7 +33,6 @@ decompositions = get_decompositions(
         aten.expand_as,
         aten.flip,
         aten.floor_divide.default,
-        aten.fmod.Tensor,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
         aten.gelu_backward,
