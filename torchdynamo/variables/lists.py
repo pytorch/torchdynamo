@@ -3,6 +3,7 @@ from typing import List
 
 import torch
 
+from .. import config
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -311,9 +312,10 @@ class SliceVariable(BaseListVariable):
         # the slice.  It is a workaround until
         # https://github.com/pytorch/pytorch/pull/83567 is landed and there is
         # more complete support for breaking on data dependent operators.
-        for limit in (start, stop, step):
-            if isinstance(limit, variables.TensorVariable):
-                unimplemented("Dynamic slicing not supported")
+        if not config.capture_scalar_outputs:
+            for limit in (start, stop, step):
+                if isinstance(limit, variables.TensorVariable):
+                    unimplemented("Dynamic slicing not supported")
 
         super().__init__([start, stop, step], **kwargs)
 
