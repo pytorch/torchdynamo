@@ -305,6 +305,16 @@ class SliceVariable(BaseListVariable):
             start, stop, step = items
         else:
             assert False
+
+        # Avoids a .item() call in the tensor slice that would attempt to get a
+        # value out fake tensors, and which would determine the output shape of
+        # the slice.  It is a workaround until
+        # https://github.com/pytorch/pytorch/pull/83567 is landed and there is
+        # more complete support for breaking on data dependent operators.
+        for limit in (start, stop, step):
+            if isinstance(limit, variables.TensorVariable):
+                unimplemented("Dynamic slicing not supported")
+
         super().__init__([start, stop, step], **kwargs)
 
     def as_proxy(self):
