@@ -1753,7 +1753,7 @@ class CommonTemplate:
 
     def test_fmod(self):
         def fn(a, b):
-            return torch.fmod(a, b), torch.fmod(3. * a, b) - 2.
+            return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
 
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))

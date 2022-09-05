@@ -208,12 +208,15 @@ def map_to_dtype(e, dtype):
 def deserialize_args(inps):
     inps = inps.strip().strip("'")
     global_vals = {
-        "T": deserialize_tensor,
-        "ST": deserialize_sparse_tensor,
-        "th": torch,
-        "inf": math.inf,
-        "torch": torch,
-    } | dtype_abbrs_parsing
+        **{
+            "T": deserialize_tensor,
+            "ST": deserialize_sparse_tensor,
+            "th": torch,
+            "inf": math.inf,
+            "torch": torch,
+        },
+        **dtype_abbrs_parsing,
+    }
     # f strings introduce quotations we dont want
     for key in dtype_abbrs_parsing:
         inps = inps.replace(f"'{key}'", key)
