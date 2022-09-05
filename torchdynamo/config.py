@@ -23,7 +23,7 @@ except ImportError:
 # ERROR print exceptions (and what user code was being processed when it occurred)
 log_level = logging.WARNING
 # Verbose will print full stack traces on warnings and errors
-verbose = True
+verbose = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -59,10 +59,10 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 guard_nn_modules = False
 
 # Run the FX graph as it is created to get better type information
-dynamic_propagation = False
+dynamic_propagation = True
 
 # Run the FX graph with FakeTensors
-fake_tensor_propagation = False
+fake_tensor_propagation = True
 
 # run FX normalization passes in optimizer
 normalize_ir = False
