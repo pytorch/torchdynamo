@@ -21,7 +21,7 @@ from torch.fx.passes.tools_common import legalize_graph
 
 import torchinductor
 from torchdynamo.debug_utils import save_graph_repro
-from torchdynamo.debug_utils import wrap_debug
+from torchdynamo.debug_utils import wrap_compiler_debug
 from torchdynamo.utils import init_logging
 
 from . import config
@@ -181,7 +181,7 @@ class DebugContext:
             with DebugContext():
                 return fn(*args, **kwargs)
 
-        return wrap_debug(inner, compiler_name="inductor")
+        return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
     def create_debug_dir():

@@ -21,9 +21,12 @@ When filing an issue, please include
 Given a program like this,
 
 ```
-with torchdynamo.optimize(...):
-   some_fun(x)
+@torchdynamo.optimize(...):
+def some_fun(x):
    ...
+
+some_fun(x)
+
 ```
 
 Torchdynamo will attempt to compile all of the torch/tensor operations within some_fun into a single FX graph, but it may fail to capture everything into one graph.
@@ -61,8 +64,8 @@ If graph breaks are observed, the profiler report will list the reasons for each
 
 ```
 prof = torchdynamo.utils.CompilationProfiler()
-with torchdynamo.optimize(prof):
-   my_model()
+opt_my_model = torchdynamo.optimize(prof)(my_model)
+opt_my_model()
 print(prof.report())
 ```
 

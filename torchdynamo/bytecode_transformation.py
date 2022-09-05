@@ -346,7 +346,7 @@ def transform_code_object(code, transformations, safe=False):
         # this pass might change offsets, if so we need to try again
         dirty = fix_extended_args(instructions)
 
-    bytecode, lnotab = assemble(instructions, code.co_firstlineno)
+    bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
     if sys.version_info < (3, 10):
         code_options["co_lnotab"] = lnotab
     else:

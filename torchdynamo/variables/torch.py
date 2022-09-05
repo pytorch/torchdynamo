@@ -7,6 +7,8 @@ from typing import List
 import torch._C
 import torch.nn
 
+from torchdynamo.source import GetItemSource
+from torchdynamo.source import NNModuleSource
 from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import FakeContextWrappingVariable
 
@@ -398,3 +400,115 @@ class TorchVariable(VariableTracker):
             return variables.LambdaVariable(handle_ntuple, **options)
         else:
             return handle_ntuple(args[0])
+
+
+class TorchPyOperator(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super(TorchPyOperator, self).__init__(**kwargs)
+        self.value = value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import ListVariable
+        from . import TensorVariable
+        from . import UserFunctionVariable
+
+        assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
+
+        def unwrap_real(arg):
+            if isinstance(arg, TensorVariable):
+                return arg.as_proxy().node.meta["example_value"]
+            if isinstance(arg, UserFunctionVariable):
+                return arg.fn
+            if arg.has_unpack_var_sequence(tx):
+                return [
+                    unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
+                ]
+            return arg
+
+        # Get values
+        u_args = [unwrap_real(arg) for arg in args]
+
+        def unwrap_proxy(arg):
+            try:
+                return arg.as_proxy()
+            except NotImplementedError:
+                return arg
+
+        def register_as_subgraph(fn, name, args):
+            import torchdynamo
+
+            gm, guards = torchdynamo.export(fn, *args)
+
+            next_name = None
+            i = 0
+            while not next_name:
+                candidate = f"name_{i}"
+                if candidate in tx.output.nn_modules:
+                    i += 1
+                else:
+                    next_name = candidate
+
+            gm.__name__ = next_name
+            src = NNModuleSource(GetItemSource(self.source, next_name))
+            gm.torchdynamo_force_dynamic = False
+            tx.output.add_submodule(gm, next_name, source=src)
+            return next_name, gm, guards
+
+        # Get args as proxies
+        p_args = [unwrap_proxy(arg) for arg in args]
+        if self.value.__name__ == "cond":
+            # TODO(voz): Support fake tensor dispatch for recursive
+            # ops - see torch/dispatch/_dispatcher.py
+            import torchdynamo.config as config
+
+            if config.fake_tensor_propagation:
+                unimplemented("Fake tensor mode not yet supported for cond")
+
+            assert len(p_args) == 4
+            assert type(args[0]) is TensorVariable  # predicate
+            assert type(p_args[1]) is UserFunctionVariable  # true_fn
+            assert type(p_args[2]) is UserFunctionVariable  # false_fn
+            assert type(args[3]) is ListVariable  # args
+
+            node_args = [unwrap_real(x) for x in args[3].unpack_var_sequence(tx)]
+            proxy_args = [unwrap_proxy(x) for x in args[3].unpack_var_sequence(tx)]
+            true_name, true_graph, true_guards = register_as_subgraph(
+                p_args[1].get_function(), "true", node_args
+            )
+            false_name, false_graph, false_guards = register_as_subgraph(
+                p_args[2].get_function(), "false", node_args
+            )
+
+            if config.enforce_cond_guards_match:
+                assert (
+                    true_guards == false_guards
+                ), "Guards for true and false path must be equal."
+
+            def make_attr(name):
+                node = tx.output.create_proxy(
+                    "get_attr",
+                    name,
+                    tuple(proxy_args),
+                    {},
+                )
+                return node
+
+            true_node = make_attr(true_name)
+            false_node = make_attr(false_name)
+            p_args[1] = true_node
+            p_args[2] = false_node
+
+        # Store the invocation as a call
+        return variables.TensorVariable.create(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(p_args),
+                kwargs={},
+                current_tx=tx,
+            ),
+            example_value=self.value(*u_args),
+        )
