@@ -179,7 +179,7 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
             except Exception as e:
                 print(f"error {operator}")
                 print(e)
-                pass
+                raise e
 
         if not timings:
             continue
