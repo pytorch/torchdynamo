@@ -38,7 +38,11 @@ def collect_results(model, prediction, loss, example_inputs):
     results.append(loss)
     grads = dict()
     for name, param in model.named_parameters():
-        grads[name + ".grad"] = clone_me(param.grad)
+        grad = clone_me(param.grad)
+        # Treat None and zero grad as same
+        if param.grad is None:
+            grad = torch.zeros_like(param)
+        grads[name + ".grad"] = grad
     results.append(grads)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
