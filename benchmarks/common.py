@@ -87,6 +87,7 @@ CI_SKIP_INFERENCE = [
     # TIMM
     "cait_m36_384",
     "ghostnet_100",
+    "hrnet_w18",
     "inception_v3",
     "swin_base_patch4_window7_224",
     "visformer_small",
@@ -128,7 +129,6 @@ CI_SKIP_TRAINING = [
     "coat_lite_mini",
     "convnext_base",
     "mobilevit_s",
-    "swin_base_patch4_window7_224",
     "twins_pcpvt_base",
 ]
 
