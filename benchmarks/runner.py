@@ -574,16 +574,17 @@ class ParsePerformanceLogs(Parser):
             "pass outputs and gradients by comparing with native pytorch. We measure speedup "
             "by normalizing against the performance of native pytorch.\n\n"
             "Caveats\n"
-            "1) Batch size has been reduced to workaround OOM errors. Work is in progress to reduce peak memory footprint.\n"
+            "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
+            "reduce peak memory footprint.\n"
             "2) Experiments do not cover dynamic shapes.\n"
             "3) Experimental setup does not have optimizer.\n\n"
         )
         str_io.write(description)
 
-        speedup_caption = f"Geometric mean speedup\n"
+        speedup_caption = "Geometric mean speedup\n"
         speedup_summary = self.exec_summary_text(speedup_caption, self.geomean)
 
-        passrate_caption = f"Passrate\n"
+        passrate_caption = "Passrate\n"
         passrate_summary = self.exec_summary_text(passrate_caption, self.passrate)
 
         str_io.write(passrate_summary)
