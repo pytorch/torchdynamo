@@ -399,6 +399,8 @@ class InstructionTranslatorBase(object):
                 source = AttrSource(
                     self.import_source(self.f_globals["__name__"]), name
                 )
+                if name not in self.output.root_globals and name in self.f_globals:
+                    self.output.install_global(name, self.f_globals[name])
             else:
                 mangled_name = f"___unnamed_scope_{id(self.f_globals)}"
                 if mangled_name not in self.output.root_globals:
