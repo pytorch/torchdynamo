@@ -432,7 +432,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}, is_contiguous=False):
+    def __init__(self, *groups, pid_cache={}, is_inner_reduction=False):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -445,7 +445,7 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
-        self.is_contiguous = is_contiguous
+        self.is_inner_reduction = is_inner_reduction
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -902,7 +902,9 @@ class TritonKernel(Kernel):
 
         if self.inside_reduction:
             reduction_hint = (
-                "ReductionHint.INNER" if self.is_contiguous else "ReductionHint.DEFAULT"
+                "ReductionHint.INNER"
+                if self.is_inner_reduction
+                else "ReductionHint.DEFAULT"
             )
             heuristics_line = f"""
                 @{heuristics}(size_hints={size_hints!r}, reduction_hint={reduction_hint}, filename=__file__)
@@ -1113,7 +1115,7 @@ class TritonScheduling:
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
-    def is_contiguous(node):
+    def is_inner_reduction(node):
         if node in (EnableReduction, DisableReduction):
             return True
         if node.is_reduction():
@@ -1124,12 +1126,25 @@ class TritonScheduling:
                 )
             )
         else:
-            return True
+            return False
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+        reductions = list(
+            filter(
+                lambda n: n not in (EnableReduction, DisableReduction)
+                and n.is_reduction(),
+                node_schedule,
+            )
+        )
+        print(reductions)
+        is_inner_reduction = (
+            all(map(self.is_inner_reduction, reductions))
+            if len(reductions) > 0
+            else False
+        )
         with TritonKernel(
-            *tiled_groups, is_contiguous=all(map(self.is_contiguous, node_schedule))
+            *tiled_groups, is_inner_reduction=is_inner_reduction
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
