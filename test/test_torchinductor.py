@@ -2465,6 +2465,17 @@ class CommonTemplate:
             ],
         )
 
+    def test_eye(self):
+        def fn(a):
+            return torch.eye(a.size(0), a.size(1), device=a.device)
+
+        self.common(
+            fn,
+            [
+                torch.randn([8, 9]),
+            ],
+        )
+
     def test_narrow(self):
         def fn(x):
             return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
