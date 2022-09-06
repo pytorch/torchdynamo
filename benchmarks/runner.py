@@ -580,12 +580,10 @@ class ParsePerformanceLogs(Parser):
         )
         str_io.write(description)
 
-        speedup_caption = (
-            f"Geometric mean speedup for {self.dtypes[0]} precision on A100 GPU\n"
-        )
+        speedup_caption = f"Geometric mean speedup\n"
         speedup_summary = self.exec_summary_text(speedup_caption, self.geomean)
 
-        passrate_caption = f"Passrate for {self.dtypes[0]} precision on A100 GPU\n"
+        passrate_caption = f"Passrate\n"
         passrate_summary = self.exec_summary_text(passrate_caption, self.passrate)
 
         str_io.write(passrate_summary)
