@@ -287,7 +287,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 0 --output=inductor_timm_inference_0.csv
       - store_artifacts:
           path: inductor_timm_inference_0.csv
@@ -309,7 +309,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 1 --output=inductor_timm_inference_1.csv
       - store_artifacts:
           path: inductor_timm_inference_1.csv
@@ -331,7 +331,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 2 --output=inductor_timm_inference_2.csv
       - store_artifacts:
           path: inductor_timm_inference_2.csv
@@ -353,7 +353,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --ci --batch_size 1 -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --ci --batch_size 2 -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 3 --output=inductor_timm_inference_3.csv
       - store_artifacts:
           path: inductor_timm_inference_3.csv
