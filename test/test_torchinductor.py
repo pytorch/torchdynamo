@@ -777,6 +777,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
@@ -787,6 +789,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randint(-100, 100, [8, 8]), 100 * torch.randn(8, 8)))
@@ -797,6 +801,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         a = torch.randint(1, 100, [8, 8])
@@ -804,11 +810,12 @@ class CommonTemplate:
 
     def test_div4(self):
         def fn(a, b):
-            return aten.div(a, b, rounding_mode="floor")
             return (
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -822,6 +829,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # divide a scalar
@@ -833,6 +842,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # treat boolean as integer
@@ -847,6 +858,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
