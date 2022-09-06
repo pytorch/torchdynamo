@@ -1116,7 +1116,6 @@ class TritonScheduling:
     def is_contiguous(node):
         if node in (EnableReduction, DisableReduction):
             return True
-        # print("Node readwrites", node.read_writes.reads, node.read_writes.writes, node.read_writes.index_exprs, node.read_writes.range_vars)
         if node.is_reduction():
             return all(
                 dep.is_contiguous()
