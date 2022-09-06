@@ -130,8 +130,20 @@ CI_SKIP_TRAINING = [
     # TIMM
     "coat_lite_mini",
     "convnext_base",
+    "deit_base_distilled_patch16_224",
+    "levit_128",
+    "nasnetalarge",
     "mobilevit_s",
+    "pnasnet5large",
+    "rexnet_100",
     "twins_pcpvt_base",
+    # https://github.com/pytorch/torchdynamo/issues/1135
+    "gmixer_24_224",
+    "gmlp_s16_224",
+    "jx_nest_base",
+    "mixer_b16_224",
+    "tnt_s_patch16_224",
+    "xcit_large_24_p8_224",
 ]
 
 
