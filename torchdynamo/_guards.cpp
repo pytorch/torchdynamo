@@ -32,7 +32,7 @@ public:
     const auto &strides = v.strides();
     sizes_.reserve(ndim);
     strides_.reserve(ndim);
-    for (auto i: c10::irange(ndim)) {
+    for (auto i : c10::irange(ndim)) {
       sizes_.emplace_back(sizes[i]);
       strides_.emplace_back(strides[i]);
     }
@@ -51,7 +51,7 @@ public:
     if (!dynamic_shapes_) {
       const auto &sizes = v.sizes();
       const auto &strides = v.strides();
-      for (auto i: c10::irange(ndim)) {
+      for (auto i : c10::irange(ndim)) {
         if (sizes_[i] != sizes[i] || strides_[i] != strides[i]) {
           return false;
         }
@@ -97,7 +97,7 @@ public:
     if (!dynamic_shapes_) {
       const auto &sizes = v.sizes();
       const auto &strides = v.strides();
-      for (auto i: c10::irange(ndim)) {
+      for (auto i : c10::irange(ndim)) {
         if (sizes_[i] != sizes[i]) {
           // return fmt::format("tensor size mismatch at index {}. expected {},
           // actual {}", i, sizes_[i], sizes[i]);
@@ -168,7 +168,7 @@ static int TensorGuards_init(TensorGuards *self, PyObject *args,
   auto len = PyTuple_GET_SIZE(args);
   checks.reserve(len);
   LocalState state;
-  for (auto i: c10::irange(len)) {
+  for (auto i : c10::irange(len)) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
       PyErr_SetString(PyExc_TypeError, "expected Tensor()");
@@ -195,7 +195,7 @@ PyObject *TensorGuards_check(TensorGuards *self, PyObject *args) {
 
   LocalState state;
 
-  for (auto i: c10::irange(len)) {
+  for (auto i : c10::irange(len)) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
       Py_RETURN_FALSE;
@@ -243,7 +243,7 @@ PyObject *TensorGuards_check_verbose(TensorGuards *self, PyObject *args,
 
   std::vector<std::string> tensor_check_names;
   tensor_check_names.reserve(names_size);
-  for (auto i: c10::irange(names_size)) {
+  for (auto i : c10::irange(names_size)) {
     PyObject *value = PyList_GetItem(tensor_check_names_py, i);
     if (!PyUnicode_Check(value)) {
       PyErr_SetString(PyExc_TypeError,
@@ -254,7 +254,7 @@ PyObject *TensorGuards_check_verbose(TensorGuards *self, PyObject *args,
   }
 
   LocalState state;
-  for (auto i: c10::irange(len)) {
+  for (auto i : c10::irange(len)) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
       std::stringstream fail_reason;

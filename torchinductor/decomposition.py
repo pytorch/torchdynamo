@@ -33,6 +33,7 @@ decompositions = get_decompositions(
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
+        aten.eye,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -89,8 +90,8 @@ decompositions = get_decompositions(
         aten.threshold_backward,
         aten.transpose.int,
         aten.tril.default,
-        aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
+        aten.upsample_nearest2d_backward,
     ]
 )
 decompositions.update(aot_autograd_decompositions)

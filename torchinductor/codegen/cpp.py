@@ -264,6 +264,8 @@ class CppOverrides(OpOverrides):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif val in (True, False):
+            return str(val).lower()
         return ops.to_dtype(repr(val), dtype)
 
     @staticmethod
