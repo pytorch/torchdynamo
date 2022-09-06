@@ -85,7 +85,9 @@ CI_SKIP_INFERENCE = [
     "PLBartForConditionalGeneration",
     "RobertaForQuestionAnswering",
     # TIMM
+    # Some of these happen intermittently on CI, not locally
     "cait_m36_384",
+    "dla102",
     "ghostnet_100",
     "hrnet_w18",
     "inception_v3",
