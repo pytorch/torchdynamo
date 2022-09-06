@@ -56,6 +56,7 @@ output_filename = None
 
 CI_SKIP_INFERENCE = [
     # TorchBench
+    "detectron2",
     "dlrm",
     "fambench_dlrm",
     "fastNLP_Bert",
