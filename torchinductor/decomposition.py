@@ -2,7 +2,6 @@ import functools
 import logging
 import math
 import numbers
-from enum import Enum
 
 import torch
 import torch._decomp as decomp
