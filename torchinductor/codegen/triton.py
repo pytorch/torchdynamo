@@ -884,9 +884,11 @@ class TritonKernel(Kernel):
         ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
+            hint_import = "from torchinductor.triton_ops.autotune import ReductionHint"
         else:
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]
+            hint_import = ""
 
         if name is None:
             code.splice(
@@ -894,15 +896,24 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from torchinductor.triton_ops.autotune import {heuristics}
+                    {hint_import}
                 """
             )
 
-        code.splice(
-            f"""
-                @{heuristics}(size_hints={size_hints!r}, contiguous={self.is_contiguous!r}, filename=__file__)
+        if self.inside_reduction:
+            reduction_hint = (
+                "ReductionHint.INNER" if self.is_contiguous else "ReductionHint.DEFAULT"
+            )
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, reduction_hint={reduction_hint}, filename=__file__)
                 @triton.jit
             """
-        )
+        else:
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, filename=__file__)
+                @triton.jit
+            """
+        code.splice(heuristics_line)
 
         argdefs, _ = self.args.python_argdefs()
 
@@ -1105,14 +1116,19 @@ class TritonScheduling:
     def is_contiguous(node):
         if node in (EnableReduction, DisableReduction):
             return True
-        return all(
-            dep.is_contiguous()
-            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
-        )
+        # print("Node readwrites", node.read_writes.reads, node.read_writes.writes, node.read_writes.index_exprs, node.read_writes.range_vars)
+        if node.is_reduction():
+            return all(
+                dep.is_contiguous()
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.read_writes.writes
+                )
+            )
+        else:
+            return True
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-
         with TritonKernel(
             *tiled_groups, is_contiguous=all(map(self.is_contiguous, node_schedule))
         ) as kernel:
@@ -1134,7 +1150,6 @@ class TritonScheduling:
             wrapper.kernels[src_code] = kernel_name
             src_code = src_code.format(kernel_name=kernel_name)
             wrapper.define_kernel(kernel_name, src_code)
-
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 

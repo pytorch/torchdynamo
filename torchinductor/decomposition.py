@@ -249,12 +249,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-class Reduction(Enum):
-    NONE = 0
-    MEAN = 1
-    SUM = 2
-
-
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
     return aten.index_put_(self.clone(), indices, values, accumulate)
