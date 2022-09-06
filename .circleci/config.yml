@@ -16,7 +16,7 @@ commands:
       - run:
           name: Install TorchBenchmark
           command: |
-            FILE=torchbenchmark/env-v5.key
+            FILE=torchbenchmark/env-v6.key
             if test -f "$FILE"; then
               # If torchbenchmark is updated, we need to invalidate the cache by bumping up the key version number,
               # but this won't happen often because we also update cache daily.
