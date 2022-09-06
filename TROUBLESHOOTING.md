@@ -62,7 +62,11 @@ def toy_example(a, b):
 ```
 
 ## Diagnosing Runtime Errors
-... Insert steps to narrow error to before/after fx graph generation/and then wich tool to narrow the scope of the error
+Below is the PyTorch 2.0 stack. 
+
+![](./documentation/images/pt_stack.png)
+
+Errors can occur in any component of the stack, and the following sections are focused on isolating which component contains an error and how to resolve it.
 
 
 ### Torchdynamo Errors
@@ -90,17 +94,15 @@ As the message suggests you can set `torchdynamo.config.verbose=True` to get a f
 - `logging.WARNING` (default): Print graph breaks in addition to all below log levels
 - `logging.ERROR`: Print errors only
 
-If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. The record and replay tool for dynamo can be useful in this case. Instructions and an example are below.
+If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to help narrow this case. The record and replay tool for dynamo can be useful in this case. Instructions and an example are below.
 
 
 ### Backend Compiler Errors
-There are different choices for backend compilers for torchdynamo, with torchinductor or nvfuser fitting the needs of most users. This section focuses on torchinductor as the motivating example, but some tools will be usable with other backend compilers.
+There are different choices for backend compilers for torchdynamo, with torchinductor or nvfuser fitting the needs of most users. This section focuses on torchinductor as the motivating example, but some tools will be usable with other backend compilers. 
 
-Below is the pytorch 2.0 stack.
 
-![](./documentation/images/pt_stack.png)
+With torchinductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while torchinductor lowers the forward and backward graphs. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes which are cuasing the issue the issue. The first step here is to determine if your error occurs before or after tracing of the backward graph. Once this is determined, the minifier can be run to obtain a minimal graph repro.
 
-With torchinductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while torchinductor lowers the forward and backward graphs. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes that cause the issue. The first step here is to determine if your error occurs before or after tracing of the backward graph. Once this is determined, the minifier can be run to obtain a minimal graph repro.
 
 Minifying to debug an issue in the backend trace:
 
@@ -108,6 +110,7 @@ Minifying to debug an issue in the backend trace:
 Minifying to debug an issue in torchinductor lowering:
 
 
+Dumping Torchinductor 
 
 Errors in the backend compiler look like this: 
 
