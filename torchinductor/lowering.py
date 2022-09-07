@@ -2058,16 +2058,17 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 def max_pool2d_with_indices(
     x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
 ):
+    if padding == 0:
+        padding = [0, 0]
+    if not stride:
+        stride = kernel_size
+
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0 or len(padding) == 2
+    assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
-    if padding == 0:
-        padding = [0, 0]
-    if stride is None:
-        stride = kernel_size
 
     x.realize_hint()
     *batch, h, w = x.get_size()
@@ -2122,16 +2123,17 @@ def max_pool2d_with_indices(
 def max_pool2d_with_indices_backward(
     grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
 ):
+    if padding == 0:
+        padding = [0, 0]
+    if not stride:
+        stride = kernel_size
+
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0 or len(padding) == 2
+    assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
-    if padding == 0:
-        padding = [0, 0]
-    if stride is None:
-        stride = kernel_size
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
