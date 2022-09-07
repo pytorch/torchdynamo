@@ -59,10 +59,20 @@ def compile_fx_inner(
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
-    if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
-        compiled_fn = cudagraphify(
-            compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
-        )
+    safe_cudagraphs = set(graph.device_types) == {"cuda"} and not graph.mutated_inputs
+    run_cudagraphs = safe_cudagraphs or config.always_attempt_cudagraphify
+    if cudagraphs and run_cudagraphs:
+        try:
+            cudagraph_fn = cudagraphify(
+                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+            )
+        except Exception as e:
+            if config.fallback_cudagraphify:
+                log.warning("Cudagraph failed, but running with fallback enabled")
+            else:
+                raise e
+
+        compiled_fn = cudagraph_fn
     elif cudagraphs:
         BoxedBool.disable(cudagraphs)
 
