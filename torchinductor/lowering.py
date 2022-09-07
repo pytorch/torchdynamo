@@ -2859,7 +2859,7 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering([aten.div, prims.div], broadcast=True)
+@register_lowering([aten.div], broadcast=True)
 def div(a, b):
     def fn(*args):
         return ops.div(*args)
@@ -2872,6 +2872,20 @@ def div(a, b):
         a if isinstance(a, Number) else to_dtype(a, dtype),
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
+
+
+# TODO(lezcano) I believe the casting behaviour of prims.div is wrong
+# https://github.com/pytorch/pytorch/issues/84412
+# div prim performs truncation division on integer inputs
+#   and true division for floating and complex inputs
+@register_lowering([prims.div], broadcast=True)
+def div_prim(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+        return div_mode(a, b, rounding_mode="floor")
+    else:
+        return div(a, b)
 
 
 # TODO - enable builtin and disable decomp to lower to ptx instruction

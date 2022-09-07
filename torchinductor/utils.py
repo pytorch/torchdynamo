@@ -206,3 +206,16 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
+
+
+def has_incompatible_cudagraph_ops(gm):
+    forbidden_list = set(
+        [
+            "fbgemm.dense_to_jagged.default",
+            "fbgemm.jagged_to_padded_dense.default",
+        ]
+    )
+    for node in gm.graph.nodes:
+        if str(node.target) in forbidden_list:
+            return True
+    return False
