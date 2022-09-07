@@ -412,7 +412,34 @@ def explain(f, *args, **kwargs):
 
 def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
     """
-    TODO - voz - Document me! Don't land PR without docs.
+    Export mode for torchdynamo enables whole graph capture.
+
+    The philosophy behind torchdynamo.export() is to either capture a whole graph, or fail.
+    In this, it differs greatly from torchdynamo.optimize() - graph breaks which would normally
+    get passed along to the python interpreter instead cause this method to raise an exception.
+
+    Parameters
+    ----------
+    f : Callable
+        the callable to be traced.
+    args : *a varargs value of the arguments to pass to `f` above.
+        usage of f and args is akin to calling f(args).
+    aten_graph : bool
+        Enabling aten_graph exports the graph as aten ops. Otherwise, we export
+        the graph as torch ops.
+
+        Note: This will raise if there are ops in the graph that cannot be traced as ATen ops.
+    guard_args: bool
+        Enabling guard_args installs assertions on the exported graph. If torchdynamo is in dynamic_shapes
+        mode, we assert that the dtypes of (tensor) input values match subsequent invocations. If dynamic_shapes
+        is disabled, we assert that the strides and sizes match as well.
+
+        Note: Future work will change how dynamic shapes work in dynamo, this API and its asserts are experimental.
+
+    Returns
+    -------
+    (new_graph, out_guards)
+    A tuple of an fx.graph and Set[Guard] (torchdynamo/guard.py).
     """
     f = innermost_fn(f)
 
