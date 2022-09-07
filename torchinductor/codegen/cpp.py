@@ -195,6 +195,10 @@ class CppOverrides(OpOverrides):
         return f"1 / std::sqrt({x})"
 
     @staticmethod
+    def signbit(x):
+        return f"std::signbit({x})"
+
+    @staticmethod
     def pow(a, b):
         return f"std::pow({a}, {b})"
 
@@ -229,6 +233,10 @@ class CppOverrides(OpOverrides):
     def truncdiv(a, b):
         # a and b are integer type
         return f"{a} / {b}"
+
+    @staticmethod
+    def fmod(a, b):
+        return f"std::fmod({a}, {b})"
 
     @staticmethod
     def isinf(x):
