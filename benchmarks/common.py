@@ -223,7 +223,9 @@ class Stats:
         return [cls.totals["aot_autograd"]["total"], cls.totals["aot_autograd"]["ok"]]
 
 
-def coverage_experiment(args, model_iter_fn, model, example_inputs, start_latency):
+def coverage_experiment(
+    args, model_iter_fn, model, example_inputs, start_latency, peak_memory
+):
     """
     Test operator/model coverage of TorchDynamo and record statistics
     taken from a profiler.  This target is mainly intended to check
@@ -388,7 +390,7 @@ def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_c
     )
 
 
-def speedup_experiment(args, model_iter_fn, model, example_inputs):
+def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
 
@@ -442,10 +444,18 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs):
             f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
             timings,
         )
+
+    headers = ("dev", "name", "batch_size", "speedup")
+    row = [current_device, current_name, current_batch_size, float(speedup)]
+    if "start_latency" in kwargs:
+        headers = headers + ("start_latency", "peak_memory")
+        row.append(kwargs["start_latency"])
+        row.append(kwargs["peak_memory"])
+
     output_csv(
         output_filename,
-        ("dev", "name", "batch_size", "speedup"),
-        [current_device, current_name, current_batch_size, float(speedup)],
+        headers,
+        row,
     )
     headers, data = torchdynamo.utils.compile_times(repr="csv", aggregate=True)
     assert (
@@ -794,6 +804,10 @@ def exit_after(s):
     return outer
 
 
+def get_peak_memory():
+    return torch.cuda.max_memory_allocated() / 10**9
+
+
 def compilation_profiling_experiment(
     model_iter_fn, model, example_inputs, backend="pytorch"
 ):
@@ -803,9 +817,6 @@ def compilation_profiling_experiment(
         ctx = NullContext()
     else:
         ctx = torchdynamo.optimize(cnt)
-
-    def get_peak_memory():
-        return torch.cuda.max_memory_allocated() / 10**9
 
     # Exit the process after 600 seconds
     timeout = 600
@@ -1187,6 +1198,7 @@ class BenchmarkRunner:
                     if not self.args.skip_accuracy_check:
                         return sys.exit(-1)
 
+            torch.cuda.reset_peak_memory_stats()
             t0 = time.perf_counter()
             reset_rng_state()
             torchdynamo.reset()
@@ -1227,14 +1239,16 @@ class BenchmarkRunner:
             else:
                 frames_third_pass = 0
 
+            t1 = time.perf_counter()
+            peak_memory = get_peak_memory()
             if output_filename and "coverage" in output_filename:
-                t1 = time.perf_counter()
                 results.append(
-                    f"{ok:3}/{total:3} +{frames_third_pass} frames {t1-t0:3.0f}s"
+                    f"{ok:3}/{total:3} +{frames_third_pass} frames {t1-t0:3.0f}s {peak_memory} GBs"
                 )
 
-            if experiment.func is coverage_experiment:
+            if experiment.func in (coverage_experiment, speedup_experiment):
                 experiment_kwargs["start_latency"] = t1 - t0
+                experiment_kwargs["peak_memory"] = peak_memory
 
             if not hasattr(model, name):
                 model.name = name
