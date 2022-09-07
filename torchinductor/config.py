@@ -49,10 +49,11 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
-# Cudagraphify will run even if we have graph mutations
-always_attempt_cudagraphify = True
+# Cudagraphify will run even if we have graph mutations, may segfault
+always_attempt_cudagraphify = False
 
 # Cudagraphify failures will not stop compilation, but will not produce cudagraphified code
+# Will not proceed past segfaults
 fallback_cudagraphify = True
 
 

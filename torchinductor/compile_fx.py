@@ -60,7 +60,10 @@ def compile_fx_inner(
         compiled_fn = wrap(graph.compile_to_fn())
 
     safe_cudagraphs = set(graph.device_types) == {"cuda"} and not graph.mutated_inputs
+    # TODO(voz): Add a config driven option to install a segfault handler for the sake of reporting.
     run_cudagraphs = safe_cudagraphs or config.always_attempt_cudagraphify
+    if config.always_attempt_cudagraphify and not safe_cudagraphs:
+        log.warning("Cudagraph failure heuristics bypassed, may segfault.")
     if cudagraphs and run_cudagraphs:
         try:
             cudagraph_fn = cudagraphify(
@@ -68,7 +71,7 @@ def compile_fx_inner(
             )
         except Exception as e:
             if config.fallback_cudagraphify:
-                log.warning("Cudagraph failed, but running with fallback enabled")
+                log.warning("Cudagraph failed, but running with fallback enabled.")
             else:
                 raise e
 
