@@ -547,22 +547,42 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
                         arg_for_guard = id_to_arg_mapping[underlying_tensor_id][1]
 
                         with new_graph.graph.inserting_after(placeholders[-1]):
-                            shape = None if torchdynamo.config.dynamic_shapes else arg_for_guard.shape
-                            strides = None if torchdynamo.config.dynamic_shapes else arg_for_guard.stride()
-                            dtype = None if torchdynamo.config.dynamic_shapes else arg_for_guard.dtype
+                            shape = (
+                                None
+                                if torchdynamo.config.dynamic_shapes
+                                else arg_for_guard.shape
+                            )
+                            strides = (
+                                None
+                                if torchdynamo.config.dynamic_shapes
+                                else arg_for_guard.stride()
+                            )
+                            dtype = (
+                                None
+                                if torchdynamo.config.dynamic_shapes
+                                else arg_for_guard.dtype
+                            )
 
                             equals = new_graph.graph.create_node(
                                 "call_function",
                                 torch._tensor_equal,
-                                (placeholders[arg_for_guard_position], shape, strides, dtype),
+                                (
+                                    placeholders[arg_for_guard_position],
+                                    shape,
+                                    strides,
+                                    dtype,
+                                ),
                                 {},
-                                name="arg_guard_equality_check"
+                                name="arg_guard_equality_check",
                             )
                             with new_graph.graph.inserting_after(equals):
                                 new_graph.graph.create_node(
                                     "call_function",
                                     torch._assert_true,
-                                    (equals, f"Guard evaluation failed equality check for {placeholders[arg_for_guard_position].name}"),
+                                    (
+                                        equals,
+                                        f"Guard evaluation failed equality check for {placeholders[arg_for_guard_position].name}",
+                                    ),
                                     {},
                                 )
 
