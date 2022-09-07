@@ -1162,7 +1162,8 @@ class TritonScheduling:
         else:
             kernel_name = wrapper.next_kernel_name()
             wrapper.kernels[src_code] = kernel_name
-            src_code = src_code.format(kernel_name=kernel_name)
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            src_code = src_code.format(kernel_name=subs_name)
             wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
