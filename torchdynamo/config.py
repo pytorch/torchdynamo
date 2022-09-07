@@ -53,7 +53,8 @@ constant_functions = {
 base_dir = dirname(dirname(abspath(__file__)))
 
 # don't specialize on shapes and strides and put shape ops in graph
-dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+dynamic_shapes = False
+# os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False

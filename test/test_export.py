@@ -865,3 +865,30 @@ class ExportTests(torchdynamo.testing.TestCase):
         dynamo_result = out_graph(*flat_input)
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+
+    def test_export_with_guarded_inputs_in_graph(self):
+        def func(a, b, c):
+            y = a + b + c
+            return ([b, c], (y, y))
+
+        graph, guards = torchdynamo.export(func, torch.tensor([[[1.3737, 0.1]]]), torch.tensor([[[1.3737, 0.1]]]), torch.tensor([[[1.3737, 0.1]]]))
+
+        dynamo_result = graph(torch.tensor([[[1.3737, 0.1]]]), torch.tensor([[[1.3737, 0.1]]]), torch.tensor([[[1.3737, 0.1]]]))
+
+        raised = False
+        try:
+            graph(torch.tensor([[[1.3737, 0.1]]]), torch.tensor([[[1.3737, 0.1]]]), torch.tensor([[[1.3737, 0.1]]]))
+        except RuntimeError as e:
+            raised = True
+
+        self.assertFalse(raised)
+
+        # self.assertRaises(RuntimeError) doesn't work
+        try:
+            graph(torch.tensor([[[1.3737]]]), torch.tensor([[[1.3737]]]), torch.tensor([[[1.3737]]]))
+        except RuntimeError as e:
+            raised = True
+
+        self.assertTrue(raised)
+
