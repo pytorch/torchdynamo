@@ -84,6 +84,16 @@ CI_SKIP_INFERENCE = [
     "MobileBertForQuestionAnswering",
     "PLBartForConditionalGeneration",
     "RobertaForQuestionAnswering",
+    # TIMM
+    # Some of these happen intermittently on CI, not locally
+    "cait_m36_384",
+    "dla102",
+    "ghostnet_100",
+    "hrnet_w18",
+    "inception_v3",
+    "swin_base_patch4_window7_224",
+    "visformer_small",
+    "volo_d1_224",
 ]
 
 CI_SKIP_TRAINING = [
@@ -117,6 +127,23 @@ CI_SKIP_TRAINING = [
     "XGLMForCausalLM",
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
+    # TIMM
+    "coat_lite_mini",
+    "convnext_base",
+    "deit_base_distilled_patch16_224",
+    "levit_128",
+    "nasnetalarge",
+    "mobilevit_s",
+    "pnasnet5large",
+    "rexnet_100",
+    "twins_pcpvt_base",
+    # https://github.com/pytorch/torchdynamo/issues/1135
+    "gmixer_24_224",
+    "gmlp_s16_224",
+    "jx_nest_base",
+    "mixer_b16_224",
+    "tnt_s_patch16_224",
+    "xcit_large_24_p8_224",
 ]
 
 
