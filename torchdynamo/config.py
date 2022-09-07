@@ -26,7 +26,7 @@ log_level = logging.WARNING
 verbose = False
 
 # the name of a file to write the logs to
-log_file = None
+log_file_name = None
 
 # verify the correctness of optimized backend
 verify_correctness = False
