@@ -78,6 +78,7 @@ def compile_fx_inner(
     return compiled_fn
 
 
+@dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
