@@ -18,6 +18,7 @@ import sys
 import time
 import types
 import weakref
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 from typing import Dict
@@ -396,6 +397,19 @@ def clone_inputs(example_inputs):
         if isinstance(res[i], torch.Tensor):
             res[i] = clone_input(res[i])
     return res
+
+
+@contextmanager
+def preserve_rng_state():
+    rng = torch.clone(torch.random.get_rng_state())
+    if torch.cuda.is_available():
+        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    try:
+        yield
+    finally:
+        torch.random.set_rng_state(rng)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng)
 
 
 def is_jit_model(model0):

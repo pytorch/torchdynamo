@@ -33,6 +33,7 @@ from ..source import AttrSource
 from ..utils import clone_input
 from ..utils import is_lazy_module
 from ..utils import istype
+from ..utils import preserve_rng_state
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import MutableLocal
@@ -41,19 +42,6 @@ from .base import typestr
 from .constant import ConstantVariable
 from .lists import ShapeVariable
 from .lists import SizeVariable
-
-
-@contextmanager
-def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
-    try:
-        yield
-    finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
 
 
 class TensorVariable(VariableTracker):
