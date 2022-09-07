@@ -194,20 +194,14 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
     xreplace is faster than subs, but is way more picky
     """
 
-    def swap_key(key):
+    def promote_strings(key):
         if isinstance(key, str):
             return sympy.Symbol(key)
-        assert isinstance(key, sympy.Symbol), key
         return key
 
-    def swap_value(val):
-        if isinstance(val, int):
-            return sympy.Integer(val)
-        if isinstance(val, sympy.Expr):
-            return val
-        return swap_key(val)
-
-    return expr.xreplace({swap_key(k): swap_value(v) for k, v in replacements.items()})
+    return expr.xreplace(
+        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+    )
 
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
