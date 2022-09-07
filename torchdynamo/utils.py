@@ -155,7 +155,6 @@ def init_logging():
         if config.log_file_name is not None:
             log_file = logging.FileHandler(config.log_file_name)
             log_file.setLevel(config.log_level)
-            logger = logging.getLogger("torchdynamo")
             td_logger.addHandler(log_file)
             ti_logger.addHandler(log_file)
 
