@@ -806,7 +806,7 @@ def bernoulli_(x, *args):
 
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
-def foobar_(_):
+def _foobar(_):
     assert False
 
 
