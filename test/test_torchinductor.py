@@ -2465,7 +2465,7 @@ class CommonTemplate:
             ],
         )
 
-    @requires_decomp(aten.eye)
+    @requires_decomp(aten.eye.m)
     def test_eye(self):
         def fn(a):
             return torch.eye(a.size(0), a.size(1), device=a.device)
