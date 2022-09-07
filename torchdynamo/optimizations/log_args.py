@@ -62,7 +62,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
                     arg_name = self.conv_arg_names[i]
                     conv_args[arg_name] = args[i]
 
-                self.nodes_conv_args[n.name] = conv_args
+                self.nodes_conv_args[n.name.replace("_default", "")] = conv_args
         return result
 
 

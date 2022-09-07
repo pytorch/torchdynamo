@@ -144,8 +144,8 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         self.assertTrue(os.path.exists(filename))
         with open(filename) as f:
             args_dict = json.load(f)
-            self.assertIn("convolution_default", args_dict.keys())
-            conv_args_dict = args_dict["convolution_default"]
+            self.assertIn("convolution", args_dict.keys())
+            conv_args_dict = args_dict["convolution"]
             self.assertIn("input", conv_args_dict.keys())
             self.assertIn("weight", conv_args_dict.keys())
             self.assertIn("bias", conv_args_dict.keys())
