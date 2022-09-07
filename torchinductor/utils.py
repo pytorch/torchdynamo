@@ -165,3 +165,50 @@ def cache_on_self(fn):
         return getattr(self, key)
 
     return wrapper
+
+
+def sympy_str(expr: sympy.Expr):
+    """
+    Normal sympy str is very slow, this is a lot faster.  The result are
+    somewhat worse, as it doesn't do as much simplification.  So don't
+    use this for final codegen.
+    """
+    if isinstance(expr, sympy.Symbol):
+        return expr.name
+    if isinstance(expr, sympy.Add):
+        return " + ".join(map(sympy_str, expr.args))
+    if isinstance(expr, sympy.Mul):
+        return " * ".join(map(sympy_str, expr.args))
+
+    from .ir import CleanDiv
+    from .ir import IndexingDiv
+    from .ir import ModularIndexing
+
+    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+        return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
+    return str(expr)
+
+
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+    """
+    xreplace is faster than subs, but is way more picky
+    """
+
+    def swap_key(key):
+        if isinstance(key, str):
+            return sympy.Symbol(key)
+        assert isinstance(key, sympy.Symbol), key
+        return key
+
+    def swap_value(val):
+        if isinstance(val, int):
+            return sympy.Integer(val)
+        if isinstance(val, sympy.Expr):
+            return val
+        return swap_key(val)
+
+    return expr.xreplace({swap_key(k): swap_value(v) for k, v in replacements.items()})
+
+
+def free_symbol_startswith(index: sympy.Expr, prefix: str):
+    return any(v.name.startswith(prefix) for v in index.free_symbols)

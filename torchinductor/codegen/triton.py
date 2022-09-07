@@ -16,8 +16,10 @@ import torchinductor
 
 from .. import config
 from .. import ir
+from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
 from ..utils import sympy_product
+from ..utils import sympy_subs
 from ..virtualized import V
 from ..virtualized import ops
 from .common import DeferredLine
@@ -447,6 +449,16 @@ class TritonKernel(Kernel):
         self.initialize_range_tree(pid_cache)
         self.is_contiguous = is_contiguous
 
+        # define this in a closure to make cache local to object
+        @functools.lru_cache(None)
+        def simplify_indexing(index: sympy.Expr):
+            index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
+            for tree in self.range_trees:
+                index = self.combine_contiguous_dims(index, tree)
+            return index
+
+        self.simplify_indexing = simplify_indexing
+
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
@@ -593,17 +605,15 @@ class TritonKernel(Kernel):
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     def is_indirect_indexing(self, index: sympy.Expr):
-        index_vars = set(index.free_symbols)
-        return any(
-            # tmpX  means indirect indexing
-            str(v).startswith("tmp")
-            for v in index_vars
-        )
+        # tmpX  means indirect indexing
+        return free_symbol_startswith(index, "tmp")
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
         """
+        if isinstance(index, (sympy.Integer, sympy.Symbol)):
+            return index
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
@@ -613,7 +623,7 @@ class TritonKernel(Kernel):
         if new_sizes == sizes:
             return index
         new_index_vars = tree.construct(new_sizes)
-        new_index = index.subs(dict(zip(index_vars, reindex(new_index_vars))))
+        new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
     def indexing(
@@ -625,12 +635,11 @@ class TritonKernel(Kernel):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
-        index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
-        for tree in self.range_trees:
-            index = self.combine_contiguous_dims(index, tree)
-        index_vars = set(index.free_symbols)
+        index = self.simplify_indexing(index)
+        index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
         indirect_indexing = self.is_indirect_indexing(index)
+
         need_dense = (
             config.triton.dense_indexing
             or dense_indexing
