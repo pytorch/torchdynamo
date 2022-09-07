@@ -865,3 +865,30 @@ class ExportTests(torchdynamo.testing.TestCase):
         dynamo_result = out_graph(*flat_input)
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_stack_trace(self):
+        inp = torch.tensor([0.1, 0.1])
+        linear = torch.nn.Linear(2, 2)
+
+        def func(x):
+            x = x + 1
+            y = x.t()
+            y = y.relu()
+            y = linear(y)
+            return y
+
+        exported = torchdynamo.export(func, inp, aten_graph=False)
+        out_graph = exported[0]
+
+        print(out_graph)
+        for node in out_graph.graph.nodes:
+            if node.op not in {"placeholder", "output"}:
+                self.assertTrue(node.stack_trace is not None)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp, aten_graph=True)
+        out_graph = exported[0]
+        for node in out_graph.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(node.stack_trace is not None)
