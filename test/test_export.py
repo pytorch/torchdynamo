@@ -880,7 +880,6 @@ class ExportTests(torchdynamo.testing.TestCase):
         exported = torchdynamo.export(func, inp, aten_graph=False)
         out_graph = exported[0]
 
-        print(out_graph)
         for node in out_graph.graph.nodes:
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
