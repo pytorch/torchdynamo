@@ -38,7 +38,11 @@ def collect_results(model, prediction, loss, example_inputs):
     results.append(loss)
     grads = dict()
     for name, param in model.named_parameters():
-        grads[name + ".grad"] = clone_me(param.grad)
+        grad = clone_me(param.grad)
+        # Treat None and zero grad as same
+        if param.grad is None:
+            grad = torch.zeros_like(param)
+        grads[name + ".grad"] = grad
     results.append(grads)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
@@ -49,6 +53,14 @@ def collect_results(model, prediction, loss, example_inputs):
             if isinstance(example, torch.Tensor):
                 results.append(clone_me(example.grad))
     return results
+
+
+def requires_bwd_pass(out):
+    if isinstance(out, torch.Tensor):
+        return out.requires_grad
+    elif isinstance(out, (list, tuple)):
+        return any([requires_bwd_pass(x) for x in out])
+    raise NotImplementedError("Don't know how to reduce", type(out))
 
 
 def reduce_to_scalar_loss(out):
@@ -185,6 +197,9 @@ class TestCase(unittest.TestCase):
         cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls._exit_stack.enter_context(
             patch.object(config, "raise_on_backend_error", True)
+        )
+        cls._exit_stack.enter_context(
+            patch.object(config, "raise_on_ctx_manager_usage", True)
         )
 
     def setUp(self):

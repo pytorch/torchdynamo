@@ -1,3 +1,4 @@
+#!/usr/bin/env pytest
 # Owner(s): ["module: cuda graphs"]
 
 import functools

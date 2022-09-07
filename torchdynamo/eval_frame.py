@@ -14,6 +14,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo
+from torchdynamo.debug_utils import wrap_backend_debug
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
 from torchdynamo.utils import compile_times
@@ -102,6 +103,15 @@ class _TorchDynamoContext:
         patch_fn()
 
     def __enter__(self):
+        logging.warn(
+            (
+                "Using TorchDynamo with a context manager will be deprecated soon."
+                "Please read https://github.com/pytorch/torchdynamo#usage-example "
+                "to use TorchDynamo using an annotation."
+            )
+        )
+        if config.raise_on_ctx_manager_usage:
+            raise RuntimeError("TorchDynamo is used with a context manager")
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
@@ -280,6 +290,7 @@ class WrapperBackend:
 
 def get_compiler_fn(compiler_fn):
     """Expand backend strings to functions"""
+    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
 
@@ -289,7 +300,7 @@ def get_compiler_fn(compiler_fn):
 
         compiler_fn = BACKENDS[compiler_fn]
 
-    return compiler_fn
+    return wrap_backend_debug(compiler_fn, compiler_str)
 
 
 class _NullDecorator(contextlib.nullcontext):
@@ -372,13 +383,14 @@ def explain(f, *args, **kwargs):
         nonlocal out_guards
         out_guards.append(guards)
 
-    with patch(f"{__name__}.most_recent_backend", None), optimize(
-        dynamo_graph_accumulating_compiler,
-        nopython=False,
-        guard_export_fn=guard_export_print,
-    ):
+    with patch(f"{__name__}.most_recent_backend", None):
+        opt_f = optimize(
+            dynamo_graph_accumulating_compiler,
+            nopython=False,
+            guard_export_fn=guard_export_print,
+        )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        f(*args, **kwargs)
+        opt_f(*args, **kwargs)
 
     graph_count = len(graphs)
 
@@ -461,11 +473,12 @@ def export(f, *args, aten_graph=False, **kwargs):
     flat_args, in_spec = pytree.tree_flatten(args)
 
     remove_from_cache(f)
-    with patch(f"{__name__}.most_recent_backend", None), optimize_assert(
-        dynamo_normalization_capturing_compiler, guard_export_fn=guard_export_print
-    ):
+    with patch(f"{__name__}.most_recent_backend", None):
+        opt_f = optimize_assert(
+            dynamo_normalization_capturing_compiler, guard_export_fn=guard_export_print
+        )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        result_traced = f(*args, **kwargs)
+        result_traced = opt_f(*args, **kwargs)
     remove_from_cache(f)
 
     assert graph is not None, "whole graph export entails exactly one call"

@@ -249,9 +249,17 @@ def promote_constants(inputs):
     ]
 
 
-def make_pointwise(fn, override_dtype=None, override_device=None, override_bool=None):
-    def inner(*inputs: List[TensorBox]):
+def make_pointwise(
+    fn, override_dtype=None, override_device=None, override_bool=None, allow_alpha=False
+):
+    def inner(*inputs: List[TensorBox], alpha=None):
         inputs = promote_constants(inputs)
+        if allow_alpha:
+            if alpha is not None and alpha != 1:
+                inputs = list(inputs)
+                inputs[-1] = mul(inputs[-1], alpha)
+        else:
+            assert alpha is None
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_dtype or inputs[0].get_dtype()
@@ -366,6 +374,7 @@ def register_pointwise(
     override_dtype=None,
     override_device=None,
     override_bool=None,
+    allow_alpha=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -378,6 +387,7 @@ def register_pointwise(
         override_dtype=override_dtype,
         override_device=override_device,
         override_bool=override_bool,
+        allow_alpha=allow_alpha,
     )
     fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
 
@@ -459,9 +469,17 @@ def expand(x, sizes):
     assert isinstance(sizes, (list, tuple))
     if tuple(x.get_size()) == tuple(sizes):
         return x
-    x.mark_reuse(
-        V.graph.sizevars.size_hint(sympy_product(sizes) / sympy_product(x.get_size()))
-    )
+
+    x_size_product = sympy_product(x.get_size())
+    try:
+        if x_size_product > 0:
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(sizes) / x_size_product)
+            )
+    except TypeError:
+        # Certain sympy products cannot be compared, fails with
+        # cannot determine truth value of Relational
+        pass
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
@@ -513,9 +531,17 @@ def repeat(x, repeats):
                     index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    x.mark_reuse(
-        V.graph.sizevars.size_hint(sympy_product(new_size) / sympy_product(old_size))
-    )
+    old_size_product = sympy_product(old_size)
+    try:
+        if old_size_product > 0:
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size) / old_size_product)
+            )
+    except TypeError:
+        # Certain sympy products cannot be compared, fails with
+        # cannot determine truth value of Relational
+        pass
+
     x_loader = x.make_loader()
     return Pointwise.create(
         device=x.get_device(),
@@ -902,8 +928,6 @@ make_fallback(aten._embedding_bag)
 make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten.grid_sampler_2d_backward)
-make_fallback(aten.im2col)
-make_fallback(aten.native_group_norm_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
@@ -1300,7 +1324,6 @@ def create_tensor_like(creation_fn):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
-
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -2887,7 +2910,7 @@ reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_dtype=torch.int64)
 )
 
-add = register_pointwise(aten.add)
+add = register_pointwise(aten.add, allow_alpha=True)
 exp = register_pointwise(aten.exp)
 floor = register_pointwise(aten.floor)
 mul = register_pointwise(aten.mul)
@@ -2895,7 +2918,7 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub)
+sub = register_pointwise(aten.sub, allow_alpha=True)
 trunc = register_pointwise(aten.trunc)
 
 register_pointwise(aten.cos)
@@ -2935,8 +2958,8 @@ register_lowering(aten.__or__, type_promote=False)(
 
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promote=False)
-    def fn(*args):
-        result = outplace_op(*args)
+    def fn(*args, **kwargs):
+        result = outplace_op(*args, **kwargs)
         return mutate_to(args[0], result)
 
     return fn

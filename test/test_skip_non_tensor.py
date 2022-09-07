@@ -1,4 +1,6 @@
 #!/usr/bin/env pytest
+from unittest.mock import patch
+
 import torch
 
 import torchdynamo
@@ -67,6 +69,7 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
 
         assert counter.op_count == 0
 
+    @patch.object(torchdynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):
         def fn(x):
             return x
@@ -80,6 +83,7 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
 
         assert counter.op_count == 0
 
+    @patch.object(torchdynamo.config, "raise_on_ctx_manager_usage", False)
     def test_custom_list(self):
         def fn(x):
             return x[0] + x[1]
