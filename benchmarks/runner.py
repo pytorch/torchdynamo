@@ -526,7 +526,7 @@ class ParsePerformanceLogs(Parser):
         cleaned_df = df[compiler][df[compiler] > 0].clip(1)
         if cleaned_df.empty:
             return "0.0x"
-        return f"{round(gmean(cleaned_df), 2)}x"
+        return f"{gmean(cleaned_df):.2f}x"
 
     def passrate(self, compiler, df):
         total = len(df.index)
