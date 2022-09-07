@@ -41,7 +41,7 @@ cuda,speech_transformer,9,10,854,1209,0.7064,0.8849
 cuda,squeezenet1_1,1,1,67,67,1.0000,0.9978
 cuda,tacotron2,88,3449,26847,31376,0.8557,0.9139
 cuda,timm_efficientnet,1,1,240,240,1.0000,0.9992
-cuda,timm_regnet,1,1,447,447,1.0000,0.9995
+cuda,timm_regnet,1,1,319,319,1.0000,0.9995
 cuda,timm_resnest,1,1,128,129,0.9922,0.9986
 cuda,timm_vision_transformer,1,1,289,289,1.0000,0.9989
 cuda,timm_vovnet,1,1,130,130,1.0000,0.9987

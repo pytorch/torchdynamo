@@ -105,6 +105,7 @@ CI_SKIP_TRAINING = [
     "hf_GPT2",
     "mobilenet_",
     "pytorch_struct",
+    "timm_regnet",
     "vgg16",
     "Background_Matting",  # from functionalization
     "mobilenet_v2_quantized_qat",  # from functionalization
