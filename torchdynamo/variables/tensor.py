@@ -22,7 +22,6 @@ if fake_tensors_available:
 
 
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map
 
 from torchdynamo.guards import GuardBuilder
@@ -118,7 +117,7 @@ class TensorVariable(VariableTracker):
                         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
                     def context():
-                        return enable_torch_dispatch_mode(tx.fake_mode)
+                        return tx.fake_mode.restore()
 
                 else:
                     context = contextlib.nullcontext
