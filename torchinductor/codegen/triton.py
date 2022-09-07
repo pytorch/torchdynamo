@@ -1137,7 +1137,6 @@ class TritonScheduling:
                 node_schedule,
             )
         )
-        print(reductions)
         is_inner_reduction = (
             all(map(self.is_inner_reduction, reductions))
             if len(reductions) > 0
