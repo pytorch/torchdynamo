@@ -81,10 +81,12 @@ def install_gcc_via_conda():
                 "create",
                 f"--prefix={prefix}",
                 "--channel=conda-forge",
+                "--quiet",
                 "-y",
                 "python=3.8",
                 "gxx",
-            ]
+            ],
+            stdout=subprocess.PIPE,
         )
         assert os.path.exists(cxx_path)
     return cxx_path

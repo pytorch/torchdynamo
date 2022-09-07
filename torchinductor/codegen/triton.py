@@ -164,9 +164,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def signbit(x):
-        # For integer dtypes we use signbitd as per the 4th overload in
-        # https://en.cppreference.com/w/cpp/numeric/math/signbit
-        return f"tl.libdevice.signbitf({x}) if {x}.dtype is tl.float32 else tl.libdevice.signbitd({x})"
+        # XX: This is wrong for the value -0.0 in floating point
+        return f"tl.libdevice.signbitf({x}) if {x}.dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
