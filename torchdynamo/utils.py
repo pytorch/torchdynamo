@@ -21,6 +21,7 @@ import weakref
 from functools import lru_cache
 from typing import Any
 from typing import Dict
+import scipy
 
 import numpy as np
 import tabulate
@@ -646,6 +647,8 @@ def rmse(ref, res):
     """
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
+def ttest(ref, res):
+  return scipy.stats.ttest_ind(ref, res, alternative="greater", equal_var=False)
 
 def same(
     ref,
@@ -719,8 +722,15 @@ def same(
                 passes_test = res_error <= (1.1 * ref_error + 1e-5)
                 if not passes_test:
                     log.warning(
-                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                        f"RMSE (ref-fp64): {ref_error:.5f}, (res-fp64): {res_error:.5f}"
                     )
+                    if fp64_ref.numel() > 2:
+                        ttest_result = ttest((fp64_ref - ref).abs().cpu(), (fp64_ref - res).abs().cpu()).pvalue
+                        passes_test |= ttest_result > 0.05
+                        if not passes_test:
+                            log.warning(
+                                f"ttest(ref-fp64, res-fp64).pvalue: {ttest_result:.5f}"
+                            )
                 return passes_test
 
             return False
