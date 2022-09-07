@@ -2076,6 +2076,19 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_torch_utils_pytree(self):
+        def fn(x):
+            torch.utils._pytree.tree_flatten((x, x))
+            return x + 1
+
+        x = torch.randn(3)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_torch_nn_parameter_isinstance(self):
         def fn(x):
             a = torch.nn.Parameter(torch.rand(2, 3))

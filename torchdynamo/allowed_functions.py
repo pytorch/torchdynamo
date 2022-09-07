@@ -123,7 +123,11 @@ def _allowed_function_ids():
         # Tensor.set_ with a Storage, and Storages cannot be traced with
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
-        disallowed_modules = ("torch.optim.", "torch.nn.modules.rnn.")
+        disallowed_modules = (
+            "torch.optim.",
+            "torch.nn.modules.rnn.",
+            "torch.utils._pytree",
+        )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
         if module is None:
