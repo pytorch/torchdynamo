@@ -30,7 +30,6 @@ cuda,pyhpc_isoneutral_mixing,1,1,1546,1546,1.0000,0.9992
 cuda,pyhpc_turbulent_kinetic_energy,1,1,1569,1569,1.0000,0.9989
 cuda,pytorch_CycleGAN_and_pix2pix,1,1,92,92,1.0000,0.9984
 cuda,pytorch_stargan,1,1,57,57,1.0000,0.9987
-cuda,pytorch_struct,1,1,42,42,1.0000,0.9921
 cuda,pytorch_unet,1,1,72,72,1.0000,0.9979
 cuda,resnet18,1,1,70,70,1.0000,0.9981
 cuda,resnet50,1,1,176,176,1.0000,0.9990
