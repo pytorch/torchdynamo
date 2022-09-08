@@ -148,10 +148,15 @@ LOGGING_CONFIG = {
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
-        logger = logging.getLogger("torchdynamo")
-        logger.setLevel(config.log_level)
-        logger = logging.getLogger("torchinductor")
-        logger.setLevel(config.log_level)
+        td_logger = logging.getLogger("torchdynamo")
+        td_logger.setLevel(config.log_level)
+        ti_logger = logging.getLogger("torchinductor")
+        ti_logger.setLevel(config.log_level)
+        if config.log_file_name is not None:
+            log_file = logging.FileHandler(config.log_file_name)
+            log_file.setLevel(config.log_level)
+            td_logger.addHandler(log_file)
+            ti_logger.addHandler(log_file)
 
 
 # filter out all frames after entering dynamo
