@@ -8,7 +8,7 @@ commands:
           name: Generate date for cache key
           command: date +%F > .circleci-date
       - restore_cache:
-          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}-{{ checksum "requirements.txt" }}
       - run:
           name: Install libs
           command: |
@@ -29,6 +29,7 @@ commands:
               wget -O torchbenchmark.tar.bz2 "https://github.com/jansel/benchmark/releases/download/snapshots/torchbenchmark.tar.bz2"
               tar jxvf torchbenchmark.tar.bz2
               (cd torchbenchmark && python install.py && touch env-v4.key)
+              pip install gym==0.25.2  # workaround issue in 0.26.0
             fi
       - run:
           name: Install HuggingFace
@@ -41,7 +42,7 @@ commands:
             source .circleci/setup_env.sh
             python -m pip install git+https://github.com/rwightman/pytorch-image-models
       - save_cache:
-          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}
+          key: env-v4-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}-{{ checksum "requirements.txt" }}
           paths:
             - conda
             - env

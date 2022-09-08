@@ -448,8 +448,11 @@ def squeeze(x, dim=None):
     dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
     removed = new_shape.pop(dim)
-    assert removed == 1, removed
-    return view(x, new_shape)
+    if V.graph.sizevars.maybe_guard_equals(removed, 1):
+        return view(x, new_shape)
+
+    # squeeze does nothing if the size isn't 1
+    return x
 
 
 @register_lowering([aten.squeeze_])
@@ -802,6 +805,12 @@ def bernoulli_(x, *args):
     V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
     return x
+
+
+# This shouldn't be called in general
+@register_lowering(aten._foobar)
+def _foobar(_):
+    assert False
 
 
 def make_rand(fn_name):
@@ -1195,8 +1204,9 @@ def _unwrap(x):
 
 
 @register_lowering([torch.tensor, aten.scalar_tensor])
-def tensor(data, *, dtype=None, device=None, layout=None):
+def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert layout in (None, torch.strided)
+    assert pin_memory is False
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -1463,12 +1473,10 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 def check_and_broadcast_indices(indices):
     assert all(
-        [
-            i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
-            for i in indices
-            if i is not None
-        ]
-    ), "indices must be int64, byte or bool"
+        i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+        for i in indices
+        if i is not None
+    ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
     assert all(
         [i.get_dtype() == torch.int64 for i in indices if i is not None]
     ), "bool indices are not supported yet"
@@ -2058,16 +2066,17 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 def max_pool2d_with_indices(
     x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
 ):
+    if padding == 0:
+        padding = [0, 0]
+    if not stride:
+        stride = kernel_size
+
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0 or len(padding) == 2
+    assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
-    if padding == 0:
-        padding = [0, 0]
-    if stride is None:
-        stride = kernel_size
 
     x.realize_hint()
     *batch, h, w = x.get_size()
@@ -2122,16 +2131,17 @@ def max_pool2d_with_indices(
 def max_pool2d_with_indices_backward(
     grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
 ):
+    if padding == 0:
+        padding = [0, 0]
+    if not stride:
+        stride = kernel_size
+
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0 or len(padding) == 2
+    assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
-    if padding == 0:
-        padding = [0, 0]
-    if stride is None:
-        stride = kernel_size
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
@@ -2953,6 +2963,8 @@ register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)
+register_pointwise(aten.fmod)
+register_pointwise(aten.signbit, override_dtype=torch.bool)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
 register_pointwise(aten.isnan, override_dtype=torch.bool)
 

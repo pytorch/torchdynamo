@@ -1285,6 +1285,15 @@ class CommonTemplate:
             (torch.randn([2, 8, 111, 111]),),
         )
 
+    def test_max_pool2d5(self):
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 3], [])
+
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -1754,6 +1763,22 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 6, 6]),),
         )
+
+    def test_signbit(self):
+        def fn(x):
+            return torch.signbit(x), ~torch.signbit(-x) & 1
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
+        )
+
+    def test_fmod(self):
+        def fn(a, b):
+            return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
+
+        shape = [1, 2, 6, 6]
+        self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
     def test_log2(self):
         def fn(x):
@@ -3136,6 +3161,14 @@ if HAS_CPU:
             fn(x2, y)
             fn_compiled(x3, y)
             assert same(x2, x3)
+
+        def test_no_op_squeeze(self):
+            @torchdynamo.optimize("inductor")
+            def forward(arg0_1):
+                return torch.ops.aten.squeeze.dim(arg0_1, 1)
+
+            x = torch.randn((10, 20))
+            assert same(x, forward(x))
 
 
 if HAS_CUDA:
