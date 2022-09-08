@@ -13,4 +13,4 @@ pyyaml
 sympy
 tabulate
 torch>=1.12.0
-gym==0.25.2
+gym==0.24.1
