@@ -8,7 +8,7 @@ commands:
           name: Generate date for cache key
           command: date +%F > .circleci-date
       - restore_cache:
-          key: env-v5-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}-{{ checksum "requirements.txt" }}
+          key: env-v6-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}-{{ checksum "requirements.txt" }}
       - run:
           name: Install libs
           command: |
@@ -16,7 +16,7 @@ commands:
       - run:
           name: Install TorchBenchmark
           command: |
-            FILE=torchbenchmark/env-v5.key
+            FILE=torchbenchmark/env-v6.key
             if test -f "$FILE"; then
               # If torchbenchmark is updated, we need to invalidate the cache by bumping up the key version number,
               # but this won't happen very often because we also update cache daily.
@@ -25,8 +25,8 @@ commands:
               source .circleci/setup_env.sh
               conda install -y -c conda-forge git-lfs
               git lfs install --skip-repo --skip-smudge
-              git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git -b xz9/use-s3-download torchbenchmark
-              (cd torchbenchmark && python install.py && touch env-v5.key)
+              git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git torchbenchmark
+              (cd torchbenchmark && python install.py && touch env-v6.key)
               pip install gym==0.25.2  # workaround issue in 0.26.0
             fi
       - run:
@@ -40,7 +40,7 @@ commands:
             source .circleci/setup_env.sh
             python -m pip install git+https://github.com/rwightman/pytorch-image-models
       - save_cache:
-          key: env-v5-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}-{{ checksum "requirements.txt" }}
+          key: env-v6-{{ arch }}-{{ checksum ".circleci/setup_env.sh" }}-{{ checksum "Makefile" }}-{{ checksum ".circleci-date" }}-{{ checksum "requirements.txt" }}
           paths:
             - conda
             - env
