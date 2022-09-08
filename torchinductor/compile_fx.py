@@ -65,7 +65,7 @@ def compile_fx_inner(
         and not graph.mutated_inputs
         and not has_incompatible_cudagraph_ops(gm)
     )
-    
+
     # TODO(voz): Add a config driven option to install a segfault handler for the sake of reporting.
     run_cudagraphs = safe_cudagraphs or config.force_cudagraphs
     if config.force_cudagraphs and not safe_cudagraphs:
@@ -82,7 +82,6 @@ def compile_fx_inner(
                 raise e
 
         compiled_fn = cudagraph_fn
->>>>>>> 6cc2d4cb83069819944d866d310f7bb7349cdaff
     elif cudagraphs:
         BoxedBool.disable(cudagraphs)
 
