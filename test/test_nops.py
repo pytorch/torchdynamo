@@ -61,5 +61,5 @@ class NopTests(torchdynamo.testing.TestCase):
         fn = eval(source)
         a = torch.ones(1)
         b = torch.ones(1)
-        with with_debug_nops:
-            self.assertEqual(fn(a, b).sum(), 513)
+        fn = with_debug_nops(fn)
+        self.assertEqual(fn(a, b).sum(), 513)

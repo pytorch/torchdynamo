@@ -113,7 +113,9 @@ class TensorVariable(VariableTracker):
             def wrap_fake_exception(func):
                 return func()
 
+        args = kwargs = None
         initial_example_value = example_value
+
         with preserve_rng_state():
             if example_value is None:
                 op = proxy.node.op

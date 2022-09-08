@@ -37,7 +37,7 @@ cuda,resnet50,1,1,176,176,1.0000,0.9990
 cuda,resnext50_32x4d,1,1,176,176,1.0000,0.9987
 cuda,shufflenet_v2_x1_0,1,1,246,246,1.0000,0.9992
 cuda,soft_actor_critic,1,1,13,13,1.0000,0.9818
-cuda,speech_transformer,4,4,962,1054,0.9127,0.7702
+cuda,speech_transformer,9,10,854,1209,0.7064,0.8849
 cuda,squeezenet1_1,1,1,67,67,1.0000,0.9978
 cuda,tacotron2,88,3449,26847,31376,0.8557,0.9139
 cuda,timm_efficientnet,1,1,240,240,1.0000,0.9992

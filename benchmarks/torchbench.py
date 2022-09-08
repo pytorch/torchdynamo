@@ -82,14 +82,15 @@ SKIP_TRAIN = {
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
-# Some models have bad train dataset. We read eval dataset.
-# yolov3 - seems to have different number of inputs between eval and train
-# timm_efficientdet - loader only exists for eval mode.
-ONLY_EVAL_DATASET = {"yolov3", "timm_efficientdet"}
-
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
-ONLY_TRAINING_MODE = {"tts_angular", "tacotron2", "demucs"}
+ONLY_TRAINING_MODE = {
+    "tts_angular",
+    "tacotron2",
+    "demucs",
+    "hf_Reformer",
+    "yolov3",
+}
 ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
 
 # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
@@ -241,11 +242,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
+
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+        dynamic_shapes = self.args.dynamic_shapes
         module = importlib.import_module(f"torchbenchmark.models.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
@@ -254,7 +256,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
-        if is_training and model_name not in ONLY_EVAL_DATASET:
+        if is_training:
             benchmark = benchmark_cls(
                 test="train", device=device, jit=False, batch_size=batch_size
             )
@@ -276,25 +278,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.eval()
         gc.collect()
         batch_size = benchmark.batch_size
+
+        # Torchbench has quite different setup for yolov3, so directly passing
+        # the right example_inputs
+        if model_name == "yolov3":
+            example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+        self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
-
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                        args.dynamic_shapes,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
 
     def iter_model_names(self, args):
         from torchbenchmark import _list_model_paths

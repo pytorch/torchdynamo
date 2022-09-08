@@ -20,17 +20,20 @@ decompositions = get_decompositions(
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
+        aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
         aten.clamp_min,
         aten.col2im_backward,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
         aten.detach,
+        aten.dot,
         aten.elu,
         aten.elu_backward,
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
+        aten.eye,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -43,6 +46,7 @@ decompositions = get_decompositions(
         aten.hardswish_backward,
         aten.hardtanh,
         aten.hardtanh_backward,
+        aten.im2col,
         aten.im2col_backward,
         aten.l1_loss,
         aten.leaky_relu,
@@ -56,11 +60,13 @@ decompositions = get_decompositions(
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
+        aten.mv,
         aten.narrow,
         aten.native_batch_norm,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
+        aten.native_group_norm_backward,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
         aten.new_empty,
@@ -84,8 +90,8 @@ decompositions = get_decompositions(
         aten.threshold_backward,
         aten.transpose.int,
         aten.tril.default,
-        aten.upsample_nearest2d_backward,
         aten.upsample_bilinear2d.vec,
+        aten.upsample_nearest2d_backward,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
@@ -110,6 +116,13 @@ def clamp(x, min=None, max=None):
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
+# TorchInductor-only decomposition. It should not be taken to core.
+# See https://github.com/pytorch/torchdynamo/pull/1120
+@register_decomposition([aten.floor_divide.default])
+def floordiv(a, b):
+    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
 
 @register_decomposition([aten.addmm])
@@ -252,7 +265,7 @@ class Reduction(Enum):
 
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
-    return torch.index_put_(self.clone(), indices, values, accumulate)
+    return aten.index_put_(self.clone(), indices, values, accumulate)
 
 
 @register_decomposition([aten.scatter])

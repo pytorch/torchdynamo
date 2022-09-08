@@ -777,6 +777,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
@@ -787,6 +789,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randint(-100, 100, [8, 8]), 100 * torch.randn(8, 8)))
@@ -797,6 +801,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         a = torch.randint(1, 100, [8, 8])
@@ -804,11 +810,12 @@ class CommonTemplate:
 
     def test_div4(self):
         def fn(a, b):
-            return aten.div(a, b, rounding_mode="floor")
             return (
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -822,6 +829,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # divide a scalar
@@ -833,6 +842,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # treat boolean as integer
@@ -847,6 +858,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -2212,9 +2225,10 @@ class CommonTemplate:
         arg4 = arg3.clone()
         correct1 = fn(arg1)
         correct2 = fn(arg3)
-        with torchdynamo.optimize_assert(compile_fx):
-            actual1 = fn(arg2)
-            actual2 = fn(arg4)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
+        actual2 = opt_fn(arg4)
+
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(actual2, correct2))
         self.assertTrue(same(arg1, arg2))
@@ -2231,8 +2245,8 @@ class CommonTemplate:
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
-        with torchdynamo.optimize_assert(compile_fx):
-            actual1 = fn(arg2)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
 
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
@@ -2252,8 +2266,8 @@ class CommonTemplate:
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
-        with torchdynamo.optimize_assert(compile_fx):
-            actual1 = fn(arg2)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
 
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
@@ -2280,8 +2294,8 @@ class CommonTemplate:
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
         fn(arg1)
-        with torchdynamo.optimize_assert(compile_fx):
-            fn(arg2)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        opt_fn(arg2)
 
         self.assertTrue(same(arg1, arg2))
 
@@ -3107,6 +3121,21 @@ if HAS_CPU:
             v = torch.randn(10)
             result = fn(v)
             assert same(result, mod(v))
+
+        def test_inplace_add_alpha(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(10)
+            x2 = torch.zeros(10)
+            x3 = torch.zeros(10)
+            y = torch.randn(10)
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled(x3, y)
+            assert same(x2, x3)
 
 
 if HAS_CUDA:

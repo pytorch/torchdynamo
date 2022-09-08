@@ -315,6 +315,19 @@ class PyCodegen(object):
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
+    def create_load_python_module(self, mod):
+        """
+        Generate a LOAD_GLOBAL instruction to fetch a given python module.
+        """
+        root_globals = self.tx.output.root_globals
+        name = re.sub(r"^.*[.]", "", mod.__name__)
+        if root_globals.get(name, None) is mod:
+            return self.create_load_global(name, add=True)
+        mangled_name = f"___module_{name}_{id(mod)}"
+        if mangled_name not in root_globals:
+            self.tx.output.install_global(mangled_name, mod)
+        return self.create_load_global(mangled_name, add=True)
+
     def make_call_generated_code(self, fn_name: str) -> List[Instruction]:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name))
@@ -324,7 +337,7 @@ class PyCodegen(object):
             if arg.is_unspecialized:
                 self.extend_output(
                     [
-                        self.create_load_global("torch", add=True),
+                        self.create_load_python_module(torch),
                         self.create_load_attr("tensor"),
                     ]
                 )
