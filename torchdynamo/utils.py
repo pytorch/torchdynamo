@@ -718,9 +718,9 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 1.1
 
-                if ref_error > 0.01 or fp64_ref.numel() == 1:
-                    # fp64_ref and ref itself have large deviation. Relax the
-                    # accuracy check.
+                if fp64_ref.numel() < 500:
+                    # In the presence of noise, noise might dominate our error
+                    # metric for smaller tensors.
                     multiplier = 2
 
                 passes_test = res_error <= (multiplier * ref_error + 1e-5)
