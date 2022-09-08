@@ -12,6 +12,7 @@ from .. import codecache
 from .. import config
 from .. import ir
 from ..utils import has_triton
+from ..utils import sympy_dot
 from ..utils import sympy_product
 from ..virtualized import V
 from .common import CodeGen
@@ -24,10 +25,15 @@ pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
+    size = node.get_size()
+    stride = node.get_stride()
+    last_element = sympy_dot([s - 1 for s in size], stride)
     return (
         node.get_device(),
         node.get_dtype(),
-        V.graph.sizevars.simplify(sympy_product(node.get_size())),
+        V.graph.sizevars.simplify(sympy_product(size)),
+        # Detect gaps in tensor storage caused by strides
+        V.graph.sizevars.size_hint(last_element),
     )
 
 
