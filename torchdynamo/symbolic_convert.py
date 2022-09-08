@@ -1261,7 +1261,9 @@ class InstructionTranslatorBase(object):
         self.nn_module_stack: Dict[str, str] = {}
 
         if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode(throw_on_data_dependent_ops=True) as fake_mode:
+            with torch._subclasses.FakeTensorMode(
+                throw_on_data_dependent_ops=True
+            ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
 
