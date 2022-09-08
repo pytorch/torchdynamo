@@ -75,7 +75,7 @@ There are some backend options which can enable you to determine which component
 - `"aot_nop"`: runs torchdynamo to capture a forward graph, and then `AOTAutograd` to trace the backward graph without any additional backend compiler steps. PyTorch eager will then be used to run the forward and backward graphs. This is useful to narrow down the issue to `AOTAutograd`.
 
 The general procedure to narrow down an issue is the following:
-1. Run your program with the `eager` backend. If the error no longer occurs, the issue is in the backend compiler that is being used (if using `TorchInductor`, proceed to step 2), otherwise if the error still occurs, it is an (error while running torchdynamo)[# torchdynamo-errors].
+1. Run your program with the `eager` backend. If the error no longer occurs, the issue is in the backend compiler that is being used (if using `TorchInductor`, proceed to step 2), otherwise if the error still occurs, it is an [error while running torchdynamo](# torchdynamo-errors).
 
 2. This step is only necessary if `TorchInductor` is used as the backend compiler. Run the model with the `aot_nop` backend. If this backend raises an error then the error is occurring during `AOTAutograd` tracing. If the error no longer occurs with this backend, then the error is in `TorchInductor`*.
 
