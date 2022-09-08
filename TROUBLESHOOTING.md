@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Torchdynamo is still in active development, and many of the reasons for graph breaks and excessive recompilation will be fixed with upcoming support for [tracing dynamic tensor shapes](https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing), more careful choices for guards and better tuned heurstics.
+TorchDynamo is still in active development, and many of the reasons for graph breaks and excessive recompilation will be fixed with upcoming support for [tracing dynamic tensor shapes](https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing), more careful choices for guards and better tuned heurstics.
 
 In the mean time, you may need to diagnose a particular issue and determine if it is easy to work around with a change to your model, or file an issue for support.
 
@@ -9,22 +9,25 @@ We're also actively developing debug tools, profilers, and improving our errors/
 ## Graph Breaks
 Given a program like this,
 
-```
-with torchdynamo.optimize(...):
-   some_fun(x)
-   ...
+```py
+torchdynamo.optimize(...):
+def some_fun(x):
+    ...
+
+some_fun(x)
+...
 ```
 
 Torchdynamo will attempt to compile all of the torch/tensor operations within some_fun into a single FX graph, but it may fail to capture everything into one graph.
 
-Some graph break reasons are insurmountable to torchdynamo, and can't be easily fixed.
-- calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without torchdynamo being able to introduce necessary guards to ensure that the compiled program would be safe to reuse
+Some graph break reasons are insurmountable to TorchDynamo, and can't be easily fixed.
+- calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without TorchDynamo being able to introduce necessary guards to ensure that the compiled program would be safe to reuse
 
 ### Identifying the cause of a graph break
 
-To identify all graph breaks in a program and the associated reasons for the breaks, `torchdynamo.explain` can be used. This tool runs Torchdynamo on the supplied function and aggregates the graph breaks that are encountered. Here is an example usage:
+To identify all graph breaks in a program and the associated reasons for the breaks, `torchdynamo.explain` can be used. This tool runs TorchDynamo on the supplied function and aggregates the graph breaks that are encountered. Here is an example usage:
 
-```python
+```py
 from typing import List
 import torch
 import torchdynamo
@@ -53,9 +56,9 @@ Dynamo produced 3 graphs, with 2 graph break and 6 ops.
  """
 ```
 
-To throw an error on the first graph break encountered, `nopython` mode can be used. This disables Torchdynamo's python fallback, and only succeeds if the entire program is convertible to a single graph. Example usage:
+To throw an error on the first graph break encountered, `nopython` mode can be used. This disables TorchDynamo's python fallback, and only succeeds if the entire program is convertible to a single graph. Example usage:
 
-```python
+```py
 @torchdynamo.optimize(<compiler>, nopython=True)
 def toy_example(a, b):
    ...
@@ -66,11 +69,11 @@ Below is the TorchDynamo compiler stack.
 
 <img src="./documentation/images/td_stack.png" width=800>
 
-At a high level, the PyTorch 2.0 stack consists of a graph capture from Python code (TorchDynamo) and a backend compiler. In this example the backend compiler consists of backward graph tracing (AOTAutograd) and graph lowering (TorchInductor)*. Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
+At a high level, the TorchDynamo stack consists of a graph capture from Python code (TorchDynamo) and a backend compiler. In this example the backend compiler consists of backward graph tracing (AOTAutograd) and graph lowering (TorchInductor)*. Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
 
 There are some backend options which can enable you to determine which component is causing the error if you're unable to understand the error message that is generated. These are the following:
 
-- `"eager"`: only runs torchdynamo forward graph capture and then runs the captured graph with PyTorch. This provides an indication as to whether torchdynamo is raising the error.
+- `"eager"`: only runs torchdynamo forward graph capture and then runs the captured graph with PyTorch. This provides an indication as to whether TorchDynamo is raising the error.
 
 - `"aot_nop"`: runs torchdynamo to capture a forward graph, and then AOTAutograd to trace the backward graph without any additional backend compiler steps. PyTorch eager will then be used to run the forward and backward graphs. This is useful to narrow down the issue to AOTAutograd.
 
@@ -86,7 +89,7 @@ Each of these cases are analyzed in the following sections.
 ### Torchdynamo Errors
 If the error that is generated occurs with the `"eager"` backend, then torchdynamo is the most likely source of the error. Here is example code which will generate an error.
 
-```
+```py
 import torch
 
 import torchdynamo
@@ -300,14 +303,14 @@ The other difference from the procedure in [TorhInductor Errors](#torchinductor-
 
 
 ## Excessive Recompilation
-When torchdynamo compiles a function (or part of one), it makes certain assumptions
+When TorchDynamo compiles a function (or part of one), it makes certain assumptions
 about locals and globals in order to allow compiler optimizations, and expresses these
 assumptions as guards that check particular values at runtime.  If any of these guards
 fail, Dynamo will recompile that function (or part) up to `torchdynamo.config.cache_size_limit` times.  If your program is hitting the cache limit, you will first need to determine which guard is failing and what part of your program is triggering it.
 
-The [recompilation profiler](#recompilation-profiler) automates the process of setting torchdynamo's cache limit to 1 and running your program under an observation-only 'compiler' that records the causes of any guard failures.  You should be sure to run your program for at least as long (as many iterations) as you were running when you ran into trouble, and the profiler will accumulate statistics over this duration.
+The [recompilation profiler](#recompilation-profiler) automates the process of setting TorchDynamo's cache limit to 1 and running your program under an observation-only 'compiler' that records the causes of any guard failures.  You should be sure to run your program for at least as long (as many iterations) as you were running when you ran into trouble, and the profiler will accumulate statistics over this duration.
 
-If your program exhibits a bounded amount of dynamism, you may be able to tune the torchdynamo cache limit to allow for each variation to be compiled and cached, but if the cache limit is too high you may find the cost of recompilation outweighs any optimization benefits.
+If your program exhibits a bounded amount of dynamism, you may be able to tune the TorchDynamo cache limit to allow for each variation to be compiled and cached, but if the cache limit is too high you may find the cost of recompilation outweighs any optimization benefits.
 
 ```
 torchdynamo.config.cache_size_limit = <your desired cache limit>
@@ -315,10 +318,14 @@ torchdynamo.config.cache_size_limit = <your desired cache limit>
 
 Torchdynamo plans to support many common cases of dynamic tensor shapes, such as varying batch size or sequence length.  It does not plan to support rank-dynamism.  In the mean time, setting a specific cache limit can be used in coordination with bucketing techniques to achieve an acceptable number of recompilations for some dynamic models.
 
-```
+```py
 prof = torchdynamo.utils.CompilationProfiler()
-with torchdynamo.optimize(prof):
-   my_model()
+
+@torchdynamo.optimize(prof)
+def my_model():
+    ...
+
+my_model()
 print(prof.report())
 ```
 
