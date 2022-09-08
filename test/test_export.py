@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 import torch
+from torch.fx.experimental.proxy_tensor import make_fx
 import torch.utils._pytree as pytree
 
 import torchdynamo.testing
@@ -891,3 +892,33 @@ class ExportTests(torchdynamo.testing.TestCase):
         for node in out_graph.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
+
+    def test_export_compare_optimize_with_make_fx(self):
+        inp = torch.tensor([0.1, 0.1])
+        linear = torch.nn.Linear(2, 2)
+
+        def func(x):
+            x = x + 1
+            y = x.t()
+            y = y.relu()
+            y = linear(y)
+            return y
+
+        exported = torchdynamo.export(func, inp, aten_graph=True)
+        out_graph = exported[0]
+
+        torchdynamo.reset()
+
+        def compiler(gm, sample_inputs):
+            aten_gm = make_fx(gm)(*sample_inputs)
+
+            self.assertEqual(len(aten_gm.graph.nodes), len(out_graph.graph.nodes))
+            for node1, node2 in zip(aten_gm.graph.nodes, out_graph.graph.nodes):
+                self.assertEqual(node1.op, node2.op)
+                if node1.op == "call_function":
+                    self.assertEqual(node1.target, node2.target)
+
+            return aten_gm.forward
+
+        opt_func = torchdynamo.optimize(compiler, nopython=True)(func)
+        opt_func(inp)
