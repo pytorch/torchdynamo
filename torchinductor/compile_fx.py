@@ -60,15 +60,29 @@ def compile_fx_inner(
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
-    if (
-        cudagraphs
-        and set(graph.device_types) == {"cuda"}
+    safe_cudagraphs = (
+        set(graph.device_types) == {"cuda"}
         and not graph.mutated_inputs
         and not has_incompatible_cudagraph_ops(gm)
-    ):
-        compiled_fn = cudagraphify(
-            compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
-        )
+    )
+    
+    # TODO(voz): Add a config driven option to install a segfault handler for the sake of reporting.
+    run_cudagraphs = safe_cudagraphs or config.force_cudagraphs
+    if config.force_cudagraphs and not safe_cudagraphs:
+        log.warning("Cudagraph failure heuristics bypassed, may segfault.")
+    if cudagraphs and run_cudagraphs:
+        try:
+            cudagraph_fn = cudagraphify(
+                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+            )
+        except Exception as e:
+            if config.fallback_cudagraphify:
+                log.warning("Cudagraph failed, but running with fallback enabled.")
+            else:
+                raise e
+
+        compiled_fn = cudagraph_fn
+>>>>>>> 6cc2d4cb83069819944d866d310f7bb7349cdaff
     elif cudagraphs:
         BoxedBool.disable(cudagraphs)
 

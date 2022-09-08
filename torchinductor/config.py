@@ -49,6 +49,15 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# Cudagraphify will run even if we have graph mutations, may segfault.
+# This is a relatively unsafe flag for the sake of forcing cudagraphs despite
+# us thinking there may be mutations. Discards input mutations.
+force_cudagraphs = False
+
+# Cudagraphify failures will not stop compilation, but will not produce cudagraphified code
+# Will not proceed past segfaults
+fallback_cudagraphify = False
+
 
 # config specific to codegen/cpp.pp
 class cpp:
