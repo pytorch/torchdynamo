@@ -35,6 +35,7 @@ class NNModuleToString:
         torch.nn.Softmax,
         torch.nn.ReLU,
         torch.nn.MaxPool2d,
+        torch.nn.Embedding,
     ]
 
     @staticmethod
@@ -408,6 +409,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name):
     model_str = NNModuleToString.convert(gm)
     with open(file_name, "w") as fd:
         fd.write(generate_dynamo_fx_repro_string(model_str, args, compiler_name))
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to repro.py")
     repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
     shutil.copyfile(file_name, repro_path)
 
@@ -530,11 +532,10 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 dump_state_fn = functools.partial(
                     dump_backend_state, compiler_name=compiler_name
                 )
-                if config.repro_level == 1:
-                    dump_state_fn(
-                        fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
-                    )
-                else:
+                dump_state_fn(
+                    fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
+                )
+                if config.repro_level > 1:
                     # As opposed to using dump_to_minify, like we do in
                     # wrap_compiler_debug, we directly run minifier here. This
                     # is because we can't serialize compiler_fn here.
