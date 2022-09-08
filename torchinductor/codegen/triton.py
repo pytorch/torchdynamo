@@ -443,7 +443,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}, is_contiguous=False):
+    def __init__(self, *groups, pid_cache={}, is_inner_reduction=False):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -456,7 +456,7 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
-        self.is_contiguous = is_contiguous
+        self.is_inner_reduction = is_inner_reduction
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -902,9 +902,11 @@ class TritonKernel(Kernel):
         ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
+            hint_import = "from torchinductor.triton_ops.autotune import ReductionHint"
         else:
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]
+            hint_import = ""
 
         if name is None:
             code.splice(
@@ -912,15 +914,26 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from torchinductor.triton_ops.autotune import {heuristics}
+                    {hint_import}
                 """
             )
 
-        code.splice(
-            f"""
-                @{heuristics}(size_hints={size_hints!r}, contiguous={self.is_contiguous!r}, filename=__file__)
+        if self.inside_reduction:
+            reduction_hint = (
+                "ReductionHint.INNER"
+                if self.is_inner_reduction
+                else "ReductionHint.DEFAULT"
+            )
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, reduction_hint={reduction_hint}, filename=__file__)
                 @triton.jit
             """
-        )
+        else:
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, filename=__file__)
+                @triton.jit
+            """
+        code.splice(heuristics_line)
 
         argdefs, _ = self.args.python_argdefs()
 
@@ -937,7 +950,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
-        code.writeline(f"def {name or 'kernel'}({', '.join(argdefs)}):")
+        code.writeline(f"def {name or '{kernel_name}'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
             for old, new in self.args.aliases():
@@ -950,7 +963,7 @@ class TritonKernel(Kernel):
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")
         wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("''').kernel")
+        wrapper.writeline("''').{kernel_name}")
         return wrapper.getvalue()
 
     def reshape_size_str(self, i=None, x=None):
@@ -1120,19 +1133,35 @@ class TritonScheduling:
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
-    def is_contiguous(node):
+    def is_inner_reduction(node):
         if node in (EnableReduction, DisableReduction):
             return True
-        return all(
-            dep.is_contiguous()
-            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
-        )
+        if node.is_reduction():
+            return all(
+                dep.is_contiguous()
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.read_writes.writes
+                )
+            )
+        else:
+            return False
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-
+        reductions = list(
+            filter(
+                lambda n: n not in (EnableReduction, DisableReduction)
+                and n.is_reduction(),
+                node_schedule,
+            )
+        )
+        is_inner_reduction = (
+            all(map(self.is_inner_reduction, reductions))
+            if len(reductions) > 0
+            else False
+        )
         with TritonKernel(
-            *tiled_groups, is_contiguous=all(map(self.is_contiguous, node_schedule))
+            *tiled_groups, is_inner_reduction=is_inner_reduction
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
@@ -1149,9 +1178,10 @@ class TritonScheduling:
             kernel_name = wrapper.kernels[src_code]
         else:
             kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, src_code)
             wrapper.kernels[src_code] = kernel_name
-
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            src_code = src_code.format(kernel_name=subs_name)
+            wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 

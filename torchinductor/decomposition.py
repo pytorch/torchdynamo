@@ -2,7 +2,6 @@ import functools
 import logging
 import math
 import numbers
-from enum import Enum
 
 import torch
 import torch._decomp as decomp
@@ -255,12 +254,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
-
-
-class Reduction(Enum):
-    NONE = 0
-    MEAN = 1
-    SUM = 2
 
 
 @register_decomposition([aten.index_put])
