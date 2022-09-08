@@ -448,7 +448,7 @@ def squeeze(x, dim=None):
     dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
     removed = new_shape.pop(dim)
-    if removed == 1:
+    if V.graph.sizevars.maybe_guard_eq(removed, 1):
         return view(x, new_shape)
 
     # squeeze does nothing if the size isn't 1
