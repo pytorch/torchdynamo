@@ -56,6 +56,7 @@ output_filename = None
 
 CI_SKIP_INFERENCE = [
     # TorchBench
+    "detectron2",
     "dlrm",
     "fambench_dlrm",
     "fastNLP_Bert",
@@ -104,6 +105,7 @@ CI_SKIP_TRAINING = [
     "hf_GPT2",
     "mobilenet_",
     "pytorch_struct",
+    "timm_regnet",
     "vgg16",
     "Background_Matting",  # from functionalization
     "speech_transformer",  # from functionalization
