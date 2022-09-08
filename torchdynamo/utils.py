@@ -155,7 +155,6 @@ def init_logging():
         if config.log_file_name is not None:
             log_file = logging.FileHandler(config.log_file_name)
             log_file.setLevel(config.log_level)
-            logger = logging.getLogger("torchdynamo")
             td_logger.addHandler(log_file)
             ti_logger.addHandler(log_file)
 
@@ -722,7 +721,14 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                multiplier = 1.1
+
+                if fp64_ref.numel() < 500:
+                    # In the presence of noise, noise might dominate our error
+                    # metric for smaller tensors.
+                    multiplier = 2
+
+                passes_test = res_error <= (multiplier * ref_error + 1e-5)
                 if not passes_test:
                     log.warning(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
