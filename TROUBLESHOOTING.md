@@ -62,9 +62,9 @@ def toy_example(a, b):
 ```
 
 ## Diagnosing Runtime Errors
-Below is the PyTorch 2.0 stack. 
+Below is the TorchDynamo compiler stack. 
 
-<img src="./documentation/images/pt_stack.png" width=800>
+<img src="./documentation/images/td_stack.png" width=800>
 
 At a high level, the PyTorch 2.0 stack consists of a graph capture from Python code (TorchDynamo) and a backend compiler. In this example the backend compiler consists of backward graph tracing (AOTAutograd) and graph lowering (TorchInductor)*. Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
 
