@@ -716,7 +716,14 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                multiplier = 1.1
+
+                if ref_error > 0.01 or fp64_ref.numel() == 1:
+                    # fp64_ref and ref itself have large deviation. Relax the
+                    # accuracy check.
+                    multiplier = 2
+
+                passes_test = res_error <= (multiplier * ref_error + 1e-5)
                 if not passes_test:
                     log.warning(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
