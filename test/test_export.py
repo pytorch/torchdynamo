@@ -2,8 +2,8 @@
 from unittest.mock import patch
 
 import torch
-from torch.fx.experimental.proxy_tensor import make_fx
 import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo.testing
 
