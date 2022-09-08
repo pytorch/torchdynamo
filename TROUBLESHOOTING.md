@@ -10,7 +10,7 @@ We're also actively developing debug tools, profilers, and improving our errors/
 Given a program like this,
 
 ```py
-torchdynamo.optimize(...):
+@torchdynamo.optimize(...)
 def some_fun(x):
     ...
 
