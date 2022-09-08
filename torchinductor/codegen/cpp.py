@@ -195,6 +195,10 @@ class CppOverrides(OpOverrides):
         return f"1 / std::sqrt({x})"
 
     @staticmethod
+    def signbit(x):
+        return f"std::signbit({x})"
+
+    @staticmethod
     def pow(a, b):
         return f"std::pow({a}, {b})"
 
@@ -231,6 +235,10 @@ class CppOverrides(OpOverrides):
         return f"{a} / {b}"
 
     @staticmethod
+    def fmod(a, b):
+        return f"std::fmod({a}, {b})"
+
+    @staticmethod
     def isinf(x):
         return f"std::isinf({x})"
 
@@ -264,6 +272,8 @@ class CppOverrides(OpOverrides):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif val is True or val is False:
+            return ops.to_dtype(str(val).lower(), dtype)
         return ops.to_dtype(repr(val), dtype)
 
     @staticmethod

@@ -3,6 +3,7 @@ from typing import List
 
 import torch
 
+from .. import config
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -305,6 +306,17 @@ class SliceVariable(BaseListVariable):
             start, stop, step = items
         else:
             assert False
+
+        # Avoids a .item() call in the tensor slice that would attempt to get a
+        # value out fake tensors, and which would determine the output shape of
+        # the slice.  It is a workaround until
+        # https://github.com/pytorch/pytorch/pull/83567 is landed and there is
+        # more complete support for breaking on data dependent operators.
+        if not config.capture_scalar_outputs:
+            for limit in (start, stop, step):
+                if isinstance(limit, variables.TensorVariable):
+                    unimplemented("Dynamic slicing not supported")
+
         super().__init__([start, stop, step], **kwargs)
 
     def as_proxy(self):
