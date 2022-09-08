@@ -804,6 +804,12 @@ def bernoulli_(x, *args):
     return x
 
 
+# This shouldn't be called in general
+@register_lowering(aten._foobar)
+def _foobar(_):
+    assert False
+
+
 def make_rand(fn_name):
     def rand_or_randn(
         *size,
