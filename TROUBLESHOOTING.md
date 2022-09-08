@@ -126,7 +126,7 @@ As the message suggests you can set `torchdynamo.config.verbose=True` to get a f
 - `logging.WARNING` (default): Print graph breaks in addition to all below log levels
 - `logging.ERROR`: Print errors only
 
-If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to enable this. Setting the environment variable TORCHDYNAMO_DEBUG_FUNCTION to the desired function name will only run torchdynamo on functions with that name. Additionally there is record/replay tool [being developed](https://github.com/pytorch/torchdynamo/pull/1089) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
+If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to enable this. Setting the environment variable TORCHDYNAMO_DEBUG_FUNCTION to the desired function name will only run torchdynamo on functions with that name. Additionally there is a record/replay tool [being developed](https://github.com/pytorch/torchdynamo/pull/1089) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
 
 ### TorchInductor Errors
@@ -177,7 +177,7 @@ AssertionError
 
 If you then change `@torchdynamo.optimize("inductor")` to `@torchdynamo.optimize("aot_nop")`, it will run without error, because [the issue](https://github.com/pytorch/torchdynamo/blob/d09e50fbee388d466b5252a63045643166006f77/torchinductor/lowering.py#:~:text=%23%20This%20shouldn%27t%20be,assert%20False) is in the TorchInductor lowering process, not in AOTAutograd.
 
-From here, let's run the minifier to get a minimal repro.  Setting the environment variable TORCHDYNAMO_REPRO_AFTER="aot" (or setting `torchdynamo.config.repro_after="aot"` directly) will generate a python program which reduces the graph produced by AOTAutograd to the smallest subgraph which reproduces the error. (See below for an example where we minify the graph produced by torchdynamo) Running the program with this environment variable should show nearly [identical output](https://gist.github.com/mlazos/0458ab828aa403c779fe73c012aa5982), with an additional line indicating where `minifier_launcher.py` has been written to. The output directory is configurable by setting `torchdynamo.config.base_dir` to a valid directory name. The final step is to run the minifier and check that it runs successfully. A successful run looks liek (this)[https://gist.github.com/mlazos/e6ea41ccce68a7b1b8a7a09acb1b206a]. If the minifier runs successfully, it generates runnable python code which reproduces the exact error. For our example this is the following code:
+From here, let's run the minifier to get a minimal repro.  Setting the environment variable TORCHDYNAMO_REPRO_AFTER="aot" (or setting `torchdynamo.config.repro_after="aot"` directly) will generate a python program which reduces the graph produced by AOTAutograd to the smallest subgraph which reproduces the error. (See below for an example where we minify the graph produced by torchdynamo) Running the program with this environment variable should show nearly [identical output](https://gist.github.com/mlazos/0458ab828aa403c779fe73c012aa5982), with an additional line indicating where `minifier_launcher.py` has been written to. The output directory is configurable by setting `torchdynamo.config.base_dir` to a valid directory name. The final step is to run the minifier and check that it runs successfully. A successful run looks like (this)[https://gist.github.com/mlazos/e6ea41ccce68a7b1b8a7a09acb1b206a]. If the minifier runs successfully, it generates runnable python code which reproduces the exact error. For our example this is the following code:
 
 ```py
 import torch
@@ -226,10 +226,9 @@ compiled(*args)
 
 The `forward` method of the `Repro` module contains the exact op which causes the issue. When filing an issue, please include any minified repros to aid in debugging.
 
-If minifying the error doesn't seem to help, another tool that can aid in debugging is to dump the TorchInductorIR and state. 
 
 ### Backend Compiler Errors
-With backend compilers other than TorchInductor, the minifier can be run on the graph that is captured by TorchDynamo before it is passed to the backend compiler. The prcoess is nearly identical to the procedure in [errors in TorchInductor](#torchinductor-errors) with two important caveats. Let's walk through an example.
+With backend compilers other than TorchInductor the prcoess for finding the subgraph causing the error is nearly identical to the procedure in [errors in TorchInductor](#torchinductor-errors) with two important caveats. Namely, that the minifier will now be run on the graph that is traced by TorchDynamo, not the output graph of AOTAutograd.  Let's walk through an example. 
 
 ```py
 import torch
@@ -297,7 +296,7 @@ with torch.cuda.amp.autocast(enabled=False):
 ```
 
 The minifier successfully reduced the graph to the op that raises the error in `toy_compiler`.
-Note that in this case, the minifier is automatically run after encountering a backend compiler error and writes `repro.py` to `torchdynamo.config.base_dir`.
+The other difference from the above procedure is that the minifier is automatically run after encountering a backend compiler error. After a successful run, the minifier writes `repro.py` to `torchdynamo.config.base_dir`.
 
 
 ## Excessive Recompilation
