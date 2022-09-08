@@ -118,6 +118,13 @@ def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
+# TorchInductor-only decomposition. It should not be taken to core.
+# See https://github.com/pytorch/torchdynamo/pull/1120
+@register_decomposition([aten.floor_divide.default])
+def floordiv(a, b):
+    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+
+
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2):
     if config.triton.mm != "aten":
