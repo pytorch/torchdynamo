@@ -33,6 +33,7 @@ from .dependencies import var_builder
 from .utils import cache_on_self
 from .utils import sympy_dot
 from .utils import sympy_product
+from .utils import sympy_subs
 from .virtualized import V
 from .virtualized import ops
 
@@ -1153,12 +1154,8 @@ class View(BaseView):
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):
-        new_size = [
-            sympy.expand(x).subs(V.graph.sizevars.replacements) for x in new_size
-        ]
-        old_size = [
-            sympy.expand(x).subs(V.graph.sizevars.replacements) for x in old_size
-        ]
+        new_size = [V.graph.sizevars.simplify(x) for x in new_size]
+        old_size = [V.graph.sizevars.simplify(x) for x in old_size]
 
         new_size = list(new_size)
         for i in range(len(new_size)):
@@ -1241,7 +1238,7 @@ class View(BaseView):
         def reindex(index):
             assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
-            return tuple(x.subs(replacements) for x in view_expr)
+            return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
 
@@ -1829,7 +1826,9 @@ class ComputedBuffer(Buffer):
                     priority_idx.append(i)
             # only consider reads to buffer of same size
             reads = [
-                r.index.subs({v: sympy.Integer(0) for v in reduction_vars})
+                sympy_subs(
+                    r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
+                )
                 for r in reads
             ]
 
@@ -2308,7 +2307,7 @@ class ExternKernel(InputsKernel):
         _, add_var = var_builder("c")
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
 
-        index = sympy.expand(index).subs(replacement)
+        index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
     def __str__(self):
@@ -3233,7 +3232,7 @@ class LoopBody:
         self.reads_name2expr = {}
         self.writes_name2expr = {}
         self.other = []
-        self.submodules = {}
+        self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
         self.root_block = LoopBodyBlock(self, fn, args)
@@ -3273,7 +3272,7 @@ class LoopBody:
 
     def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
-        var = sympy.Symbol(name, integer=True)
+        var = sympy.Symbol(name)
         self.indirect_vars.append([var])
         return var
 
@@ -3281,7 +3280,7 @@ class LoopBody:
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
-        self.indexing = {k: v.subs({old: new}) for k, v in self.indexing.items()}
+        self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def get_index(self, name):
         return self.indexing[name]
@@ -3292,7 +3291,8 @@ class LoopBody:
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
         self.indexing = {
-            name: expr.subs(replacements) for name, expr in self.indexing_exprs.items()
+            name: sympy_subs(expr, replacements)
+            for name, expr in self.indexing_exprs.items()
         }
         result = self.root_block()
         self.indexing = None
@@ -3385,16 +3385,27 @@ class LoopBodyBlock:
             tracer.create_proxy("output", "output", (fn(*args),), {})
         self.graph = tracer.graph
 
-    def make_gm(self):
-        return torch.fx.GraphModule(
-            {**self.body.submodules, "get_index": self.body.get_index}, self.graph
-        )
-
     def __call__(self):
-        return self.make_gm().forward(V.get_ops_handler())
+        graph = self.graph
+        submodules = self.body.submodules
+
+        class InterpreterShim(torch.fx.Interpreter):
+            def __init__(self):
+                """
+                We don't call super() here to avoid constructing a
+                GraphModule which is very expensive (it does codegen).
+                """
+                self.module = self
+                self.graph = graph
+                self.submodules = submodules
+                self.garbage_collect_values = False
+                self.env = {}
+                self.fetch_attr = submodules.__getitem__
+
+        return InterpreterShim().run(V.get_ops_handler())
 
     def debug_str(self, name="block"):
-        code = self.make_gm().code
+        code = torch.fx.GraphModule(self.body.submodules, self.graph).code
         return re.sub(
             # strip `; del var0` suffixes to make output prettier
             r";[^\n]*",
