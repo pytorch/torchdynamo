@@ -791,9 +791,10 @@ class ReproTests(torchdynamo.testing.TestCase):
             False,
         )
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
+        # Graph break because of dynamic slicing
         self.assertEqual(
             torchdynamo.utils.counters["frames"]["total"],
-            torchdynamo.utils.counters["frames"]["ok"],
+            torchdynamo.utils.counters["frames"]["ok"] + 1,
         )
 
     @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
@@ -903,6 +904,20 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(expected_frame, expected_frame)
 
         self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
+
+    def test_slicing_dynamic_shape_setitem(self):
+        def fn(input_lengths: torch.Tensor, new_ones_1):
+            getitem_13 = input_lengths[3]
+            new_ones_1[(3, slice(getitem_13, None, None))] = 0
+            setitem_13 = new_ones_1
+            return (setitem_13,)
+
+        x = torch.randn(10).to(dtype=torch.int64)
+        y = torch.randn(10, 204)
+        ref = fn(x, y)
+        opt_fn = torchdynamo.optimize("aot_nop")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
 
     @requires_static_shapes
     def test_chunk_reformer_ff(self):

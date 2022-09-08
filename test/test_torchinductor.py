@@ -777,6 +777,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
@@ -787,6 +789,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randint(-100, 100, [8, 8]), 100 * torch.randn(8, 8)))
@@ -797,6 +801,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         a = torch.randint(1, 100, [8, 8])
@@ -804,11 +810,12 @@ class CommonTemplate:
 
     def test_div4(self):
         def fn(a, b):
-            return aten.div(a, b, rounding_mode="floor")
             return (
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -822,6 +829,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # divide a scalar
@@ -833,6 +842,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # treat boolean as integer
@@ -847,6 +858,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -1270,6 +1283,15 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 8, 111, 111]),),
+        )
+
+    def test_max_pool2d5(self):
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 3], [])
+
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
         )
 
     def test_avg_pool2d1(self):
@@ -1741,6 +1763,22 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 6, 6]),),
         )
+
+    def test_signbit(self):
+        def fn(x):
+            return torch.signbit(x), ~torch.signbit(-x) & 1
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
+        )
+
+    def test_fmod(self):
+        def fn(a, b):
+            return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
+
+        shape = [1, 2, 6, 6]
+        self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
     def test_log2(self):
         def fn(x):
