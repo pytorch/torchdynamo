@@ -75,7 +75,7 @@ There are some backend options which can enable you to determine which component
 - `"aot_nop"`: runs torchdynamo to capture a forward graph, and then `AOTAutograd` to trace the backward graph without any additional backend compiler steps. PyTorch eager will then be used to run the forward and backward graphs. This is useful to narrow down the issue to `AOTAutograd`.
 
 The general procedure to narrow down an issue is the following:
-1. Run your program with the `eager` backend. If the error no longer occurs, the issue is in the backend compiler that is being used (if using `TorchInductor`, proceed to step 2), otherwise if the error still occurs, it is an error while running torchdynamo.
+1. Run your program with the `eager` backend. If the error no longer occurs, the issue is in the backend compiler that is being used (if using `TorchInductor`, proceed to step 2), otherwise if the error still occurs, it is an (error while running torchdynamo)[# torchdynamo-errors].
 
 2. This step is only necessary if `TorchInductor` is used as the backend compiler. Run the model with the `aot_nop` backend. If this backend raises an error then the error is occurring during `AOTAutograd` tracing. If the error no longer occurs with this backend, then the error is in `TorchInductor`*.
 
@@ -134,7 +134,7 @@ If the error doesn't occur with the `eager` backend, then the backend compiler i
 
 Below is the zoomed in portion of the stack which we are focusing on:
 
-<img src="./documentation/images/torchinductor_backend.png" width=800>
+<img src="./documentation/images/torchinductor_backend.png" width=600>
 
 With torchinductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while torchinductor lowers the forward and backward graphs to GPU code or C++. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes which are causing the issue the issue. The first step is to determine whether the error occurs during tracing of the backward graph with `AOTAutograd` or during `TorchInductor` lowering. As mentioned above in step 2, the `aot_nop` backend can be used to run only `AOTAutograd` in isolation without lowering. If the error still occurs with this backend, this indicates that the error is occurring during `AOTAutograd` tracing.
 
