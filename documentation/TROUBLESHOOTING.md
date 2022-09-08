@@ -67,7 +67,7 @@ def toy_example(a, b):
 ## Diagnosing Runtime Errors
 Below is the TorchDynamo compiler stack. 
 
-<img src="./documentation/images/td_stack.png" width=800>
+<img src="./images/td_stack.png" width=800>
 
 At a high level, the TorchDynamo stack consists of a graph capture from Python code (TorchDynamo) and a backend compiler. In this example the backend compiler consists of backward graph tracing (AOTAutograd) and graph lowering (TorchInductor)*. Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
 
@@ -137,7 +137,7 @@ If the error doesn't occur with the `"eager"` backend, then the backend compiler
 
 Below is the portion of the stack which we are focusing on:
 
-<img src="./documentation/images/torchinductor_backend.png" width=600>
+<img src="./images/torchinductor_backend.png" width=600>
 
 With TorchInductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while TorchInductor lowers the forward and backward graphs to GPU code or C++. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes which are causing the issue the issue. The first step is to determine whether the error occurs during tracing of the backward graph with AOTAutograd or during TorchInductor lowering. As mentioned above in step 2, the `"aot_nop"` backend can be used to run only AOTAutograd in isolation without lowering. If the error still occurs with this backend, this indicates that the error is occurring during AOTAutograd tracing.
 
