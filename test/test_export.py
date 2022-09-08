@@ -906,6 +906,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         exported = torchdynamo.export(func, inp, aten_graph=True)
         out_graph = exported[0]
+        export_result = out_graph(inp)
 
         torchdynamo.reset()
 
@@ -917,8 +918,13 @@ class ExportTests(torchdynamo.testing.TestCase):
                 self.assertEqual(node1.op, node2.op)
                 if node1.op == "call_function":
                     self.assertEqual(node1.target, node2.target)
+                    self.assertEqual(len(node1.args), len(node2.args))
+                    for arg1, arg2 in zip(node1.args, node2.args):
+                        self.assertEqual(type(arg1), type(arg2))
 
             return aten_gm.forward
 
         opt_func = torchdynamo.optimize(compiler, nopython=True)(func)
-        opt_func(inp)
+        make_fx_result = opt_func(inp)
+
+        self.assertTrue(torchdynamo.utils.same(make_fx_result, export_result))
