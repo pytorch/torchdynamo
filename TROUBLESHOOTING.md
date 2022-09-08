@@ -66,7 +66,7 @@ Below is the PyTorch 2.0 stack.
 
 <img src="./documentation/images/pt_stack.png" width=800>
 
-At a high level, the PyTorch 2.0 stack consists of a graph capture from Python code (`TorchDynamo`) and a backend compiler. In this example the backend compiler consists of backward graph tracing (`AOTAutograd`) and graph lowering (TorchInductor). Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
+At a high level, the PyTorch 2.0 stack consists of a graph capture from Python code (`TorchDynamo`) and a backend compiler. In this example the backend compiler consists of backward graph tracing (`AOTAutograd`) and graph lowering (`TorchInductor`)*. Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
 
 There are some backend options which can enable you to determine which component is causing the error if you're unable to understand the error message that is generated. These are the following:
 
@@ -81,10 +81,28 @@ The general procedure to narrow down an issue is the following:
 
 Each of these cases are analyzed in the following sections.
 
-*Note on `TorchInductor` naming: The `TorchInductor` backend consists of both `AOTAutograd` tracing and `TorchInductor`. Other compilers will generate the backward graph through other means.
+*Note on `TorchInductor` naming: The `TorchInductor` backend consists of both `AOTAutograd` tracing and the `TorchInductor` compiler itself. We will disambiguate by referring to `TorchInductor` as the backend, and `TorchInductor` lowering as the phase which lowers the graph traced by `AOTAutograd`. 
 
 ### Torchdynamo Errors
-If the error that is generated occurs with the `"eager"` backend, then torchdynamo is the most likely source of the error. Errors in Torchdynamo typically look like this:
+If the error that is generated occurs with the `"eager"` backend, then torchdynamo is the most likely source of the error. Here is example code which will generate an error.
+
+```
+import torch
+
+import torchdynamo
+
+
+@torchdynamo.optimize("eager")
+def test_assertion_error():
+    y = torch.ones(200, 200)
+    z = {y: 5}
+    return z
+
+
+test_assertion_error()
+```
+
+Which will generate the following error:
 
 ```
 torchdynamo.convert_frame: [ERROR] WON'T CONVERT test_assertion_error /scratch/mlazos/torchdynamo/../test/errors.py line 26 
@@ -101,7 +119,6 @@ from user code:
 Set torchdynamo.config.verbose=True for more information
 ==========
 ```
-[code](https://gist.github.com/mlazos/e4bba91a7e8de5145156523406fdee78)
 
 As the message suggests you can set `torchdynamo.config.verbose=True` to get a full stack trace to both the error in torchdynamo and the user code. In addition to this flag, you can also set the `log_level` of torchdynamo through `torchdynamo.config.log_level`. The available levels are the following:
 - `logging.DEBUG`: Print every instruction that is encountered in addition to all below log levels
@@ -109,12 +126,15 @@ As the message suggests you can set `torchdynamo.config.verbose=True` to get a f
 - `logging.WARNING` (default): Print graph breaks in addition to all below log levels
 - `logging.ERROR`: Print errors only
 
-If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to help narrow this case. Setting the environment variable TORCHDYNAMO_DEBUG_FUNCTION to the desired function name can help narrow the case by only running dynamo on functions with that name. Additionally there is record/replay tool [being developed](https://github.com/pytorch/torchdynamo/pull/1089) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
+If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to enable this. Setting the environment variable TORCHDYNAMO_DEBUG_FUNCTION to the desired function name will only run torchdynamo on functions with that name. Additionally there is record/replay tool [being developed](https://github.com/pytorch/torchdynamo/pull/1089) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
 
 ### TorchInductor Errors
 If the error doesn't occur with the `eager` backend, then the backend compiler is the source of the error ([example error](https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de])). There are [different choices](https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backends) for backend compilers for torchdynamo, with torchinductor or nvfuser fitting the needs of most users. This section focuses on torchinductor as the motivating example, but some tools will be usable with other backend compilers. 
 
+Below is the zoomed in portion of the stack which we are focusing on:
+
+<img src="./documentation/images/torchinductor_backend.png" width=800>
 
 With torchinductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while torchinductor lowers the forward and backward graphs to GPU code or C++. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes which are causing the issue the issue. The first step is to determine whether the error occurs during tracing of the backward graph with `AOTAutograd` or during `TorchInductor` lowering. As mentioned above in step 2, the `aot_nop` backend can be used to run only `AOTAutograd` in isolation without lowering. If the error still occurs with this backend, this indicates that the error is occurring during `AOTAutograd` tracing.
 
@@ -155,21 +175,11 @@ AssertionError
 ```
 [error with full stack trace](https://gist.github.com/mlazos/d6947854aa56d686800259a164c62100)
 
-If you then change line 130 to "aot_nop", it will run without error, because this is [an issue](https://github.com/pytorch/torchdynamo/blob/d09e50fbee388d466b5252a63045643166006f77/torchinductor/lowering.py#:~:text=%23%20This%20shouldn%27t%20be,assert%20False) in the inductor lowering process.
+If you then change `@torchdynamo.optimize("inductor")` to `@torchdynamo.optimize("aot_nop")`, it will run without error, because [the issue](https://github.com/pytorch/torchdynamo/blob/d09e50fbee388d466b5252a63045643166006f77/torchinductor/lowering.py#:~:text=%23%20This%20shouldn%27t%20be,assert%20False) is in the `TorchInductor` lowering process, not in `AOTAutograd`.
 
+From here, let's run the minifier to get a minimal repro.  Setting the environment variable TORCHDYNAMO_REPRO_AFTER="aot" (or setting `torchdynamo.config.repro_after="aot"` directly) will generate a python program which reduces the graph produced by `AOTAutograd` to the smallest subgraph which reproduces the error. (See below for an example where we minify the graph produced by torchdynamo) Running the program with this environment variable should show nearly identical output, with an additional line indicating where `minifier_launcher.py` has been written to. The output directory is configurable by setting `torchdynamo.config.base_dir` to a valid directory name.
 
-Once this is determined, the minifier can be run to obtain a minimal graph repro.
-
-Here is an example of a backend compiler error: 
-
-
-
-Minifying to debug an issue in the backend trace:
-
-Minifying to debug an issue in torchinductor lowering:
-
-Set the environment variable `COMPILER_REPRO_LEVEL` to 3 and run the original script which caused the error.
-
+### Backend Compiler Errors
 
 Dumping Torchinductor IR and 
 
