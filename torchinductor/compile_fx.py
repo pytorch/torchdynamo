@@ -19,6 +19,7 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .utils import ceildiv
+from .utils import has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,12 @@ def compile_fx_inner(
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
-    if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
+    if (
+        cudagraphs
+        and set(graph.device_types) == {"cuda"}
+        and not graph.mutated_inputs
+        and not has_incompatible_cudagraph_ops(gm)
+    ):
         compiled_fn = cudagraphify(
             compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
         )

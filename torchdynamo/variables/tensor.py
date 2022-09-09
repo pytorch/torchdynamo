@@ -168,7 +168,6 @@ class TensorVariable(VariableTracker):
                 if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
 
-
         # Avoids a .item() call in the tensor slice that would attempt to get a value out
         # fake tensors, and which would determine the output shape of the slice.
         # It is a workaround until https://github.com/pytorch/pytorch/pull/83567

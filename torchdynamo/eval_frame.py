@@ -518,7 +518,12 @@ def export(f, *args, aten_graph=False, **kwargs):
             return super().output(target, (new_result,), {})
 
     if aten_graph:
-        graph = make_fx(graph)(*graph_captured_input)
+        # Running graph with interpreter is needed for propagating the stack_trace
+        def graph_with_interpreter(*args):
+            with torch.fx.traceback.override_stack_trace():
+                return torch.fx.Interpreter(graph).run(*args)
+
+        graph = make_fx(graph_with_interpreter)(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,
