@@ -189,7 +189,6 @@ class TensorVariable(VariableTracker):
             ):
                 unimplemented("dynamic shape slicing")
 
-
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
             parameter_value = initial_example_value if is_parameter else None
