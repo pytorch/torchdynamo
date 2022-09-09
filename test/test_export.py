@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo.testing
 
@@ -865,3 +866,65 @@ class ExportTests(torchdynamo.testing.TestCase):
         dynamo_result = out_graph(*flat_input)
 
         self.assertTrue(torchdynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_stack_trace(self):
+        inp = torch.tensor([0.1, 0.1])
+        linear = torch.nn.Linear(2, 2)
+
+        def func(x):
+            x = x + 1
+            y = x.t()
+            y = y.relu()
+            y = linear(y)
+            return y
+
+        exported = torchdynamo.export(func, inp, aten_graph=False)
+        out_graph = exported[0]
+
+        for node in out_graph.graph.nodes:
+            if node.op not in {"placeholder", "output"}:
+                self.assertTrue(node.stack_trace is not None)
+
+        torchdynamo.reset()
+
+        exported = torchdynamo.export(func, inp, aten_graph=True)
+        out_graph = exported[0]
+        for node in out_graph.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(node.stack_trace is not None)
+
+    def test_export_compare_optimize_with_make_fx(self):
+        inp = torch.tensor([0.1, 0.1])
+        linear = torch.nn.Linear(2, 2)
+
+        def func(x):
+            x = x + 1
+            y = x.t()
+            y = y.relu()
+            y = linear(y)
+            return y
+
+        exported = torchdynamo.export(func, inp, aten_graph=True)
+        out_graph = exported[0]
+        export_result = out_graph(inp)
+
+        torchdynamo.reset()
+
+        def compiler(gm, sample_inputs):
+            aten_gm = make_fx(gm)(*sample_inputs)
+
+            self.assertEqual(len(aten_gm.graph.nodes), len(out_graph.graph.nodes))
+            for node1, node2 in zip(aten_gm.graph.nodes, out_graph.graph.nodes):
+                self.assertEqual(node1.op, node2.op)
+                if node1.op == "call_function":
+                    self.assertEqual(node1.target, node2.target)
+                    self.assertEqual(len(node1.args), len(node2.args))
+                    for arg1, arg2 in zip(node1.args, node2.args):
+                        self.assertEqual(type(arg1), type(arg2))
+
+            return aten_gm.forward
+
+        opt_func = torchdynamo.optimize(compiler, nopython=True)(func)
+        make_fx_result = opt_func(inp)
+
+        self.assertTrue(torchdynamo.utils.same(make_fx_result, export_result))
