@@ -90,7 +90,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-          python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda --use-eval-mode --output=aot_eager.csv
+            python benchmarks/torchbench.py --ci --training --accuracy-aot-nop -d cuda --use-eval-mode --output=aot_eager.csv
       - store_artifacts:
           path: aot_eager.csv
       - run:
