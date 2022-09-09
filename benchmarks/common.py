@@ -94,6 +94,7 @@ CI_SKIP_INFERENCE = [
     "swin_base_patch4_window7_224",
     "visformer_small",
     "volo_d1_224",
+    "tnt_s_patch16_224",
 ]
 
 CI_SKIP_TRAINING = [
