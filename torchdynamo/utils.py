@@ -772,18 +772,19 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 1.1
+                multiplier = 2
 
-                if fp64_ref.numel() < 500:
-                    # In the presence of noise, noise might dominate our error
-                    # metric for smaller tensors.
-                    multiplier = 2
+                # if fp64_ref.numel() < 500:
+                #     # In the presence of noise, noise might dominate our error
+                #     # metric for smaller tensors.
+                #     multiplier = 2.5
 
                 passes_test = res_error <= (multiplier * ref_error + 1e-5)
                 if not passes_test:
-                    log.warning(
+                    log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
                     )
+                    # import pdb; pdb.set_trace()
                 return passes_test
 
             return False

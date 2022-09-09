@@ -59,7 +59,6 @@ DETECTRON2_MODELS = {
     "detectron2_fasterrcnn_r_50_fpn",
     "detectron2_maskrcnn_r_101_c4",
     "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
 }
 
@@ -89,6 +88,7 @@ ONLY_TRAINING_MODE = {
     "tacotron2",
     "demucs",
     "hf_Reformer",
+    "pytorch_struct",
     "yolov3",
 }
 ONLY_TRAINING_MODE.update(DETECTRON2_MODELS)
@@ -187,8 +187,17 @@ DYNAMIC_SHAPES_NOT_YET_WORKING = {
     "timm_nfnet",
 }
 
+DONT_CHANGE_BATCH_SIZE = {
+    "pytorch_struct",
+    "pyhpc_turbulent_kinetic_energy",
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
+    def __init__(self):
+        super(TorchBenchmarkRunner, self).__init__()
+        self.suite_name = "torchbench"
+
     @property
     def skip_models(self):
         return SKIP
@@ -239,7 +248,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 
-        if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
+        cant_change_batch_size = (
+            not getattr(benchmark_cls, "ALLOW_CUSTOMIZE_BSIZE", True)
+            or model_name in DONT_CHANGE_BATCH_SIZE
+        )
+        if cant_change_batch_size:
+            batch_size = None
+        elif batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
         if is_training:
