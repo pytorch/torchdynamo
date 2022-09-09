@@ -117,7 +117,7 @@ class TensorVariable(VariableTracker):
                         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
                     def context():
-                        return tx.fake_mode.restore()
+                        return tx.fake_mode
 
                 else:
                     context = contextlib.nullcontext
