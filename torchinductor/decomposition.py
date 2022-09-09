@@ -56,6 +56,7 @@ decompositions = get_decompositions(
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
+        aten.masked_fill,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
@@ -179,14 +180,14 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill])
-def masked_fill(value, mask, other):
-    if isinstance(other, numbers.Number):
-        other = torch.tensor(other, dtype=value.dtype, device=value.device)
-    if other.device != value.device and other.numel() == 1:
-        other = other.to(value.device)
-    value, mask, other = torch.broadcast_tensors(value, mask, other)
-    return torch.where(mask, other, value)
+# @register_decomposition([aten.masked_fill])
+# def masked_fill(value, mask, other):
+#     if isinstance(other, numbers.Number):
+#         other = torch.tensor(other, dtype=value.dtype, device=value.device)
+#     if other.device != value.device and other.numel() == 1:
+#         other = other.to(value.device)
+#     value, mask, other = torch.broadcast_tensors(value, mask, other)
+#     return torch.where(mask, other, value)
 
 
 @register_decomposition([aten.nan_to_num])

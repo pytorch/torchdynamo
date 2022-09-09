@@ -1694,7 +1694,7 @@ def main(runner, original_dir=None):
     elif args.inductor or args.inductor_dynamic:
         import torchinductor.config
 
-        torchinductor.config.debug = args.verbose
+        # torchinductor.config.debug = args.verbose
         if args.threads:
             torchinductor.config.cpp.threads = args.threads
 

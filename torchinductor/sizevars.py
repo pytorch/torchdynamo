@@ -274,7 +274,8 @@ class SizeVarAllocator(object):
         return var
 
     def size_hint(self, expr: Expr) -> int:
-        return int(sympy_subs(sympy.expand(expr), self.var_to_val))
+        out = int(sympy_subs(sympy.expand(expr), self.var_to_val))
+        return out
 
     def _lru_cache(self, fn, maxsize=None):
         """

@@ -516,9 +516,7 @@ def repeat(x, repeats):
     new_size = list(x.get_size())
 
     for i in range(len(repeats)):
-        assert repeats[i] >= 1
-        if repeats[i] > 1:
-            new_size[i] = new_size[i] * repeats[i]
+        new_size[i] = new_size[i] * repeats[i]
 
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return expand(x, new_size)
@@ -527,11 +525,10 @@ def repeat(x, repeats):
         assert len(index) == len(repeats)
         index = list(index)
         for i in range(len(repeats)):
-            if repeats[i] > 1:
-                if old_size[i] == 1:
-                    index[i] = sympy.Integer(0)
-                else:
-                    index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
+            if old_size[i] == 1:
+                index[i] = sympy.Integer(0)
+            else:
+                index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
     old_size_product = sympy_product(old_size)
@@ -571,9 +568,14 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promote=False)
-def slice_(x, dim, start, end, step=1):
+def slice(x, dim=0, start=None, end=None, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
+    if start is None:
+        start = 0
+    if end is None:
+        end = 2**63 + 1
+
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -3002,6 +3004,10 @@ register_inplace(aten.sigmoid_, sigmoid)
 @register_lowering(aten.sym_size)
 def sym_size(a, dim):
     return a.get_size()[dim]
+
+@register_lowering(aten.sym_stride)
+def sym_stride(a, dim):
+    return a.get_stride()[dim]
 
 
 @register_lowering(operator.mul)

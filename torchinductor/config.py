@@ -1,7 +1,7 @@
 import os
 
 # add some debug printouts
-debug = False
+debug = True
 
 # dead code elimination
 dce = False
@@ -71,7 +71,7 @@ class cpp:
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = True
+    cudagraphs = False
 
     # Monkey patching to lower overheads
     hackery = False
