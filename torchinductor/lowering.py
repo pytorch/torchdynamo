@@ -447,8 +447,11 @@ def squeeze(x, dim=None):
     dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
     removed = new_shape.pop(dim)
-    assert removed == 1, removed
-    return view(x, new_shape)
+    if V.graph.sizevars.maybe_guard_equals(removed, 1):
+        return view(x, new_shape)
+
+    # squeeze does nothing if the size isn't 1
+    return x
 
 
 @register_lowering([aten.squeeze_])

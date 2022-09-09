@@ -3162,6 +3162,14 @@ if HAS_CPU:
             fn_compiled(x3, y)
             assert same(x2, x3)
 
+        def test_no_op_squeeze(self):
+            @torchdynamo.optimize("inductor")
+            def forward(arg0_1):
+                return torch.ops.aten.squeeze.dim(arg0_1, 1)
+
+            x = torch.randn((10, 20))
+            assert same(x, forward(x))
+
 
 if HAS_CUDA:
 

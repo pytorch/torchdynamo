@@ -4,6 +4,7 @@ import json
 import logging
 import os.path
 import time
+from enum import Enum
 from typing import List
 
 import triton
@@ -269,7 +270,7 @@ def apply_triton_config(config):
     return cached_autotune([config])
 
 
-def pointwise_heuristics(size_hints, contiguous=False, filename=None):
+def pointwise_heuristics(size_hints, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
@@ -306,14 +307,20 @@ def pointwise_heuristics(size_hints, contiguous=False, filename=None):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction_heuristics(size_hints, contiguous=False, filename=None):
+class ReductionHint(Enum):
+    INNER = 0
+    OUTER = 1
+    DEFAULT = 2
+
+
+def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
     """args to @triton.heuristics()"""
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
             size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
         )
-        if contiguous:
+        if reduction_hint == ReductionHint.INNER:
             return apply_triton_config(contiguous_config)
         if not config.triton.autotune:
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
