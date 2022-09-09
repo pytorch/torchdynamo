@@ -13,7 +13,7 @@ def main():
         expected_ops = int(expected.loc[expected["name"] == name]["captured_ops"])
         try:
             actual_ops = int(actual.loc[actual["name"] == name]["captured_ops"])
-        except TypeError:
+        except (TypeError, ValueError):
             print(f"{name:34} MISSING")
             failed.append(name)
             continue
