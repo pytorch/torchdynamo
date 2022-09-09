@@ -3126,17 +3126,14 @@ class CommonTemplate:
             return [embedding, view_1]
 
         args = [
-            ((50005, 768), (768, 1), torch.float32, "cuda"),
-            ((8, 128), (128, 1), torch.int64, "cuda"),
-            ((8, 127), (127, 1), torch.int64, "cuda"),
-            ((8,), (1,), torch.int64, "cuda"),
-            ((1024,), (1,), torch.int64, "cuda"),
-            ((8, 128), (128, 1), torch.int64, "cuda"),
+            ((50005, 768), (768, 1), torch.float32),
+            ((8, 128), (128, 1), torch.int64),
+            ((8, 127), (127, 1), torch.int64),
+            ((8,), (1,), torch.int64),
+            ((1024,), (1,), torch.int64),
+            ((8, 128), (128, 1), torch.int64),
         ]
-        args = [
-            rand_strided(shape, stride, dtype, device)
-            for shape, stride, dtype, device in args
-        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
     @patch.object(torchinductor.config.triton, "cudagraphs", False)

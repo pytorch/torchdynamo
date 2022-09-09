@@ -284,13 +284,12 @@ class CppOverrides(OpOverrides):
     def masked(mask, body, other):
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
-        assert isinstance(other, float)
         if other == float("-inf"):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
         elif other == float("inf"):
             code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
         else:
-            code.writeline(f"float {var} = {other!r};")
+            code.writeline(f"auto {var} = {other!r};")
         code.writeline(f"if({mask})")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
