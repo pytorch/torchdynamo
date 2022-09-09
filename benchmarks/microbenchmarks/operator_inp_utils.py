@@ -256,7 +256,7 @@ class OperatorInputsLoader:
         ), f"Could not find {operator}, must provide overload"
 
         if "embedding" in str(operator):
-            logging.warn("Embedding inputs NYI, input data cannot be randomized")
+            logging.warning("Embedding inputs NYI, input data cannot be randomized")
             yield
             return
 

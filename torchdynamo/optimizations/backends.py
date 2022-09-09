@@ -5,7 +5,6 @@ import logging
 import os
 import subprocess
 import tempfile
-import warnings
 
 import numpy as np
 import torch
@@ -296,7 +295,7 @@ def ipex(subgraph, **kwargs):
             traced_model = torch.jit.freeze(traced_model)
             return traced_model
         except Exception:
-            warnings.warn("JIT trace failed during the 'ipex' optimize process.")
+            log.warning("JIT trace failed during the 'ipex' optimize process.")
             return model
 
 

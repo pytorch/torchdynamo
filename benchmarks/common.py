@@ -1051,7 +1051,7 @@ class BenchmarkRunner:
                 batch_size=batch_size,
             )
         except NotImplementedError:
-            logging.warn(f"{model_name} failed to load")
+            logging.warning(f"{model_name} failed to load")
 
         assert (
             device == "cuda"
@@ -1855,7 +1855,7 @@ def main(runner, original_dir=None):
                     batch_size=batch_size,
                 )
             except NotImplementedError:
-                logging.warn(f"{args.only} failed to load")
+                logging.warning(f"{args.only} failed to load")
                 continue  # bad benchmark implementation
 
             current_name = name

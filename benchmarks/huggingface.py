@@ -160,7 +160,7 @@ def get_sequence_length(model_cls, model_name):
     ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert", "CamemBert"):
         seq_length = 512
     else:
-        logging.warn(
+        logging.warning(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
         )
         seq_length = 128
@@ -363,7 +363,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
-            logging.warn(
+            logging.warning(
                 "Batch size not specified for {model_name}. Setting batch_size=16"
             )
 
@@ -371,12 +371,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             batch_size = batch_size_default
             if model_name in USE_SMALL_BATCH_SIZE:
                 batch_size = USE_SMALL_BATCH_SIZE[model_name]
-                logging.warn(
+                logging.warning(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
             elif USE_HALF_BATCH_SIZE and batch_size >= 2:
                 batch_size = int(batch_size / 2)
-                logging.warn(
+                logging.warning(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
 
@@ -526,7 +526,7 @@ def refresh_model_names_and_batch_sizes():
                 + [f"--output={MODELS_FILENAME}"]
             )
         except subprocess.SubprocessError:
-            logging.warn(f"Failed to find suitable batch size for {model_name}")
+            logging.warning(f"Failed to find suitable batch size for {model_name}")
 
 
 if __name__ == "__main__":

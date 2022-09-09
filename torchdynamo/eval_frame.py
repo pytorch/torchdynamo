@@ -103,7 +103,7 @@ class _TorchDynamoContext:
         patch_fn()
 
     def __enter__(self):
-        logging.warn(
+        log.warning(
             (
                 "Using TorchDynamo with a context manager will be deprecated soon."
                 "Please read https://github.com/pytorch/torchdynamo#usage-example "
@@ -233,8 +233,7 @@ def catch_errors_wrapper(callback):
             with compile_lock:
                 return callback(frame, cache_size)
         except Exception:
-            logging.basicConfig()
-            logging.exception("Error while processing frame")
+            log.exception("Error while processing frame")
             raise
 
     catch_errors._torchdynamo_orig_callable = callback
