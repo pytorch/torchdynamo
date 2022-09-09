@@ -11,10 +11,10 @@ import torch
 from common import BenchmarkRunner
 from common import main
 
-log = logging.getLogger(__name__)
-
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
+
+log = logging.getLogger(__name__)
 
 
 def pip_install(package):
