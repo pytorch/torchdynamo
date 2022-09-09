@@ -16,6 +16,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_map
 
+log = logging.getLogger(__name__)
+
 OP_INP_DIRECTORY = os.path.join(os.path.dirname(__file__), "operator_inp_logs")
 
 TIMM_DIR = os.path.join(OP_INP_DIRECTORY, "timm_train")
@@ -256,7 +258,7 @@ class OperatorInputsLoader:
         ), f"Could not find {operator}, must provide overload"
 
         if "embedding" in str(operator):
-            logging.warn("Embedding inputs NYI, input data cannot be randomized")
+            log.warning("Embedding inputs NYI, input data cannot be randomized")
             yield
             return
 
