@@ -56,6 +56,7 @@ output_filename = None
 
 CI_SKIP_INFERENCE = [
     # TorchBench
+    "detectron2",
     "dlrm",
     "fambench_dlrm",
     "fastNLP_Bert",
@@ -105,13 +106,14 @@ CI_SKIP_TRAINING = [
     "hf_GPT2",
     "mobilenet_",
     "pytorch_struct",
+    "timm_regnet",
     "vgg16",
     "Background_Matting",  # from functionalization
-    "mobilenet_v2_quantized_qat",  # from functionalization
-    "resnet50_quantized_qat",  # from functionalization
     "speech_transformer",  # from functionalization
     "vision_maskrcnn",  # from functionalization
     "timm_efficientnet",  # from functionalization (only fails for inductor)
+    # OOM
+    "resnet50_quantized_qat",
     # Huggingface
     "AlbertForMaskedLM",
     "BartForConditionalGeneration",

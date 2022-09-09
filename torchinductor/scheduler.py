@@ -164,6 +164,9 @@ class BaseSchedulerNode:
     def is_template(self):
         return False
 
+    def is_extern(self):
+        return False
+
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
 
@@ -184,6 +187,9 @@ class BaseSchedulerNode:
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self):
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
+
+    def is_extern(self):
+        return True
 
 
 class TemplateSchedulerNode(BaseSchedulerNode):
@@ -977,18 +983,18 @@ class Scheduler:
 
     def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
-        self.flush()
         scheduler_node.allocate()
         node = scheduler_node.node
         node.codegen(V.graph.wrapper_code)
+        self.free_buffers()
 
     def codegen_template_call(
         self, scheduler_node: Union[FusedSchedulerNode, TemplateSchedulerNode]
     ):
-        self.flush()
         node, *epilogue = scheduler_node.get_nodes()
         node.allocate()
         template_codegen(self, node, epilogue)
+        self.free_buffers()
 
     def create_backend(self, device: torch.device):
         assert (
@@ -1013,22 +1019,27 @@ class Scheduler:
     def codegen(self):
         for node in self.nodes:
             self.buffer_names_no_longer_needed.update(node.last_usage)
+
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if device != self.current_device:
+                if (
+                    device != self.current_device
+                    or node.is_extern()
+                    or node.is_template()
+                ):
                     self.flush()
                     self.current_device = device
 
+            self.buffer_names_to_free.update(node.last_usage)
+
             if node.is_template():
                 self.codegen_template_call(node)
-                self.free_buffers()
+            elif node.is_extern():
+                self.codegen_extern_call(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
-            elif isinstance(node, ExternKernelSchedulerNode):
-                self.codegen_extern_call(node)
-                self.free_buffers()
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
-            self.buffer_names_to_free.update(node.last_usage)
+
         self.flush()
