@@ -701,7 +701,7 @@ class Scheduler:
         def visit(n):
             if n not in seen:
                 seen.add(n)
-                for dep in n.unmet_dependencies:
+                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
                     visit(name_to_node[dep.name])
                 result.append(n)
 

@@ -25,7 +25,7 @@ inplace_buffers = False
 benchmark_harness = True
 
 # control store vs recompute heuristic
-realize_reads_threshold = 4
+realize_reads_threshold = 5
 realize_bytes_threshold = 2000
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
@@ -72,9 +72,6 @@ class triton:
 
     # Use cudagraphs on output code
     cudagraphs = True
-
-    # Monkey patching to lower overheads
-    hackery = False
 
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"

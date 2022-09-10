@@ -300,6 +300,7 @@ class Loops(IRNode):
             for n, s in enumerate(ranges)
         ]
 
+    @cache_on_self
     def inner_fn_str(self):
         try:
             with V.set_ops_handler(V.MockHandler()), patch.object(
@@ -408,6 +409,7 @@ class Reduction(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
 
+    @cache_on_self
     def inner_fn_str(self):
         try:
             with V.set_ops_handler(V.MockHandler()), patch.object(
@@ -3180,22 +3182,25 @@ class StorageBox(MutableBox):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if self.num_reads() > 1:
+        if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
 
     def mark_reuse(self, users):
-        if users <= 1:
-            return
-        if isinstance(self.data, (Pointwise, Reduction)):
-            num_reads = self.num_reads()
-
-            # TODO(jansel): this heuristic is a wild guess
-            if (
-                num_reads > config.realize_reads_threshold
+        """
+        A heuristic to decide if we should realize a tensor
+        that is used multiple times.
+        """
+        if (
+            users > 1
+            and isinstance(self.data, (Pointwise, Reduction))
+            and (
+                self.num_reads() > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
-            ):
-                self.realize()
+            )
+        ):
+            self.realize()
 
+    @cache_on_self
     def num_reads(self):
         data = self.data
         if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
