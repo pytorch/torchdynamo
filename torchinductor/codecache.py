@@ -4,7 +4,6 @@ import getpass
 import hashlib
 import logging
 import os
-import random
 import re
 import subprocess
 import sysconfig
