@@ -25,6 +25,7 @@ commands:
               source .circleci/setup_env.sh
               conda install -y -c conda-forge git-lfs
               git lfs install --skip-repo --skip-smudge
+              rm -rf torchbenchmark
               git clone --recursive git@github.com:pytorch/benchmark.git torchbenchmark
               cd torchbenchmark
               # Pin to specific version to avoid upstream breakages
