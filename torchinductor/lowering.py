@@ -3013,3 +3013,7 @@ def sym_stride(a, dim):
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
+
+@register_lowering(operator.floordiv)
+def op_mul(a, b):
+    return ir.IndexingDiv(a, b)

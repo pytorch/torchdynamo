@@ -71,11 +71,11 @@ class NNModuleToString:
             module_str = f"{module.__repr__()}"
             model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
-        for buffer_name, buffer in gm._buffers.items():
-            if buffer is None:
-                continue
-            tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+        # for buffer_name, buffer in gm._buffers.items():
+        #     if buffer is None:
+        #         continue
+        #     tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+        #     model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
 
         for param_name, param in gm._parameters.items():
             if param is None:
@@ -313,6 +313,10 @@ def wrap_compiler_debug(compiler, compiler_name: str):
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "aot":
+            if config.repro_level == 3:
+                dump_to_minify(
+                    fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                )
             try:
                 compiled_fn = compiler(gm, example_inputs, **kwargs)
                 compiled_fn(*example_inputs)

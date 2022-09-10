@@ -76,7 +76,7 @@ decompositions = get_decompositions(
         aten.nll_loss_forward,
         aten.norm,
         aten.reflection_pad2d_backward,
-        aten._reshape_alias,
+        # aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
         aten.sigmoid_backward,
