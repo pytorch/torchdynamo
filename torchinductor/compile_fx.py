@@ -202,7 +202,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             fw_compiler=make_boxed_compiler(fw_compiler),
             bw_compiler=make_boxed_compiler(bw_compiler),
             decompositions=select_decomp_table(),
-            partition_fn=functools.partial(
-                min_cut_rematerialization_partition, compiler="inductor"
-            ),
+            # partition_fn=functools.partial(
+            #     min_cut_rematerialization_partition, compiler="inductor"
+            # ),
         )

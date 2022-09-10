@@ -257,9 +257,9 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-@register_decomposition([aten.index_put])
-def index_put(self, indices, values, accumulate=False):
-    return aten.index_put_(self.clone(), indices, values, accumulate)
+# @register_decomposition([aten.index_put])
+# def index_put(self, indices, values, accumulate=False):
+#     return aten.index_put_(self.clone(), indices, values, accumulate)
 
 
 @register_decomposition([aten.scatter])
