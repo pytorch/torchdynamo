@@ -1133,11 +1133,9 @@ class TritonScheduling:
     def reduction_hint(node):
         assert node.is_reduction()
         if all(
-                dep.is_contiguous()
-                for dep in itertools.chain(
-                    node.read_writes.reads, node.read_writes.writes
-                )
-            ):
+            dep.is_contiguous()
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
+        ):
             return ReductionHint.INNER
         else:
             return node.node.data.reduction_hint
@@ -1160,9 +1158,7 @@ class TritonScheduling:
                 reduction_hint_val = ReductionHint.DEFAULT
         else:
             reduction_hint_val = ReductionHint.DEFAULT
-        with TritonKernel(
-            *tiled_groups, reduction_hint=reduction_hint_val
-        ) as kernel:
+        with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node is DisableReduction:

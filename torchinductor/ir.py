@@ -433,7 +433,7 @@ class Reduction(Loops):
             self.reduction_ranges,
             self.reduction_type,
             self.src_dtype,
-            ReductionHint.DEFAULT
+            ReductionHint.DEFAULT,
         )
 
     @staticmethod
@@ -529,7 +529,9 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         # easy cases
         if numel_hint == 1:
-            return ReductionHint.INNER, inner_reduction_splits(reduction_numel_hint, numel_hint)
+            return ReductionHint.INNER, inner_reduction_splits(
+                reduction_numel_hint, numel_hint
+            )
         if (
             reduction_numel_hint <= min_elements_per_thread
             or numel_hint >= num_sm * 2 * 32
@@ -544,7 +546,7 @@ class Reduction(Loops):
             reduction_ranges,
             reduction_type,
             src_dtype,
-            ReductionHint.DEFAULT
+            ReductionHint.DEFAULT,
         )
         read_writes = ComputedBuffer(
             name=None,
@@ -578,9 +580,13 @@ class Reduction(Loops):
         strides = V.graph.sizevars.stride_hints(index, reduction_vars)
         outer = all([s > 1 for s in strides])
         if not outer:
-            return ReductionHint.INNER, inner_reduction_splits(reduction_numel_hint, numel_hint)
+            return ReductionHint.INNER, inner_reduction_splits(
+                reduction_numel_hint, numel_hint
+            )
         else:  # outer reduction
-            return ReductionHint.OUTER, outer_reduction_splits(reduction_numel_hint, numel_hint)
+            return ReductionHint.OUTER, outer_reduction_splits(
+                reduction_numel_hint, numel_hint
+            )
 
     @staticmethod
     def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
@@ -667,7 +673,7 @@ class Reduction(Loops):
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
-        reduction_hint: ReductionHint=ReductionHint.DEFAULT
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
         if reduction_numel == 1:
@@ -715,7 +721,7 @@ class Reduction(Loops):
                     reduction_ranges,
                     reduction_type,
                     split,
-                    reduction_hint
+                    reduction_hint,
                 )
 
         return TensorBox.create(
@@ -727,7 +733,7 @@ class Reduction(Loops):
                 reduction_ranges,
                 reduction_type,
                 src_dtype,
-                reduction_hint
+                reduction_hint,
             )
         )
 
@@ -753,7 +759,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
         split: int,
-        reduction_hint: ReductionHint
+        reduction_hint: ReductionHint,
     ):
         """
         Break a large reduction up into multiple smaller reductions
@@ -816,15 +822,16 @@ class Reduction(Loops):
             [*ranges, split],
             [block_size],
             reduction_type,
-            reduction_hint
+            reduction_hint,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
 
         def intermediate_fn(index, reduction_index):
             return intermediate_loader([*index, *reduction_index])
+
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-        if split <= 512 and numel_hint <= 512 and reduction_hint==ReductionHint.OUTER:
+        if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
             reduction_hint = ReductionHint.OUTER_TINY
         return TensorBox.create(
             Reduction(
@@ -835,7 +842,7 @@ class Reduction(Loops):
                 [split],
                 reduction_type,
                 src_dtype,
-                reduction_hint
+                reduction_hint,
             )
         )
 

@@ -327,7 +327,7 @@ def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
         elif reduction_hint == ReductionHint.OUTER:
             return apply_triton_config(outer_config)
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return apply_triton_config(size_hints, 2 * (256//rnumel), rnumel)
+            return apply_triton_config(size_hints, 2 * (256 // rnumel), rnumel)
         if not config.triton.autotune:
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
         return cached_autotune(
