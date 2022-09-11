@@ -302,10 +302,33 @@ def make_cell(val=None):
     return f.__closure__[0]
 
 
-def proxy_args_kwargs(args, kwargs):
+def proxy_args_kwargs(tx, args, kwargs, unify_devices=False):
+    from .variables.base import VariableTracker
+    from .variables.tensor import TensorVariable
+
+    def get_proxy(x):
+        if (
+            unify_devices
+            and isinstance(x, TensorVariable)
+            and (not x.device or x.device.type == "cpu")
+            and torch.cuda.is_available()
+        ):
+            new_proxy = tx.output.create_proxy(
+                "call_method",
+                "to",
+                (x.as_proxy(), torch.device("cuda", index=torch.cuda.current_device())),
+                {},
+                current_tx=tx,
+            )
+            options = VariableTracker.propagate(x)
+            new_var = x.__class__.create(tx, new_proxy, **options)
+            return new_var.as_proxy()
+        else:
+            return x.as_proxy()
+
     try:
-        proxy_args = tuple(arg.as_proxy() for arg in args)
-        proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        proxy_args = tuple(get_proxy(arg) for arg in args)
+        proxy_kwargs = {key: get_proxy(arg) for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError:
         from .exc import unimplemented

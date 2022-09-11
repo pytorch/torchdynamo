@@ -476,7 +476,7 @@ class GetAttrVariable(VariableTracker):
                         proxy=tx.output.create_proxy(
                             "call_function",
                             original_torch_or_getattr_variable.value,
-                            *proxy_args_kwargs(new_args, new_kwargs),
+                            *proxy_args_kwargs(tx, new_args, new_kwargs),
                             current_tx=tx,
                         ),
                         **options,
@@ -487,7 +487,7 @@ class GetAttrVariable(VariableTracker):
                         proxy=tx.output.create_proxy(
                             "call_method",
                             original_torch_or_getattr_variable.name,
-                            *proxy_args_kwargs(new_args, new_kwargs),
+                            *proxy_args_kwargs(tx, new_args, new_kwargs),
                             current_tx=tx,
                         ),
                         **options,

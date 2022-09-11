@@ -194,6 +194,20 @@ class UnspecTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_tensor_unspec_on_multiple_devices(self):
+        # https://github.com/pytorch/torchdynamo/issues/1176
+        def fn(x, y):
+            z = (x + 1) / y
+            return z
+
+        x = torch.randn(3, device="cuda")
+        y = np.int64(198)
+        ref = fn(x, y)
+        opt_fn = torchdynamo.optimize("inductor")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
     def test_unspec_float_precision(self):
         def fn(image, scale_factor):
             image = torch.nn.functional.interpolate(

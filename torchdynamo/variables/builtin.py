@@ -273,7 +273,10 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
+                    "call_function",
+                    fn,
+                    *proxy_args_kwargs(tx, args, kwargs, True),
+                    current_tx=tx,
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
                     return variables.FakeItemVariable.create(
@@ -313,7 +316,7 @@ class BuiltinVariable(VariableTracker):
                     if self.fn is operator.truediv and isinstance(
                         args[0], variables.UnspecializedPythonVariable
                     ):
-                        args[0] = args[0].convert_to_constant(tx)
+                        args[0] = args[0].as_specialized(tx)
                     return variables.TensorVariable.create(tx, proxy, **options)
 
             except NotImplementedError:

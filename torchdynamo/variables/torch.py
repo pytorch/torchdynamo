@@ -219,7 +219,7 @@ class TorchVariable(VariableTracker):
                 proxy=tx.output.create_proxy(
                     "call_function",
                     self.value,
-                    *proxy_args_kwargs(args, kwargs),
+                    *proxy_args_kwargs(tx, args, kwargs),
                     current_tx=tx,
                 ),
                 **options,
@@ -289,7 +289,7 @@ class TorchVariable(VariableTracker):
                 proxy=tx.output.create_proxy(
                     "call_function",
                     torch.nn.functional.softmax,
-                    *proxy_args_kwargs([input, dim], {}),
+                    *proxy_args_kwargs(tx, [input, dim], {}),
                     current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
@@ -342,6 +342,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.cross_entropy,
                     *proxy_args_kwargs(
+                        tx,
                         [
                             input,
                             target,
