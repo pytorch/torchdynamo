@@ -322,12 +322,15 @@ def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
             size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
+        tiny_config = triton_config_reduction(
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+        )
         if reduction_hint == ReductionHint.INNER:
             return apply_triton_config(contiguous_config)
         elif reduction_hint == ReductionHint.OUTER:
             return apply_triton_config(outer_config)
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return apply_triton_config(size_hints, 2 * (256 // rnumel), rnumel)
+            return apply_triton_config(tiny_config)
         if not config.triton.autotune:
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
         return cached_autotune(

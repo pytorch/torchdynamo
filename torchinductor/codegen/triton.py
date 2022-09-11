@@ -1150,10 +1150,9 @@ class TritonScheduling:
             )
         )
         if len(reductions) > 0:
-            if all(self.reduction_hint(n) == ReductionHint.INNER for n in reductions):
-                reduction_hint_val = ReductionHint.INNER
-            elif all(self.reduction_hint(n) == ReductionHint.OUTER for n in reductions):
-                reduction_hint_val = ReductionHint.OUTER
+            hints = [self.reduction_hint(n) for n in reductions]
+            if hints.count(hints[0]) == len(hints):
+                reduction_hint_val = hints[0]
             else:
                 reduction_hint_val = ReductionHint.DEFAULT
         else:
