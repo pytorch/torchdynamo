@@ -529,12 +529,12 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         # easy cases
         if numel_hint == 1:
-            return False, inner_reduction_splits(reduction_numel_hint, numel_hint)
+            return ReductionHint.INNER, inner_reduction_splits(reduction_numel_hint, numel_hint)
         if (
             reduction_numel_hint <= min_elements_per_thread
             or numel_hint >= num_sm * 2 * 32
         ):
-            return False, 1
+            return ReductionHint.DEFAULT, 1
 
         r = Reduction(
             device,
@@ -571,16 +571,16 @@ class Reduction(Loops):
                 break
         if not index:
             # TODO determine splits when all inputs are broadcasted
-            return False, 1
+            return ReductionHint.DEFAULT, 1
         reduction_vars = [
             rv for rv in range_vars if read_writes.var_ranges[rv] in reduction_ranges
         ]
         strides = V.graph.sizevars.stride_hints(index, reduction_vars)
         outer = all([s > 1 for s in strides])
         if not outer:
-            return False, inner_reduction_splits(reduction_numel_hint, numel_hint)
+            return ReductionHint.INNER, inner_reduction_splits(reduction_numel_hint, numel_hint)
         else:  # outer reduction
-            return True, outer_reduction_splits(reduction_numel_hint, numel_hint)
+            return ReductionHint.OUTER, outer_reduction_splits(reduction_numel_hint, numel_hint)
 
     @staticmethod
     def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
@@ -693,7 +693,7 @@ class Reduction(Loops):
 
         if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
             # triton doesn't support reduce to single element well, so break it up
-            outer, split = cls.num_splits(
+            hint, split = cls.num_splits(
                 device,
                 dst_dtype,
                 src_dtype,
@@ -703,7 +703,7 @@ class Reduction(Loops):
                 reduction_type,
                 reduction_numel,
             )
-            reduction_hint = ReductionHint.OUTER if outer else reduction_hint
+            reduction_hint = hint if hint != ReductionHint.DEFAULT else reduction_hint
             if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
@@ -823,7 +823,9 @@ class Reduction(Loops):
 
         def intermediate_fn(index, reduction_index):
             return intermediate_loader([*index, *reduction_index])
-
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        if split <= 512 and numel_hint <= 512 and reduction_hint==ReductionHint.OUTER:
+            reduction_hint = ReductionHint.OUTER_TINY
         return TensorBox.create(
             Reduction(
                 device,
