@@ -16,6 +16,7 @@ import torchinductor
 
 from .. import config
 from .. import ir
+from ..triton_ops.autotune import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
 from ..utils import sympy_product
@@ -28,7 +29,6 @@ from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
 from .common import index_prevent_reordering
-from ..triton_ops.autotune import ReductionHint
 
 log = logging.getLogger(__name__)
 

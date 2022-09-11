@@ -30,13 +30,13 @@ from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
+from .triton_ops.autotune import ReductionHint
 from .utils import cache_on_self
 from .utils import sympy_dot
 from .utils import sympy_product
 from .utils import sympy_subs
 from .virtualized import V
 from .virtualized import ops
-from .triton_ops.autotune import ReductionHint
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
