@@ -11,7 +11,7 @@ from transformers import AutoTokenizer
 
 import torchdynamo
 
-# torchdynamo.config.fake_tensor_propagation = False
+torchdynamo.config.fake_tensor_propagation = False
 
 # You will download around 84G dataset if you run this end to end training/evaluation example.
 
