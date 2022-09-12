@@ -52,9 +52,7 @@ def patch_all(ok=True):
 N_ITERS = 5
 
 
-# These were failing because of pytorch changes related to renaming "fake_result" key to "val"
-# and should be removed when that change is complete (together with skips below)
-@unittest.expectedFailure
+@unittest.skip("requires https://github.com/pytorch/pytorch/pull/84432/")
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
 class TestAotCudagraphs(torchdynamo.testing.TestCase):
     @patch_all()
@@ -105,7 +103,6 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
         y = torch.randn((), device="cpu")
         fn(x, y)
 
-    @unittest.skip("Skipping until fake_result -> val change is complete")
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all(ok=False)  # input mutation not supported yet
     def test_mutate_input(self):
@@ -162,7 +159,6 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
         y = torch.randn(3, device="cuda:0", requires_grad=True)
         fn(y)
 
-    @unittest.skip("Skipping until fake_result -> val change is complete")
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all()
     def test_mutated_metadata(self):

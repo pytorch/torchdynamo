@@ -1181,7 +1181,11 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             )
         assert mask
         mask = functools.reduce(ops.and_, mask)
-        src_val = ops.masked(mask, lambda: src_loader(src_idx), 0.0)
+        src_val = ops.masked(
+            mask,
+            lambda: src_loader(src_idx),
+            0 if is_integer_type(x) else 0.0,
+        )
         return ops.where(
             mask,
             src_val,
