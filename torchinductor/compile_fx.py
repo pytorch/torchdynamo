@@ -69,10 +69,13 @@ def compile_fx_inner(
     # TODO(voz): Add a config driven option to install a segfault handler for the sake of reporting.
     run_cudagraphs = safe_cudagraphs or config.force_cudagraphs
     if config.force_cudagraphs and not safe_cudagraphs:
-        log.warning("Cudagraph failure heuristics bypassed, may segfault.")
-    if cudagraphs and run_cudagraphs:
+        log.warning(
+            "Cudagraph failure heuristics bypassed, may segfault or not perform input mutation."
+        )
+    use_cudagraphs = cudagraphs and run_cudagraphs
+    if use_cudagraphs:
         try:
-            cudagraph_fn = cudagraphify(
+            compiled_fn = cudagraphify(
                 compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
             )
         except Exception as e:
@@ -81,8 +84,7 @@ def compile_fx_inner(
             else:
                 raise e
 
-        compiled_fn = cudagraph_fn
-    elif cudagraphs:
+    elif use_cudagraphs:
         BoxedBool.disable(cudagraphs)
 
         if len(set(graph.device_types)) > 1:
