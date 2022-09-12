@@ -18,6 +18,7 @@ from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
+from .config import init_logging
 from .eval_frame import TorchPatcher
 from .eval_frame import WrapperBackend
 from .eval_frame import always_optimize_code_objects
@@ -36,7 +37,6 @@ from .utils import dynamo_timed
 from .utils import filter_stack
 from .utils import format_bytecode
 from .utils import guard_failures
-from .utils import init_logging
 from .utils import is_namedtuple
 from .utils import istype
 from .utils import orig_code_map

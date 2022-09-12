@@ -20,9 +20,9 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
 import torchinductor
+from torchdynamo.config import init_logging
 from torchdynamo.debug_utils import save_graph_repro
 from torchdynamo.debug_utils import wrap_compiler_debug
-from torchdynamo.utils import init_logging
 
 from . import config
 from . import ir

@@ -28,8 +28,6 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-import torchdynamo.config
-
 from . import config
 
 counters = collections.defaultdict(collections.Counter)
@@ -114,49 +112,6 @@ def compile_times(repr="str", aggregate=False):
         ]
         headers = list(compilation_metrics.keys())
         return headers, values
-
-
-LOGGING_CONFIG = {
-    "version": 1,
-    "formatters": {
-        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
-    },
-    "handlers": {
-        "torchdynamo_console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stdout",
-        },
-    },
-    "loggers": {
-        "torchdynamo": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torchinductor": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-    },
-    "disable_existing_loggers": False,
-}
-
-
-def init_logging():
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        logging.config.dictConfig(LOGGING_CONFIG)
-        td_logger = logging.getLogger("torchdynamo")
-        td_logger.setLevel(config.log_level)
-        ti_logger = logging.getLogger("torchinductor")
-        ti_logger.setLevel(config.log_level)
-        if config.log_file_name is not None:
-            log_file = logging.FileHandler(config.log_file_name)
-            log_file.setLevel(config.log_level)
-            td_logger.addHandler(log_file)
-            ti_logger.addHandler(log_file)
 
 
 # filter out all frames after entering dynamo
@@ -779,14 +734,14 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = torchdynamo.config.cache_size_limit
-    torchdynamo.config.cache_size_limit = sys.maxsize
+    prior = config.cache_size_limit
+    config.cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         pass
-        torchdynamo.config.cache_size_limit = prior
+        config.cache_size_limit = prior
 
 
 # map from transformed code back to original user code

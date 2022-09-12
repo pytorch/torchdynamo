@@ -1,7 +1,6 @@
 import contextlib
 import dis
 import functools
-import logging
 import os.path
 import types
 import unittest
@@ -194,7 +193,6 @@ class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._exit_stack = contextlib.ExitStack()
-        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls._exit_stack.enter_context(
             patch.object(config, "raise_on_backend_error", True)
         )
