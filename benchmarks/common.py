@@ -66,6 +66,7 @@ CI_SKIP_INFERENCE = [
     "Super_SloMo",
     "tacotron2",
     "yolov3",
+    "DALLE2_pytorch",
     # Huggingface
     "AlbertForQuestionAnswering",
     "AllenaiLongformerBase",
