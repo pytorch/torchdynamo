@@ -68,10 +68,8 @@ class OptimizerTests(torchdynamo.testing.TestCase):
     #    torch.optim.LBFGS, exp_frame_cnt=3, closure=lambda: model(input).sum()
     # )
     # RAdam has data-dependent control which breaks the graph
-    # NB: in python versions < 3.8, we don't capture graphs when
-    # breaks occur in a loop
     test_radam = make_test(
-        torch.optim.RAdam, exp_frame_cnt=(0 if sys.version_info < (3, 8) else 1)
+        torch.optim.RAdam, exp_frame_cnt=1
     )
 
     # ASGD has a small optimization that avoids averaging
