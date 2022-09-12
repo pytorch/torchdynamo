@@ -157,37 +157,16 @@ class TensorVariable(VariableTracker):
                                 size=(), dtype=args[0].dtype
                             ).item()
                         else:
-                            unimplemented("data dependent operator")
+                            unimplemented(f"data dependent operator: {e.func}")
                     elif use_fake_tensors and isinstance(
                         e, DynamicOutputShapeException
                     ):
-                        unimplemented("dynamic shape operator")
+                        unimplemented(f"dynamic shape operator: {e.func}")
                     else:
                         raise TorchRuntimeError() from e
             else:
                 if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
-
-        # Avoids a .item() call in the tensor slice that would attempt to get a value out
-        # fake tensors, and which would determine the output shape of the slice.
-        # It is a workaround until https://github.com/pytorch/pytorch/pull/83567
-        # is landed and there is more complete support for breaking on data dependent operators.
-
-        if (
-            proxy.node.target == operator.getitem
-            and use_fake_tensors
-            and args is not None
-            and not config.dynamic_shapes
-        ):
-            if (
-                isinstance(args[0], FakeTensor)
-                and isinstance(args[1], slice)
-                and any(
-                    isinstance(e, FakeTensor)
-                    for e in (args[1].start, args[1].stop, args[1].step)
-                )
-            ):
-                unimplemented("dynamic shape slicing")
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
