@@ -7,6 +7,7 @@ from torch.fx.graph import inplace_methods
 from torch.fx.graph import magic_methods
 
 import torchdynamo
+from torchinductor.utils import sympy_str
 
 threadlocal = local()
 
@@ -47,10 +48,16 @@ class NullHandler:
     pass
 
 
+def _arg_str(a):
+    if isinstance(a, sympy.Expr):
+        return sympy_str(a)
+    return str(a)
+
+
 class MockHandler:
     def __getattr__(self, name):
         def inner(*args, **kwargs):
-            fargs = list(map(str, args))
+            fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
             return f"{name}({', '.join(fargs)})"
 

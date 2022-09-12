@@ -813,6 +813,16 @@ def _foobar(_):
     assert False
 
 
+@functools.lru_cache(1)
+def _warn_triton_random(salt):
+    log.warning("using triton random, expect difference from eager")
+
+
+def warn_triton_random():
+    # only warn once per graph
+    _warn_triton_random(V.graph.creation_time)
+
+
 def make_rand(fn_name):
     def rand_or_randn(
         *size,
@@ -822,7 +832,7 @@ def make_rand(fn_name):
         pin_memory=False,
         memory_format=None,
     ):
-        log.warning("using triton random, expect difference from eager")
+        warn_triton_random()
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
@@ -888,7 +898,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    log.warning("using triton random, expect difference from eager")
+    warn_triton_random()
     return V.graph.random_seed_buffer(x.get_device())
 
 
