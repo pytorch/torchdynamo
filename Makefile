@@ -9,7 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220826
+PYTORCH_VERSION ?= dev20220911
 TRITON_VERSION ?= 5b04331dd2efdd23f4475823761fa975de60a514
 
 
@@ -19,7 +19,7 @@ develop:
 	python setup.py develop
 
 test: develop
-	pytest test
+	pytest test -o log_cli=False
 
 torchbench: develop
 	python benchmarks/torchbench.py --fast

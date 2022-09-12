@@ -448,8 +448,11 @@ def squeeze(x, dim=None):
     dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
     removed = new_shape.pop(dim)
-    assert removed == 1, removed
-    return view(x, new_shape)
+    if V.graph.sizevars.maybe_guard_equals(removed, 1):
+        return view(x, new_shape)
+
+    # squeeze does nothing if the size isn't 1
+    return x
 
 
 @register_lowering([aten.squeeze_])
@@ -810,6 +813,16 @@ def _foobar(_):
     assert False
 
 
+@functools.lru_cache(1)
+def _warn_triton_random(salt):
+    log.warning("using triton random, expect difference from eager")
+
+
+def warn_triton_random():
+    # only warn once per graph
+    _warn_triton_random(V.graph.creation_time)
+
+
 def make_rand(fn_name):
     def rand_or_randn(
         *size,
@@ -819,7 +832,7 @@ def make_rand(fn_name):
         pin_memory=False,
         memory_format=None,
     ):
-        log.warning("using triton random, expect difference from eager")
+        warn_triton_random()
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
@@ -885,7 +898,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    log.warning("using triton random, expect difference from eager")
+    warn_triton_random()
     return V.graph.random_seed_buffer(x.get_device())
 
 
@@ -1179,7 +1192,11 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             )
         assert mask
         mask = functools.reduce(ops.and_, mask)
-        src_val = ops.masked(mask, lambda: src_loader(src_idx), 0.0)
+        src_val = ops.masked(
+            mask,
+            lambda: src_loader(src_idx),
+            0 if is_integer_type(x) else 0.0,
+        )
         return ops.where(
             mask,
             src_val,

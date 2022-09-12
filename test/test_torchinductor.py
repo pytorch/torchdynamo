@@ -3104,6 +3104,38 @@ class CommonTemplate:
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
+    def test_invalid_operand_issue1(self):
+        def forward(arg0_1, arg1_1, arg3_1, squeeze, view_1, slice_1):
+            slice_scatter = torch.ops.aten.slice_scatter.default(
+                slice_1, arg3_1, 1, 1, 9223372036854775807
+            )
+            slice_scatter_1 = torch.ops.aten.slice_scatter.default(
+                arg1_1, slice_scatter, 0, 0, 9223372036854775807
+            )
+            slice_2 = torch.ops.aten.slice.Tensor(
+                slice_scatter_1, 0, 0, 9223372036854775807
+            )
+            select_scatter = torch.ops.aten.select_scatter.default(
+                slice_2, squeeze, 1, 0
+            )
+            slice_scatter_2 = torch.ops.aten.slice_scatter.default(
+                slice_scatter_1, select_scatter, 0, 0, 9223372036854775807
+            )
+            view = torch.ops.aten.view.default(slice_scatter_2, [-1, 128])
+            embedding = torch.ops.aten.embedding.default(arg0_1, view, 1)
+            return [embedding, view_1]
+
+        args = [
+            ((50005, 768), (768, 1), torch.float32),
+            ((8, 128), (128, 1), torch.int64),
+            ((8, 127), (127, 1), torch.int64),
+            ((8,), (1,), torch.int64),
+            ((1024,), (1,), torch.int64),
+            ((8, 128), (128, 1), torch.int64),
+        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
+
     @patch.object(torchinductor.config.triton, "cudagraphs", False)
     def test_symbolic(self):
         def f(x):
@@ -3161,6 +3193,14 @@ if HAS_CPU:
             fn(x2, y)
             fn_compiled(x3, y)
             assert same(x2, x3)
+
+        def test_no_op_squeeze(self):
+            @torchdynamo.optimize("inductor")
+            def forward(arg0_1):
+                return torch.ops.aten.squeeze.dim(arg0_1, 1)
+
+            x = torch.randn((10, 20))
+            assert same(x, forward(x))
 
 
 if HAS_CUDA:

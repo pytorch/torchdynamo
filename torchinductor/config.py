@@ -82,9 +82,6 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = True
 
-    # Monkey patching to lower overheads
-    hackery = False
-
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 
@@ -109,6 +106,8 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+    # should we give different names to kernels
+    ordered_kernel_names = False
 
 
 # create a directory containing lots of debug information

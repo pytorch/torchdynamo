@@ -182,6 +182,8 @@ class SizeVarAllocator(object):
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
+        if left == right:
+            return True
         if self.size_hint(left - right) == 0:
             self.guard_equals(left, right)
             return True

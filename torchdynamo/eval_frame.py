@@ -103,7 +103,7 @@ class _TorchDynamoContext:
         patch_fn()
 
     def __enter__(self):
-        logging.warn(
+        log.warning(
             (
                 "Using TorchDynamo with a context manager will be deprecated soon."
                 "Please read https://github.com/pytorch/torchdynamo#usage-example "
@@ -233,8 +233,7 @@ def catch_errors_wrapper(callback):
             with compile_lock:
                 return callback(frame, cache_size)
         except Exception:
-            logging.basicConfig()
-            logging.exception("Error while processing frame")
+            log.exception("Error while processing frame")
             raise
 
     catch_errors._torchdynamo_orig_callable = callback
@@ -518,7 +517,12 @@ def export(f, *args, aten_graph=False, **kwargs):
             return super().output(target, (new_result,), {})
 
     if aten_graph:
-        graph = make_fx(graph)(*graph_captured_input)
+        # Running graph with interpreter is needed for propagating the stack_trace
+        def graph_with_interpreter(*args):
+            with torch.fx.traceback.override_stack_trace():
+                return torch.fx.Interpreter(graph).run(*args)
+
+        graph = make_fx(graph_with_interpreter)(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,
