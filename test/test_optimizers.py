@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 
 import inspect
-import sys
 import unittest
 
 import torch
