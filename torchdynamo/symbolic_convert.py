@@ -463,7 +463,7 @@ class InstructionTranslatorBase(object):
         spec = self.f_globals.get("__spec__")
         if package is not None:
             if spec is not None and package != spec.parent:
-                log.warn(
+                log.warning(
                     "__package__ != __spec__.parent "
                     f"({package!r} != {spec.parent!r})",
                     ImportWarning,
@@ -473,7 +473,7 @@ class InstructionTranslatorBase(object):
         elif spec is not None:
             return spec.parent
         else:
-            log.warn(
+            log.warning(
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
                 ImportWarning,

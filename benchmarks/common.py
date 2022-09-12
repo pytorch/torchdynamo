@@ -66,6 +66,7 @@ CI_SKIP_INFERENCE = [
     "Super_SloMo",
     "tacotron2",
     "yolov3",
+    "DALLE2_pytorch",
     # Huggingface
     "AlbertForQuestionAnswering",
     "AllenaiLongformerBase",
@@ -95,6 +96,7 @@ CI_SKIP_INFERENCE = [
     "swin_base_patch4_window7_224",
     "visformer_small",
     "volo_d1_224",
+    "tnt_s_patch16_224",
 ]
 
 CI_SKIP_TRAINING = [
@@ -795,7 +797,7 @@ def read_batch_size_from_file(args, filename, model_name):
             if model_name == cur_name:
                 batch_size = int(b)
     if batch_size is None:
-        warnings.warn("Could not find batch size for {}".format(model_name))
+        log.warning("Could not find batch size for {}".format(model_name))
     elif batch_size == -1:
         raise RuntimeError(
             f"Batch size is unset for {model_name} in {args.batch_size_file}"
@@ -1053,7 +1055,7 @@ class BenchmarkRunner:
                 batch_size=batch_size,
             )
         except NotImplementedError:
-            logging.warn(f"{model_name} failed to load")
+            log.warning(f"{model_name} failed to load")
 
         assert (
             device == "cuda"
@@ -1235,7 +1237,7 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(model_iter_fn)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
-                logging.exception("unhandled error")
+                log.exception("unhandled error")
                 print("ERROR")
                 print(e)
                 return sys.exit(-1)
@@ -1857,7 +1859,7 @@ def main(runner, original_dir=None):
                     batch_size=batch_size,
                 )
             except NotImplementedError:
-                logging.warn(f"{args.only} failed to load")
+                log.warning(f"{args.only} failed to load")
                 continue  # bad benchmark implementation
 
             current_name = name

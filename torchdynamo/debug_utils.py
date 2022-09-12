@@ -16,6 +16,8 @@ import torchdynamo
 from torchdynamo import config
 from torchdynamo.utils import clone_inputs
 
+log = logging.getLogger(__name__)
+
 
 def minifier_dir():
     return f"/tmp/minifier_{getpass.getuser()}"
@@ -46,7 +48,7 @@ class NNModuleToString:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            logging.warn(
+            log.warning(
                 f"Was not able to save the following children modules as reprs {cant_convert}"
             )
             return False
@@ -526,7 +528,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
             except Exception as exc:
                 orig_failure = str(exc)
-                logging.warn(
+                log.warning(
                     f"Compiled Fx GraphModule failed with {orig_failure}. Starting minifier."
                 )
                 dump_state_fn = functools.partial(

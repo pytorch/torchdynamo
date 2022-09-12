@@ -73,9 +73,6 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = True
 
-    # Monkey patching to lower overheads
-    hackery = False
-
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 

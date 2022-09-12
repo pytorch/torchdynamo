@@ -16,7 +16,7 @@ commands:
       - run:
           name: Install TorchBenchmark
           command: |
-            FILE=torchbenchmark/env-v6.key
+            FILE=torchbenchmark/env-v7.key
             if test -f "$FILE"; then
               # If torchbenchmark is updated, we need to invalidate the cache by bumping up the key version number,
               # but this won't happen very often because we also update cache daily.
@@ -25,9 +25,15 @@ commands:
               source .circleci/setup_env.sh
               conda install -y -c conda-forge git-lfs
               git lfs install --skip-repo --skip-smudge
-              git clone --recursive --depth=1 --shallow-submodules git@github.com:pytorch/benchmark.git torchbenchmark
-              (cd torchbenchmark && python install.py && touch env-v6.key)
+              rm -rf torchbenchmark
+              git clone --recursive git@github.com:pytorch/benchmark.git torchbenchmark
+              cd torchbenchmark
+              # Pin to specific version to avoid upstream breakages
+              git checkout 24b95f2f627bf07a61cefed653419389a7586357
+              python install.py
               pip install gym==0.25.2  # workaround issue in 0.26.0
+              touch env-v7.key
+              cd ..
             fi
       - run:
           name: Install HuggingFace
