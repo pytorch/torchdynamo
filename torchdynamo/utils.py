@@ -306,12 +306,25 @@ def proxy_args_kwargs(tx, args, kwargs, unify_devices=False):
     from .variables.base import VariableTracker
     from .variables.tensor import TensorVariable
 
+    on_multiple_devices = False
+    if unify_devices:
+        tensor_arg_list = [
+            x
+            for x in itertools.chain(args, kwargs.values())
+            if isinstance(x, TensorVariable)
+        ]
+        on_multiple_devices = (
+            len(
+                set(["cpu" if not x.device else x.device.type for x in tensor_arg_list])
+            )
+            > 1
+        )
+
     def get_proxy(x):
         if (
-            unify_devices
+            on_multiple_devices
             and isinstance(x, TensorVariable)
             and (not x.device or x.device.type == "cpu")
-            and torch.cuda.is_available()
         ):
             new_proxy = tx.output.create_proxy(
                 "call_method",
