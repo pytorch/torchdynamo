@@ -6,6 +6,7 @@ import logging
 import re
 import textwrap
 from collections import OrderedDict
+from enum import Enum
 from functools import partial
 from typing import Any
 from typing import Callable
@@ -30,7 +31,6 @@ from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
-from .triton_ops.autotune import ReductionHint
 from .utils import cache_on_self
 from .utils import sympy_dot
 from .utils import sympy_product
@@ -375,6 +375,13 @@ class Scatter(Pointwise):
             self.inner_fn(vars),
             mode=self.scatter_mode,
         )
+
+
+class ReductionHint(Enum):
+    INNER = 0
+    OUTER = 1
+    OUTER_TINY = 2
+    DEFAULT = 3
 
 
 @dataclasses.dataclass
