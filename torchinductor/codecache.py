@@ -4,10 +4,10 @@ import getpass
 import hashlib
 import logging
 import os
-import random
 import re
 import subprocess
 import sysconfig
+import tempfile
 import types
 from ctypes import cdll
 
@@ -39,10 +39,10 @@ def write(source_code, ext, extra=""):
         os.makedirs(subdir, exist_ok=True)
     path = os.path.join(subdir, f"{basename}.{ext}")
     if not os.path.exists(path):
-        # use a random temp file for thread safety
-        tmp_path = f"{path}.{random.randint(0, 2**31)}"
-        with open(tmp_path, "w") as fd:
-            fd.write(source_code)
+        # use a temp file for thread safety
+        fd, tmp_path = tempfile.mkstemp(dir=subdir)
+        with os.fdopen(fd, "w") as f:
+            f.write(source_code)
         os.rename(tmp_path, path)
     return basename, path
 
