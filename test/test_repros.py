@@ -1061,6 +1061,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             return
 
         opt_model = torchdynamo.optimize_assert(cnt)(model)
+        self.assertTrue(same(opt_model(a), correct))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
