@@ -27,8 +27,7 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-from . import config
-from . import exc
+import torchdynamo
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -230,7 +229,7 @@ def istensor(obj):
     tensor_list = (
         torch.Tensor,
         torch.nn.Parameter,
-        *config.traceable_tensor_subclasses,
+        *torchdynamo.config.traceable_tensor_subclasses,
     )
     if fake_tensors_available:
         tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
@@ -581,7 +580,7 @@ try:
         try:
             return fn()
         except UnsupportedFakeTensorException as e:
-            raise exc.FakeTensorError(
+            raise torchdynamo.exc.FakeTensorError(
                 f"Unsupported: {e.reason} with fake tensor propagation. "
                 "Run with config.fake_tensor_propagation=False"
             ) from e
@@ -734,14 +733,14 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = config.cache_size_limit
-    config.cache_size_limit = sys.maxsize
+    prior = torchdynamo.config.cache_size_limit
+    torchdynamo.config.cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         pass
-        config.cache_size_limit = prior
+        torchdynamo.config.cache_size_limit = prior
 
 
 # map from transformed code back to original user code
