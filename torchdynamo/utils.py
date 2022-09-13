@@ -11,7 +11,6 @@ import itertools
 import logging.config
 import math
 import operator
-import os
 import pstats
 import re
 import sys
@@ -29,6 +28,7 @@ from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
 from . import config
+from . import exc
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -581,7 +581,7 @@ try:
         try:
             return fn()
         except UnsupportedFakeTensorException as e:
-            raise torchdynamo.exc.FakeTensorError(
+            raise exc.FakeTensorError(
                 f"Unsupported: {e.reason} with fake tensor propagation. "
                 "Run with config.fake_tensor_propagation=False"
             ) from e

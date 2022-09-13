@@ -22,14 +22,20 @@ except ImportError:
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
 log_level = logging.WARNING
+
+
 def _get_loggers():
     return [
         logging.getLogger("torchdynamo"),
         logging.getLogger("torchinductor"),
     ]
+
+
 def _set_loggers_level(level):
     for logger in _get_loggers():
         logger.setLevel(level)
+
+
 _set_loggers_level(log_level)
 
 # the name of a file to write the logs to
