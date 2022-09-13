@@ -1609,6 +1609,26 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_disallow_in_graph_torch_ops(self):
+        cnts = torchdynamo.testing.CompileCounter()
+
+        @torchdynamo.optimize(cnts)
+        def fn(a):
+            x = torch.ops.aten.add(a, 1)
+            x = torch.ops.aten.add(x, 1)
+            x = torch.ops.aten.sub(x, 1)
+            x = torch.ops.aten.add(x, 1)
+            x = torch.ops.aten.add(x, 1)
+            return x
+
+        torchdynamo.disallow_in_graph(torch.ops.aten.sub)
+        fn(torch.randn(10))
+        torchdynamo.allow_in_graph(torch.ops.aten.sub)
+
+        # check for graph break on sub
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
     def test_allow_in_graph(self):
         cnts = torchdynamo.testing.CompileCounter()
 

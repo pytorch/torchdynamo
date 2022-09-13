@@ -205,10 +205,14 @@ def is_allowed(obj):
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
-    return id(obj) in _allowed_function_ids or isinstance(
+    explicitly_allowed = id(obj) in _allowed_function_ids
+    implicitly_allowed = isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
     )
+    explicitly_disallowed = id(obj) in _disallowed_function_ids
+
+    return explicitly_allowed or (implicitly_allowed and not explicitly_disallowed)
 
 
 def torch_get_name(obj, default):
