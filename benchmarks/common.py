@@ -115,6 +115,8 @@ CI_SKIP_TRAINING = [
     "speech_transformer",  # from functionalization
     "vision_maskrcnn",  # from functionalization
     "timm_efficientnet",  # from functionalization (only fails for inductor)
+    "hf_Bert",
+    "soft_actor_critic",
     # OOM
     "resnet50_quantized_qat",
     # Huggingface
