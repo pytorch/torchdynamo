@@ -1,11 +1,15 @@
 import collections
+import contextlib
 import functools
 import operator
+import os
+import tempfile
 import time
 from importlib import import_module
 from typing import Any
 from typing import Dict
 from typing import List
+from unittest import mock
 
 import numpy as np
 import sympy
@@ -234,3 +238,27 @@ def has_incompatible_cudagraph_ops(gm):
 instance_descriptor = collections.namedtuple(
     "instance_descriptor", ["divisible_by_16", "equal_to_1"]
 )
+
+
+class TritonCacheMinder:
+    """
+    Contextmanager used in benchmarking, which provides a clean triton cache dir
+    and also audits the files that were created during a run.
+    """
+    def __init__(self):
+        self.cache_entries = {}
+
+    @contextlib.contextmanager
+    def fresh_cache(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": tmpdirname}):
+                yield
+                cache_dir = os.path.join(tmpdirname, "cache")
+                files = os.listdir(cache_dir)
+                self.cache_entries = {
+                    f: os.path.getsize(os.path.join(cache_dir, f))
+                    for f in files if ".lock" not in f
+                }
+
+    def get_cache_entries(self):
+        return self.cache_entries

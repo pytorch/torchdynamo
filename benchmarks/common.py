@@ -17,6 +17,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import torch
+from torchinductor.utils import TritonCacheMinder
 from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
@@ -449,24 +450,26 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         else:
             yield
 
-    with maybe_profile(enabled=args.export_profiler_trace) as p:
-        frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
-        for rep in range(args.repeat):
-            inputs = (
-                randomize_input(copy.deepcopy(example_inputs))
-                if should_randomize_input
-                else example_inputs
-            )
+    with TritonCacheMinder() as triton_cache_minder:
+        with maybe_profile(enabled=args.export_profiler_trace) as p:
+            frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
+            for rep in range(args.repeat):
+                inputs = (
+                    randomize_input(copy.deepcopy(example_inputs))
+                    if should_randomize_input
+                    else example_inputs
+                )
 
-            # interleave the runs to handle frequency scaling and load changes
-            timings[rep, 0], expected_output = timed(
-                model, model_iter_fn, inputs, return_result=True
-            )
-            timings[rep, 1], actual_output = timed(
-                model, frozen_model_iter_fn, inputs, return_result=True
-            )
-            if should_check_result:
-                is_correct = is_correct and same(expected_output, actual_output)
+                # interleave the runs to handle frequency scaling and load changes
+                timings[rep, 0], expected_output = timed(
+                    model, model_iter_fn, inputs, return_result=True
+                )
+                timings[rep, 1], actual_output = timed(
+                    model, frozen_model_iter_fn, inputs, return_result=True
+                )
+                if should_check_result:
+                    is_correct = is_correct and same(expected_output, actual_output)
+    triton_cache = triton_cache_minder.get_cache_entries()
     if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torchdynamo.config.base_dir, name)
@@ -500,6 +503,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         output_filename[:-4] + "_compilation_metrics.csv",
         ["dev", "name", "batch_size"] + headers,
         [current_device, current_name, current_batch_size] + data,
+    )
+    output_csv(
+        output_filename[:-4] + "_triton_cache.csv",
+        ["dev", "name", "batch_size", "triton_cache"],
+        [current_device, current_name, current_batch_size, triton_cache],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
