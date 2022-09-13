@@ -474,7 +474,9 @@ def export(f, *args, aten_graph=False, **kwargs):
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize_assert(
-            dynamo_normalization_capturing_compiler, guard_export_fn=guard_export_print
+            dynamo_normalization_capturing_compiler,
+            guard_export_fn=guard_export_print,
+            export=True,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -531,7 +533,7 @@ def export(f, *args, aten_graph=False, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, *, guard_export_fn=None):
+def optimize_assert(backend, *, guard_export_fn=None, export=False):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
@@ -541,7 +543,8 @@ def optimize_assert(backend, *, guard_export_fn=None):
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
+        backend_ctx_ctor,
     )
 
 

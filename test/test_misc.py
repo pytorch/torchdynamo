@@ -2280,6 +2280,30 @@ class MiscTests(torchdynamo.testing.TestCase):
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_cond_export_single_arg(self):
+        from functorch.experimental.cond import cond
+
+        def true_fn(x):
+            return x
+
+        def false_fn(x):
+            return x.sin()
+
+        def f(pred, x):
+            return cond(pred, true_fn, false_fn, [x])
+
+        graph, guard = torchdynamo.export(
+            f, torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
+        true_mirror = graph(torch.tensor(True), torch.tensor([0.25, 0.25]))
+        self.assertTrue(same(torch.tensor([0.25, 0.25]), true_mirror))
+        true_mirror_2 = graph(torch.tensor(True), torch.tensor([0.33, 0.33, 0.33]))
+        self.assertTrue(same(torch.tensor([0.33, 0.33, 0.33]), true_mirror_2))
+
+        false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
+        self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
+
     def test_disable_optimize(self):
         cnt = torchdynamo.testing.CompileCounter()
 
