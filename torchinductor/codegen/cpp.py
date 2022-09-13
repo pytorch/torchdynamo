@@ -609,7 +609,9 @@ class KernelGroup:
         codecache_def.writeline("''').kernel")
 
         kernel_name = wrapper.next_kernel_name()
-        wrapper.define_kernel(kernel_name, codecache_def.getvalue())
+        codecache_str = codecache_def.getvalue()
+        codecache_str.replace("#pragma CMT", "//")
+        wrapper.define_kernel(kernel_name, codecache_str)
 
         # generate the code to call this
         wrapper.writeline(

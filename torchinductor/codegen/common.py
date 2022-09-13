@@ -202,7 +202,7 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(self):
+    def getvalue(self,):
         buf = StringIO()
         for line in self._lines:
             if isinstance(line, DeferredLine):
@@ -494,6 +494,7 @@ class CSE:
             var = self.newvar()
             self.cache[expr] = var
             if write:
+                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 

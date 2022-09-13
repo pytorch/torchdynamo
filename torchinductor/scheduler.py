@@ -69,6 +69,7 @@ class BaseSchedulerNode:
         self.min_order: Optional[int] = None
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
+        self.written = False
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -182,6 +183,25 @@ class BaseSchedulerNode:
             if isinstance(use.node, OutputNode):
                 return False
         return True
+
+    def codegen_originating_info(self, buffer, only_once=True):
+        if not config.comment_origin:
+            return 
+            
+        if only_once and self.written:
+            return
+        origins = self.node.origins 
+        origin = []
+
+        for o in origins:
+            origin.append({str(o) : (str((o.op, o.target, o.meta)))})
+        
+        origin_str = str(origin)
+        origin_str = origin_str.replace("{", "{{").replace("}", "}}")
+        buffer.writeline(f"#pragma CMT {self} : {origin_str}")
+        self.written = True
+        
+
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
