@@ -35,6 +35,9 @@ log = logging.getLogger(__name__)
 
 
 def pformat(obj):
+    if isinstance(obj, set):
+        # pformat has trouble with sets of sympy exprs
+        obj = sorted(obj, key=str)
     result = pprint.pformat(obj, indent=4)
     if "\n" in result:
         return f"\n{textwrap.indent(result, ' '*4)}"
