@@ -117,7 +117,10 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            self.output.compile_subgraph(self, msg="generic_jump")
+            user_stack = self.format_frame_summary()
+            self.output.compile_subgraph(
+                self, msg=f"generic_jump {typestr(value)}\n{user_stack}"
+            )
             self.pop()
 
             if_next = self.create_call_resume_at(self.next_instruction)
@@ -155,12 +158,7 @@ def break_graph_if_unsupported(*, push):
             except Unsupported as exc:
                 if not self.should_compile_partial_graph():
                     raise
-                user_stack = "".join(
-                    traceback.format_list(
-                        [([self.frame_summary()] + list(reversed(exc.real_stack)))[-1]]
-                    )
-                ).strip()
-
+                user_stack = self.format_frame_summary(exc.real_stack)
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if not explain:
@@ -168,7 +166,7 @@ def break_graph_if_unsupported(*, push):
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
-                msg = exc.msg
+                msg = f"exc.msg\n{user_stack}"
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, msg=msg)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
@@ -779,7 +777,8 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(prior)
 
         # break the graph
-        self.output.compile_subgraph(self, "store_attr")
+        user_stack = self.format_frame_summary()
+        self.output.compile_subgraph(self, f"store_attr\n{user_stack}")
         self.output.add_output_instructions([inst])
         self.popn(2)
         self.output.add_output_instructions(
@@ -1200,6 +1199,15 @@ class InstructionTranslatorBase(object):
                 if len(obj) != 0:
                     return False
         return True
+
+    def format_frame_summary(self, additional_stack_frames=None):
+        if additional_stack_frames is None:
+            additional_stack_frames = []
+        return "".join(
+            traceback.format_list(
+                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+            )
+        )
 
     def frame_summary(self):
         return traceback.FrameSummary(
