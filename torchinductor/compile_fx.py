@@ -40,6 +40,25 @@ class BoxedBool:
         return False
 
 
+# copy_ fails when trying to write to tensors with memory overlap,
+# for expanded dimensions (a dimension which used to have size 1 -> ?)
+# we can select one element from that dimension and write to it
+# to achieve writing to all values of that dimension of the input tensor
+def get_expanded_dims(t):
+    return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
+
+
+def index_expanded_dims(t, expanded_dims):
+    for expanded_dim in expanded_dims:
+        t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
+    return t
+
+
+def complex_memory_overlap(t):
+    indexed_tensor = index_expanded_dims(t, get_expanded_dims(t))
+    return torch._debug_has_internal_overlap(indexed_tensor) != 0
+
+
 @DebugContext.wrap
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -60,11 +79,16 @@ def compile_fx_inner(
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
+    complex_memory_overlap_inputs = any(
+        complex_memory_overlap(t) for t in example_inputs
+    )
+
     if (
         cudagraphs
         and set(graph.device_types) == {"cuda"}
         and not graph.mutated_inputs
         and not has_incompatible_cudagraph_ops(gm)
+        and not complex_memory_overlap_inputs
     ):
         compiled_fn = cudagraphify(
             compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
@@ -76,6 +100,8 @@ def compile_fx_inner(
             log.warning("skipping cudagraphs due to multiple devices")
         elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
+        elif complex_memory_overlap_inputs:
+            log.warning("skipping cudagraphs due to complex input striding")
 
     return compiled_fn
 
@@ -104,6 +130,11 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         for idx, x in enumerate(inputs)
     ]
 
+    inps_expanded_dims = [
+        get_expanded_dims(x) if idx not in static_input_idxs else []
+        for idx, x in enumerate(inputs)
+    ]
+
     # warmup
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
@@ -125,10 +156,17 @@ def cudagraphify(model, inputs, static_input_idxs=()):
 
         def run(*new_inputs):
             assert len(static_inputs) == len(new_inputs)
-            for idx, (dst, src) in enumerate(zip(static_inputs, new_inputs)):
+            for idx, (dst, src, expanded_dims) in enumerate(
+                zip(static_inputs, new_inputs, inps_expanded_dims)
+            ):
                 if idx in static_input_idxs:
                     assert dst.data_ptr() == src.data_ptr()
                 else:
+                    # TODO - could make one single op of multiple slices
+                    # and avoid dispatch.
+                    # Could also pre-index the `dst` tensors
+                    dst = index_expanded_dims(dst, expanded_dims)
+                    src = index_expanded_dims(src, expanded_dims)
                     dst.copy_(src)
             graph.replay()
             return static_outputs
@@ -140,7 +178,9 @@ def cudagraphify(model, inputs, static_input_idxs=()):
 
         def run(*new_inputs):
             for idx in copy_indices:
-                static_inputs[idx].copy_(new_inputs[idx])
+                src = index_expanded_dims(static_inputs[idx], inps_expanded_dims[idx])
+                dst = index_expanded_dims(new_inputs[idx], inps_expanded_dims[idx])
+                dst.copy_(src)
             graph.replay()
             return static_outputs
 
