@@ -162,8 +162,9 @@ def cudagraphify(model, inputs, static_input_idxs=()):
                 if idx in static_input_idxs:
                     assert dst.data_ptr() == src.data_ptr()
                 else:
-                    # TODO - could make one single op here, avoid dispatch
-                    # Could also pre-index the `dstt tensors
+                    # TODO - could make one single op of multiple slices
+                    # and avoid dispatch.
+                    # Could also pre-index the `dst` tensors
                     dst = index_expanded_dims(dst, expanded_dims)
                     src = index_expanded_dims(src, expanded_dims)
                     dst.copy_(src)
