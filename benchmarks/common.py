@@ -109,6 +109,7 @@ CI_SKIP_TRAINING = [
     "pytorch_struct",
     "timm_regnet",
     "vgg16",
+    "drq",
     "Background_Matting",  # from functionalization
     "speech_transformer",  # from functionalization
     "vision_maskrcnn",  # from functionalization
@@ -132,6 +133,7 @@ CI_SKIP_TRAINING = [
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
     # TIMM
+    "dpn107",
     "coat_lite_mini",
     "convnext_base",
     "deit_base_distilled_patch16_224",
