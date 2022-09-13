@@ -2171,13 +2171,13 @@ def max_pool2d_with_indices_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2234,6 +2234,7 @@ def max_pool2d_with_indices_backward(
                         check,
                     )
                     gradient = ops.where(mask, ops.add(gradient, grad_part), gradient)
+        assert gradient is not None
         return gradient
 
     return Pointwise.create(

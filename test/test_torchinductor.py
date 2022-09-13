@@ -2807,6 +2807,31 @@ class CommonTemplate:
             ],
         )
 
+    # From https://github.com/pytorch/torchdynamo/issues/1200
+    def test_max_pool2d_with_indices_backward3(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [1, 1], [2, 2], [0, 0], [1, 1], False, c
+            )
+
+        x = torch.randn([32, 256, 37, 38])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [1, 1],
+            [2, 2],
+            0,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
