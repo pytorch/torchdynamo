@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import sys
 
@@ -32,16 +33,10 @@ def data_processing(num_samples, batch_size):
     tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
     tokenized_datasets.set_format("torch")
 
-    small_train_dataset = (
-        tokenized_datasets["train"].shuffle(seed=42).select(range(num_samples))
-    )
-    small_eval_dataset = (
-        tokenized_datasets["test"].shuffle(seed=42).select(range(num_samples))
-    )
+    small_train_dataset = tokenized_datasets["train"].select(range(num_samples))
+    small_eval_dataset = tokenized_datasets["test"].select(range(num_samples))
 
-    train_dataloader = DataLoader(
-        small_train_dataset, shuffle=True, batch_size=batch_size
-    )
+    train_dataloader = DataLoader(small_train_dataset, batch_size=batch_size)
     eval_dataloader = DataLoader(small_eval_dataset, batch_size=batch_size)
 
     return train_dataloader, eval_dataloader
@@ -62,8 +57,12 @@ def model_training_evaluation(
     model.to(device)
     model.train()
     loss_history = []
-    # Support backends: eager, aot_nop and aot_nvfuser
-    opt_training_iter_fn = torchdynamo.optimize(backend)(training_iter_fn)
+    if not backend:
+        # Run with native Pytorch
+        opt_training_iter_fn = training_iter_fn
+    else:
+        # Support backends: eager, aot_nop and aot_nvfuser
+        opt_training_iter_fn = torchdynamo.optimize(backend)(training_iter_fn)
     for epoch in range(num_epochs):
         running_loss = 0.0
         for i, batch in enumerate(train_dataloader, 0):
@@ -76,7 +75,10 @@ def model_training_evaluation(
 
     metric = load_metric("accuracy")
     model.eval()
-    opt_model = torchdynamo.optimize(backend)(model)
+    if not backend:
+        opt_model = model
+    else:
+        opt_model = torchdynamo.optimize(backend)(model)
     for batch in eval_dataloader:
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
@@ -86,8 +88,19 @@ def model_training_evaluation(
         predictions = torch.argmax(logits, dim=-1)
         metric.add_batch(predictions=predictions, references=batch["labels"])
 
-    print("Loss history : " + str(loss_history))
-    print("Accuracy : " + str(metric.compute()))
+    return loss_history, metric.compute()
+
+
+def check_loss(ref_loss, res_loss):
+    assert len(ref_loss) == len(res_loss)
+    length = len(ref_loss)
+    for i in range(math.ceil(length / 10)):
+        end = i + 10 if i + 10 <= length else length
+        x = sum(ref_loss[i:end]) / 10
+        y = sum(res_loss[i:end]) / 10
+        if not math.isclose(x, y, rel_tol=1e-1):
+            return False
+    return True
 
 
 def parse_args():
@@ -100,8 +113,8 @@ def parse_args():
     parser.add_argument(
         "--num-samples",
         type=int,
-        default=10000,
-        help="number of samples to train/eval (default: 10000)",
+        default=1000,
+        help="number of samples to train/eval (default: 1000)",
     )
     parser.add_argument(
         "--batch-size",
@@ -110,7 +123,7 @@ def parse_args():
         help="input batch size for training (default: 8)",
     )
     parser.add_argument(
-        "--lr", type=float, default=1.0, help="learning rate (default: 1.0)"
+        "--lr", type=float, default=5e-5, help="learning rate (default: 5e-5)"
     )
     parser.add_argument(
         "--backend",
@@ -127,7 +140,7 @@ def parse_args():
     return args
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     train_dataloader, eval_dataloader = data_processing(
         args.num_samples, args.batch_size
@@ -137,6 +150,19 @@ if __name__ == "__main__":
     )
     optimizer_cls = getattr(sys.modules["torch.optim"], args.optimizer)
     optimizer = optimizer_cls(model.parameters(), lr=args.lr)
-    model_training_evaluation(
+    ref_loss, _ = model_training_evaluation(
+        None, train_dataloader, eval_dataloader, model, optimizer, args.epochs
+    )
+    res_loss, _ = model_training_evaluation(
         args.backend, train_dataloader, eval_dataloader, model, optimizer, args.epochs
     )
+    if check_loss(ref_loss, res_loss):
+        print("[PASSED] TorchDynamo end to end training passed!")
+    else:
+        print(
+            "[FAILED] TorchDynamo end to end training failed due to loss not close to native Pytorch"
+        )
+
+
+if __name__ == "__main__":
+    main()
