@@ -37,8 +37,7 @@ try:
     assert get_decompositions([torch.ops.aten.trace])
     # Requires functorch
     from torchinductor.compile_fx import compile_fx_inner
-except (ImportError, ModuleNotFoundError, AssertionError) as e:
-    print(e)
+except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires sympy/functorch")
 
 
