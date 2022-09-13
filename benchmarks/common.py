@@ -89,7 +89,7 @@ CI_SKIP_INFERENCE = [
     # TIMM
     # Some of these happen intermittently on CI, not locally
     "cait_m36_384",
-    "convit_base"
+    "convit_base",
     "dla102",
     "ghostnet_100",
     "hrnet_w18",
