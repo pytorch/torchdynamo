@@ -1,4 +1,5 @@
 # TODO: remove this config entirely
+import functorch.compile
 
 from . import allowed_functions
 from . import convert_frame
@@ -15,6 +16,9 @@ from .eval_frame import skip
 from .utils import compilation_metrics
 from .utils import guard_failures
 from .utils import orig_code_map
+
+functorch.compile.config.use_fake_tensor = True
+
 
 __all__ = [
     "optimize",

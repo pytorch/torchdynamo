@@ -7,11 +7,14 @@ import functorch
 import torch.fx
 from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._mode_utils import no_dispatch
 
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.utils import dynamo_timed
 from torchdynamo.utils import identity
+from torchdynamo.utils import preserve_rng_state
 
 from . import config
 from . import overrides
@@ -60,6 +63,7 @@ def complex_memory_overlap(t):
 
 
 @DebugContext.wrap
+@no_dispatch()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -108,6 +112,24 @@ def compile_fx_inner(
 
 @dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
+    # if using fake tensors, defer cudagraphs until we get real inputs at runtime
+    if not any(isinstance(inp, FakeTensor) for inp in inputs):
+        return cudagraphify_impl(model, inputs, static_input_idxs)
+
+    compiled_fn = None
+
+    def run(*new_inputs):
+        nonlocal compiled_fn
+        if compiled_fn is None:
+            with preserve_rng_state():
+                compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
+
+        return compiled_fn(*new_inputs)
+
+    return run
+
+
+def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """

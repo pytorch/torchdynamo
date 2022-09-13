@@ -768,11 +768,12 @@ def fallback_handler(kernel):
     return handler
 
 
+# https://github.com/pytorch/torchdynamo/issues/1215 to remove native_batch_norm
 def make_fallback(kernel):
     assert (
-        kernel not in decompositions
+        kernel not in decompositions or kernel is aten.native_batch_norm.default
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.native_batch_norm.default:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
