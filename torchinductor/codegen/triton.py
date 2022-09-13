@@ -16,6 +16,7 @@ import torchinductor
 
 from .. import config
 from .. import ir
+from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
 from ..utils import sympy_product
@@ -443,7 +444,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}, is_inner_reduction=False):
+    def __init__(self, *groups, pid_cache={}, reduction_hint=ReductionHint.DEFAULT):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -456,7 +457,7 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
-        self.is_inner_reduction = is_inner_reduction
+        self.reduction_hint = reduction_hint
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -902,7 +903,7 @@ class TritonKernel(Kernel):
         ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
-            hint_import = "from torchinductor.triton_ops.autotune import ReductionHint"
+            hint_import = "from torchinductor.ir import ReductionHint"
         else:
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]
@@ -919,11 +920,7 @@ class TritonKernel(Kernel):
             )
 
         if self.inside_reduction:
-            reduction_hint = (
-                "ReductionHint.INNER"
-                if self.is_inner_reduction
-                else "ReductionHint.DEFAULT"
-            )
+            reduction_hint = self.reduction_hint
             heuristics_line = f"""
                 @{heuristics}(size_hints={size_hints!r}, reduction_hint={reduction_hint}, filename=__file__)
                 @triton.jit
@@ -1133,18 +1130,15 @@ class TritonScheduling:
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
-    def is_inner_reduction(node):
-        if node in (EnableReduction, DisableReduction):
-            return True
-        if node.is_reduction():
-            return all(
-                dep.is_contiguous()
-                for dep in itertools.chain(
-                    node.read_writes.reads, node.read_writes.writes
-                )
-            )
+    def reduction_hint(node):
+        assert node.is_reduction()
+        if all(
+            dep.is_contiguous()
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
+        ):
+            return ReductionHint.INNER
         else:
-            return False
+            return node.node.data.reduction_hint
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
@@ -1155,14 +1149,15 @@ class TritonScheduling:
                 node_schedule,
             )
         )
-        is_inner_reduction = (
-            all(map(self.is_inner_reduction, reductions))
-            if len(reductions) > 0
-            else False
-        )
-        with TritonKernel(
-            *tiled_groups, is_inner_reduction=is_inner_reduction
-        ) as kernel:
+        if len(reductions) > 0:
+            hints = [self.reduction_hint(n) for n in reductions]
+            if hints.count(hints[0]) == len(hints):
+                reduction_hint_val = hints[0]
+            else:
+                reduction_hint_val = ReductionHint.DEFAULT
+        else:
+            reduction_hint_val = ReductionHint.DEFAULT
+        with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node is DisableReduction:
