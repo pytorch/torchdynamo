@@ -89,6 +89,7 @@ CI_SKIP_INFERENCE = [
     # TIMM
     # Some of these happen intermittently on CI, not locally
     "cait_m36_384",
+    "convit_base",
     "dla102",
     "ghostnet_100",
     "hrnet_w18",
@@ -132,6 +133,7 @@ CI_SKIP_TRAINING = [
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
     # TIMM
+    "convit_base",
     "coat_lite_mini",
     "convnext_base",
     "deit_base_distilled_patch16_224",

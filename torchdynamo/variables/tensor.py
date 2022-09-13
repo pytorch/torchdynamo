@@ -18,6 +18,9 @@ if fake_tensors_available:
     from torch._subclasses import FakeTensor
     from ..utils import wrap_to_fake_tensor
     from ..utils import deepcopy_to_fake_tensor
+    from torch._subclasses.fake_tensor import DataDependentOutputException
+    from torch._subclasses.fake_tensor import DynamicOutputShapeException
+
 
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
@@ -145,7 +148,22 @@ class TensorVariable(VariableTracker):
                             lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
                         )
                 except RuntimeError as e:
-                    raise TorchRuntimeError() from e
+                    if use_fake_tensors and isinstance(e, DataDependentOutputException):
+                        if (
+                            config.capture_scalar_outputs
+                            and proxy.node.target == "item"
+                        ):
+                            example_value = torch.zeros(
+                                size=(), dtype=args[0].dtype
+                            ).item()
+                        else:
+                            unimplemented(f"data dependent operator: {e.func}")
+                    elif use_fake_tensors and isinstance(
+                        e, DynamicOutputShapeException
+                    ):
+                        unimplemented(f"dynamic shape operator: {e.func}")
+                    else:
+                        raise TorchRuntimeError() from e
             else:
                 if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
