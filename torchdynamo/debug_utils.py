@@ -344,13 +344,54 @@ def run_fwd_maybe_bwd(gm, args):
     from torchdynamo.testing import reduce_to_scalar_loss
     from torchdynamo.testing import requires_bwd_pass
 
+    gm = copy.deepcopy(gm)
+    args = clone_inputs(args)
+    gm.zero_grad(True)
     out = gm(*args)
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-        return collect_results(gm, out, loss, args)
+        return collect_results(gm, out, loss, [])
     else:
         return out
+
+
+def same_two_models(gm, opt_gm, example_inputs):
+    """
+    Check two models have same accuracy.
+    """
+    from torchdynamo.utils import same
+
+    ref = run_fwd_maybe_bwd(gm, example_inputs)
+
+    fp64_model, fp64_examples = cast_to_fp64(
+        copy.deepcopy(gm), clone_inputs(example_inputs)
+    )
+    fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples)
+
+    res = run_fwd_maybe_bwd(opt_gm, example_inputs)
+
+    passing = same(ref, res, fp64_ref, tol=0.001)
+    return passing
+
+
+def cast_to(dtype, model, inputs):
+    from torch.utils._pytree import tree_map
+
+    # cast model and inputs to fp16
+    model = model.to(dtype)
+
+    inputs = tree_map(
+        lambda x: x.to(dtype)
+        if isinstance(x, torch.Tensor) and x.is_floating_point()
+        else x,
+        inputs,
+    )
+    return model, inputs
+
+
+def cast_to_fp64(model, inputs):
+    return cast_to(torch.float64, model, inputs)
 
 
 def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
