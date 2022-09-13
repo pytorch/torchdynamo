@@ -2531,13 +2531,13 @@ def avg_pool2d_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2618,15 +2618,15 @@ def avg_pool2d_backward(
                     scale,
                 )
 
+                mask = ops.and_(
+                    ops.lt(ph, phend),
+                    ops.lt(pw, pwend),
+                )
                 if gradient is None:
-                    # don't need mask for 0, 0
-                    gradient = part
+                    gradient = ops.where(mask, part, ops.constant(0.0, torch.float32))
                 else:
-                    mask = ops.and_(
-                        ops.lt(ph, phend),
-                        ops.lt(pw, pwend),
-                    )
                     gradient = ops.where(mask, ops.add(gradient, part), gradient)
+        assert gradient is not None
         return gradient
 
     rv = Pointwise.create(

@@ -2874,6 +2874,27 @@ class CommonTemplate:
             ],
         )
 
+    def test_avg_pool2d_backward3(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [1, 1],
+                [2, 2],
+                [0, 0],
+                False,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2016, 11, 11]),
+                torch.randn([1, 2016, 21, 21]),
+            ],
+        )
+
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
