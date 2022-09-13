@@ -166,7 +166,7 @@ def break_graph_if_unsupported(*, push):
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
-                msg = f"exc.msg\n{user_stack}"
+                msg = f"{exc.msg}\n{user_stack}"
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, msg=msg)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
