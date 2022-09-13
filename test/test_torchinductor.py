@@ -3284,8 +3284,8 @@ if HAS_CUDA:
                 return x + y
 
             inputs = (
-                rand_strided((1, 5, 1, 5), (0, 5, 0, 1), device="cuda"),
-                rand_strided((1, 5, 1, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
@@ -3297,7 +3297,7 @@ if HAS_CUDA:
                 return x + y
 
             inputs = (
-                rand_strided((1, 5, 1, 5), (0, 5, 0, 1), device="cuda"),
-                rand_strided((1, 5, 1, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
