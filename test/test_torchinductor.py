@@ -3276,3 +3276,28 @@ if HAS_CUDA:
             mod = make_fx(forward)()
             compiled = compile_fx_inner(mod, ())
             assert compiled()[0].device.type == "cuda"
+
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_expanded_inputs_cudagraphs(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x, y):
+                return x + y
+
+            inputs = (
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+            )
+            self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        @patch.object(config, "size_asserts", False)
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_expanded_inputs_cudagraphs_no_size_asserts(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x, y):
+                return x + y
+
+            inputs = (
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+            )
+            self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))

@@ -1261,7 +1261,9 @@ class InstructionTranslatorBase(object):
         self.nn_module_stack: Dict[str, str] = {}
 
         if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode() as fake_mode:
+            with torch._subclasses.FakeTensorMode(
+                throw_on_data_dependent_ops=True
+            ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
 
@@ -1291,6 +1293,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         code_options,
         compiler_fn,
         one_graph,
+        export,
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1304,6 +1307,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
         )
         self.one_graph: bool = one_graph
+        self.export = export
+        if self.export:
+            assert (
+                self.one_graph
+            ), "Export without one graph - something has gone wrong."
+
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(
@@ -1408,7 +1417,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0:
+        if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         self.output.compile_subgraph(self)
