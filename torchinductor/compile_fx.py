@@ -40,13 +40,23 @@ class BoxedBool:
         return False
 
 
-def complex_memory_overlap(tensor):
-    if tensor.numel() == 0:
-        return False
-    expanded_dims = [i for i in range(tensor.ndim) if tensor.stride(i) == 0]
-    for exp_d in expanded_dims:
-        tensor = torch.select(tensor, exp_d, 0)
-    return torch._debug_has_internal_overlap(tensor) != 0
+# copy_ fails when trying to write to tensors with memory overlap,
+# for expanded dimensions (a dimension which used to have size 1 -> ?)
+# we can select one element from that dimension and write to it
+# to achieve writing to all values of that dimension of the input tensor
+def get_expanded_dims(t):
+    return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
+
+
+def index_expanded_dims(t, expanded_dims):
+    for expanded_dim in expanded_dims:
+        t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
+    return t
+
+
+def complex_memory_overlap(t):
+    indexed_tensor = index_expanded_dims(t, get_expanded_dims(t))
+    return torch._debug_has_internal_overlap(indexed_tensor) != 0
 
 
 @DebugContext.wrap
@@ -120,28 +130,10 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         for idx, x in enumerate(inputs)
     ]
 
-    # copy_ fails when trying to write to tensors with memory overlap,
-    # for expanded dimensions (a dimension which used to have size 1 -> ?)
-    # we can select one element from that dimension and write to it
-    # to achieve writing to all values of that dimension of the input tensor
-    def get_expanded_dims(x):
-        if x.numel() == 0:
-            return []
-        expanded_dims = []
-        for dim, stride in enumerate(x.stride()):
-            if stride == 0:
-                expanded_dims.append(dim)
-        return expanded_dims
-
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
         for idx, x in enumerate(inputs)
     ]
-
-    def index_expanded_dims(tensor, expanded_dims):
-        for expanded_dim in expanded_dims:
-            tensor = torch.select(tensor, expanded_dim, 0)
-        return tensor
 
     # warmup
     torch.cuda.synchronize()
