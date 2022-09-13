@@ -115,6 +115,8 @@ def clamp(x, min=None, max=None):
     return x
 
 
+# temporary workaround until https://github.com/pytorch/torchdynamo/issues/1215
+# is fixed - fails on cpu
 @register_decomposition([aten.native_batch_norm])
 def native_batch_norm(
     input: Tensor,
