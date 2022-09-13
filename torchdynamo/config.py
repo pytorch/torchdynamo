@@ -24,63 +24,22 @@ except ImportError:
 log_level = logging.WARNING
 
 
-def _get_loggers():
+def get_loggers():
     return [
         logging.getLogger("torchdynamo"),
         logging.getLogger("torchinductor"),
     ]
 
 
-def _set_loggers_level(level):
-    for logger in _get_loggers():
+def set_loggers_level(level):
+    for logger in get_loggers():
         logger.setLevel(level)
 
 
-_set_loggers_level(log_level)
+set_loggers_level(log_level)
 
 # the name of a file to write the logs to
 log_file_name = None
-
-LOGGING_CONFIG = {
-    "version": 1,
-    "formatters": {
-        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
-    },
-    "handlers": {
-        "torchdynamo_console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stdout",
-        },
-    },
-    "loggers": {
-        "torchdynamo": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torchinductor": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-    },
-    "disable_existing_loggers": False,
-}
-
-
-def init_logging():
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        logging.config.dictConfig(LOGGING_CONFIG)
-        # previous dictConfig call may overwrite logger levels
-        _set_loggers_level(log_level)
-        if log_file_name is not None:
-            log_file = logging.FileHandler(log_file_name)
-            log_file.setLevel(log_level)
-            for logger in _get_loggers():
-                logger.addHandler(log_file)
-
 
 # Verbose will print full stack traces on warnings and errors
 verbose = False
@@ -189,7 +148,7 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            _set_loggers_level(value)
+            set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 

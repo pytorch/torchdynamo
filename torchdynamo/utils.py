@@ -8,9 +8,10 @@ import functools
 import gc
 import inspect
 import itertools
-import logging.config
+import logging
 import math
 import operator
+import os
 import pstats
 import re
 import sys
@@ -28,6 +29,7 @@ from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
 import torchdynamo
+import torchdynamo.config as config
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -111,6 +113,47 @@ def compile_times(repr="str", aggregate=False):
         ]
         headers = list(compilation_metrics.keys())
         return headers, values
+
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "formatters": {
+        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
+    },
+    "handlers": {
+        "torchdynamo_console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "torchdynamo_format",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "torchdynamo": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+        "torchinductor": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+    },
+    "disable_existing_loggers": False,
+}
+
+
+def init_logging():
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        logging.config.dictConfig(LOGGING_CONFIG)
+        # previous dictConfig call may overwrite logger levels
+        config.set_loggers_level(config.log_level)
+        if config.log_file_name is not None:
+            log_file = logging.FileHandler(config.log_file_name)
+            log_file.setLevel(config.log_level)
+            for logger in config.get_loggers():
+                logger.addHandler(log_file)
 
 
 # filter out all frames after entering dynamo
@@ -229,7 +272,7 @@ def istensor(obj):
     tensor_list = (
         torch.Tensor,
         torch.nn.Parameter,
-        *torchdynamo.config.traceable_tensor_subclasses,
+        *config.traceable_tensor_subclasses,
     )
     if fake_tensors_available:
         tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
@@ -733,14 +776,14 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = torchdynamo.config.cache_size_limit
-    torchdynamo.config.cache_size_limit = sys.maxsize
+    prior = config.cache_size_limit
+    config.cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         pass
-        torchdynamo.config.cache_size_limit = prior
+        config.cache_size_limit = prior
 
 
 # map from transformed code back to original user code
