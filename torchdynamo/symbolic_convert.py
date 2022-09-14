@@ -48,6 +48,7 @@ from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
 from .utils import fake_tensors_available
+from .utils import graph_break_dup_warning_checker
 from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
@@ -163,7 +164,8 @@ def break_graph_if_unsupported(*, push):
 
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
-                if not explain:
+                if not explain and graph_break_dup_warning_checker.add(user_stack):
+                    # import pdb; pdb.set_trace()
                     log.warning(f"Graph break: {exc} from user code at {user_stack}")
 
                 exc.remove_from_stats()
