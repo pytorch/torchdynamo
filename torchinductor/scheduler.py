@@ -186,33 +186,34 @@ class BaseSchedulerNode:
 
     def codegen_originating_info(self, buffer, only_once=True):
         if not config.comment_origin:
-            return 
-            
+            return
+
         if only_once and self.written:
             return
-        origins = self.node.origins 
+        origins = self.node.origins
         out_lines = []
 
         for o in origins:
-            if o.op == 'output':
-                # These are kinda boring and samey
+            if o.op == "output":
+                # These are boring and samey
                 continue
 
-            out_line = "#pragma CMT ORIGIN: \n"
-            out_line += f"#pragma CMT {o.op} {o.target} \n"
-            out_line_meta = f"#pragma CMT {o.meta}".replace("\\", "\n").replace("{", "{{").replace("}", "}}")
-            out_line += out_line_meta
-            out_lines.append(out_line)
-        
+            out_lines.append("#pragma CMT ORIGIN:")
+            out_lines.append(f"#pragma CMT {o.op} {o.target}")
+            out_line_meta = f"{o.meta}"
+            out_lines_meta = out_line_meta.split("\\n")
+            for line in out_lines_meta:
+                out_lines.append(
+                    "#pragma CMT " + line.replace("{", "{{").replace("}", "}}")
+                )
+
         if len(out_lines) == 0:
             return
-            
+
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         buffer.writelines(out_lines)
         self.written = True
-        
-
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):

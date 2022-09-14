@@ -202,7 +202,9 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(self,):
+    def getvalue(
+        self,
+    ):
         buf = StringIO()
         for line in self._lines:
             if isinstance(line, DeferredLine):
