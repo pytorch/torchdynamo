@@ -7,6 +7,8 @@ from types import ModuleType
 
 import torch
 
+import torchdynamo.logging
+
 try:
     import torch._prims
     import torch._refs
@@ -21,22 +23,8 @@ except ImportError:
 # INFO print compiled functions + graphs
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
+# NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
-
-
-def get_loggers():
-    return [
-        logging.getLogger("torchdynamo"),
-        logging.getLogger("torchinductor"),
-    ]
-
-
-def set_loggers_level(level):
-    for logger in get_loggers():
-        logger.setLevel(level)
-
-
-set_loggers_level(log_level)
 
 # the name of a file to write the logs to
 log_file_name = None
@@ -148,7 +136,7 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            set_loggers_level(value)
+            torchdynamo.logging.set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 
