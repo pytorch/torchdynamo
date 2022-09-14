@@ -25,8 +25,8 @@ from ..virtualized import ops
 log = logging.getLogger(__name__)
 
 
-@freeze_inputs
-@functools.lru_cache(256)
+# @freeze_inputs
+# @functools.lru_cache(256)
 def _simplify_loops(index_vars, sizes, index_formulas):
     """
     Try to remove as many axis from loop iterations as possible, by:
