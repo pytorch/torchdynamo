@@ -91,6 +91,7 @@ class _TorchDynamoContext:
         self,
         callback,
         on_enter=nothing,
+        on_exit=nothing,
         backend_ctx_ctor=null_context,
         patch_fn=nothing,
     ):
@@ -99,6 +100,7 @@ class _TorchDynamoContext:
         self.callback = callback
         self.prior = unset
         self.on_enter = on_enter
+        self.on_exit = on_exit
         self.extra_ctx_ctor = backend_ctx_ctor
         patch_fn()
 
@@ -121,6 +123,7 @@ class _TorchDynamoContext:
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
+        self.on_exit()
 
     def __call__(self, fn):
         fn = innermost_fn(fn)
@@ -187,8 +190,9 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor):
+    def __init__(self, callback, backend_ctx_ctor, pre_on_enter=nothing, post_on_exit=nothing):
         def on_enter():
+            pre_on_enter()
             global most_recent_backend
             if (
                 most_recent_backend is not None
@@ -197,11 +201,17 @@ class OptimizeContext(_TorchDynamoContext):
                 raise ResetRequired()
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
+        
+        def on_exit():
+            # Could just pass post_on_exit through, but this reads much clearer
+            post_on_exit()
 
         compiler_fn = innermost_fn(callback)
+        print("CALLBACK IS", callback)
         super().__init__(
             callback=callback,
             on_enter=on_enter,
+            on_exit=on_exit,
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
         )
@@ -215,6 +225,29 @@ class RunOnlyContext(_TorchDynamoContext):
 class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
+
+
+specializing = False
+
+
+class SpecializeContext(OptimizeContext):
+# class SpecializeContext:
+    def __init__(self):
+        def on_enter():
+            global specializing
+            assert not specializing, "Torchdynamo specialization cannot be nested yet."
+            specializing = True
+
+        def on_exit():
+            global specializing
+            specializing = False
+            
+        super().__init__(
+            callback=callback,
+            backend_ctx_ctor=backend_ctx_ctor,
+            pre_on_enter=on_enter,
+        )
+        # specializing = prior
 
 
 def catch_errors_wrapper(callback):
@@ -632,3 +665,11 @@ class TorchPatcher:
             return fn(*args, **kwargs)
 
         return inner_fn
+
+def specialize(fn=None):
+    """Decorator and context manager to disable TorchDynamo"""
+    if fn is not None:
+        print("FN is", fn)
+        # assert callable(fn)
+        return SpecializeContext()
+    return SpecializeContext()
