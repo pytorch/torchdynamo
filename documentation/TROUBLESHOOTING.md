@@ -6,7 +6,7 @@
   - [Minifying TorchInductor Errors](#minifying-torchinductor-errors)
   - [Minifying Backend Compiler Errors](#minifying-backend-compiler-errors)
 - [Performance Profiling](#performance-profiling)
-  - [Using cProfile and timer infrastructure to measure performance](#using-cprofile-and-timer-infrastructure-to-measure-performance)
+  - [Understanding Coarse-Grained Compile Times](#understanding-coarse-grained-compile-times)
   - [Memory Profiling](#memory-profiling)
   - [Graph Breaks](#graph-breaks)
     - [Identifying the cause of a graph break](#identifying-the-cause-of-a-graph-break)
@@ -270,8 +270,9 @@ The other difference from the procedure in [TorhInductor Errors](#torchinductor-
 
 # Performance Profiling
 
-## Using cProfile and timer infrastructure to measure performance
-TBD
+## Understanding Coarse-Grained Compile Times
+TorchDynamo has a builtin stats function for collecting and displaying the time spent in each compilation phase. These stats can be accessed by calling `torchdynamo.utils.compile_times()` after executing TorchDynamo. By default, this returns a string representation of the compile times spent in each TorchDynamo function by name. 
+
 
 ## Memory Profiling
 TBD
@@ -291,7 +292,7 @@ some_fun(x)
 Torchdynamo will attempt to compile all of the torch/tensor operations within some_fun into a single FX graph, but it may fail to capture everything into one graph.
 
 Some graph break reasons are insurmountable to TorchDynamo, and can't be easily fixed.
-- calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without TorchDynamo being able to introduce necessary guards to ensure that the compiled program would be safe to reuse
+- calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without TorchDynamo being able to introduce necessary guards to ensure that the compiled program would be safe to reuse. Graph breaks can hinder performance if the resulting fragments are small. To maximize performance, it's important to have as few graph breaks as possible.
 
 ### Identifying the cause of a graph break
 
