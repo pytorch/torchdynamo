@@ -17,12 +17,19 @@ from torchinductor.utils import gen_gm_and_inputs
 aten = torch.ops.aten
 
 
-def compute_speedups(repeats, models, example_inputs, accuracy_checking=False):
+def compute_speedups(
+    operator, models, example_inputs, repeats, accuracy_checking=False
+):
     expected = models[0](*example_inputs)
     if accuracy_checking:
         for model in models[1:]:
             actual = model(*example_inputs)
-            assert same(actual, expected), expected[0] - actual[0]
+            # change to assert later
+            try:
+                same(actual, expected, cos_similarity=True, equal_nan=True)
+            except AssertionError:
+                print(f"Accuracy check failed: {operator}")
+                print(expected[0] - actual[0])
 
     timings = np.zeros((repeats, len(models)), np.float64)
     for rep in range(repeats):
@@ -56,22 +63,24 @@ def convert_to_jit(gm, gm_args):
     return torch.jit.trace(gm, gm_args)
 
 
-def microbenchmark(target, args, kwargs, dtype, accuracy_checking):
-    gm, gm_args = gen_gm_and_inputs(target, args, kwargs)
+def microbenchmark(
+    operator, args, kwargs, dtype, accuracy_checking, repeats, measure_nvfuser
+):
+    gm, gm_args = gen_gm_and_inputs(operator, args, kwargs)
     torch.jit._builtins._register_builtin(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
-    compiled_fn = compile_fx(gm, gm_args)
     cudagraphs_eager = cudagraphs_inner(gm, gm_args, copy_outputs=False)
-    g = convert_to_jit(gm, gm_args)
-    cudagraphs_jit = cudagraphs_inner(g, gm_args, copy_outputs=False)
+    compiled_fn = compile_fx(gm, gm_args)
+    compiled = [cudagraphs_eager, compiled_fn]
+    if measure_nvfuser:
+        g = convert_to_jit(gm, gm_args)
+        cudagraphs_jit = cudagraphs_inner(g, gm_args, copy_outputs=False)
+        compiled += [cudagraphs_jit]
+    if accuracy_checking:
+        repeats = 1
 
-    repeats = 3
-    medians = compute_speedups(
-        repeats,
-        [cudagraphs_eager, cudagraphs_jit, compiled_fn],
-        gm_args,
-    )
+    medians = compute_speedups(operator, compiled, gm_args, repeats, accuracy_checking)
     return medians
 
 
@@ -132,7 +141,15 @@ def skip_operator(operator):
 @click.option("--dtype", help="dtype to benchmark")
 @click.option("--max-samples", help="max samples per op", default=15)
 @click.option("--accuracy-checking", help="check accuracy", default=False)
-def benchmark(suite, op, dtype, max_samples, accuracy_checking):
+@click.option(
+    "--repeats", help="how many times to repeat for perf measurement", default=3
+)
+@click.option(
+    "--measure-nvfuser", help="default we only measure inductor", default=False
+)
+def benchmark(
+    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser
+):
     assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
     if suite == "timm":
         loader = OperatorInputsLoader.get_timm_loader()
@@ -174,7 +191,15 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
             try:
                 # aten, nvfuser, inductor
                 timings.append(
-                    microbenchmark(operator, args, kwargs, dtype, accuracy_checking)
+                    microbenchmark(
+                        operator,
+                        args,
+                        kwargs,
+                        dtype,
+                        accuracy_checking,
+                        repeats,
+                        measure_nvfuser,
+                    )
                 )
             except Exception as e:
                 print(f"error {operator}")
@@ -186,8 +211,9 @@ def benchmark(suite, op, dtype, max_samples, accuracy_checking):
 
         timings = torch.tensor(timings).T
         q = torch.tensor([0.2, 0.5, 0.8], dtype=torch.float64)
-        output = f"\n{operator}:\nNVFUSER Speedups : {(torch.quantile(timings[0] / timings[1], q)).tolist()}"
-        output = f"{output}\nInductor Speedups : {(torch.quantile(timings[0] / timings[2], q)).tolist()}"
+        output = f"{operator}:\nInductor Speedups : {(torch.quantile(timings[0] / timings[1], q)).tolist()}\n"
+        if measure_nvfuser:
+            output += f"NVFUSER Speedups :{(torch.quantile(timings[0] / timings[2], q)).tolist()}\n"
         if op == "all":
             f.write(output)
         print(output)
