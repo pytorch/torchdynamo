@@ -15,6 +15,7 @@ import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_map
+from torch.testing import make_tensor
 
 log = logging.getLogger(__name__)
 
@@ -89,9 +90,14 @@ def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
 
 def deserialize_tensor(size, dtype, stride=None):
     if stride is not None:
-        return torch.empty_strided(size, stride, dtype=dtype)
+        out = torch.empty_strided(size, stride, dtype=dtype)
     else:
-        return torch.empty(size, dtype=dtype)
+        out = torch.empty(size, dtype=dtype)
+    try:
+        out.copy_(make_tensor(size, dtype=dtype, device="cpu"))
+    except:
+        return out
+    return out
 
 
 def serialize_tensor(e):
