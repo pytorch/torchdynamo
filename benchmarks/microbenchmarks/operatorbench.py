@@ -27,7 +27,7 @@ def compute_speedups(
             # change to assert later
             try:
                 same(actual, expected, cos_similarity=True, equal_nan=True)
-            except Exception as e:
+            except AssertionError:
                 print(f"Accuracy check failed: {operator}")
                 print(expected[0] - actual[0])
 
@@ -211,9 +211,9 @@ def benchmark(
 
         timings = torch.tensor(timings).T
         q = torch.tensor([0.2, 0.5, 0.8], dtype=torch.float64)
-        output = f"Inductor Speedups : {(torch.quantile(timings[0] / timings[1], q)).tolist()}"
+        output = f"{operator}:\nInductor Speedups : {(torch.quantile(timings[0] / timings[1], q)).tolist()}\n"
         if measure_nvfuser:
-            output = f"{output}\n{operator}:\nNVFUSER Speedups : {(torch.quantile(timings[0] / timings[2], q)).tolist()}"
+            output += f"NVFUSER Speedups :{(torch.quantile(timings[0] / timings[2], q)).tolist()}\n"
         if op == "all":
             f.write(output)
         print(output)
