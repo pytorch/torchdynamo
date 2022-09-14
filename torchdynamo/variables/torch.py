@@ -202,12 +202,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
-        elif self.value is torch.autograd.profiler.profile:
-            if len(args) == 0 or len(args) > 0 and args[0]:
-                log.warning("Profiler will be ignored")
-            return FakeContextWrappingVariable(**options)
-        elif self.value is torch.autograd.profiler.record_function:
-            assert len(args) == 1
+        elif self.value in dir(torch.autograd.profiler) + dir(torch.ops.profiler):
             log.warning("Profiler will be ignored")
             return FakeContextWrappingVariable(**options)
         elif self.value is torch.jit.annotate:

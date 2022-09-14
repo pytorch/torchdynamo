@@ -1316,6 +1316,18 @@ class MiscTests(torchdynamo.testing.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_torch_ops_profiler(self):
+        # wrap torch.ops.profiler.* as FakeContextWrappingVariable and do nothing
+        def fn(x):
+            torch.ops.profiler._record_function_enter("name", "args")
+            return x + 1
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
