@@ -1,6 +1,5 @@
 import collections
 import contextlib
-import functools
 import itertools
 import logging
 import math
@@ -15,7 +14,6 @@ from sympy.printing.printer import Printer
 
 from .. import metrics
 from ..utils import free_symbol_startswith
-from ..utils import freeze_inputs
 from ..utils import sympy_dot
 from ..utils import sympy_subs
 from ..utils import unique
