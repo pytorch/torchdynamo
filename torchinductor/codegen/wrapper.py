@@ -6,10 +6,13 @@ from typing import Any
 from typing import Dict
 from typing import List
 
+from torchdynamo.utils import dynamo_timed
+
 from .. import codecache
 from .. import config
 from .. import ir
 from ..utils import has_triton
+from ..utils import sympy_dot
 from ..utils import sympy_product
 from ..virtualized import V
 from .common import CodeGen
@@ -22,10 +25,15 @@ pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
+    size = node.get_size()
+    stride = node.get_stride()
+    last_element = sympy_dot([s - 1 for s in size], stride)
     return (
         node.get_device(),
         node.get_dtype(),
-        V.graph.sizevars.simplify(sympy_product(node.get_size())),
+        V.graph.sizevars.simplify(sympy_product(size)),
+        # Detect gaps in tensor storage caused by strides
+        V.graph.sizevars.size_hint(last_element),
     )
 
 
@@ -292,12 +300,19 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
+    @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
         result.splice(self.prefix)
+
+        out_names = V.graph.get_output_names()
         with result.indent():
-            while self.lines and isinstance(self.lines[-1], MemoryPlanningLine):
+            while (
+                self.lines
+                and isinstance(self.lines[-1], MemoryPlanningLine)
+                and self.lines[-1].node.name not in out_names
+            ):
                 # these lines will be pointless
                 self.lines.pop()
 

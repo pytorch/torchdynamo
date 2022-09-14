@@ -3,6 +3,7 @@ import copy
 import functools
 import inspect
 import logging
+import os
 import threading
 import types
 import warnings
@@ -10,10 +11,13 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torchdynamo
+from torchdynamo.debug_utils import wrap_backend_debug
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
+from torchdynamo.utils import compile_times
 from torchdynamo.utils import same
 
 from . import config
@@ -44,7 +48,7 @@ set_guard_error_hook = _eval_frame.set_guard_error_hook
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 unset = object()
-compile_lock = threading.Lock()
+compile_lock = threading.RLock()
 most_recent_backend = None
 
 
@@ -99,6 +103,15 @@ class _TorchDynamoContext:
         patch_fn()
 
     def __enter__(self):
+        log.warning(
+            (
+                "Using TorchDynamo with a context manager will be deprecated soon."
+                "Please read https://github.com/pytorch/torchdynamo#usage-example "
+                "to use TorchDynamo using an annotation."
+            )
+        )
+        if config.raise_on_ctx_manager_usage:
+            raise RuntimeError("TorchDynamo is used with a context manager")
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
@@ -165,7 +178,7 @@ class _TorchDynamoContext:
         # of decorators.
         _fn._torchdynamo_orig_callable = fn
 
-        # If the function is called with torchdynamo.optimize decorator, we
+        # If the function is called using torchdynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
             always_optimize_code_objects[fn.__code__] = True
@@ -220,8 +233,7 @@ def catch_errors_wrapper(callback):
             with compile_lock:
                 return callback(frame, cache_size)
         except Exception:
-            logging.basicConfig()
-            logging.exception("Error while processing frame")
+            log.exception("Error while processing frame")
             raise
 
     catch_errors._torchdynamo_orig_callable = callback
@@ -277,6 +289,7 @@ class WrapperBackend:
 
 def get_compiler_fn(compiler_fn):
     """Expand backend strings to functions"""
+    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
     if compiler_fn == "inductor":
         from torchinductor.compile_fx import compile_fx
 
@@ -286,10 +299,18 @@ def get_compiler_fn(compiler_fn):
 
         compiler_fn = BACKENDS[compiler_fn]
 
-    return compiler_fn
+    return wrap_backend_debug(compiler_fn, compiler_str)
 
 
-def optimize(backend, nopython=False, guard_export_fn=None):
+class _NullDecorator(contextlib.nullcontext):
+    def __call__(self, fn):
+        assert callable(fn)
+        return fn
+
+
+def optimize(
+    backend="inductor", *, nopython=False, guard_export_fn=None, disable=False
+):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -305,18 +326,17 @@ def optimize(backend, nopython=False, guard_export_fn=None):
             - Or, a string backend name in `torchdynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
+        disable: If True, turn this decorator into a no-op
 
     Example Usage:
 
-        @torchdynamo.optimize("ofi")
+        @torchdynamo.optimize()
         def toy_example(a, b):
             ...
-
-        or
-
-        with torchdynamo.optimize(my_compiler):
-           ...
     """
+    if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
+        return _NullDecorator()
+
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -362,13 +382,14 @@ def explain(f, *args, **kwargs):
         nonlocal out_guards
         out_guards.append(guards)
 
-    with patch(f"{__name__}.most_recent_backend", None), optimize(
-        dynamo_graph_accumulating_compiler,
-        nopython=False,
-        guard_export_fn=guard_export_print,
-    ):
+    with patch(f"{__name__}.most_recent_backend", None):
+        opt_f = optimize(
+            dynamo_graph_accumulating_compiler,
+            nopython=False,
+            guard_export_fn=guard_export_print,
+        )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        f(*args, **kwargs)
+        opt_f(*args, **kwargs)
 
     graph_count = len(graphs)
 
@@ -380,12 +401,14 @@ def explain(f, *args, **kwargs):
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
     explanation += f"\n Break reasons: \n\n{formatted_list}"
 
+    explanation += compile_times()
+
     # TODO(voz): Do we want a decorator for this?
     torchdynamo.reset()
     return explanation, out_guards, graphs, ops_per_graph
 
 
-def export(f, *args, **kwargs):
+def export(f, *args, aten_graph=False, **kwargs):
     f = innermost_fn(f)
 
     graph = None
@@ -449,11 +472,14 @@ def export(f, *args, **kwargs):
     flat_args, in_spec = pytree.tree_flatten(args)
 
     remove_from_cache(f)
-    with patch(f"{__name__}.most_recent_backend", None), optimize_assert(
-        dynamo_normalization_capturing_compiler, guard_export_print
-    ):
+    with patch(f"{__name__}.most_recent_backend", None):
+        opt_f = optimize_assert(
+            dynamo_normalization_capturing_compiler,
+            guard_export_fn=guard_export_print,
+            export=True,
+        )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        result_traced = f(*args, **kwargs)
+        result_traced = opt_f(*args, **kwargs)
     remove_from_cache(f)
 
     assert graph is not None, "whole graph export entails exactly one call"
@@ -492,6 +518,14 @@ def export(f, *args, **kwargs):
 
             return super().output(target, (new_result,), {})
 
+    if aten_graph:
+        # Running graph with interpreter is needed for propagating the stack_trace
+        def graph_with_interpreter(*args):
+            with torch.fx.traceback.override_stack_trace():
+                return torch.fx.Interpreter(graph).run(*args)
+
+        graph = make_fx(graph_with_interpreter)(*graph_captured_input)
+
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
@@ -499,7 +533,7 @@ def export(f, *args, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, guard_export_fn=None):
+def optimize_assert(backend, *, guard_export_fn=None, export=False):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
@@ -509,7 +543,8 @@ def optimize_assert(backend, guard_export_fn=None):
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
+        backend_ctx_ctor,
     )
 
 

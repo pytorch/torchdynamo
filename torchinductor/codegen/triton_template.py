@@ -290,7 +290,7 @@ def template_can_fuse(snode1, snode2):
     if snode1.group != snode2.group:
         return False
     tiling = snode1.get_nodes()[0].node.get_template_tiling()
-    for node in snode1.get_nodes():
+    for node in snode2.get_nodes():
         if not TritonKernel.is_compatible(tiling, node.get_ranges()):
             return False
     return True

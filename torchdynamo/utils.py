@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import copy
+import cProfile
 import dataclasses
 import dis
 import functools
@@ -11,11 +12,13 @@ import logging.config
 import math
 import operator
 import os
+import pstats
 import re
 import sys
 import time
 import types
 import weakref
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 from typing import Dict
@@ -36,6 +39,83 @@ troubleshooting_url = (
 )
 
 log = logging.getLogger(__name__)
+
+# profiling compilation time
+compilation_metrics = collections.OrderedDict()
+
+
+timer_counter = itertools.count()
+
+
+def dynamo_profiled(func):
+    def profile_wrapper(*args, **kwargs):
+        global timer_counter
+        datafn = (
+            func.__name__ + f"{next(timer_counter)}.profile"
+        )  # Name the data file sensibly
+        prof = cProfile.Profile()
+        prof.enable()
+        retval = prof.runcall(func, *args, **kwargs)
+        prof.disable()
+        print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
+        ps = pstats.Stats(prof)
+        ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+        ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+        prof.dump_stats(datafn)
+        return retval
+
+    return profile_wrapper
+
+
+def dynamo_timed(func):
+    def time_wrapper(*args, **kwargs):
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        compilation_metrics[key].append(time.time() - t0)
+        return r
+
+    return time_wrapper
+
+
+def compile_times(repr="str", aggregate=False):
+    """
+    Get metrics about torchdynamo frontend/backend compilation times.
+
+    Accumulates information from functions tagged with `@dynamo_timed`.
+
+    repr='str' returns a printable string for user interaction, and 'csv'
+    returns headers, rows which can be logged for output
+
+    aggregate causes values from multiple compilations (e.g. split graphs)
+    to be accumulated into one value.  If false, expect more than one value
+    per metric.
+    """
+
+    def fmt_fn(values, item_fn=lambda x: x):
+
+        if aggregate:
+            return item_fn(sum(values))
+        return ", ".join(map(item_fn, values))
+
+    if repr == "str":
+        rows = [
+            (k, fmt_fn(compilation_metrics[k], item_fn=lambda x: f"{x:.4f}"))
+            for k in compilation_metrics
+        ]
+        out = "TorchDynamo compilation metrics:\n"
+        out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+        return out
+    elif repr == "csv":
+        values = [
+            fmt_fn(v, item_fn=lambda x: f"{x:.6f}")
+            for v in compilation_metrics.values()
+        ]
+        headers = list(compilation_metrics.keys())
+        return headers, values
+
 
 LOGGING_CONFIG = {
     "version": 1,
@@ -69,10 +149,15 @@ LOGGING_CONFIG = {
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
-        logger = logging.getLogger("torchdynamo")
-        logger.setLevel(config.log_level)
-        logger = logging.getLogger("torchinductor")
-        logger.setLevel(config.log_level)
+        td_logger = logging.getLogger("torchdynamo")
+        td_logger.setLevel(config.log_level)
+        ti_logger = logging.getLogger("torchinductor")
+        ti_logger.setLevel(config.log_level)
+        if config.log_file_name is not None:
+            log_file = logging.FileHandler(config.log_file_name)
+            log_file.setLevel(config.log_level)
+            td_logger.addHandler(log_file)
+            ti_logger.addHandler(log_file)
 
 
 # filter out all frames after entering dynamo
@@ -287,16 +372,18 @@ def clone_input(x):
         result.as_strided_(x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
-            result.requires_grad_(x.requires_grad)
-            if x.grad is not None:
+            if x.is_leaf:
+                result.requires_grad_(x.requires_grad)
+            if x.is_leaf and x.grad is not None:
                 result.grad = clone_input(x.grad)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             y = torch.clone(x)
-            y.requires_grad_(x.requires_grad)
-            if x.grad is not None:
+            if x.is_leaf:
+                y.requires_grad_(x.requires_grad)
+            if x.is_leaf and x.grad is not None:
                 y.grad = clone_input(x.grad)
             return y
         return result
@@ -315,6 +402,19 @@ def clone_inputs(example_inputs):
         if isinstance(res[i], torch.Tensor):
             res[i] = clone_input(res[i])
     return res
+
+
+@contextmanager
+def preserve_rng_state():
+    rng = torch.clone(torch.random.get_rng_state())
+    if torch.cuda.is_available():
+        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    try:
+        yield
+    finally:
+        torch.random.set_rng_state(rng)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng)
 
 
 def is_jit_model(model0):
@@ -483,8 +583,8 @@ def specialize_args_kwargs(tx, args, kwargs):
     specialized_kwargs = {}
     for x in args:
         specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs:
-        specialized_kwargs.update({k: x.as_specialized(tx)})
+    for k, v in kwargs.items():
+        specialized_kwargs.update({k: v.as_specialized(tx)})
     return specialized_args, specialized_kwargs
 
 
@@ -635,7 +735,14 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                multiplier = 1.1
+
+                if fp64_ref.numel() < 500:
+                    # In the presence of noise, noise might dominate our error
+                    # metric for smaller tensors.
+                    multiplier = 2
+
+                passes_test = res_error <= (multiplier * ref_error + 1e-5)
                 if not passes_test:
                     log.warning(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"

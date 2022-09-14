@@ -1,4 +1,4 @@
-.PHONY: default develop test torchbench format lint setup clean autotune
+.PHONY: default develop test torchbench format lint setup clean
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
             $(wildcard test/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
@@ -9,7 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220820
+PYTORCH_VERSION ?= dev20220911
 TRITON_VERSION ?= 5b04331dd2efdd23f4475823761fa975de60a514
 
 
@@ -19,7 +19,7 @@ develop:
 	python setup.py develop
 
 test: develop
-	pytest test
+	pytest test -o log_cli=False
 
 torchbench: develop
 	python benchmarks/torchbench.py --fast
@@ -111,30 +111,6 @@ build-deps: clone-deps
 	(cd ../triton/python && python setup.py clean && python setup.py develop)
 	make setup_lint
 	python setup.py develop
-
-offline-autotune-cpu: develop
-	rm -rf subgraphs
-	python benchmarks/torchbench.py --offline-autotune -n3
-	python autotune.py
-	python benchmarks/torchbench.py --offline-autotune -n50
-
-offline-autotune-gpu: develop
-	rm -rf subgraphs
-	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n3
-	python autotune.py --nvfuser
-	python benchmarks/torchbench.py --nvfuser -d cuda --offline-autotune -n100
-
-online-autotune-cpu: develop
-	python benchmarks/torchbench.py --online-autotune -n50
-
-online-autotune-gpu: develop
-	python benchmarks/torchbench.py --nvfuser -d cuda --online-autotune -n100
-
-fixed1-gpu: develop
-	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed1 -n100
-
-fixed2-gpu: develop
-	python benchmarks/torchbench.py --nvfuser -d cuda --speedup-fixed2 -n100
 
 baseline-cpu: develop
 	 rm -f baseline_*.csv

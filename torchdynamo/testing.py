@@ -38,7 +38,11 @@ def collect_results(model, prediction, loss, example_inputs):
     results.append(loss)
     grads = dict()
     for name, param in model.named_parameters():
-        grads[name + ".grad"] = clone_me(param.grad)
+        grad = clone_me(param.grad)
+        # Treat None and zero grad as same
+        if param.grad is None:
+            grad = torch.zeros_like(param)
+        grads[name + ".grad"] = grad
     results.append(grads)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
@@ -49,6 +53,14 @@ def collect_results(model, prediction, loss, example_inputs):
             if isinstance(example, torch.Tensor):
                 results.append(clone_me(example.grad))
     return results
+
+
+def requires_bwd_pass(out):
+    if isinstance(out, torch.Tensor):
+        return out.requires_grad
+    elif isinstance(out, (list, tuple)):
+        return any([requires_bwd_pass(x) for x in out])
+    raise NotImplementedError("Don't know how to reduce", type(out))
 
 
 def reduce_to_scalar_loss(out):
@@ -159,11 +171,11 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     correct1 = fn(*args1)
     correct2 = fn(*args2)
     torchdynamo.reset()
-    with torchdynamo.optimize_assert(actual):
-        val1a = fn(*args1)
-        val2a = fn(*args2)
-        val1b = fn(*args1)
-        val2b = fn(*args2)
+    opt_fn = torchdynamo.optimize_assert(actual)(fn)
+    val1a = opt_fn(*args1)
+    val2a = opt_fn(*args2)
+    val1b = opt_fn(*args1)
+    val2b = opt_fn(*args2)
     torchdynamo.reset()
     self.assertTrue(same(val1a, correct1))
     self.assertTrue(same(val1b, correct1))
@@ -185,6 +197,9 @@ class TestCase(unittest.TestCase):
         cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls._exit_stack.enter_context(
             patch.object(config, "raise_on_backend_error", True)
+        )
+        cls._exit_stack.enter_context(
+            patch.object(config, "raise_on_ctx_manager_usage", True)
         )
 
     def setUp(self):
@@ -227,3 +242,35 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     else:
         buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
+
+
+def _make_fn_with_patches(fn, *patches):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        with contextlib.ExitStack() as stack:
+            for attr, val in patches:
+                stack.enter_context(patch.object(torchdynamo.config, attr, val))
+
+            return fn(*args, **kwargs)
+
+    return _fn
+
+
+def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
+    class DummyTestClass(cls):
+        pass
+
+    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+
+    for name in dir(cls):
+        if name.startswith("test_"):
+            fn = getattr(cls, name)
+            if not callable(fn):
+                continue
+            new_name = f"{name}{fn_suffix}"
+            fn = _make_fn_with_patches(fn, *patches)
+            fn.__name__ = new_name
+            setattr(DummyTestClass, name, None)
+            setattr(DummyTestClass, new_name, fn)
+
+    return DummyTestClass

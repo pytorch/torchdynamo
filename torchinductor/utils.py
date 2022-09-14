@@ -2,6 +2,7 @@ import functools
 import operator
 import time
 from typing import Any
+from typing import Dict
 from typing import List
 
 import numpy as np
@@ -10,6 +11,8 @@ import torch
 from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
+
+VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 @functools.lru_cache(None)
@@ -59,6 +62,34 @@ def sympy_dot(seq1, seq2):
 
 def unique(it):
     return {id(x): x for x in it}.values()
+
+
+def ceildiv(numer: int, denom: int):
+    assert isinstance(numer, int) and isinstance(denom, int)
+    return (numer + (denom - 1)) // denom
+
+
+def gen_gm_and_inputs(target, args, kwargs):
+    g = torch.fx.Graph()
+    g_args = []
+    a_args = []
+    for n, arg in enumerate(args):
+        if isinstance(arg, torch.Tensor):
+            g_args.append(g.placeholder(f"arg{n}"))
+            a_args.append(arg)
+        else:
+            g_args.append(arg)
+    assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
+    node = g.call_function(target, tuple(g_args), kwargs)
+    if (
+        len(target._schema.returns) == 1
+        and str(target._schema.returns[0].type) == "Tensor"
+    ):
+        node = (node,)
+    g.output(node)
+
+    gm = torch.fx.GraphModule({}, g)
+    return gm, a_args
 
 
 def timed(model, example_inputs, times=1):
@@ -122,3 +153,71 @@ def precompute_methods(obj: Any, methods: List[str]):
 
 def cmp(a, b):
     return int(a > b) - int(a < b)
+
+
+def cache_on_self(fn):
+    key = f"__{fn.__name__}_cache"
+
+    @functools.wraps(fn)
+    def wrapper(self):
+        if not hasattr(self, key):
+            setattr(self, key, fn(self))
+        return getattr(self, key)
+
+    return wrapper
+
+
+def sympy_str(expr: sympy.Expr):
+    """
+    Normal sympy str is very slow, this is a lot faster.  The result are
+    somewhat worse, as it doesn't do as much simplification.  So don't
+    use this for final codegen.
+    """
+    if isinstance(expr, sympy.Symbol):
+        return expr.name
+    if isinstance(expr, sympy.Add):
+        return " + ".join(map(sympy_str, expr.args))
+    if isinstance(expr, sympy.Mul):
+        return " * ".join(map(sympy_str, expr.args))
+
+    from .ir import CleanDiv
+    from .ir import IndexingDiv
+    from .ir import ModularIndexing
+
+    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+        return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
+    return str(expr)
+
+
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+    """
+    xreplace is faster than subs, but is way more picky
+    """
+
+    def promote_strings(key):
+        if isinstance(key, str):
+            return sympy.Symbol(key)
+        return key
+
+    return expr.xreplace(
+        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+    )
+
+
+def free_symbol_startswith(index: sympy.Expr, prefix: str):
+    return any(v.name.startswith(prefix) for v in index.free_symbols)
+
+
+def has_incompatible_cudagraph_ops(gm):
+    forbidden_list = set(
+        [
+            "aten._fused_moving_avg_obs_fq_helper.default",
+            "aten._fused_moving_avg_obs_fq_helper_functional.default",
+            "fbgemm.dense_to_jagged.default",
+            "fbgemm.jagged_to_padded_dense.default",
+        ]
+    )
+    for node in gm.graph.nodes:
+        if str(node.target) in forbidden_list:
+            return True
+    return False

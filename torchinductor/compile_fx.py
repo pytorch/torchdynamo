@@ -1,23 +1,28 @@
 import dataclasses
 import functools
 import logging
-import operator
 from typing import List
 
+import functorch
 import torch.fx
+from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._mode_utils import no_dispatch
 
-from torchdynamo.debug_utils import wrap_debug
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
-from torchdynamo.testing import same
+from torchdynamo.utils import dynamo_timed
 from torchdynamo.utils import identity
-from torchdynamo.utils import init_logging
+from torchdynamo.utils import preserve_rng_state
 
 from . import config
 from . import overrides
+from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import ceildiv
+from .utils import has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -38,51 +43,37 @@ class BoxedBool:
         return False
 
 
-class CheckEachNode(torch.fx.Interpreter):
-    def call_function(self, target, args, kwargs):
-        expected = target(*args, **kwargs)
-        if target in (operator.getitem,):
-            return expected
-
-        g = torch.fx.Graph()
-        g_args = []
-        a_args = []
-        for n, arg in enumerate(args):
-            if isinstance(arg, torch.Tensor):
-                g_args.append(g.placeholder(f"arg{n}"))
-                a_args.append(arg)
-            else:
-                g_args.append(arg)
-        assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-        node = g.call_function(target, tuple(g_args), kwargs)
-        if isinstance(expected, torch.Tensor):
-            node = (node,)
-        g.output(node)
-
-        gm = torch.fx.GraphModule({}, g)
-        graph = GraphLowering(gm)
-        with V.set_graph_handler(graph):
-            graph.run(*args, **kwargs)
-            actual = graph.compile_to_fn()(*a_args)
-
-        if isinstance(expected, torch.Tensor):
-            actual = actual[0]
-
-        print(target, same(expected, actual))
-        assert same(expected, actual)
-
-        return expected
+# copy_ fails when trying to write to tensors with memory overlap,
+# for expanded dimensions (a dimension which used to have size 1 -> ?)
+# we can select one element from that dimension and write to it
+# to achieve writing to all values of that dimension of the input tensor
+def get_expanded_dims(t):
+    return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
 
 
-@functools.partial(wrap_debug, compiler_name="inductor")
+def index_expanded_dims(t, expanded_dims):
+    for expanded_dim in expanded_dims:
+        t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
+    return t
+
+
+def complex_memory_overlap(t):
+    indexed_tensor = index_expanded_dims(t, get_expanded_dims(t))
+    return torch._debug_has_internal_overlap(indexed_tensor) != 0
+
+
+@DebugContext.wrap
+@no_dispatch()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     wrap=identity,
     cudagraphs=None,
     num_fixed=0,
+    is_backward=False,
 ):
-    init_logging()
+    log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
+    V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
@@ -92,7 +83,17 @@ def compile_fx_inner(
         wrap(graph.run)(*example_inputs)
         compiled_fn = wrap(graph.compile_to_fn())
 
-    if cudagraphs and set(graph.device_types) == {"cuda"} and not graph.mutated_inputs:
+    complex_memory_overlap_inputs = any(
+        complex_memory_overlap(t) for t in example_inputs
+    )
+
+    if (
+        cudagraphs
+        and set(graph.device_types) == {"cuda"}
+        and not graph.mutated_inputs
+        and not has_incompatible_cudagraph_ops(gm)
+        and not complex_memory_overlap_inputs
+    ):
         compiled_fn = cudagraphify(
             compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
         )
@@ -103,17 +104,56 @@ def compile_fx_inner(
             log.warning("skipping cudagraphs due to multiple devices")
         elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
             log.warning("skipping cudagraphs due to input mutation")
+        elif complex_memory_overlap_inputs:
+            log.warning("skipping cudagraphs due to complex input striding")
 
     return compiled_fn
 
 
+@dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
+    # if using fake tensors, defer cudagraphs until we get real inputs at runtime
+    if not any(isinstance(inp, FakeTensor) for inp in inputs):
+        return cudagraphify_impl(model, inputs, static_input_idxs)
+
+    compiled_fn = None
+
+    def run(*new_inputs):
+        nonlocal compiled_fn
+        if compiled_fn is None:
+            with preserve_rng_state():
+                compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
+
+        return compiled_fn(*new_inputs)
+
+    return run
+
+
+def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+
+    def static_input(x):
+        # make sure alignment and contiguity of inputs is preserved
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
+        needed_size = ceildiv(needed_size, 32) * 32
+        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
+        cache_line_offset = (
+            (x.data_ptr() - buffer.data_ptr()) % 32
+        ) // x.element_size()
+        return torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        torch.zeros_like(x) if idx not in static_input_idxs else inputs[idx]
+        static_input(x) if idx not in static_input_idxs else inputs[idx]
+        for idx, x in enumerate(inputs)
+    ]
+
+    inps_expanded_dims = [
+        get_expanded_dims(x) if idx not in static_input_idxs else []
         for idx, x in enumerate(inputs)
     ]
 
@@ -138,10 +178,17 @@ def cudagraphify(model, inputs, static_input_idxs=()):
 
         def run(*new_inputs):
             assert len(static_inputs) == len(new_inputs)
-            for idx, (dst, src) in enumerate(zip(static_inputs, new_inputs)):
+            for idx, (dst, src, expanded_dims) in enumerate(
+                zip(static_inputs, new_inputs, inps_expanded_dims)
+            ):
                 if idx in static_input_idxs:
                     assert dst.data_ptr() == src.data_ptr()
                 else:
+                    # TODO - could make one single op of multiple slices
+                    # and avoid dispatch.
+                    # Could also pre-index the `dst` tensors
+                    dst = index_expanded_dims(dst, expanded_dims)
+                    src = index_expanded_dims(src, expanded_dims)
                     dst.copy_(src)
             graph.replay()
             return static_outputs
@@ -153,7 +200,9 @@ def cudagraphify(model, inputs, static_input_idxs=()):
 
         def run(*new_inputs):
             for idx in copy_indices:
-                static_inputs[idx].copy_(new_inputs[idx])
+                src = index_expanded_dims(static_inputs[idx], inps_expanded_dims[idx])
+                dst = index_expanded_dims(new_inputs[idx], inps_expanded_dims[idx])
+                dst.copy_(src)
             graph.replay()
             return static_outputs
 
@@ -182,9 +231,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
-    logging.getLogger("torchinductor").setLevel(
-        logging.DEBUG if config.debug else logging.WARNING
-    )
+    functorch.compile.config.use_functionalize = True
 
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
@@ -192,30 +239,30 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
+    @dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        if config.debug:
-            print("FORWARD GRAPH:")
-            model.graph.print_tabular()
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
             model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
         )
 
+    @dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        if config.debug:
-            print("BACKWARD GRAPH:")
-            model.graph.print_tabular()
         fixed = count_tangents(model)
         return compile_fx_inner(
-            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+            model,
+            example_inputs,
+            num_fixed=fixed,
+            cudagraphs=cudagraphs,
+            is_backward=True,
         )
 
     with overrides.patch_functions():
         return aot_autograd(
             model_,
             example_inputs_,
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
+            fw_compiler=make_boxed_compiler(fw_compiler),
+            bw_compiler=make_boxed_compiler(bw_compiler),
             decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"

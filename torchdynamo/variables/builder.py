@@ -11,6 +11,7 @@ from typing import List
 
 import numpy as np
 import torch
+from functorch.experimental.ops import PyOperator
 
 import torchdynamo
 
@@ -45,6 +46,7 @@ from .constant import ConstantVariable
 from .constant import EnumVariable
 from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
+from .dicts import DefaultDictVariable
 from .dicts import HFPretrainedConfigVariable
 from .functions import UserFunctionVariable
 from .lists import ListIteratorVariable
@@ -65,6 +67,7 @@ from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
 from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
+from .torch import TorchPyOperator
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
@@ -198,7 +201,9 @@ class VariableBuilder:
         elif istype(value, range):
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(value=value, guards=guards)
-        elif istype(value, (dict, collections.OrderedDict)) and all(
+        elif istype(
+            value, (dict, collections.defaultdict, collections.OrderedDict)
+        ) and all(
             map(
                 lambda k: ConstantVariable.is_literal(k)
                 or isinstance(k, torch.nn.Parameter),
@@ -230,13 +235,14 @@ class VariableBuilder:
                 ]
             )
 
-            result = ConstDictVariable(result, type(value), guards=guards)
-
-            if istype(value, dict):
-                return self.tx.output.side_effects.track_dict(
-                    self.source, value, result
+            if istype(value, collections.defaultdict):
+                result = DefaultDictVariable(
+                    result, type(value), value.default_factory, guards=guards
                 )
-            return result
+            else:
+                result = ConstDictVariable(result, type(value), guards=guards)
+
+            return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
             if mutation_guard.is_dynamic_nn_module(value):
                 # created dynamically, don't specialize on it
@@ -376,6 +382,13 @@ class VariableBuilder:
                 for k in ("start", "stop", "step")
             ]
             return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
+        elif isinstance(value, PyOperator):
+            return TorchPyOperator(
+                value,
+                guards=self.make_guards(
+                    GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
+                ),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,

@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+import collections
 import functools
 import inspect
 import itertools
@@ -474,6 +475,19 @@ class FunctionTests(torchdynamo.testing.TestCase):
         def fn(a):
             tmp = {"a": a, a_param: 3}
             return tmp["a"] + tmp[a_param]
+
+        test = make_test(fn)
+        test(self)
+
+    def test_default_dict(self):
+        dd = collections.defaultdict(dict)
+        param = torch.nn.Parameter(torch.ones([2, 2]))
+
+        def fn(x):
+            dd["a"] = x + 1
+            dd[param] = 123
+            dd["c"] = x * 2
+            return dd["b"], dd
 
         test = make_test(fn)
         test(self)

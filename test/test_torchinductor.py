@@ -538,6 +538,33 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    @patch.object(config, "dynamic_shapes", False)
+    def test_unroll_small_reduction(self):
+        def fn(x):
+            val1, index1 = x.min(-1)
+            val2, index2 = x.max(-1)
+            return (
+                val1,
+                index1,
+                val2,
+                index2,
+                x.sum(-1),
+                (x > 1).any(-1),
+                (x > 0).all(-1),
+                x.argmin(-1),
+                x.argmax(-1),
+                x.amin(-1),
+                x.amax(-1),
+            )
+
+        with patch.object(config, "unroll_reductions_threshold", 8):
+            # small sized reductions will get unrolled
+            self.common(fn, (torch.randn(8, 3),))
+        torchdynamo.reset()
+        with patch.object(config, "unroll_reductions_threshold", 1):
+            # make sure things also work if they aren't unrolled
+            self.common(fn, (torch.randn(8, 3),))
+
     def test_multilayer_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
@@ -750,6 +777,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 100))
@@ -760,6 +789,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(fn, (torch.randint(-100, 100, [8, 8]), 100 * torch.randn(8, 8)))
@@ -770,6 +801,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         a = torch.randint(1, 100, [8, 8])
@@ -777,11 +810,12 @@ class CommonTemplate:
 
     def test_div4(self):
         def fn(a, b):
-            return aten.div(a, b, rounding_mode="floor")
             return (
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -795,6 +829,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # divide a scalar
@@ -806,6 +842,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         # treat boolean as integer
@@ -820,6 +858,8 @@ class CommonTemplate:
                 aten.div(a, b, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
             )
 
         self.common(
@@ -1187,7 +1227,7 @@ class CommonTemplate:
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
-                x + 1, (4, 5)
+                x + 1, (2, 5)
             )
 
         self.common(
@@ -1245,6 +1285,15 @@ class CommonTemplate:
             (torch.randn([2, 8, 111, 111]),),
         )
 
+    def test_max_pool2d5(self):
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 3], [])
+
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -1284,6 +1333,15 @@ class CommonTemplate:
     def test_avg_pool2d5(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1], count_include_pad=False)
+
+        self.common(
+            fn,
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
+        )
+
+    def test_avg_pool2d6(self):
+        def fn(x):
+            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1], divisor_override=3)
 
         self.common(
             fn,
@@ -1583,6 +1641,16 @@ class CommonTemplate:
             ),
         )
 
+    def test_fill(self):
+        def fn(x):
+            tmp = torch.ones_like(x)
+            return tmp, aten.fill.Scalar(tmp, 2)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_pow1(self):
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]
@@ -1686,6 +1754,31 @@ class CommonTemplate:
             fn,
             (torch.randn([64]),),
         )
+
+    def test_flip(self):
+        def fn(x):
+            return torch.flip(x, (-1,)), torch.flip(x, (0, 2)) - 2
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
+        )
+
+    def test_signbit(self):
+        def fn(x):
+            return torch.signbit(x), ~torch.signbit(-x) & 1
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 6, 6]),),
+        )
+
+    def test_fmod(self):
+        def fn(a, b):
+            return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
+
+        shape = [1, 2, 6, 6]
+        self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
     def test_log2(self):
         def fn(x):
@@ -1963,6 +2056,30 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
+    def test_upsample_nearest2d_backward(self):
+        func = torch.ops.aten.upsample_nearest2d_backward.vec
+
+        def fn(a):
+            return (
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 3, 6], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 4, 5], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
+                ),
+                func(
+                    a, output_size=[6, 12], input_size=[3, 3, 4, 7], scale_factors=None
+                ),
+            )
+
+        self.common(fn, (torch.randn([3, 3, 6, 12]),))
+
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -2107,6 +2224,18 @@ class CommonTemplate:
         self.common(fn, (torch.randn([8, 1, 1]),))
 
     @patch.object(config.triton, "cudagraphs", True)
+    def test_strided_inputs(self):
+        @torchdynamo.optimize("inductor")
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((8, 16), (32, 2), device=self.device),
+            rand_strided((8, 16), (16, 1), device=self.device),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    @patch.object(config.triton, "cudagraphs", True)
     @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
@@ -2121,9 +2250,10 @@ class CommonTemplate:
         arg4 = arg3.clone()
         correct1 = fn(arg1)
         correct2 = fn(arg3)
-        with torchdynamo.optimize_assert(compile_fx):
-            actual1 = fn(arg2)
-            actual2 = fn(arg4)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
+        actual2 = opt_fn(arg4)
+
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(actual2, correct2))
         self.assertTrue(same(arg1, arg2))
@@ -2140,8 +2270,8 @@ class CommonTemplate:
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
-        with torchdynamo.optimize_assert(compile_fx):
-            actual1 = fn(arg2)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
 
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
@@ -2161,8 +2291,8 @@ class CommonTemplate:
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
-        with torchdynamo.optimize_assert(compile_fx):
-            actual1 = fn(arg2)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
 
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
@@ -2189,8 +2319,8 @@ class CommonTemplate:
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
         fn(arg1)
-        with torchdynamo.optimize_assert(compile_fx):
-            fn(arg2)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        opt_fn(arg2)
 
         self.assertTrue(same(arg1, arg2))
 
@@ -2677,6 +2807,31 @@ class CommonTemplate:
             ],
         )
 
+    # From https://github.com/pytorch/torchdynamo/issues/1200
+    def test_max_pool2d_with_indices_backward3(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [1, 1], [2, 2], [0, 0], [1, 1], False, c
+            )
+
+        x = torch.randn([32, 256, 37, 38])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [1, 1],
+            [2, 2],
+            0,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -2974,6 +3129,56 @@ class CommonTemplate:
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
+    def test_invalid_operand_issue1(self):
+        def forward(arg0_1, arg1_1, arg3_1, squeeze, view_1, slice_1):
+            slice_scatter = torch.ops.aten.slice_scatter.default(
+                slice_1, arg3_1, 1, 1, 9223372036854775807
+            )
+            slice_scatter_1 = torch.ops.aten.slice_scatter.default(
+                arg1_1, slice_scatter, 0, 0, 9223372036854775807
+            )
+            slice_2 = torch.ops.aten.slice.Tensor(
+                slice_scatter_1, 0, 0, 9223372036854775807
+            )
+            select_scatter = torch.ops.aten.select_scatter.default(
+                slice_2, squeeze, 1, 0
+            )
+            slice_scatter_2 = torch.ops.aten.slice_scatter.default(
+                slice_scatter_1, select_scatter, 0, 0, 9223372036854775807
+            )
+            view = torch.ops.aten.view.default(slice_scatter_2, [-1, 128])
+            embedding = torch.ops.aten.embedding.default(arg0_1, view, 1)
+            return [embedding, view_1]
+
+        args = [
+            ((50005, 768), (768, 1), torch.float32),
+            ((8, 128), (128, 1), torch.int64),
+            ((8, 127), (127, 1), torch.int64),
+            ((8,), (1,), torch.int64),
+            ((1024,), (1,), torch.int64),
+            ((8, 128), (128, 1), torch.int64),
+        ]
+        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
+
+    @patch.object(torchinductor.config.triton, "cudagraphs", False)
+    def test_symbolic(self):
+        def f(x):
+            x = x.cos()
+            x = x.view(x.shape[0] * 2, -1)
+            return (x,)
+
+        traced = make_fx(f, tracing_mode="symbolic")(
+            torch.randn(8, 4, device=self.device)
+        )
+        compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
+
+        out = compiled(torch.randn(8, 4, device=self.device))
+        self.assertEqual(out[0].shape, (16, 2))
+
+        out = compiled(torch.randn(12, 4, device=self.device))
+        self.assertEqual(out[0].shape, (24, 2))
+
 
 if HAS_CPU:
 
@@ -2998,6 +3203,29 @@ if HAS_CPU:
             v = torch.randn(10)
             result = fn(v)
             assert same(result, mod(v))
+
+        def test_inplace_add_alpha(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(10)
+            x2 = torch.zeros(10)
+            x3 = torch.zeros(10)
+            y = torch.randn(10)
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled(x3, y)
+            assert same(x2, x3)
+
+        def test_no_op_squeeze(self):
+            @torchdynamo.optimize("inductor")
+            def forward(arg0_1):
+                return torch.ops.aten.squeeze.dim(arg0_1, 1)
+
+            x = torch.randn((10, 20))
+            assert same(x, forward(x))
 
 
 if HAS_CUDA:
@@ -3073,3 +3301,28 @@ if HAS_CUDA:
             mod = make_fx(forward)()
             compiled = compile_fx_inner(mod, ())
             assert compiled()[0].device.type == "cuda"
+
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_expanded_inputs_cudagraphs(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x, y):
+                return x + y
+
+            inputs = (
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+            )
+            self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        @patch.object(config, "size_asserts", False)
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_expanded_inputs_cudagraphs_no_size_asserts(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x, y):
+                return x + y
+
+            inputs = (
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+            )
+            self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))

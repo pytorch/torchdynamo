@@ -6,6 +6,9 @@
 #include <omp.h>
 
 #include "ATen/core/PhiloxRNGEngine.h"
+#include <c10/util/Half.h>
+
+typedef at::Half half;
 
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }

@@ -14,6 +14,8 @@ from common import main
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
 
+log = logging.getLogger(__name__)
+
 
 def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -100,6 +102,11 @@ SKIP = {
     "BlenderbotForConditionalGeneration",
     "GPTJForCausalLM",
     "GPTJForQuestionAnswering",
+    "GPTNeoForCausalLM",
+    "GPTNeoForSequenceClassification",
+    # Fails with even batch size = 1
+    "DebertaV2ForMaskedLM",
+    "DebertaV2ForQuestionAnswering",
 }
 
 # TODO - Fails even after fake tensors
@@ -155,7 +162,7 @@ def get_sequence_length(model_cls, model_name):
     ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert", "CamemBert"):
         seq_length = 512
     else:
-        logging.warn(
+        log.warning(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
         )
         seq_length = 128
@@ -321,11 +328,11 @@ class HuggingfaceRunner(BenchmarkRunner):
         self,
         device,
         model_name,
-        is_training,
-        use_eval_mode,
         batch_size=None,
-        dynamic_shapes=False,
     ):
+
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -358,7 +365,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
-            logging.warn(
+            log.warning(
                 "Batch size not specified for {model_name}. Setting batch_size=16"
             )
 
@@ -366,12 +373,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             batch_size = batch_size_default
             if model_name in USE_SMALL_BATCH_SIZE:
                 batch_size = USE_SMALL_BATCH_SIZE[model_name]
-                logging.warn(
+                log.warning(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
             elif USE_HALF_BATCH_SIZE and batch_size >= 2:
                 batch_size = int(batch_size / 2)
-                logging.warn(
+                log.warning(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
 
@@ -389,27 +396,18 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
+        self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
-
-    def iter_models(self, args):
-        for model_name in self.iter_model_names(args):
-            for device in args.devices:
-                try:
-                    yield self.load_model(
-                        device,
-                        model_name,
-                        args.training,
-                        args.use_eval_mode,
-                        args.batch_size,
-                    )
-                except NotImplementedError:
-                    continue  # bad benchmark implementation
 
     def iter_model_names(self, args):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         model_names = set(model_names)
         model_names = sorted(model_names)
-        for model_name in model_names:
+
+        start, end = self.get_benchmark_indices(len(model_names))
+        for index, model_name in enumerate(model_names):
+            if index < start or index >= end:
+                continue
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
@@ -530,7 +528,7 @@ def refresh_model_names_and_batch_sizes():
                 + [f"--output={MODELS_FILENAME}"]
             )
         except subprocess.SubprocessError:
-            logging.warn(f"Failed to find suitable batch size for {model_name}")
+            log.warning(f"Failed to find suitable batch size for {model_name}")
 
 
 if __name__ == "__main__":

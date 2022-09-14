@@ -1,5 +1,4 @@
 import collections
-import copy
 import itertools
 import logging
 import operator
@@ -109,7 +108,7 @@ class OutputGraph(fx.Tracer):
         return (
             graph_nodes,
             list(self.graphargs),
-            copy.deepcopy(self.guards),
+            set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
         )
@@ -229,10 +228,6 @@ class OutputGraph(fx.Tracer):
         Automatically restore live variables.
         """
         self.partial_convert = partial_convert
-        if msg is not None:
-            stack = tx.frame_summary()
-            msgs = reversed(traceback.StackSummary.from_list([stack]).format())
-            msg = f"{msg} \n {''.join(msgs)}"
         self.compile_subgraph_reason = msg
 
         if not all(block.can_restore() for block in tx.block_stack):

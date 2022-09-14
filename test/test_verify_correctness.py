@@ -9,8 +9,6 @@ import torch
 import torchdynamo
 import torchdynamo.config as config
 from torchdynamo.optimizations import backends
-from torchdynamo.optimizations.inference import fixed_strategy1
-from torchdynamo.optimizations.inference import offline_autotuner
 from torchdynamo.testing import same
 
 
@@ -105,15 +103,6 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         self.assertTrue(same(r1, r3))
 
     @patch.object(config, "verify_correctness", True)
-    def test_fixed_strategy1(self):
-        s = Seq()
-        i = torch.randn(10)
-        r1 = s(i)
-        opt_s = torchdynamo.optimize(fixed_strategy1)(s)
-        r2 = opt_s(i)
-        self.assertTrue(same(r1, r2))
-
-    @patch.object(config, "verify_correctness", True)
     def test_nnc(self):
         s = Seq()
         i = torch.randn(10)
@@ -163,16 +152,6 @@ class TestVerifyCorrectness(torchdynamo.testing.TestCase):
         opt_toy_example = torchdynamo.optimize(incorrect_compile_fn)(toy_example)
         r2 = opt_toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
-
-    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    @patch.object(config, "verify_correctness", True)
-    def test_export(self):
-        s = Seq()
-        i = torch.randn(10)
-        r1 = s(i)
-        opt_s = torchdynamo.optimize_assert(offline_autotuner)(s)
-        r2 = opt_s(i)
-        self.assertTrue(same(r1, r2))
 
     @unittest.skipIf(not has_ipex(), "requires ipex")
     @patch.object(config, "verify_correctness", True)

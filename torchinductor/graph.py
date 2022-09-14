@@ -1,5 +1,7 @@
 import logging
 import operator
+import os
+import time
 from itertools import chain
 
 import sympy
@@ -8,6 +10,8 @@ import torch.fx
 from sympy import Integer
 from torch._decomp import get_decompositions
 from torch.utils._mode_utils import no_dispatch
+
+from torchdynamo.utils import dynamo_timed
 
 from . import config
 from . import ir
@@ -23,6 +27,7 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
+from .virtualized import V
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +92,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
+        self.creation_time = time.time()
+
+    def get_dtype(self, buffer_name):
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].dtype
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name].get_dtype()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_dtype()
+        raise KeyError(f"could not find {buffer_name}")
 
     def random_seed_buffer(self, device: torch.device):
         """
@@ -120,6 +135,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
+    @dynamo_timed
     def run(self, *args):
         if self.num_dynamic_inputs is None:
             self.num_dynamic_inputs = len(args)
@@ -214,17 +230,22 @@ class GraphLowering(torch.fx.Interpreter):
             return super().call_function(target, args, kwargs)
 
         if target not in lowerings:
-            if get_decompositions([target]):
-                # There isn't a good way to dynamically patch this in
-                # since AOT Autograd already ran.  The error message tells
-                # the user how ot fix it.
-                raise MissingOperatorWithDecomp(target, args, kwargs)
-            elif config.implicit_fallbacks:
+            if config.implicit_fallbacks:
+                error = (
+                    MissingOperatorWithDecomp
+                    if get_decompositions([target])
+                    else MissingOperatorWithoutDecomp
+                )
                 log.warning(
                     "Creating implicit fallback for:\n%s",
-                    MissingOperatorWithoutDecomp.operator_str(target, args, kwargs),
+                    error.operator_str(target, args, kwargs),
                 )
                 make_fallback(target)
+            elif get_decompositions([target]):
+                # There isn't a good way to dynamically patch this in
+                # since AOT Autograd already ran.  The error message tells
+                # the user how to fix it.
+                raise MissingOperatorWithDecomp(target, args, kwargs)
             else:
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
@@ -250,6 +271,9 @@ class GraphLowering(torch.fx.Interpreter):
     def call_module(self, target, args, kwargs):
         assert False
 
+    def call_method(self, target, args, kwargs):
+        assert False
+
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
@@ -258,7 +282,6 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
-
         for name, value in self.graph_inputs.items():
             value.realize()
             assert isinstance(value, TensorBox)
@@ -296,7 +319,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate()
 
-    def compile_to_fn(self):
+    @dynamo_timed
+    def compile_to_module(self):
         from .codecache import PyCodeCache
 
         code = self.codegen()
@@ -304,8 +328,20 @@ class GraphLowering(torch.fx.Interpreter):
             print(code)
 
         mod = PyCodeCache.load(code)
-
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        return mod.call
+        log.info("Output code: %s", mod.__file__)
+        V.debug.output_code(mod.__file__)
+        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        return mod
+
+    def compile_to_fn(self):
+        return self.compile_to_module().call
+
+    def get_output_names(self):
+        return [
+            node.get_name()
+            for node in self.graph_outputs
+            if not isinstance(node, ir.NoneAsConstantBuffer)
+        ]

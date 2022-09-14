@@ -1,33 +1,65 @@
 import collections
+import contextlib
+import cProfile
+import functools
+import itertools
+import logging
+import os.path
+import pstats
+import shutil
+import subprocess
 from typing import Any
 from typing import List
 
 import torch
+from functorch.compile import draw_graph
+from functorch.compile import get_graph_being_compiled
 from torch import fx as fx
+from torch.fx.graph_module import GraphModule
+from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.tools_common import legalize_graph
 
-from torchinductor import ir
-from torchinductor.scheduler import BaseSchedulerNode
-from torchinductor.scheduler import ExternKernelSchedulerNode
-from torchinductor.scheduler import FusedSchedulerNode
-from torchinductor.scheduler import NopKernelSchedulerNode
-from torchinductor.scheduler import OutputNode
-from torchinductor.scheduler import SchedulerNode
-from torchinductor.scheduler import TemplateSchedulerNode
+import torchinductor
+from torchdynamo.debug_utils import save_graph_repro
+from torchdynamo.debug_utils import wrap_compiler_debug
+from torchdynamo.utils import init_logging
+
+from . import config
+from . import ir
+from .codecache import cache_dir
+from .scheduler import BaseSchedulerNode
+from .scheduler import ExternKernelSchedulerNode
+from .scheduler import FusedSchedulerNode
+from .scheduler import NopKernelSchedulerNode
+from .scheduler import OutputNode
+from .scheduler import SchedulerNode
+from .scheduler import TemplateSchedulerNode
+from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
-def draw_buffers(nodes, print_graph=False):
+@functools.lru_cache(None)
+def has_dot():
+    try:
+        subprocess.check_output(["which", "dot"], stderr=subprocess.PIPE)
+        return True
+    except subprocess.SubprocessError:
+        return False
+
+
+def draw_buffers(nodes, print_graph=False, fname=None):
     """
     Draw a graph in fname.svg.
     nodes is a list of SchedulerNode objects.
     """
+    if not has_dot():
+        log.warning("draw_buffers() requires `graphviz` package")
+        return
 
-    from functorch.compile import draw_graph
-    from functorch.compile import get_graph_being_compiled
-    from torch.fx.graph_module import GraphModule
-    from torch.fx.passes.shape_prop import TensorMetadata
-    from torch.fx.passes.tools_common import legalize_graph
+    if fname is None:
+        fname = get_graph_being_compiled()
 
-    fname = get_graph_being_compiled()
     graph = create_fx_from_snodes(nodes)
 
     for node in graph.nodes:
@@ -47,11 +79,10 @@ def draw_buffers(nodes, print_graph=False):
 
     if print_graph:
         print(graph)
-    print("starting creating module")
+
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    print("starting drawing")
     draw_graph(gm, fname, clear_meta=False)
 
 
@@ -138,3 +169,148 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     graph.output(outputs[0] if len(outputs) == 1 else tuple(outputs))
     return graph
+
+
+class DebugContext:
+    _counter = itertools.count()
+
+    @staticmethod
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            with DebugContext():
+                return fn(*args, **kwargs)
+
+        return wrap_compiler_debug(inner, compiler_name="inductor")
+
+    @staticmethod
+    def create_debug_dir():
+        for n in DebugContext._counter:
+            dirname = os.path.join(cache_dir(), f"debug.{os.getpid()}.{n}")
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
+                return dirname
+
+    def __init__(self):
+        self._prof = None
+        self._path = None
+        self._stack = contextlib.ExitStack()
+
+    def rename(self, new_path: str):
+        if not self._path:
+            return
+        assert new_path.endswith(".debug"), new_path
+        if os.path.exists(new_path):
+            shutil.rmtree(new_path)
+        try:
+            os.rename(self._path, new_path)
+            self._path = new_path
+        except OSError:
+            # other OS might have troubling renaming dir with open files
+            pass
+
+    def fopen(self, filename):
+        assert self._path
+        return open(os.path.join(self._path, filename), "w")
+
+    def filename(self, suffix):
+        return os.path.join(self._path, suffix)
+
+    def __enter__(self):
+        log = logging.getLogger("torchinductor")
+        if not log.handlers:
+            init_logging()
+
+        for handler in itertools.chain([log], log.handlers):
+            handler.setLevel(logging.DEBUG if config.debug else logging.WARNING)
+
+        self._stack.enter_context(V.set_debug_handler(self))
+
+        if not config.trace.enabled:
+            return
+
+        self._path = self.create_debug_dir()
+
+        if config.trace.debug_log:
+            self._setup_log_capture("debug.log", logging.DEBUG)
+        if config.trace.info_log:
+            self._setup_log_capture("info.log", logging.INFO)
+        if config.trace.compile_profile:
+            self._prof = cProfile.Profile()
+            self._prof.enable()
+
+    def _setup_log_capture(self, filename, level):
+        log = logging.getLogger("torchinductor")
+        fd = self._stack.enter_context(self.fopen(filename))
+        ch = logging.StreamHandler(fd)
+        ch.setLevel(level)
+        ch.setFormatter(
+            logging.Formatter("[%(filename)s:%(lineno)d %(levelname)s] %(message)s")
+        )
+        log.addHandler(ch)
+        log.setLevel(min(log.level, level))
+        self._stack.callback(log.removeHandler, ch)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._prof:
+            self._prof.disable()
+            self._save_profile_data()
+
+        if self._path:
+            log.warning("%s debug trace: %s", get_graph_being_compiled(), self._path)
+        self._stack.close()
+
+    def _save_profile_data(self):
+        self._prof.dump_stats(self.filename("compile.prof"))
+        with self.fopen("compile.stats") as fd:
+            stats = pstats.Stats(self._prof, stream=fd)
+            stats.strip_dirs()
+            stats.sort_stats("cumtime")
+            stats.print_stats(100)
+            stats.sort_stats("tottime")
+            stats.print_stats(100)
+
+    def __getattr__(self, name):
+        if config.trace.enabled and getattr(config.trace, name):
+            try:
+                return getattr(DebugFormatter(self), name)
+            except Exception:
+                log.warning("Ignoring exception in debug code", exc_info=True)
+        else:
+
+            def ignored(*args, **kwargs):
+                pass
+
+            return ignored
+
+
+SchedulerNodeList = List["torchinductor.scheduler.BaseSchedulerNode"]
+
+
+class DebugFormatter:
+    def __init__(self, handler):
+        self.fopen = handler.fopen
+        self.filename = handler.filename
+        self.handler = handler
+
+    def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
+        with self.fopen("fx_graph.py") as fd:
+            save_graph_repro(fd, gm, inputs, "inductor")
+
+    def ir_pre_fusion(self, nodes: SchedulerNodeList):
+        self._write_ir("ir_pre_fusion.txt", nodes)
+
+    def ir_post_fusion(self, nodes: SchedulerNodeList):
+        self._write_ir("ir_post_fusion.txt", nodes)
+
+    def _write_ir(self, filename: str, nodes: SchedulerNodeList):
+        with self.fopen(filename) as fd:
+            for node in nodes:
+                fd.write(node.debug_str())
+                fd.write("\n\n\n")
+
+    def graph_diagram(self, nodes: SchedulerNodeList):
+        draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+
+    def output_code(self, filename):
+        shutil.copy(filename, self.filename("output_code.py"))

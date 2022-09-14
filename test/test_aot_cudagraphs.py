@@ -1,3 +1,4 @@
+#!/usr/bin/env pytest
 # Owner(s): ["module: cuda graphs"]
 
 import functools
@@ -51,6 +52,7 @@ def patch_all(ok=True):
 N_ITERS = 5
 
 
+@unittest.skip("requires https://github.com/pytorch/pytorch/pull/84432/")
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
 class TestAotCudagraphs(torchdynamo.testing.TestCase):
     @patch_all()
@@ -58,12 +60,15 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
         def model(x, y):
             return (x + y) * y
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x, y):
             for i in range(N_ITERS):
-                x = torch.randn(3, device="cuda", requires_grad=True)
-                y = torch.randn(3, device="cuda")
                 loss = model(x, y).sum()
                 loss.backward()
+
+        x = torch.randn(3, device="cuda", requires_grad=True)
+        y = torch.randn(3, device="cuda")
+        fn(x, y)
 
     @patch_all()
     def test_dtoh(self):
@@ -72,12 +77,15 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             b = a.cpu() * 3
             return b
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x, y):
             for i in range(N_ITERS):
-                x = torch.randn(3, device="cuda", requires_grad=True)
-                y = torch.randn(3, device="cuda")
                 loss = model(x, y).sum()
                 loss.backward()
+
+        x = torch.randn(3, device="cuda", requires_grad=True)
+        y = torch.randn(3, device="cuda")
+        fn(x, y)
 
     @patch_all()
     def test_htod(self):
@@ -85,12 +93,15 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             a = x + y
             return a * 3
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x, y):
             for i in range(N_ITERS):
-                x = torch.randn(3, device="cuda", requires_grad=True)
-                y = torch.randn((), device="cpu")
                 loss = model(x, y).sum()
                 loss.backward()
+
+        x = torch.randn(3, device="cuda", requires_grad=True)
+        y = torch.randn((), device="cpu")
+        fn(x, y)
 
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all(ok=False)  # input mutation not supported yet
@@ -99,15 +110,18 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             y.add_(3)
             return x * y
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x, y):
             for i in range(N_ITERS):
                 with self.subTest(i):
-                    x = torch.randn(3, device="cuda", requires_grad=True)
-                    y = torch.randn(3, device="cuda")
                     y_orig = y.clone()
                     loss = model(x, y).sum()
                     self.assertTrue(same(y, y_orig + 3))
                     loss.backward()
+
+        x = torch.randn(3, device="cuda", requires_grad=True)
+        y = torch.randn(3, device="cuda")
+        fn(x, y)
 
     @patch_all()
     def test_mutate_constant(self):
@@ -116,14 +130,17 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             c.add_(2)
             return x * y * 0 + c
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x, y):
             for i in range(N_ITERS):
                 with self.subTest(i):
-                    x = torch.randn(1, device="cuda", requires_grad=True)
-                    y = torch.randn(1, device="cuda")
                     loss = model(x, y).sum()
                     self.assertTrue(same(loss, torch.tensor(3.0, device="cuda")))
                     loss.backward()
+
+        x = torch.randn(1, device="cuda", requires_grad=True)
+        y = torch.randn(1, device="cuda")
+        fn(x, y)
 
     @patch_all()
     def test_factory(self):
@@ -132,12 +149,15 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             x.add_(3)
             return x * y
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(y):
             for i in range(N_ITERS):
                 with self.subTest(i):
-                    y = torch.randn(3, device="cuda:0", requires_grad=True)
                     loss = model(y).sum()
                     loss.backward()
+
+        y = torch.randn(3, device="cuda:0", requires_grad=True)
+        fn(y)
 
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all()
@@ -150,12 +170,15 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             x.fill_(2)
             return x
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x):
             for i in range(N_ITERS):
                 with self.subTest(i):
-                    x = torch.empty(0, device="cuda:0")
                     rx = model(x)
                     self.assertTrue(same(rx, torch.full((20,), 2.0, device="cuda:0")))
+
+        x = torch.empty(0, device="cuda:0")
+        fn(x)
 
     @patch("functorch._src.config.use_functionalize", True)
     @patch_all()
@@ -167,13 +190,16 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
             y.fill_(3)
             return x, y
 
-        with torchdynamo.optimize("aot_cudagraphs"):
+        @torchdynamo.optimize("aot_cudagraphs")
+        def fn(x):
             for i in range(N_ITERS):
                 with self.subTest(i):
-                    x = torch.empty(20, device="cuda:0")
                     rx, ry = model(x)
                     self.assertTrue(same(rx, torch.full((20,), 2.0, device="cuda:0")))
                     self.assertTrue(same(ry, torch.empty(0, device="cuda:0")))
+
+        x = torch.empty(20, device="cuda:0")
+        fn(x)
 
 
 if __name__ == "__main__":

@@ -14,8 +14,10 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
+from ..utils import free_symbol_startswith
 from ..utils import freeze_inputs
 from ..utils import sympy_dot
+from ..utils import sympy_subs
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -52,8 +54,8 @@ def _simplify_loops(index_vars, sizes, index_formulas):
                 va = index_vars[a]
                 vb = index_vars[b]
                 v = sympy.Symbol("_merge_tester")
-                expr1 = index_formulas[k].subs({va: v * sizes[a], vb: 0})
-                expr2 = index_formulas[k].subs({va: 0, vb: v})
+                expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
+                expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
                 if V.graph.sizevars.simplify(expr1) == V.graph.sizevars.simplify(expr2):
                     continue
             return False
@@ -556,16 +558,16 @@ class Kernel(CodeGen):
         self.stores = stores
         self.cse = cse
 
-    def load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
 
-    def indirect_load(self, name: str, index: sympy.Expr, upcast: bool = False):
+    def indirect_load(self, name: str, index: sympy.Expr):
         """A load the depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
             self.loads = self.compute
-            return self.load(name, index, upcast)
+            return self.load(name, index)
         finally:
             self.loads = prior
 
@@ -591,17 +593,17 @@ class Kernel(CodeGen):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
-            def load(name: str, index: sympy.Expr, upcast: bool = False):
+            def load(name: str, index: sympy.Expr):
                 if name in self.cse.invalidated_stores:
                     # A load from an invalidated store requires us to
                     # keep the actual buffer around
                     V.kernel.must_keep_buffers.add(name)
-                if "tmp" in str(index):
-                    return self.indirect_load(name, index, upcast)
+                if free_symbol_startswith(index, "tmp"):
+                    return self.indirect_load(name, index)
                 store_cache = self.cse.store_cache
                 if name in store_cache:
                     return store_cache[name]
-                return self.load(name, index, upcast)
+                return self.load(name, index)
 
             @staticmethod
             def store(name, index, value, mode=None):
@@ -635,5 +637,7 @@ class Kernel(CodeGen):
             return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
-        subs = {x: self.args.size(x) for x in sorted_symbols if str(x).startswith("s")}
-        return index.subs(subs)
+        replacements = {
+            x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
+        }
+        return sympy_subs(index, replacements)

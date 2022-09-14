@@ -32,6 +32,7 @@ from .guards import GuardedCode
 from .symbolic_convert import InstructionTranslator
 from .utils import CleanupManager
 from .utils import counters
+from .utils import dynamo_timed
 from .utils import filter_stack
 from .utils import format_bytecode
 from .utils import guard_failures
@@ -121,7 +122,7 @@ def wrap_convert_context(fn):
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
-    # Check if the function was decorated with torchdynamo.optimize
+    # Check if the function was decorated using torchdynamo.optimize
     if frame.f_code in always_optimize_code_objects:
         return True
 
@@ -214,12 +215,15 @@ def format_error_msg(exc, frame):
     return msg
 
 
-def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
+def convert_frame_assert(
+    compiler_fn: Callable, guard_export_fn=None, one_graph=True, export=False
+):
     """Fully convert a frame into an FX graph"""
     init_logging()
 
     compiler_fn = wrap_compiler_fn(compiler_fn)
 
+    @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
         input_codes.add(code)
@@ -292,6 +296,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
                 code_options,
                 compiler_fn,
                 one_graph,
+                export,
             )
             tracer.run()
             output = tracer.output

@@ -2,11 +2,13 @@ import functools
 import logging
 import math
 import numbers
-from enum import Enum
+from typing import Optional
+from typing import Tuple
 
 import torch
 import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
+from torch import Tensor
 from torch._decomp import get_decompositions
 
 from torchinductor import config
@@ -20,17 +22,20 @@ decompositions = get_decompositions(
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
+        aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
         aten.clamp_min,
         aten.col2im_backward,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
         aten.detach,
+        aten.dot,
         aten.elu,
         aten.elu_backward,
         aten._embedding_bag,
         aten.embedding_dense_backward,
         aten.expand_as,
+        aten.eye,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -43,6 +48,7 @@ decompositions = get_decompositions(
         aten.hardswish_backward,
         aten.hardtanh,
         aten.hardtanh_backward,
+        aten.im2col,
         aten.im2col_backward,
         aten.l1_loss,
         aten.leaky_relu,
@@ -56,11 +62,13 @@ decompositions = get_decompositions(
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
+        aten.mv,
         aten.narrow,
-        aten.native_batch_norm,
+        # aten.native_batch_norm, TODO - fix cpu error and enable
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
+        aten.native_group_norm_backward,
         aten.native_layer_norm,
         aten.native_layer_norm_backward,
         aten.new_empty,
@@ -83,8 +91,9 @@ decompositions = get_decompositions(
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
-        aten.upsample_nearest2d_backward,
+        aten.tril.default,
         aten.upsample_bilinear2d.vec,
+        aten.upsample_nearest2d_backward,
     ]
 )
 decompositions.update(aot_autograd_decompositions)
@@ -106,14 +115,44 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2):
-    return torch.mm(mat1, mat2) + input
+# temporary workaround until https://github.com/pytorch/torchdynamo/issues/1215
+# is fixed - fails on cpu
+@register_decomposition([aten.native_batch_norm])
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if input.device.type == "cpu":
+        return NotImplemented
+    return torch._decomp.decompositions.native_batch_norm(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
 
 
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
+# TorchInductor-only decomposition. It should not be taken to core.
+# See https://github.com/pytorch/torchdynamo/pull/1120
+@register_decomposition([aten.floor_divide.default])
+def floordiv(a, b):
+    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+
+
+@register_decomposition([aten.addmm])
+def addmm(input, mat1, mat2):
+    if config.triton.mm != "aten":
+        return torch.mm(mat1, mat2) + input
+    else:
+        return NotImplemented  # go directly to lowering
 
 
 @register_decomposition([aten.rsqrt])
@@ -240,15 +279,9 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-class Reduction(Enum):
-    NONE = 0
-    MEAN = 1
-    SUM = 2
-
-
 @register_decomposition([aten.index_put])
 def index_put(self, indices, values, accumulate=False):
-    return torch.index_put_(self.clone(), indices, values, accumulate)
+    return aten.index_put_(self.clone(), indices, values, accumulate)
 
 
 @register_decomposition([aten.scatter])
@@ -285,6 +318,11 @@ def lift(self):
 @register_decomposition([aten.sgn])
 def sgn(self):
     return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
+
+
+@register_decomposition([aten.fill.Scalar])
+def fill_scalar(self, value):
+    return torch.full_like(self, value)
 
 
 """
