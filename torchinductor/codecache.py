@@ -116,7 +116,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++2a -Wno-unused-variable
+            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
             -o{output} {input}
@@ -144,6 +144,7 @@ class CppCodeCache:
 
             cls.cache[key] = cdll.LoadLibrary(output_path)
             cls.cache[key].key = key
+
         return cls.cache[key]
 
 
