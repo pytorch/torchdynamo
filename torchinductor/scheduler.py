@@ -198,6 +198,7 @@ class BaseSchedulerNode:
                 # These are boring and samey
                 continue
 
+            # TODO(voz): Should the pragma be constant somewhere?
             out_lines.append("#pragma CMT ORIGIN:")
             out_lines.append(f"#pragma CMT {o.op} {o.target}")
             out_line_meta = f"{o.meta}"
