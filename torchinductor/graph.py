@@ -1,6 +1,7 @@
 import logging
 import operator
 import os
+import time
 from itertools import chain
 
 import sympy
@@ -91,6 +92,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
+        self.creation_time = time.time()
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
